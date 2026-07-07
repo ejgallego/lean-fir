@@ -1,0 +1,12 @@
+.agents/
+.codex/
+.beam/
+.lake/
+build/
+*.olean
+*.ilean
+*.c
+*.o
+*.so
+*.a
+*~

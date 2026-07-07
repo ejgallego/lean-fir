@@ -1,0 +1,6 @@
+name = "Fir"
+version = "0.1.0"
+defaultTargets = ["Fir"]
+
+[[lean_lib]]
+name = "Fir"

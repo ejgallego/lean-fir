@@ -1,0 +1,175 @@
+import Lean.Compiler.LCNF
+import Lean.Elab.Command
+import Fir.LeanIR.Examples
+
+open Lean
+open Lean.Elab.Command
+open Lean.Compiler
+open Fir.LeanIR.LCNFCore
+
+namespace Fir.Inspect
+
+syntax (name := firInspectLCNF) "#fir_inspect_lcnf " ident* : command
+
+def supportedText (b : Bool) : String :=
+  if b then "yes" else "no"
+
+def unsupportedLetValue? : LCNF.LetValue .impure -> Option String
+  | .lit _ => none
+  | .erased => none
+  | .proj .. => some "proj"
+  | .const .. => some "const"
+  | .fvar .. => some "fvar"
+  | .ctor .. => some "ctor"
+  | .oproj .. => some "oproj"
+  | .uproj .. => some "uproj"
+  | .sproj .. => some "sproj"
+  | .fap .. => some "fap"
+  | .pap .. => some "pap"
+  | .reset .. => some "reset"
+  | .reuse .. => some "reuse"
+  | .box .. => some "box"
+  | .unbox .. => some "unbox"
+  | .isShared .. => some "isShared"
+
+partial def firstUnsupportedCode? : LCNF.Code .impure -> Option String
+  | .let decl k =>
+      match unsupportedLetValue? decl.value with
+      | some reason => some reason
+      | none => firstUnsupportedCode? k
+  | .return _ => none
+  | .unreach _ => none
+  | .fun .. => some "fun"
+  | .jp .. => some "jp"
+  | .jmp .. => some "jmp"
+  | .cases .. => some "cases"
+  | .oset .. => some "oset"
+  | .uset .. => some "uset"
+  | .sset .. => some "sset"
+  | .setTag .. => some "setTag"
+  | .inc _ _ _ _ k _ => firstUnsupportedCode? k
+  | .dec .. => some "dec"
+  | .del .. => some "del"
+
+#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.letLitReturn == none
+#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.unsupportedSetTag == some "setTag"
+
+def borrowedParamCount (params : Array (LCNF.Param .impure)) : Nat :=
+  params.foldl (init := 0) fun count param =>
+    if param.borrow then count + 1 else count
+
+def firstUnsupportedDecl? (decl : LCNF.Decl .impure) : Option String :=
+  match decl.value with
+  | .code code => firstUnsupportedCode? code
+  | .extern _ => some "extern"
+
+def declSupported? (decl : LCNF.Decl .impure) : Bool :=
+  match decl.value with
+  | .code code => supportedCode? code
+  | .extern _ => false
+
+def callReady? (decl : LCNF.Decl .impure) : Bool :=
+  decl.params.isEmpty && declSupported? decl
+
+def reasonText : Option String -> String
+  | none => "-"
+  | some reason => reason
+
+def coverageLine (decl : LCNF.Decl .impure) : String :=
+  s!"{decl.name}: params={decl.params.size}, borrowed={borrowedParamCount decl.params}, " ++
+    s!"code-supported={supportedText (declSupported? decl)}, " ++
+    s!"call-ready={supportedText (callReady? decl)}, " ++
+    s!"first-unsupported={reasonText (firstUnsupportedDecl? decl)}"
+
+structure GeneratedLCNFReport where
+  formatted : String
+  coverage : String
+
+def compileAndReportImpureDecl (declName : Name) : CoreM GeneratedLCNFReport := do
+  Lean.Compiler.LCNF.main #[declName] (← getOptions)
+  let some decl ← Lean.Compiler.LCNF.getLocalImpureDecl? declName
+    | return {
+        formatted := s!"{declName}: no local impure LCNF declaration",
+        coverage := s!"{declName}: code-supported=no, call-ready=no, first-unsupported=no-local-impure-decl" }
+  return {
+    formatted := toString (← Lean.Compiler.LCNF.ppDecl' decl .impure),
+    coverage := coverageLine decl }
+
+@[command_elab firInspectLCNF]
+def elabFirInspectLCNF : CommandElab := fun stx => do
+  match stx with
+  | `(#fir_inspect_lcnf $ids:ident*) =>
+      let reports ← ids.mapM fun id => do
+        let declName ← resolveGlobalConstNoOverload id
+        liftCoreM <| compileAndReportImpureDecl declName
+      liftIO <| IO.println ""
+      liftIO <| IO.println "Generated LCNF"
+      reports.forM fun report => do
+        liftIO <| IO.println report.formatted
+        liftIO <| IO.println ""
+      liftIO <| IO.println "Generated LCNF Coverage"
+      reports.forM fun report =>
+        liftIO <| IO.println report.coverage
+  | _ => throwError "unsupported #fir_inspect_lcnf syntax"
+
+namespace CompilerSamples
+
+def litNat : Nat :=
+  42
+
+def idNat (x : Nat) : Nat :=
+  x
+
+def branchNat (b : Bool) : Nat :=
+  if b then 1 else 0
+
+def pairFirst (p : Nat × Nat) : Nat :=
+  p.1
+
+end CompilerSamples
+
+def resultText : Except EvalError Value -> String
+  | .ok _ => "ok"
+  | .error .unsupported => "unsupported"
+  | .error .unreachable => "unreachable"
+  | .error (.unknownVar _) => "unknown-var"
+
+structure InspectEntry where
+  name : String
+  supported : Bool
+  result : Except EvalError Value
+
+def InspectEntry.line (entry : InspectEntry) : String :=
+  s!"{entry.name}: supported={supportedText entry.supported}, eval={resultText entry.result}"
+
+def entries : List InspectEntry :=
+  [ { name := "letLitReturn",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.letLitReturn,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.letLitReturn },
+    { name := "nestedLetReturnFirst",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.nestedLetReturnFirst,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.nestedLetReturnFirst },
+    { name := "shadowingReturnLatest",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.shadowingReturnLatest,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.shadowingReturnLatest },
+    { name := "erasedLetReturn",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.erasedLetReturn,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.erasedLetReturn },
+    { name := "incLetReturn",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.incLetReturn,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.incLetReturn },
+    { name := "unsupportedSetTag",
+      supported := supportedCode? Fir.LeanIR.LCNFExamples.unsupportedSetTag,
+      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.unsupportedSetTag } ]
+
+def main : IO Unit := do
+  IO.println "FIR inspection"
+  for entry in entries do
+    IO.println entry.line
+
+#eval main
+
+#fir_inspect_lcnf CompilerSamples.litNat CompilerSamples.idNat
+  CompilerSamples.branchNat CompilerSamples.pairFirst
+
+end Fir.Inspect
