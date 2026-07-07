@@ -82,19 +82,20 @@ With Lean 4.31.0, the emitted shapes and coverage report are already informative
 Current generated coverage:
 
 ```text
-litNat: params=0, borrowed=0, code-supported=yes, call-ready=yes, first-unsupported=-
-idNat: params=1, borrowed=1, code-supported=yes, call-ready=no, first-unsupported=-
-branchNat: params=1, borrowed=0, code-supported=no, call-ready=no, first-unsupported=cases
-pairFirst: params=1, borrowed=1, code-supported=no, call-ready=no, first-unsupported=oproj
+litNat: params=0, borrowed=0, code-supported=yes, call-ready=yes, sample-eval=ok, first-unsupported=-
+idNat: params=1, borrowed=1, code-supported=yes, call-ready=yes, sample-eval=ok, first-unsupported=-
+branchNat: params=1, borrowed=0, code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=cases
+pairFirst: params=1, borrowed=1, code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=oproj
 ```
 
 The `inc` instruction is now modeled as an observational no-op in the FIR evaluator. That
-makes the body of `idNat` supported, while the declaration is still not call-ready because
-we do not yet bind declaration parameters to argument values.
+makes the body of `idNat` supported. Declaration-level simulation now binds parameters to
+argument values, so generated `idNat` is also call-ready and evaluates successfully on a
+sample literal argument.
 
-This suggests the next semantic increments should be declaration-parameter/argument binding,
-constructor cases, and object projection. Full heap layout, destructive update, closures, and
-precise reference-counting soundness should still wait.
+Parameter binding is now present, so the next open semantic increments are constructor cases
+and object projection. Full heap layout, destructive update, closures, and precise
+reference-counting soundness should still wait.
 
 ## Next bridge target
 

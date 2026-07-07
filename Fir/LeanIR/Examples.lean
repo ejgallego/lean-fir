@@ -38,6 +38,19 @@ def incLetReturn : LCNF.Code .impure :=
   .let { fvarId := x, binderName := `x, type := type, value := .lit lit42 }
     (.inc x 1 true false (.return x))
 
+def idParam : LCNF.Param .impure :=
+  { fvarId := x, binderName := `x, type := type, borrow := true }
+
+def idDecl : LCNF.Decl .impure :=
+  { name := `idDecl
+    levelParams := []
+    type := type
+    params := #[idParam]
+    value := .code (.inc x 1 true false (.return x))
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
 example : eval ({} : Env) letLitReturn = .ok (.lit lit42) := by
   rfl
 
@@ -60,6 +73,16 @@ example : eval ({} : Env) erasedLetReturn = .ok .erased := by
   rfl
 
 example : eval ({} : Env) incLetReturn = .ok (.lit lit42) := by
+  rfl
+
+example : bindParams ({} : Env) #[idParam] [.lit lit42] =
+    .ok (bind ({} : Env) x (.lit lit42)) := by
+  rfl
+
+example : evalDecl [.lit lit42] idDecl = .ok (.lit lit42) := by
+  rfl
+
+example : evalDecl [] idDecl = .error (.arityMismatch 1 0) := by
   rfl
 
 def unsupportedSetTag : LCNF.Code .impure :=

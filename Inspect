@@ -14,6 +14,13 @@ syntax (name := firInspectLCNF) "#fir_inspect_lcnf " ident* : command
 def supportedText (b : Bool) : String :=
   if b then "yes" else "no"
 
+def resultText : Except EvalError Value -> String
+  | .ok _ => "ok"
+  | .error (.arityMismatch expected actual) => s!"arity-mismatch({expected},{actual})"
+  | .error .unsupported => "unsupported"
+  | .error .unreachable => "unreachable"
+  | .error (.unknownVar _) => "unknown-var"
+
 def unsupportedLetValue? : LCNF.LetValue .impure -> Option String
   | .lit _ => none
   | .erased => none
@@ -52,6 +59,7 @@ partial def firstUnsupportedCode? : LCNF.Code .impure -> Option String
   | .del .. => some "del"
 
 #guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.letLitReturn == none
+#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.incLetReturn == none
 #guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.unsupportedSetTag == some "setTag"
 
 def borrowedParamCount (params : Array (LCNF.Param .impure)) : Nat :=
@@ -69,7 +77,17 @@ def declSupported? (decl : LCNF.Decl .impure) : Bool :=
   | .extern _ => false
 
 def callReady? (decl : LCNF.Decl .impure) : Bool :=
-  decl.params.isEmpty && declSupported? decl
+  declSupported? decl
+
+def sampleArgs? : Name -> Option (List Value)
+  | `Fir.Inspect.CompilerSamples.litNat => some []
+  | `Fir.Inspect.CompilerSamples.idNat => some [.lit (.nat 42)]
+  | _ => none
+
+def sampleEvalText (decl : LCNF.Decl .impure) : String :=
+  match sampleArgs? decl.name with
+  | none => "skipped"
+  | some args => resultText (evalDecl args decl)
 
 def reasonText : Option String -> String
   | none => "-"
@@ -79,6 +97,7 @@ def coverageLine (decl : LCNF.Decl .impure) : String :=
   s!"{decl.name}: params={decl.params.size}, borrowed={borrowedParamCount decl.params}, " ++
     s!"code-supported={supportedText (declSupported? decl)}, " ++
     s!"call-ready={supportedText (callReady? decl)}, " ++
+    s!"sample-eval={sampleEvalText decl}, " ++
     s!"first-unsupported={reasonText (firstUnsupportedDecl? decl)}"
 
 structure GeneratedLCNFReport where
@@ -90,7 +109,7 @@ def compileAndReportImpureDecl (declName : Name) : CoreM GeneratedLCNFReport := 
   let some decl ← Lean.Compiler.LCNF.getLocalImpureDecl? declName
     | return {
         formatted := s!"{declName}: no local impure LCNF declaration",
-        coverage := s!"{declName}: code-supported=no, call-ready=no, first-unsupported=no-local-impure-decl" }
+        coverage := s!"{declName}: code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=no-local-impure-decl" }
   return {
     formatted := toString (← Lean.Compiler.LCNF.ppDecl' decl .impure),
     coverage := coverageLine decl }
@@ -127,12 +146,6 @@ def pairFirst (p : Nat × Nat) : Nat :=
   p.1
 
 end CompilerSamples
-
-def resultText : Except EvalError Value -> String
-  | .ok _ => "ok"
-  | .error .unsupported => "unsupported"
-  | .error .unreachable => "unreachable"
-  | .error (.unknownVar _) => "unknown-var"
 
 structure InspectEntry where
   name : String

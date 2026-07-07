@@ -37,9 +37,19 @@ def lookup : Env → FVarId → Option Value
 /-- Errors reported by the executable semantics. -/
 inductive EvalError where
   | unknownVar (x : FVarId)
+  | arityMismatch (expected actual : Nat)
   | unreachable
   | unsupported
   deriving Inhabited, BEq
+
+/-- Bind declaration parameters to supplied argument values. -/
+def bindParams (env : Env) (params : Array (LCNF.Param .impure)) (args : List Value) :
+    Except EvalError Env :=
+  if params.size == args.length then
+    .ok <| (params.toList.zip args).foldl
+      (fun env pair => bind env pair.fst.fvarId pair.snd) env
+  else
+    .error (.arityMismatch params.size args.length)
 
 /-- The supported v1 fragment of LCNF let-values. -/
 inductive SupportedLetValue : LCNF.LetValue .impure → Prop where
@@ -154,6 +164,13 @@ def eval (env : Env) : LCNF.Code .impure → Except EvalError Value
       | none => .error (.unknownVar x)
   | .unreach _ => .error .unreachable
   | _ => .error .unsupported
+
+/-- Evaluate an impure LCNF declaration body after binding its parameters to arguments. -/
+def evalDecl (args : List Value) (decl : LCNF.Decl .impure) : Except EvalError Value := do
+  let env ← bindParams ({} : Env) decl.params args
+  match decl.value with
+  | .code code => eval env code
+  | .extern _ => .error .unsupported
 
 /-- Big-step semantics for supported let-values. -/
 inductive EvalLetValue : LCNF.LetValue .impure → Value → Prop where
