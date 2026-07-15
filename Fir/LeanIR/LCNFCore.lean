@@ -96,7 +96,7 @@ theorem supportedLetValue?_complete {value : LCNF.LetValue .impure} :
   intro h
   cases h <;> rfl
 
-def supportedCode?_sound :
+theorem supportedCode?_sound :
     (code : LCNF.Code .impure) → supportedCode? code = true → SupportedCode code
   | .let decl k, h => by
       simp [supportedCode?] at h

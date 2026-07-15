@@ -10,7 +10,7 @@ notes and rationale.
 
 ## Requirements
 
-- Lean toolchain: `leanprover/lean4:v4.31.0`
+- Lean toolchain: `leanprover/lean4:v4.33.0-rc1`
 - Lake from the pinned Lean toolchain
 - `rg` for the placeholder scan
 - Optional: `lean-beam` for fast Lean diagnostics

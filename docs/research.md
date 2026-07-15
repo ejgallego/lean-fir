@@ -72,7 +72,7 @@ constructors, calls, or Wasm simulation.
 `lake lean Inspect` now compiles a few local declarations through `LCNF.main` and reads the
 local impure declaration extension with `getLocalImpureDecl?`.
 
-With Lean 4.31.0, the emitted shapes and coverage report are already informative:
+With Lean 4.33.0-rc1, the emitted shapes and coverage report are already informative:
 
 - A literal `Nat` definition becomes a literal let followed by `return`.
 - Identity on `Nat` uses a borrowed parameter (`@&x`), then `inc x`, then `return x`.
