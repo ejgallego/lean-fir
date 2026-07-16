@@ -122,6 +122,16 @@ def DecodesValue (table : HandleTable) (kind : AbiKind) (physical : Wasm.Value)
     (semantic : Value) : Prop :=
   decodeValue table kind physical = .ok semantic
 
+/-- A related physical value is exactly a successful singleton ABI decode. -/
+theorem decodeArgs_singleton_of_decodesValue
+    {table : HandleTable} {kind : AbiKind} {physical : Wasm.Value}
+    {semantic : Value}
+    (decoded : DecodesValue table kind physical semantic) :
+    decodeArgs table #[kind] [physical] = .ok #[semantic] := by
+  change decodeValue table kind physical = .ok semantic at decoded
+  simp [decodeArgs, decodeValueList, decoded]
+  rfl
+
 /-- Proof-side relation for a successful single-value encode. -/
 def EncodesValue (before after : HandleTable) (kind : AbiKind) (semantic : Value)
     (physical : Wasm.Value) : Prop :=

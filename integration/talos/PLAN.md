@@ -119,10 +119,16 @@ production heap layout.
   counterpart produce `RelatedPost`, and exported-name wrappers retain the
   module's actual `findExport` witness. This store-specific bridge avoids the
   stronger store-polymorphic premise required by `FuncSpec`.
+- Whole-module adaptation now exposes an exact layout theorem for the mapped
+  imports, pointwise-adapted functions, and unified-index exports. Singleton
+  result decoding feeds directly into target observations, and a closed
+  `ReturnPost` can be weakened to `RelatedPost` and lifted to total correctness
+  for a resolved single-result export.
 
-The next W4 slice connects those wrappers to whole-module adaptation and
-instantiates the supported fragment on representative W3 programs. The adapter
-still rejects initializers and closures.
+The next W4 slice instantiates that path on representative W3 programs, then
+extends the exported theorem from the closed literal case across the supported
+constructor/projection/case fragment. The adapter still rejects initializers
+and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

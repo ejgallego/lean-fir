@@ -27,6 +27,57 @@ def FunctionBodyPost (function : Wasm.Function) (args : List Wasm.Value)
           (values.take function.results.length ++ args.drop function.numParams)
     | _ => False
 
+/-- The canonical successful source observation for one returned value. -/
+def ReturnedObservation (runtime : RuntimeState) (value : Value) : Observation :=
+  { outcome := .returned value
+    heap := runtime.heap
+    world := runtime.world
+    trace := runtime.trace }
+
+/-- Weakening the continuation assertion preserves the semantic code judgment. -/
+theorem CodeWP.conseq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {code : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    {targetStore : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q Q' : Wasm.Assertion RuntimeHost}
+    (post : Q ⇛ Q')
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv code target targetStore targetLocals tail Q' :=
+  ⟨correct.1, correct.2.1, Wasm.wp.conseq post correct.2.2⟩
+
+/--
+A decoded local return entails the function-body observation postcondition for
+one result lane. The explicit comparison premise isolates the policy-level W3
+observation relation from the ABI and control-flow proof.
+-/
+theorem ReturnPost.toFunctionBodyPost
+    {function : Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceValue : Value} {kind : AbiKind}
+    (resultCount : function.results.length = 1)
+    (related :
+      compareObservations (ReturnedObservation sourceRuntime sourceValue)
+          (.returned sourceValue sourceRuntime) =
+        .related (ReturnedObservation sourceRuntime sourceValue)
+          (.returned sourceValue sourceRuntime)) :
+    ReturnPost sourceRuntime sourceValue kind [] ⇛
+      FunctionBodyPost function []
+        (RelatedPost #[kind] (ReturnedObservation sourceRuntime sourceValue)) := by
+  intro continuation returned
+  rcases returned with ⟨targetStore, physical, rfl, runtimeEq, decoded⟩
+  simp only [FunctionBodyPost, List.drop_nil, List.append_nil]
+  rw [resultCount]
+  simp only [List.take]
+  refine ⟨.returned sourceValue sourceRuntime, ?_, related⟩
+  have decodedArgs := decodeArgs_singleton_of_decodesValue decoded
+  rw [observeTarget_success_singleton decodedArgs, runtimeEq]
+
 /--
 Store-specific bridge from total correctness of one function body to Talos's
 fuel-free public function predicate. Unlike `Wasm.FuncSpec.of_wp_body`, this
@@ -193,5 +244,41 @@ theorem CodeWP.toExportPartiallyMeetsRelated
     ExportPartiallyMeets hostEnv module exportName initial args
       (RelatedPost resultKinds source) :=
   ⟨functionIndex, exported, correct.toPartiallyMeetsRelated notImport found⟩
+
+/--
+A closed single-result local return proof yields total correctness for the
+resolved export and the canonical successful source observation.
+-/
+theorem CodeWP.toExportTerminatesWithRelated_of_return
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {kind : AbiKind}
+    {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
+    {functionIndex : Nat} {exportName : String}
+    {initial : Wasm.Store RuntimeHost} {args : List Wasm.Value}
+    (exported : module.findExport exportName = some functionIndex)
+    (notImport : module.imports[functionIndex]? = none)
+    (found :
+      module.funcs[functionIndex - module.imports.length]? = some function)
+    (noArgs : args = [])
+    (resultCount : function.results.length = 1)
+    (related :
+      compareObservations (ReturnedObservation sourceRuntime sourceValue)
+          (.returned sourceValue sourceRuntime) =
+        .related (ReturnedObservation sourceRuntime sourceValue)
+          (.returned sourceValue sourceRuntime))
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code function.body initial
+        (function.toLocals (args.take function.numParams).reverse) []
+        (ReturnPost sourceRuntime sourceValue kind [])) :
+    ExportTerminatesWith hostEnv module exportName initial args
+      (RelatedPost #[kind] (ReturnedObservation sourceRuntime sourceValue)) := by
+  subst args
+  apply CodeWP.toExportTerminatesWithRelated exported notImport found
+  exact correct.conseq (ReturnPost.toFunctionBodyPost resultCount related)
 
 end FirTalos.Correctness

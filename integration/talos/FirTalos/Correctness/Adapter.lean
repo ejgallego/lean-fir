@@ -72,11 +72,23 @@ theorem instruction_call
   rw [instruction, found]
   rfl
 
-/-- Successful whole-module adaptation preserves the positional import count. -/
-theorem adapt_preserves_import_count
+/--
+Successful whole-module adaptation exposes the exact executable layout used by
+the proof bridge: mapped imports, pointwise adapted functions, and positional
+exports in the unified function-index space.
+-/
+theorem adapt_preserves_module_layout
     {source : Fir.Wasm.Module} {target : AdaptedModule}
     (adapted : adapt source = .ok target) :
-    target.wasmModule.imports.length = source.imports.size := by
+    ∃ functions,
+      source.functions.toList.mapM (function source) = .ok functions ∧
+        target.wasmModule = {
+          funcs := functions
+          imports := source.imports.toList.map importDecl
+          exports := source.exports.toList.filterMap fun name =>
+            (source.functions.findIdx? (·.name == name)).map fun index =>
+              { name := name.toString
+                funcIdx := source.imports.size + index : Wasm.Export } } := by
   cases sourceValid : Fir.Wasm.validateModule source with
   | error error =>
       simp only [adapt, sourceValid] at adapted
@@ -118,7 +130,16 @@ theorem adapt_preserves_import_count
                   Except.ok target at adapted
               rw [targetValid] at adapted
               injection adapted with targetEq
+              refine ⟨functions, rfl, ?_⟩
               rw [← targetEq]
-              simp [targetModule]
+
+/-- Successful whole-module adaptation preserves the positional import count. -/
+theorem adapt_preserves_import_count
+    {source : Fir.Wasm.Module} {target : AdaptedModule}
+    (adapted : adapt source = .ok target) :
+    target.wasmModule.imports.length = source.imports.size := by
+  rcases adapt_preserves_module_layout adapted with ⟨functions, _, layout⟩
+  rw [layout]
+  simp
 
 end FirTalos.Correctness

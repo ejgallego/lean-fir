@@ -205,6 +205,17 @@ def observeTarget (results : Array AbiKind) :
   | .OutOfFuel => .outOfFuel
   | .Thrown tag args store => .thrown tag args store.host.runtime
 
+/-- A successful singleton ABI decode determines the successful target observation. -/
+theorem observeTarget_success_singleton
+    {results : Array AbiKind} {physical : List Wasm.Value}
+    {store : Wasm.Store RuntimeHost} {value : Value}
+    (decoded : decodeArgs store.host.handles results physical = .ok #[value]) :
+    observeTarget results (.Success physical store) =
+      .returned value store.host.runtime := by
+  rw [observeTarget]
+  rw [decoded]
+  rfl
+
 def compareObservations (source : Observation) (target : TargetObservation) :
     DifferentialResult :=
   match target.toSource? with
