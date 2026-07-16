@@ -57,6 +57,49 @@ def CodeWP (context : Fir.Wasm.Context)
     Wasm.wp module target Q targetStore
       { targetLocals with values := tail } hostEnv
 
+/--
+The postcondition installed around either arm of a generated case test. Talos
+models `if` bodies as nested programs: ordinary fallthrough and a break out of
+the body resume the instructions following the test, while deeper breaks lose
+one label level.
+-/
+def CaseResumePost (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost) (rest : Wasm.Program)
+    (Q : Wasm.Assertion RuntimeHost) (tail : List Wasm.Value) :
+    Wasm.Assertion RuntimeHost :=
+  fun continuation =>
+    match continuation with
+    | .Fallthrough nextStore nextLocals =>
+        Wasm.wp module rest Q nextStore
+          { nextLocals with values := tail } hostEnv
+    | .Break 0 nextStore nextLocals =>
+        Wasm.wp module rest Q nextStore
+          { nextLocals with values := tail } hostEnv
+    | .Break (level + 1) nextStore nextLocals =>
+        Q (.Break level nextStore nextLocals)
+    | other => Q other
+
+/--
+Semantic judgment for a constructor-test suffix. Unlike `CodeWP`, the source
+side is an alternative list plus the symbolic fallback selected before chain
+construction. This makes the recursive proof follow exactly the executable
+case compiler.
+-/
+def CaseChainWP (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (discr : Lean.FVarId) (alts : List (Lean.Compiler.LCNF.Alt .impure))
+    (fallback : List Fir.Wasm.Instruction) (target : Wasm.Program)
+    (targetStore : Wasm.Store RuntimeHost) (targetLocals : Wasm.Locals)
+    (tail : List Wasm.Value) (Q : Wasm.Assertion RuntimeHost) : Prop :=
+  CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      fallback target ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
+    Wasm.wp module target Q targetStore
+      { targetLocals with values := tail } hostEnv
+
 /-- The direct, non-calling source result of one `let` value computation. -/
 def SourceLetResult (context : Fir.Wasm.Context) (sourceRuntime : RuntimeState)
     (sourceEnv : Env) (decl : Lean.Compiler.LCNF.LetDecl .impure)
@@ -126,6 +169,24 @@ theorem StateRelated.resolve
   injection actualKindAt with kindEq
   subst actualKind
   exact ⟨physical, targetLookup, decoded⟩
+
+/-- Clearing already-clear host failure channels is observationally the identity. -/
+theorem StateRelated.clearFailures
+    {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store RuntimeHost}
+    {targetLocals : Wasm.Locals}
+    (related :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals) :
+    { targetStore with host := {
+        targetStore.host with
+        fault? := none
+        targetFailure? := none } } =
+      targetStore := by
+  rcases targetStore with
+    ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
+      gcHeap, host⟩
+  rcases host with ⟨runtime, handles, fault, targetFailure⟩
+  simp_all [StateRelated]
 
 /-- Base semantic rule for a generated source return. -/
 theorem codeWP_return
@@ -816,5 +877,262 @@ theorem codeWP_objectProjection_let
     hi hContract hParams hResults decoded usesHandle encoded targetSet
   simpa using
     codeWP_let (context := context) valueCompiled valueAdapted resultFound step continued
+
+/-- The empty constructor-test suffix executes its already adapted fallback. -/
+theorem caseChainWP_nil
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {fallback : List Fir.Wasm.Instruction}
+    {target : Wasm.Program} {targetStore : Wasm.Store RuntimeHost}
+    {targetLocals : Wasm.Locals} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion RuntimeHost}
+    (fallbackAdapted :
+      instructions sourceModule sourceFunction labels fallback = .ok target)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals)
+    (fallbackWP :
+      Wasm.wp module target Q targetStore
+        { targetLocals with values := tail } hostEnv) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr [] fallback target targetStore targetLocals
+      tail Q := by
+  exact ⟨caseChainAdapted_nil fallbackAdapted, stateRelated, fallbackWP⟩
+
+/-- A source default is omitted from the constructor-test suffix. -/
+theorem caseChainWP_default
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
+    {targetStore : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (rest :
+      CaseChainWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv discr alts fallback target targetStore targetLocals
+        tail Q) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.default code :: alts) fallback target
+      targetStore targetLocals tail Q := by
+  exact ⟨caseChainAdapted_default rest.1, rest.2⟩
+
+/--
+Semantic constructor-test rule. Structural adaptation is required for both
+arms, but the weakest-precondition premise follows only the arm selected by
+the source `getTag` result. This is the path-sensitive induction step used by
+the hit and miss rules below.
+-/
+theorem caseChainWP_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    {discrIndex getTagIndex : Nat} {handle : Handle}
+    {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (thenAdapted :
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+    (elseAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback elseTarget)
+    (discrFound :
+      findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex)
+    (getTagFound :
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals)
+    (hLocal : locals.get discrIndex = some (.i32 handle))
+    (hImp : module.imports[getTagIndex]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : getTagIndex < module.imports.length)
+    (hContract :
+      spec.contracts[getTagIndex]? = some (hostContract .getTag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded :
+      decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
+        .ok #[sourceObject])
+    (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
+    (actualFits : actualTag < UInt32.size)
+    (expectedFits : info.cidx < UInt32.size)
+    (selectedWP :
+      Wasm.wp module
+        (if actualTag = info.cidx then thenTarget else elseTarget)
+        (CaseResumePost module hostEnv [] Q tail) initial
+        { locals with values := tail } hostEnv) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget]
+      initial locals tail Q := by
+  refine ⟨caseChainAdapted_constructor fits thenAdapted elseAdapted discrFound
+    getTagFound, stateRelated, ?_⟩
+  apply wp_getTag_case_test (spec := spec) (rest := []) sourceObject actualTag
+    info.cidx
+  · simpa [Wasm.Locals.get] using hLocal
+  · exact hImp
+  · exact hSat
+  · exact hi
+  · exact hContract
+  · exact hParams
+  · exact hResults
+  · exact decoded
+  · exact tagged
+  · exact actualFits
+  · exact expectedFits
+  · rw [StateRelated.clearFailures stateRelated]
+    exact selectedWP
+
+/--
+Path-sensitive constructor hit: only the selected source branch needs a
+semantic `CodeWP`; the unselected suffix remains a structural obligation.
+-/
+theorem caseChainWP_constructor_hit
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    {discrIndex getTagIndex : Nat} {handle : Handle}
+    {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (thenBranch :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code thenTarget initial locals tail
+        (CaseResumePost module hostEnv [] Q tail))
+    (elseAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback elseTarget)
+    (tagEq : actualTag = info.cidx)
+    (discrFound :
+      findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex)
+    (getTagFound :
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex)
+    (hLocal : locals.get discrIndex = some (.i32 handle))
+    (hImp : module.imports[getTagIndex]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : getTagIndex < module.imports.length)
+    (hContract :
+      spec.contracts[getTagIndex]? = some (hostContract .getTag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded :
+      decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
+        .ok #[sourceObject])
+    (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
+    (actualFits : actualTag < UInt32.size)
+    (expectedFits : info.cidx < UInt32.size) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget]
+      initial locals tail Q := by
+  apply caseChainWP_constructor fits thenBranch.1 elseAdapted discrFound getTagFound
+    thenBranch.2.1 hLocal hImp hSat hi hContract hParams hResults decoded tagged
+    actualFits expectedFits
+  simpa [tagEq] using thenBranch.2.2
+
+/--
+Path-sensitive constructor miss: the current source arm only needs structural
+adaptation and the semantic proof proceeds recursively through the suffix.
+-/
+theorem caseChainWP_constructor_miss
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    {discrIndex getTagIndex : Nat} {handle : Handle}
+    {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (thenAdapted :
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+    (elseBranch :
+      CaseChainWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv discr alts fallback elseTarget initial locals tail
+        (CaseResumePost module hostEnv [] Q tail))
+    (tagNe : actualTag ≠ info.cidx)
+    (discrFound :
+      findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex)
+    (getTagFound :
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex)
+    (hLocal : locals.get discrIndex = some (.i32 handle))
+    (hImp : module.imports[getTagIndex]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : getTagIndex < module.imports.length)
+    (hContract :
+      spec.contracts[getTagIndex]? = some (hostContract .getTag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded :
+      decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
+        .ok #[sourceObject])
+    (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
+    (actualFits : actualTag < UInt32.size)
+    (expectedFits : info.cidx < UInt32.size) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget]
+      initial locals tail Q := by
+  apply caseChainWP_constructor fits thenAdapted elseBranch.1 discrFound getTagFound
+    elseBranch.2.1 hLocal hImp hSat hi hContract hParams hResults decoded tagged
+    actualFits expectedFits
+  simpa [tagNe] using elseBranch.2.2
+
+/-- A semantically established full test chain is a semantic source `.cases`. -/
+theorem codeWP_cases
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
+    {targetStore : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context cases.alts.toList = .ok fallback)
+    (chain :
+      CaseChainWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv cases.discr cases.alts.toList fallback target
+        targetStore targetLocals tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals tail Q := by
+  exact ⟨codeAdapted_cases ⟨fallback, fallbackCompiled, chain.1⟩, chain.2⟩
 
 end FirTalos.Correctness

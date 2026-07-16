@@ -105,12 +105,17 @@ production heap layout.
   Constructor allocation and object projection now instantiate the same
   recursive boundary, including multi-local argument loading, source heap
   operations, handle-table extension, and continuation composition.
+- W4 semantic cases now thread the common state invariant and arbitrary
+  postcondition through the actual fallback/constructor chain. `CaseChainWP`
+  has rules for an adapted fallback, skipped defaults, constructor hits, and
+  constructor misses. The hit rule requires semantic correctness only for the
+  selected source arm; the miss rule recurses only through the selected suffix,
+  while both retain structural compiler evidence for the unexecuted arm. The
+  complete chain lifts to `CodeWP (.cases ...)` through the executable case
+  compiler.
 
-The next W4 slice threads `CodeWP` through the structural case relation using
-the existing source-facing tag-test WP rule and the already adapted fallback/
-constructor chains. The completed fragment can then lift through `RelatedPost`
-to whole exported functions. The adapter still rejects initializers and
-closures.
+The next W4 slice lifts the completed local fragment through `RelatedPost` to
+whole exported functions. The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -417,9 +422,9 @@ compiler through default selection and recursive constructor-case chains. Its
 semantic induction now has a common related-state/`CodeWP` judgment, a generic
 direct-`let` rule, closed natural/string literal-to-return instances, and
 recursive constructor/projection instances. Its active proof obligation is to
-thread the same state invariant and postcondition through constructor cases.
-Layer 5 can then instantiate the bridge without mentioning runner fuel in the
-public theorem.
+instantiate the completed path-sensitive constructor-case induction for the
+initial fragment and then lift it through the observation bridge. Layer 5 can
+instantiate that bridge without mentioning runner fuel in the public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an

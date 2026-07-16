@@ -72,7 +72,11 @@ evaluation through handle encoding and checked local storage to a Talos return
 whose result decodes to the exact source value. String literals now have the
 same closed theorem, while constructor allocation and object projection use the
 same recursive rule for arbitrary continuations. Semantic constructor cases
-are the next instance of the boundary.
+now use `CaseChainWP`: an adapted fallback seeds the chain, defaults are
+skipped, and constructor hit/miss rules follow only the arm selected by the
+source tag while retaining compiler evidence for both target arms. A complete
+chain lifts directly to `CodeWP (.cases ...)`. The next proof slice lifts this
+local fragment through the exported-function observation bridge.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
