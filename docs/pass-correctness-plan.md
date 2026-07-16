@@ -320,6 +320,16 @@ relation in paired bind frames. `coreStep_yielded_bind_related` proves that a
 returned call value pops those frames and resumes the related continuations
 under the extended binders.
 
+The sequential impure-code layer is integrated as well. `CodeRelated` now
+covers object, usize, and scalar field writes, tag updates, reference-count
+increments and decrements, and deletion. `runtimeEffectResult_related` factors
+their common proof shape: related operands select one identical runtime
+operation; faults yield one observation, while success enters related
+continuations with the shared updated runtime. Persistent `inc` and `dec`
+instructions take the matching no-op path. The `sset` type annotation is left
+unconstrained in the semantic relation because the interpreter does not
+observe it; relating Lean's type checker remains an executable-bridge concern.
+
 The older terminal boundary theorems remain useful independently:
 `coreStep_terminal_related` proves matching immediate outcomes, and
 `terminalCodeRelated_empty_sound` discharges both terminal cases at the
@@ -336,9 +346,9 @@ boundary until Lean exposes a proof-facing definition or recursion theorem.
 
 The remaining bounded work is:
 
-1. extend the declarative state simulation through join points, cases,
-   mutation/ownership continuations, calls, and the remaining frame forms,
-   reusing the now-proved `let`/bind-frame invariant;
+1. extend the declarative state simulation through join points, jumps, cases,
+   calls, and the remaining frame forms, reusing the now-proved `let`,
+   bind-frame, and sequential-effect invariants;
 2. discharge or refine the exact runtime-type premises at the impure phase
    boundary and resolve or upstream the opaque-checker bridge needed for the
    exact `Code.alphaEqv` Boolean;

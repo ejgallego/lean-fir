@@ -17,9 +17,9 @@ inductive TerminalCodeRelated (rho : FVarIdMap FVarId)
       TerminalCodeRelated rho leftScope rightScope (.unreach leftType) (.unreach rightType)
 
 /--
-The proof-facing code relation, initially covering terminal code and value
-bindings. The recursive `let` case records the same scope extension performed
-by Lean's alpha-equivalence checker.
+The proof-facing code relation, covering terminal code, value bindings, and
+the sequential impure heap/ownership instructions. The recursive `let` case
+records the same scope extension performed by Lean's alpha-equivalence checker.
 -/
 inductive CodeRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
@@ -37,6 +37,57 @@ inductive CodeRelated :
           leftContinuation rightContinuation) :
       CodeRelated rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
+  | oset
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (field : ArgRelated rho leftScope rightScope leftField rightField)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.oset leftObject index leftField leftContinuation)
+        (.oset rightObject index rightField rightContinuation)
+  | uset
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (field : ScopedFVarRelated rho leftScope rightScope leftField rightField)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.uset leftObject index leftField leftContinuation)
+        (.uset rightObject index rightField rightContinuation)
+  | sset
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (field : ScopedFVarRelated rho leftScope rightScope leftField rightField)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.sset leftObject width offset leftField leftType leftContinuation)
+        (.sset rightObject width offset rightField rightType rightContinuation)
+  | setTag
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.setTag leftObject tag leftContinuation)
+        (.setTag rightObject tag rightContinuation)
+  | inc
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.inc leftObject amount check persistent leftContinuation)
+        (.inc rightObject amount check persistent rightContinuation)
+  | dec
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.dec leftObject amount check persistent objects leftContinuation)
+        (.dec rightObject amount check persistent objects rightContinuation)
+  | del
+      (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
+      (continuation :
+        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated rho leftScope rightScope
+        (.del leftObject leftContinuation) (.del rightObject rightContinuation)
 
 /--
 Saved continuations are related when they remember agreeing environments and
@@ -139,11 +190,77 @@ theorem observe_eq_of_runtime_eq
   cases right
   simp_all [observe]
 
+/-- Continue with related code without changing either runtime. -/
+theorem continuationResult_related
+    (leftState rightState : MachineState)
+    (programEq : leftState.program = rightState.program)
+    (runtimeEq : leftState.runtime = rightState.runtime)
+    (joinsEq : leftState.joins = rightState.joins)
+    (framesRelated : FramesRelated leftState.frames rightState.frames)
+    (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
+    (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (continuation :
+      CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+    CoreResultRelated
+      (.next { leftState with control := .code leftContinuation })
+      (.next { rightState with control := .code rightContinuation }) :=
+  .next {
+    program_eq := programEq
+    runtime_eq := runtimeEq
+    joins_eq := joinsEq
+    frames := framesRelated
+    envs := agree
+    renaming_scoped := renamingScoped
+    control := .code continuation
+  }
+
+/-- Lift one common runtime effect through related continuation states. -/
+theorem runtimeEffectResult_related
+    (leftState rightState : MachineState)
+    (programEq : leftState.program = rightState.program)
+    (runtimeEq : leftState.runtime = rightState.runtime)
+    (joinsEq : leftState.joins = rightState.joins)
+    (framesRelated : FramesRelated leftState.frames rightState.frames)
+    (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
+    (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (continuation :
+      CodeRelated rho leftScope rightScope leftContinuation rightContinuation)
+    (effect : Except RuntimeFault RuntimeState) :
+    CoreResultRelated
+      (match effect with
+      | .error fault => .done (observe leftState (.fault fault))
+      | .ok nextRuntime =>
+          .next { leftState with
+            runtime := nextRuntime, control := .code leftContinuation })
+      (match effect with
+      | .error fault => .done (observe rightState (.fault fault))
+      | .ok nextRuntime =>
+          .next { rightState with
+            runtime := nextRuntime, control := .code rightContinuation }) := by
+  cases effect with
+  | error fault =>
+      simp only
+      rw [observe_eq_of_runtime_eq
+        (left := leftState) (right := rightState) runtimeEq (.fault fault)]
+      exact .done _
+  | ok nextRuntime =>
+      simp only
+      exact .next {
+        program_eq := programEq
+        runtime_eq := rfl
+        joins_eq := joinsEq
+        frames := framesRelated
+        envs := agree
+        renaming_scoped := renamingScoped
+        control := .code continuation
+      }
+
 /--
-One interpreter step preserves the declarative machine relation for the
-terminal and `let` code fragment. In particular, the three successful let
-actions either extend the current environments immediately or save the same
-extension invariant in a pair of bind frames.
+One interpreter step preserves the declarative machine relation for terminal
+code, `let`, and sequential impure effects. The three successful let actions
+either extend the current environments immediately or save the same extension
+invariant in a pair of bind frames. Heap and ownership instructions run the
+same runtime effect on both sides before entering related continuations.
 -/
 theorem coreStep_code_related
     (leftState rightState : MachineState)
@@ -301,6 +418,237 @@ theorem coreStep_code_related
                 control := .invokeValue function args
               }
               simpa [pushBindFrame] using CoreResultRelated.next nextRelated
+  | oset object field continuation =>
+      rename_i leftObject rightObject leftField rightField
+        leftContinuation rightContinuation index
+      have objectEq := lookupValue_eq_of_scoped_related agree object
+      have fieldEq := evalArg_eq_of_related agree field
+      simp only [coreStep]
+      rw [objectEq, fieldEq, runtimeEq]
+      generalize objectLookup : lookupValue rightState.env _ = objectResult
+      generalize fieldLookup : evalArg rightState.env _ = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation (.error fault)
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok fieldValue =>
+              simp
+              generalize effectEq :
+                setObjectField rightState.runtime objectValue index fieldValue = effect
+              cases effect with
+              | error fault =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.error fault)
+              | ok nextRuntime =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.ok nextRuntime)
+  | uset object field continuation =>
+      rename_i leftObject rightObject leftField rightField
+        leftContinuation rightContinuation index
+      have objectEq := lookupValue_eq_of_scoped_related agree object
+      have fieldEq := lookupValue_eq_of_scoped_related agree field
+      simp only [coreStep]
+      rw [objectEq, fieldEq, runtimeEq]
+      generalize objectLookup : lookupValue rightState.env _ = objectResult
+      generalize fieldLookup : lookupValue rightState.env _ = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation (.error fault)
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok fieldValue =>
+              simp
+              generalize effectEq :
+                setUSizeField rightState.runtime objectValue index fieldValue = effect
+              cases effect with
+              | error fault =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.error fault)
+              | ok nextRuntime =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.ok nextRuntime)
+  | sset object field continuation =>
+      rename_i leftObject rightObject leftField rightField
+        leftContinuation rightContinuation width offset leftType rightType
+      have objectEq := lookupValue_eq_of_scoped_related agree object
+      have fieldEq := lookupValue_eq_of_scoped_related agree field
+      simp only [coreStep]
+      rw [objectEq, fieldEq, runtimeEq]
+      generalize objectLookup : lookupValue rightState.env _ = objectResult
+      generalize fieldLookup : lookupValue rightState.env _ = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation (.error fault)
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok fieldValue =>
+              simp
+              generalize effectEq :
+                setScalarField rightState.runtime objectValue width offset fieldValue = effect
+              cases effect with
+              | error fault =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.error fault)
+              | ok nextRuntime =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.ok nextRuntime)
+  | setTag object continuation =>
+      rename_i leftObject rightObject leftContinuation rightContinuation tag
+      have objectEq := lookupValue_eq_of_scoped_related agree object
+      simp only [coreStep]
+      rw [objectEq, runtimeEq]
+      generalize objectLookup : lookupValue rightState.env _ = objectResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation (.error fault)
+      | ok objectValue =>
+          simp
+          generalize effectEq : setTag rightState.runtime objectValue tag = effect
+          cases effect with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok nextRuntime =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.ok nextRuntime)
+  | inc object continuation =>
+      rename_i leftObject rightObject leftContinuation rightContinuation
+        amount check persistent
+      cases persistent with
+      | false =>
+          have objectEq := lookupValue_eq_of_scoped_related agree object
+          simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+          rw [objectEq, runtimeEq]
+          generalize objectLookup : lookupValue rightState.env _ = objectResult
+          cases objectResult with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok objectValue =>
+              simp
+              generalize effectEq :
+                incValue rightState.runtime objectValue amount check = effect
+              cases effect with
+              | error fault =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.error fault)
+              | ok nextRuntime =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.ok nextRuntime)
+      | true =>
+          simpa [coreStep] using continuationResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation
+  | dec object continuation =>
+      rename_i leftObject rightObject leftContinuation rightContinuation
+        amount check persistent objects
+      cases persistent with
+      | false =>
+          have objectEq := lookupValue_eq_of_scoped_related agree object
+          simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+          rw [objectEq, runtimeEq]
+          generalize objectLookup : lookupValue rightState.env _ = objectResult
+          cases objectResult with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok objectValue =>
+              simp
+              generalize effectEq :
+                decValue rightState.runtime objectValue amount check = effect
+              cases effect with
+              | error fault =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.error fault)
+              | ok nextRuntime =>
+                  simp only
+                  simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                    renamingScoped continuation (.ok nextRuntime)
+      | true =>
+          simpa [coreStep] using continuationResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation
+  | del object continuation =>
+      rename_i leftObject rightObject leftContinuation rightContinuation
+      have objectEq := lookupValue_eq_of_scoped_related agree object
+      simp only [coreStep]
+      rw [objectEq, runtimeEq]
+      generalize objectLookup : lookupValue rightState.env _ = objectResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+            leftState rightState programEq runtimeEq joinsEq framesRelated agree
+            renamingScoped continuation (.error fault)
+      | ok objectValue =>
+          simp
+          generalize effectEq : deleteValue rightState.runtime objectValue = effect
+          cases effect with
+          | error fault =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.error fault)
+          | ok nextRuntime =>
+              simp only
+              simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
+                leftState rightState programEq runtimeEq joinsEq framesRelated agree
+                renamingScoped continuation (.ok nextRuntime)
 
 /-- A related pair of saved bind continuations resumes under the new binders. -/
 theorem coreStep_yielded_bind_related
