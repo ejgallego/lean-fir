@@ -101,8 +101,15 @@ def idNatList (xs : List Nat) : List Nat :=
 def idString (value : String) : String :=
   value
 
-def maxUInt64 : UInt64 :=
-  18446744073709551615
+def maxUInt8 : UInt8 := 255
+
+def maxUInt16 : UInt16 := 65535
+
+def maxUInt32 : UInt32 := 4294967295
+
+def maxUInt64 : UInt64 := 18446744073709551615
+
+def maxUSize : USize := 18446744073709551615
 
 @[noinline]
 def polyId (α : Type) (value : α) : α :=
@@ -597,6 +604,33 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := leanCompileProvenance "tests/compile/str.lean"
       "Unicode fixture adapted to a pure source-level identity" },
+  { id := "uint8-max"
+    entry := ``Source.maxUInt8
+    resultSchema := .bits 8
+    native := fun _ => .bits 8 (UInt64.ofNat Source.maxUInt8.toNat)
+    tags := #["quick", "scalar", "boundary"]
+    requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
+    provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
+      "Maximum-width UInt8 literal" },
+  { id := "uint16-max"
+    entry := ``Source.maxUInt16
+    resultSchema := .bits 16
+    native := fun _ => .bits 16 (UInt64.ofNat Source.maxUInt16.toNat)
+    tags := #["quick", "scalar", "boundary"]
+    requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
+    provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
+      "Maximum-width UInt16 literal" },
+  { id := "uint32-max"
+    entry := ``Source.maxUInt32
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat Source.maxUInt32.toNat)
+    tags := #["quick", "scalar", "boundary"]
+    requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
+    provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
+      "Maximum-width UInt32 literal" },
   { id := "uint64-max"
     entry := ``Source.maxUInt64
     resultSchema := .bits 64
@@ -606,6 +640,15 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["lit", "return"]
     provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
       "Maximum-width UInt64 literal" },
+  { id := "usize-max"
+    entry := ``Source.maxUSize
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat Source.maxUSize.toNat)
+    tags := #["quick", "scalar", "boundary"]
+    requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
+    provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
+      "Maximum-width USize literal" },
   { id := "boxed-uint32"
     entry := ``Source.boxedUInt32
     dependencies := #[``Source.polyId]
