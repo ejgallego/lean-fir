@@ -242,10 +242,19 @@ that it produces the specification result. The folding fixture uses different
 local `FVarId`s in its equal bodies, so it exercises alpha-renaming rather than
 mere syntactic equality. No discrepancy was found.
 
+Attempting to remove the `AlphaEqvSoundAt` hypothesis exposed a necessary
+phase invariant. `Code.alphaEqv` accepts a minimized pair with different
+observations when local `FVarId`s are reused. Lean's compiler intends these IDs
+to be globally fresh, but FIR's current impure `WellFormedAt` does not say so.
+The executable witness and triage are recorded in
+`FIR-BUG-impure-simpCase-alpha-hygiene`; this is currently a FIR invariant gap,
+not evidence of a compiler error on compiler-generated LCNF.
+
 The remaining bounded work is:
 
-1. prove `Code.alphaEqv` sound for the interpreter, using an environment
-   renaming relation internally while preserving external observations;
+1. strengthen impure checked-program well-formedness with global binder
+   freshness and lexical scope, then prove `Code.alphaEqv` sound using an
+   environment renaming relation internally while preserving observations;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 3. lift the resulting theorem through recursive code, declarations, and program
