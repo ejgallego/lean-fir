@@ -75,7 +75,9 @@ invokes that captured path directly; it no longer uses `lake exe`, which could
 silently rebuild after capture.  LCNF validation binds the resolved Lean
 engine, `FirValidationLCNF.lean`, and the consumed
 `Fir/Validation/LCNF.olean`, then verifies all captured backend tool files
-before and after execution.  The current LCNF module hash relies on Lean's
+before and after execution.  External adapters likewise bind the exact
+PATH-resolved engine and every config-relative runner argument.  The current
+LCNF module hash relies on Lean's
 embedded import fingerprints for its transitive closure; inventorying every
 loaded olean and host dynamic library remains future hardening.  A V8 adapter
 will analogously register the engine and runner as tools while keeping the
@@ -178,6 +180,14 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "timeoutSeconds": 120,
   "products": [
     {"kind": "wasm-module", "path": "modules/validation.wasm"}
+  ],
+  "tools": [
+    {"kind": "engine", "name": "node", "command": "node"},
+    {
+      "kind": "runner",
+      "name": "scripts/run-lean-wasm-v8.mjs",
+      "path": "../scripts/run-lean-wasm-v8.mjs"
+    }
   ]
 }
 ```
@@ -198,6 +208,29 @@ protocol JSONL to stdout; stdout, stderr, result records, domain failures, and
 comparisons then follow the same path as built-in adapters.  This contract does
 not assume how a Wasm module is produced or initialized, so it can be exercised
 only after the compiler track deliberately supplies those pieces.
+
+Every JSON external adapter must declare its execution tools.  A tool has a
+restricted lowercase `kind`, a normalized report-stable relative POSIX `name`,
+and exactly one source locator.  `command` is a bare executable name resolved
+through `PATH`; exactly one command tool is required and it must equal
+`runCommand[0]`.  `path` is a normalized POSIX path resolved relative to the
+adapter config, may use leading `..`, and must resolve to exactly one later
+`runCommand` argument under the owning project root.  Duplicate identities and
+duplicate sources are rejected.  After the optional build, the harness hashes
+each regular tool file, replaces the matching run argv entries with those exact
+captured absolute paths, and verifies the files immediately before and after
+execution.  Thus a changing `PATH`, engine symlink, or runner alias cannot make
+the run execute bytes different from the recorded engine and runner.  Direct
+in-process adapter construction may omit tools for protocol-only tests, but a
+declarative real-engine adapter cannot.
+
+The run command receives `FIR_VALIDATION_TOOLS`, a compact sorted JSON array of
+the captured backend, kind, logical name, SHA-256, and exact local path.  The
+machine-local path is not written to `matrix.json`; the matrix retains the tool
+bytes under `evidence/tools/<sha256>`, binds their logical identities and hashes
+into `identity.run`, and reports `toolCount`.  Tools are execution provenance,
+not compiler products, so they do not use the per-case product-consumption
+receipt.
 
 The optional `products` array declares regular build outputs whose bytes affect
 the backend's semantics.  Each declaration has a restricted lowercase `kind`

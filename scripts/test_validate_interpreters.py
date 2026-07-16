@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -1034,7 +1035,9 @@ class HarnessTests(unittest.TestCase):
 
     def test_external_adapter_config_uses_argv_not_a_shell_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "v8.json"
+            root = Path(directory)
+            path = root / "configs" / "v8.json"
+            path.parent.mkdir()
             path.write_text(
                 json.dumps(
                     {
@@ -1048,6 +1051,18 @@ class HarnessTests(unittest.TestCase):
                                 "kind": "wasm-module",
                                 "path": "modules/validation.wasm",
                             }
+                        ],
+                        "tools": [
+                            {
+                                "kind": "runner",
+                                "name": "scripts/run-v8.mjs",
+                                "path": "../scripts/run-v8.mjs",
+                            },
+                            {
+                                "kind": "engine",
+                                "name": "node",
+                                "command": "node",
+                            },
                         ],
                     }
                 ),
@@ -1066,11 +1081,172 @@ class HarnessTests(unittest.TestCase):
                     ),
                 ),
             )
+            self.assertEqual(
+                adapter.tool_declarations,
+                (
+                    harness.ToolDeclaration(
+                        "engine", "node", command="node"
+                    ),
+                    harness.ToolDeclaration(
+                        "runner",
+                        "scripts/run-v8.mjs",
+                        path=root / "scripts" / "run-v8.mjs",
+                    ),
+                ),
+            )
 
             value = json.loads(path.read_text(encoding="utf-8"))
             value["runCommand"] = "node scripts/run-v8.mjs"
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(harness.ValidationError, "argv array"):
+                harness.external_adapter_from_config(path)
+
+    def test_external_adapter_tool_config_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = {
+                "name": "v8",
+                "runCommand": ["node", "run.mjs"],
+                "resultDomain": "selected",
+            }
+
+            path.write_text(json.dumps(base), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "tools must be nonempty"
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid_tools = (
+                [{"kind": "engine", "name": "node"}],
+                [
+                    {
+                        "kind": "engine",
+                        "name": "node",
+                        "command": "node",
+                        "path": "node",
+                    }
+                ],
+                [
+                    {
+                        "kind": "engine",
+                        "name": "node",
+                        "command": "node",
+                        "extra": True,
+                    }
+                ],
+            )
+            for tools in invalid_tools:
+                value = dict(base)
+                value["tools"] = tools
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "exactly one of path or command"
+                ):
+                    harness.external_adapter_from_config(path)
+
+            for tool_path in (
+                "/tmp/runner.mjs",
+                "a/../runner.mjs",
+                "runner\\module.mjs",
+            ):
+                value = dict(base)
+                value["tools"] = [
+                    {
+                        "kind": "runner",
+                        "name": "runner.mjs",
+                        "path": tool_path,
+                    }
+                ]
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "config-relative POSIX path"
+                ):
+                    harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {
+                    "kind": "runner",
+                    "name": "../runner.mjs",
+                    "path": "runner.mjs",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "normalized relative POSIX path"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {"kind": "engine", "name": "node", "command": ""}
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "command must be a bare PATH command"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {
+                    "kind": "engine",
+                    "name": "node",
+                    "command": "/usr/bin/node",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "command must be a bare PATH command"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {"kind": "engine", "name": "node", "command": "node"},
+                {"kind": "engine", "name": "node", "path": "node"},
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate tool: engine:node"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {"kind": "engine", "name": "node", "command": "node"},
+                {
+                    "kind": "secondary",
+                    "name": "node-copy",
+                    "command": "node",
+                },
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate tool source: node"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = {"kind": "engine"}
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "tools must be an object array"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["tools"] = [
+                {
+                    "kind": "engine",
+                    "name": "node",
+                    "command": "other-engine",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, r"must match runCommand\[0\]"
+            ):
                 harness.external_adapter_from_config(path)
 
     def test_external_adapter_product_config_is_strict(self) -> None:
@@ -1165,6 +1341,14 @@ class HarnessTests(unittest.TestCase):
                     "name": "v8",
                     "runCommand": ["node", "run-v8.mjs"],
                     "resultDomain": "selected",
+                    "tools": [
+                        {"kind": "engine", "name": "node", "command": "node"},
+                        {
+                            "kind": "runner",
+                            "name": "run-v8.mjs",
+                            "path": "run-v8.mjs",
+                        },
+                    ],
                 }
             ).encode("utf-8")
             path.write_bytes(original)
@@ -1275,6 +1459,7 @@ class HarnessTests(unittest.TestCase):
             product_bytes = b"\0asm\x01\0\0\0test-product"
             product_path.write_bytes(b"stale-product")
             adapter_path = root / "v8.json"
+            runner_path = root / "runner.py"
             product_sha256 = harness.sha256_bytes(product_bytes)
             build_program = (
                 "import os,pathlib;"
@@ -1286,7 +1471,11 @@ class HarnessTests(unittest.TestCase):
             program = (
                 "import hashlib,json,os,pathlib;"
                 "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
+                "tools=json.loads(os.environ['FIR_VALIDATION_TOOLS']);"
                 "assert len(products)==1;"
+                "assert [tool['kind'] for tool in tools]==['engine','runner'];"
+                "assert all(hashlib.sha256(pathlib.Path(tool['path']).read_bytes()).hexdigest()"
+                "==tool['sha256'] for tool in tools);"
                 f"assert products[0]['sha256']=={product_sha256!r};"
                 f"assert pathlib.Path(products[0]['path']).read_bytes()=={product_bytes!r};"
                 f"record=json.loads({json.dumps(json.dumps(success('case', 'v8')))});"
@@ -1297,6 +1486,14 @@ class HarnessTests(unittest.TestCase):
                 "'value':json.dumps(receipt,separators=(',',':'),sort_keys=True)}];"
                 "print(json.dumps(record))"
             )
+            runner_path.write_text(program, encoding="utf-8")
+            runner_sha256 = harness.sha256_bytes(runner_path.read_bytes())
+            engine_command = Path(sys.executable).name
+            engine_path_text = shutil.which(engine_command)
+            self.assertIsNotNone(engine_path_text)
+            assert engine_path_text is not None
+            engine_path = Path(engine_path_text).resolve()
+            engine_sha256 = harness.sha256_bytes(engine_path.read_bytes())
             adapter_path.write_text(
                 json.dumps(
                     {
@@ -1306,13 +1503,25 @@ class HarnessTests(unittest.TestCase):
                             "-c",
                             build_program,
                         ],
-                        "runCommand": [sys.executable, "-c", program],
+                        "runCommand": [engine_command, str(runner_path)],
                         "resultDomain": "selected",
                         "products": [
                             {
                                 "kind": "wasm-module",
                                 "path": "modules/validation.wasm",
                             }
+                        ],
+                        "tools": [
+                            {
+                                "kind": "runner",
+                                "name": "runner.py",
+                                "path": "runner.py",
+                            },
+                            {
+                                "kind": "engine",
+                                "name": "python",
+                                "command": engine_command,
+                            },
                         ],
                     }
                 ),
@@ -1394,6 +1603,26 @@ class HarnessTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(matrix["summary"]["productCount"], 1)
+            self.assertEqual(
+                matrix["tools"],
+                [
+                    {
+                        "backend": "v8",
+                        "kind": "engine",
+                        "name": "python",
+                        "sha256": engine_sha256,
+                        "artifact": f"evidence/tools/{engine_sha256}",
+                    },
+                    {
+                        "backend": "v8",
+                        "kind": "runner",
+                        "name": "runner.py",
+                        "sha256": runner_sha256,
+                        "artifact": f"evidence/tools/{runner_sha256}",
+                    },
+                ],
+            )
+            self.assertEqual(matrix["summary"]["toolCount"], 2)
             self.assertTrue(
                 (out_dir / "comparisons" / "native--v8.json").is_file()
             )
@@ -1405,6 +1634,7 @@ class HarnessTests(unittest.TestCase):
 
             plan_path.unlink()
             adapter_path.unlink()
+            runner_path.unlink()
             product_path.unlink()
             (out_dir / "comparisons" / "native--v8.json").unlink()
             self.assertEqual(
@@ -1470,6 +1700,7 @@ class HarnessTests(unittest.TestCase):
             program = (
                 "import json,os;"
                 "assert json.loads(os.environ['FIR_VALIDATION_CASES']) == ['case'];"
+                "assert json.loads(os.environ['FIR_VALIDATION_TOOLS']) == [];"
                 "assert os.path.isfile(os.environ['FIR_VALIDATION_CORPUS']);"
                 "assert os.environ['FIR_VALIDATION_BACKEND'] == 'v8';"
                 f"assert os.getcwd() == {json.dumps(str(harness.ROOT))};"
@@ -1487,6 +1718,113 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(backend_run.expected_cases, ["case"])
             self.assertEqual(backend_run.results, {"case": record})
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
+
+    def test_external_adapter_binds_and_verifies_exact_declared_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            runner = root / "runner.py"
+            runner.write_bytes(b"original runner")
+            engine_command = Path(sys.executable).name
+            engine_path_text = shutil.which(engine_command)
+            self.assertIsNotNone(engine_path_text)
+            assert engine_path_text is not None
+            engine_path = Path(engine_path_text).resolve()
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                run_command=[engine_command, str(runner)],
+                result_domain="selected",
+                tool_declarations=(
+                    harness.ToolDeclaration(
+                        "runner", "runner.py", path=runner
+                    ),
+                    harness.ToolDeclaration(
+                        "engine", "python", command=engine_command
+                    ),
+                ),
+            )
+            build_context = harness.BuildContext(root, out_dir, True)
+            adapter.build(build_context)
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            context = harness.RunContext(root, out_dir, descriptors, ["case"])
+            failed = mock.Mock(returncode=7, stdout="", stderr="engine failed")
+            with mock.patch.object(core, "run", return_value=failed) as run_mock:
+                backend_run = adapter.execute(context)
+            self.assertEqual(
+                run_mock.call_args.args[0],
+                [str(engine_path), str(runner.resolve())],
+            )
+            environment = run_mock.call_args.args[3]
+            received_tools = json.loads(environment["FIR_VALIDATION_TOOLS"])
+            self.assertEqual(
+                [(tool["kind"], tool["name"]) for tool in received_tools],
+                [("engine", "python"), ("runner", "runner.py")],
+            )
+            self.assertEqual(
+                [tool["path"] for tool in received_tools],
+                [str(engine_path), str(runner.resolve())],
+            )
+            self.assertEqual(
+                [(tool.kind, tool.name) for tool in backend_run.tools],
+                [("engine", "python"), ("runner", "runner.py")],
+            )
+            self.assertEqual(backend_run.findings[0].phase, "execution")
+
+            runner.write_bytes(b"changed before execution")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "tools changed between build and execution"
+            ):
+                adapter.execute(context)
+
+            runner.write_bytes(b"original runner")
+            adapter.build(build_context)
+
+            def mutate_runner(*args: object, **kwargs: object) -> mock.Mock:
+                runner.write_bytes(b"changed during execution")
+                return failed
+
+            with mock.patch.object(core, "run", side_effect=mutate_runner):
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "tools changed during execution"
+                ):
+                    adapter.execute(context)
+
+            missing = harness.ExternalCommandAdapter(
+                name="missing",
+                run_command=["fir-validation-command-that-does-not-exist"],
+                result_domain="selected",
+                tool_declarations=(
+                    harness.ToolDeclaration(
+                        "engine",
+                        "missing",
+                        command="fir-validation-command-that-does-not-exist",
+                    ),
+                ),
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "cannot resolve validation tool command"
+            ):
+                missing.build(build_context)
+
+            unbound = harness.ExternalCommandAdapter(
+                name="unbound",
+                run_command=[engine_command, str(root / "different.py")],
+                result_domain="selected",
+                tool_declarations=(
+                    harness.ToolDeclaration(
+                        "engine", "python", command=engine_command
+                    ),
+                    harness.ToolDeclaration(
+                        "runner", "runner.py", path=runner
+                    ),
+                ),
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "path tool runner:runner.py must match exactly one runCommand argument",
+            ):
+                unbound.build(build_context)
 
     def test_native_adapter_executes_the_captured_binary_directly(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
