@@ -1,5 +1,4 @@
-import Fir.LeanIR.PassCorrectness
-import Lean.Compiler.LCNF.AlphaEqv
+import Fir.LeanIR.Passes.AlphaEqv
 
 namespace Fir.LeanIR.Passes.SimpCase
 
