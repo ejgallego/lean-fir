@@ -1,15 +1,33 @@
-import Fir.Wasm
-import Interpreter.Wasm.Syntax
+import Fir.Wasm.Validate
+import Interpreter.Wasm.Validate
 
 namespace FirTalos
 
 open Lean
 
 inductive AdapterError where
+  | invalidModule (error : Fir.Wasm.SymbolicError)
+  | targetValidation (message : String)
   | unknownLocal (fvarId : FVarId)
   | unknownLabel (fvarId : FVarId)
   | unknownCallTarget
   deriving Inhabited, BEq, Repr
+
+inductive FunctionOrigin where
+  | import (key : Fir.Wasm.ImportKey)
+  | definition (name : Name)
+  deriving Inhabited, BEq
+
+structure SourceMap where
+  functionOrigins : Array FunctionOrigin
+  deriving Inhabited, BEq
+
+def SourceMap.origin? (sourceMap : SourceMap) (index : Nat) : Option FunctionOrigin :=
+  sourceMap.functionOrigins[index]?
+
+structure AdaptedModule where
+  wasmModule : Wasm.Module
+  sourceMap : SourceMap
 
 def valueType : Fir.Wasm.ValueType → Wasm.ValueType
   | .i32 => .i32
@@ -95,14 +113,29 @@ def function (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
     results := source.results.toList.map abiKind
     body := ← instructions module source [] source.body }
 
-def module (source : Fir.Wasm.Module) : Except AdapterError Wasm.Module := do
+def adapt (source : Fir.Wasm.Module) : Except AdapterError AdaptedModule := do
+  match Fir.Wasm.validateModule source with
+  | .ok _ => pure ()
+  | .error error => throw (.invalidModule error)
   let functions ← source.functions.toList.mapM (function source)
   let exports := source.exports.toList.filterMap fun name =>
     (source.functions.findIdx? (·.name == name)).map fun index =>
       { name := name.toString, funcIdx := source.imports.size + index : Wasm.Export }
-  return {
+  let wasmModule : Wasm.Module := {
     funcs := functions
     imports := source.imports.toList.map importDecl
     exports }
+  match wasmModule.validate with
+  | .ok _ => pure ()
+  | .error message => throw (.targetValidation message)
+  return {
+    wasmModule
+    sourceMap := {
+      functionOrigins :=
+        source.imports.map (FunctionOrigin.import ·.key) ++
+        source.functions.map (FunctionOrigin.definition ·.name) } }
+
+def module (source : Fir.Wasm.Module) : Except AdapterError Wasm.Module :=
+  (adapt source).map (·.wasmModule)
 
 end FirTalos

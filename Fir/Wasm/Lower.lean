@@ -350,13 +350,11 @@ def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := d
         | .error error => throw (.abi error)
     | .code _ => pure none
   let exports := functions.map (·.name)
-  let initializers := program.decls.filterMap fun decl =>
-    if decl.params.isEmpty then some decl.name else none
   return {
     imports := runtimeImports ++ externalImports
     functions
     exports
-    initializers
+    initializers := #[]
     runtimeOperations := operations }
 
 end Fir.Wasm

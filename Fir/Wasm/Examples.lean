@@ -1,10 +1,12 @@
 import Fir.Wasm.Lower
 import Fir.Wasm.Handle
+import Fir.Wasm.Validate
 import Fir.Wasm.WellFormed
 import Fir.LeanIR.InterpreterExamples
 
 namespace Fir.Wasm
 
+open Lean
 open Lean.Compiler
 open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Impure
@@ -125,6 +127,7 @@ def literalModule? : Option Module :=
 #guard literalModule?.any fun module =>
   module.functions.size == 1 &&
   module.exports == #[`main] &&
+  module.initializers.isEmpty &&
   module.runtimeOperations.contains (.literal (.nat 42) .object) &&
   module.imports.map (·.key) == module.runtimeOperations.map (.runtime ·)
 
@@ -252,6 +255,178 @@ def abiCaseProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard match validateSupported directCallProgram with
   | .error (.unsupportedCode `main) => true
+  | _ => false
+
+def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
+  match lower program with
+  | .error _ => false
+  | .ok module =>
+      match validateModule module with
+      | .ok _ => true
+      | .error _ => false
+
+#guard ([
+  literalProgram,
+  ctorProjectionProgram,
+  caseProgram,
+  directCallProgram,
+  joinProgram,
+  scalarBoxProgram,
+  mutationProgram,
+  usizeProjectionProgram,
+  objectMutationProgram,
+  tagMutationProgram,
+  defaultCaseProgram,
+  rcProgram,
+  persistentRcProgram,
+  resetReuseProgram,
+  sharedResetProgram,
+  deletedProgram,
+  externalProgram,
+  scalarIdProgram,
+  floatIdProgram,
+  voidProgram,
+  abiLiteralProgram,
+  abiErasedProgram,
+  abiCtorProjectionProgram,
+  abiCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
+
+#guard !validates? erasedProgram
+
+#guard match lower closureCallProgram with
+  | .ok module =>
+      match validateModule module with
+      | .error (.unsupportedClosure _) => true
+      | _ => false
+  | .error _ => false
+
+def fixtureFunction (body : List Instruction) (results : Array AbiKind := #[])
+    (locals : Array (FVarId × AbiKind) := #[]) : Function :=
+  { name := `fixture, params := #[], results, locals, body }
+
+def fixtureModule (function : Function) : Module :=
+  { imports := #[]
+    functions := #[function]
+    exports := #[]
+    initializers := #[]
+    runtimeOperations := #[] }
+
+def ghost : Lean.FVarId := ⟨`ghost⟩
+def outer : Lean.FVarId := ⟨`outer⟩
+def inner : Lean.FVarId := ⟨`inner⟩
+
+#guard match validateModule (fixtureModule <| fixtureFunction [.localGet ghost]) with
+  | .error (.unknownLocal `fixture fvarId) => fvarId.name == ghost.name
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [.unreachable, .localGet ghost]) with
+  | .error (.unknownLocal `fixture fvarId) => fvarId.name == ghost.name
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [.br ghost]) with
+  | .error (.unknownLabel `fixture fvarId) => fvarId.name == ghost.name
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [.call (.declaration `missing)]) with
+  | .error (.unknownCallTarget `fixture) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <|
+    fixtureFunction [.i32Const .uint64 0]) with
+  | .error (.invalidConstant `fixture .uint64 .i32) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <|
+    fixtureFunction [.i64Const .uint64 0, .localSet x] #[] #[(x, .uint32)]) with
+  | .error (.stackMismatch `fixture [.uint32] [.uint64]) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <|
+    fixtureFunction [.i32Const .uint32 0, .ret] #[.uint64]) with
+  | .error (.stackMismatch `fixture [.uint64] [.uint32]) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i32Const .uint32 0,
+    .ifElse [.i32Const .uint32 1] [.i64Const .uint64 1]]) with
+  | .error (.branchMergeMismatch `fixture [.uint32] [.uint64]) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .block outer [.block inner [.br outer]]]) with
+  | .ok _ => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .block outer [.block outer [.br outer]]]) with
+  | .error (.duplicateLabel `fixture fvarId) => fvarId.name == outer.name
+  | _ => false
+
+#guard match validateModule (fixtureModule <|
+    fixtureFunction [] #[] #[(x, .uint32), (x, .uint64)]) with
+  | .error (.duplicateLocal `fixture fvarId) => fvarId.name == x.name
+  | _ => false
+
+#guard match validateModule { fixtureModule (fixtureFunction []) with exports := #[`missing] } with
+  | .error (.unknownExport `missing) => true
+  | _ => false
+
+#guard match validateModule { fixtureModule (fixtureFunction []) with
+    exports := #[`fixture, `fixture] } with
+  | .error (.duplicateExport `fixture) => true
+  | _ => false
+
+#guard match validateModule { fixtureModule (fixtureFunction []) with
+    functions := #[fixtureFunction [], fixtureFunction []] } with
+  | .error (.duplicateFunction `fixture) => true
+  | _ => false
+
+def directCallArityModule : Module :=
+  let callee : Function := {
+    name := `callee
+    params := #[(x, .uint64)]
+    results := #[.uint64]
+    locals := #[]
+    body := [.localGet x, .ret] }
+  let caller : Function := {
+    name := `caller
+    params := #[]
+    results := #[.uint64]
+    locals := #[]
+    body := [.call (.declaration `callee), .ret] }
+  { imports := #[]
+    functions := #[callee, caller]
+    exports := #[]
+    initializers := #[]
+    runtimeOperations := #[] }
+
+#guard match validateModule directCallArityModule with
+  | .error (.stackUnderflow `caller [.uint64]) => true
+  | _ => false
+
+def ctorProjectionModule? : Option Module :=
+  match lower ctorProjectionProgram with
+  | .ok module => some module
+  | .error _ => none
+
+#guard ctorProjectionModule?.any fun module =>
+  match validateModule { module with imports := module.imports.reverse } with
+  | .error (.invalidRuntimeImport 0) => true
+  | _ => false
+
+#guard ctorProjectionModule?.any fun module =>
+  match validateModule { module with runtimeOperations := module.runtimeOperations.reverse } with
+  | .error .runtimeOperationOrder => true
+  | _ => false
+
+#guard externalModule?.any fun module =>
+  match validateModule { module with imports := module.imports ++ module.imports } with
+  | .error .duplicateImportKey => true
+  | _ => false
+
+#guard literalModule?.any fun module =>
+  match validateModule { module with initializers := #[`main] } with
+  | .error (.unsupportedInitializer `main) => true
   | _ => false
 
 def taggedValue : Value := .object (.tagged 42)
