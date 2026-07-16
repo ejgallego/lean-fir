@@ -98,7 +98,11 @@ forms, and the comparison summary.  Process logging, per-case result writing,
 result-domain checks, and semantic comparison use actual backend names rather
 than assuming LCNF.  `_build/validation/comparison.json` identifies its reference
 and candidate explicitly; this is the backend-neutral artifact boundary used
-by later V8 and Talos adapters.  The native oracle's `--manifest` JSONL is
+by later V8 and Talos adapters.  It is written for successful and failed
+comparisons, with selected/compared/equal/finding counts and typed findings for
+`execution`, `result-domain`, `audit`, and `comparison` phases.  Each finding
+retains its backend and case ID when applicable, so automation does not need to
+recover structure from stderr text.  The native oracle's `--manifest` JSONL is
 the single discovery surface for the harness: case and tag selection no longer
 depend on a second ad-hoc listing command.  The harness validates and
 canonicalizes those descriptors into `_build/validation/corpus.json`, ordered

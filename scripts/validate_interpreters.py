@@ -40,6 +40,27 @@ class ValidationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ValidationFinding:
+    phase: str
+    message: str
+    backend: str | None = None
+    case_id: str | None = None
+
+    def render(self) -> str:
+        scope = [value for value in (self.case_id, self.backend) if value is not None]
+        prefix = f"{': '.join(scope)}: " if scope else ""
+        return prefix + self.message
+
+    def to_json(self) -> dict:
+        result = {"phase": self.phase, "message": self.message}
+        if self.backend is not None:
+            result["backend"] = self.backend
+        if self.case_id is not None:
+            result["caseId"] = self.case_id
+        return result
+
+
 def run(
     command: list[str],
     timeout: int = 120,
@@ -379,7 +400,7 @@ def positive_int_diagnostic(record: dict | None, key: str) -> tuple[bool, int | 
 
 def coverage_report(
     descriptors: list[dict], results: dict[str, dict], selected: list[str]
-) -> tuple[dict, list[str]]:
+) -> tuple[dict, list[ValidationFinding]]:
     """Build deterministic static and executed LCNF and external coverage.
 
     `lcnf-forms` describes the forms in the compiled artifact;
@@ -392,7 +413,7 @@ def coverage_report(
     """
     descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
     cases: list[dict] = []
-    failures: list[str] = []
+    findings: list[ValidationFinding] = []
     static_required: set[str] = set()
     static_observed: set[str] = set()
     executed_required: set[str] = set()
@@ -480,49 +501,53 @@ def coverage_report(
         if steps is not None:
             interpreter_steps.append(steps)
 
+        def audit_finding(message: str) -> None:
+            findings.append(
+                ValidationFinding("audit", message, "lcnf", case_id)
+            )
+
         if missing_static:
-            failures.append(
-                f"{case_id}: missing required static LCNF forms: "
-                f"{','.join(missing_static)}"
+            audit_finding(
+                f"missing required static LCNF forms: {','.join(missing_static)}"
             )
         if missing_executed:
-            failures.append(
-                f"{case_id}: missing required executed LCNF forms: "
+            audit_finding(
+                "missing required executed LCNF forms: "
                 f"{','.join(missing_executed)}"
             )
         if missing_static_externals:
-            failures.append(
-                f"{case_id}: missing required static externals: "
+            audit_finding(
+                "missing required static externals: "
                 f"{','.join(missing_static_externals)}"
             )
         if missing_executed_externals:
-            failures.append(
-                f"{case_id}: missing required executed externals: "
+            audit_finding(
+                "missing required executed externals: "
                 f"{','.join(missing_executed_externals)}"
             )
         if record is not None and not executed_present:
-            failures.append(f"{case_id}: missing executed-lcnf-forms diagnostic")
+            audit_finding("missing executed-lcnf-forms diagnostic")
         if record is not None and not steps_present:
-            failures.append(f"{case_id}: missing interpreter-steps diagnostic")
+            audit_finding("missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
-            failures.append(f"{case_id}: interpreter-steps must be a positive integer")
+            audit_finding("interpreter-steps must be a positive integer")
         if record is not None and not static_external_present:
-            failures.append(f"{case_id}: missing externals diagnostic")
+            audit_finding("missing externals diagnostic")
         if record is not None and not static_external_missing_present:
-            failures.append(f"{case_id}: missing missing-externals diagnostic")
+            audit_finding("missing missing-externals diagnostic")
         elif reported_missing_static_externals != missing_static_externals:
-            failures.append(
-                f"{case_id}: missing-externals diagnostic disagrees with obligations "
+            audit_finding(
+                "missing-externals diagnostic disagrees with obligations "
                 f"(reported={','.join(reported_missing_static_externals)}; "
                 f"computed={','.join(missing_static_externals)})"
             )
         if record is not None and not executed_external_present:
-            failures.append(f"{case_id}: missing executed-externals diagnostic")
+            audit_finding("missing executed-externals diagnostic")
         if record is not None and not executed_external_missing_present:
-            failures.append(f"{case_id}: missing missing-executed-externals diagnostic")
+            audit_finding("missing missing-executed-externals diagnostic")
         elif reported_missing_executed_externals != missing_executed_externals:
-            failures.append(
-                f"{case_id}: missing-executed-externals diagnostic disagrees with "
+            audit_finding(
+                "missing-executed-externals diagnostic disagrees with "
                 f"obligations (reported={','.join(reported_missing_executed_externals)}; "
                 f"computed={','.join(missing_executed_externals)})"
             )
@@ -612,7 +637,7 @@ def coverage_report(
         },
         "cases": cases,
     }
-    return report, failures
+    return report, findings
 
 
 def write_coverage_artifact(out_dir: Path, report: dict) -> None:
@@ -641,22 +666,34 @@ def compare_success(reference: dict, candidate: dict) -> tuple[bool, dict, dict]
     )
 
 
-def result_domain_failures(
+def result_domain_findings(
     results: dict[str, dict], backend: str, expected_cases: list[str]
-) -> list[str]:
+) -> list[ValidationFinding]:
     """Check which case IDs a backend returned, independently of how it ran."""
     expected = set(expected_cases)
     actual = set(results)
-    failures: list[str] = []
+    findings: list[ValidationFinding] = []
     unknown = sorted(actual - expected)
     missing = sorted(expected - actual)
-    if unknown:
-        failures.append(
-            f"{backend} backend returned unknown cases: {', '.join(unknown)}"
+    for case_id in unknown:
+        findings.append(
+            ValidationFinding(
+                "result-domain",
+                "backend returned an unknown case",
+                backend,
+                case_id,
+            )
         )
-    if missing:
-        failures.append(f"{backend} backend omitted cases: {', '.join(missing)}")
-    return failures
+    for case_id in missing:
+        findings.append(
+            ValidationFinding(
+                "result-domain",
+                "backend omitted the expected case",
+                backend,
+                case_id,
+            )
+        )
+    return findings
 
 
 def compare_backend_results(
@@ -667,29 +704,55 @@ def compare_backend_results(
     candidate_backend: str,
     candidate_results: dict[str, dict],
     blocked_cases: set[str] | None = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[ValidationFinding]]:
     """Compare semantic observations without imposing candidate-specific policy."""
     blocked = blocked_cases or set()
     comparisons: list[dict] = []
-    failures: list[str] = []
+    findings: list[ValidationFinding] = []
     for case_id in selected:
         if case_id in blocked:
             continue
         reference = reference_results.get(case_id)
         if reference is None:
-            failures.append(f"{case_id}: {reference_backend} backend returned no result")
+            findings.append(
+                ValidationFinding(
+                    "comparison",
+                    "backend returned no result to compare",
+                    reference_backend,
+                    case_id,
+                )
+            )
             continue
         candidate = candidate_results.get(case_id)
         if candidate is None:
-            failures.append(f"{case_id}: {candidate_backend} backend returned no result")
+            findings.append(
+                ValidationFinding(
+                    "comparison",
+                    "backend returned no result to compare",
+                    candidate_backend,
+                    case_id,
+                )
+            )
             continue
         try:
-            equal, reference_observation, candidate_observation = compare_success(
-                reference, candidate
-            )
+            reference_observation = success_observation(reference)
         except ValidationError as error:
-            failures.append(str(error))
+            findings.append(
+                ValidationFinding(
+                    "comparison", str(error), reference_backend, case_id
+                )
+            )
             continue
+        try:
+            candidate_observation = success_observation(candidate)
+        except ValidationError as error:
+            findings.append(
+                ValidationFinding(
+                    "comparison", str(error), candidate_backend, case_id
+                )
+            )
+            continue
+        equal = reference_observation == candidate_observation
         comparisons.append(
             {
                 "caseId": case_id,
@@ -700,14 +763,18 @@ def compare_backend_results(
             }
         )
         if not equal:
-            failures.append(
-                f"{case_id}: semantic mismatch\n"
-                f"  {reference_backend}="
-                f"{json.dumps(reference_observation, sort_keys=True)}\n"
-                f"  {candidate_backend}="
-                f"{json.dumps(candidate_observation, sort_keys=True)}"
+            findings.append(
+                ValidationFinding(
+                    "comparison",
+                    "semantic mismatch\n"
+                    f"  {reference_backend}="
+                    f"{json.dumps(reference_observation, sort_keys=True)}\n"
+                    f"  {candidate_backend}="
+                    f"{json.dumps(candidate_observation, sort_keys=True)}",
+                    case_id=case_id,
+                )
             )
-    return comparisons, failures
+    return comparisons, findings
 
 
 def write_artifact(out_dir: Path, case_id: str, backend: str, record: dict) -> None:
@@ -731,7 +798,11 @@ def write_comparison_artifact(
     reference_backend: str,
     candidate_backend: str,
     comparisons: list[dict],
+    findings: list[ValidationFinding] | None = None,
+    selected_count: int | None = None,
 ) -> None:
+    recorded_findings = findings or []
+    selected = len(comparisons) if selected_count is None else selected_count
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "comparison.json").write_text(
         json.dumps(
@@ -740,6 +811,15 @@ def write_comparison_artifact(
                 "reference": reference_backend,
                 "candidate": candidate_backend,
                 "comparisons": comparisons,
+                "findings": [finding.to_json() for finding in recorded_findings],
+                "summary": {
+                    "selectedCases": selected,
+                    "comparedCases": len(comparisons),
+                    "equalCases": sum(
+                        int(comparison["equal"]) for comparison in comparisons
+                    ),
+                    "findingCount": len(recorded_findings),
+                },
             },
             indent=2,
             sort_keys=True,
@@ -777,14 +857,14 @@ class BackendRun:
     backend: str
     expected_cases: list[str]
     results: dict[str, dict] = field(default_factory=dict)
-    failures: list[str] = field(default_factory=list)
+    findings: list[ValidationFinding] = field(default_factory=list)
     blocked_cases: set[str] = field(default_factory=set)
 
 
 @dataclass
 class BackendAudit:
     report: dict | None = None
-    failures: list[str] = field(default_factory=list)
+    findings: list[ValidationFinding] = field(default_factory=list)
 
 
 class BackendAdapter(Protocol):
@@ -820,8 +900,13 @@ class NativeAdapter:
                 context.out_dir / case_id / self.name, completed
             )
             if completed.returncode != 0:
-                backend_run.failures.append(
-                    f"{case_id}: {self.name} process exited {completed.returncode}"
+                backend_run.findings.append(
+                    ValidationFinding(
+                        "execution",
+                        f"process exited {completed.returncode}",
+                        self.name,
+                        case_id,
+                    )
                 )
                 backend_run.blocked_cases.add(case_id)
                 continue
@@ -829,8 +914,13 @@ class NativeAdapter:
                 records_from_output(completed.stdout, command), self.name
             )
             if set(case_results) != {case_id}:
-                backend_run.failures.append(
-                    f"{case_id}: {self.name} backend returned {sorted(case_results)}"
+                backend_run.findings.append(
+                    ValidationFinding(
+                        "execution",
+                        f"backend returned {sorted(case_results)}",
+                        self.name,
+                        case_id,
+                    )
                 )
                 backend_run.blocked_cases.add(case_id)
                 continue
@@ -858,8 +948,12 @@ class LcnfAdapter:
         write_process_artifacts(context.out_dir / self.name, completed)
         backend_run = BackendRun(self.name, context.all_cases)
         if completed.returncode != 0:
-            backend_run.failures.append(
-                f"{self.name} process exited {completed.returncode}"
+            backend_run.findings.append(
+                ValidationFinding(
+                    "execution",
+                    f"process exited {completed.returncode}",
+                    self.name,
+                )
             )
             backend_run.blocked_cases.update(context.selected)
             return backend_run
@@ -869,11 +963,11 @@ class LcnfAdapter:
         return backend_run
 
     def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
-        report, failures = coverage_report(
+        report, findings = coverage_report(
             context.descriptors, backend_run.results, context.selected
         )
         write_coverage_artifact(context.out_dir / self.name, report)
-        return BackendAudit(report, failures)
+        return BackendAudit(report, findings)
 
 
 @dataclass(frozen=True)
@@ -933,8 +1027,12 @@ class ExternalCommandAdapter:
         )
         backend_run = BackendRun(self.name, list(expected_cases))
         if completed.returncode != 0:
-            backend_run.failures.append(
-                f"{self.name} process exited {completed.returncode}"
+            backend_run.findings.append(
+                ValidationFinding(
+                    "execution",
+                    f"process exited {completed.returncode}",
+                    self.name,
+                )
             )
             backend_run.blocked_cases.update(context.selected)
             return backend_run
@@ -1037,18 +1135,18 @@ def validate_pair(
     context: RunContext,
     reference: BackendAdapter,
     candidate: BackendAdapter,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[ValidationFinding]]:
     """Execute, audit, persist, and compare one reference/candidate pair."""
     reference_run = reference.execute(context)
     candidate_run = candidate.execute(context)
-    failures = list(reference_run.failures) + list(candidate_run.failures)
-    failures.extend(
-        result_domain_failures(
+    findings = list(reference_run.findings) + list(candidate_run.findings)
+    findings.extend(
+        result_domain_findings(
             reference_run.results, reference.name, reference_run.expected_cases
         )
     )
-    failures.extend(
-        result_domain_failures(
+    findings.extend(
+        result_domain_findings(
             candidate_run.results, candidate.name, candidate_run.expected_cases
         )
     )
@@ -1061,10 +1159,10 @@ def validate_pair(
 
     reference_audit = reference.audit(context, reference_run)
     candidate_audit = candidate.audit(context, candidate_run)
-    failures.extend(reference_audit.failures)
-    failures.extend(candidate_audit.failures)
+    findings.extend(reference_audit.findings)
+    findings.extend(candidate_audit.findings)
 
-    comparisons, comparison_failures = compare_backend_results(
+    comparisons, comparison_findings = compare_backend_results(
         context.descriptor_by_id,
         context.selected,
         reference.name,
@@ -1073,11 +1171,16 @@ def validate_pair(
         candidate_run.results,
         reference_run.blocked_cases | candidate_run.blocked_cases,
     )
-    failures.extend(comparison_failures)
+    findings.extend(comparison_findings)
     write_comparison_artifact(
-        context.out_dir, reference.name, candidate.name, comparisons
+        context.out_dir,
+        reference.name,
+        candidate.name,
+        comparisons,
+        findings,
+        len(context.selected),
     )
-    return comparisons, failures
+    return comparisons, findings
 
 
 def main() -> int:
@@ -1141,15 +1244,15 @@ def main() -> int:
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
     context = RunContext(ROOT, args.out_dir, descriptors, selected)
-    comparisons, failures = validate_pair(context, reference, candidate)
+    comparisons, findings = validate_pair(context, reference, candidate)
     for comparison in comparisons:
         if comparison["equal"]:
             case_id = comparison["caseId"]
             print(f"PASS {case_id:<22} {reference.name} == {candidate.name}")
 
-    if failures:
-        for failure in failures:
-            print(f"FAIL {failure}", file=sys.stderr)
+    if findings:
+        for finding in findings:
+            print(f"FAIL {finding.render()}", file=sys.stderr)
         return 1
     print(
         f"validated {len(selected)} case(s): "

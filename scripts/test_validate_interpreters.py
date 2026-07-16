@@ -28,6 +28,14 @@ def success(case_id: str, backend: str, value: int = 42) -> dict:
     }
 
 
+def finding_messages(findings: list[harness.ValidationFinding]) -> list[str]:
+    return [
+        (f"{finding.case_id}: " if finding.case_id is not None else "")
+        + finding.message
+        for finding in findings
+    ]
+
+
 def descriptor(
     case_id: str,
     *,
@@ -113,7 +121,7 @@ class HarnessTests(unittest.TestCase):
 
     def test_generic_backend_comparison_uses_protocol_observations(self) -> None:
         manifest = {"case": descriptor("case")}
-        comparisons, failures = harness.compare_backend_results(
+        comparisons, findings = harness.compare_backend_results(
             manifest,
             ["case"],
             "native",
@@ -124,13 +132,15 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(comparisons[0]["reference"], "native")
         self.assertEqual(comparisons[0]["candidate"], "v8")
         self.assertFalse(comparisons[0]["equal"])
-        self.assertEqual(len(failures), 1)
-        self.assertIn("native=", failures[0])
-        self.assertIn("v8=", failures[0])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].phase, "comparison")
+        self.assertEqual(findings[0].case_id, "case")
+        self.assertIn("native=", findings[0].message)
+        self.assertIn("v8=", findings[0].message)
 
     def test_generic_comparison_skips_only_explicitly_blocked_cases(self) -> None:
         manifest = {"case": descriptor("case")}
-        comparisons, failures = harness.compare_backend_results(
+        comparisons, findings = harness.compare_backend_results(
             manifest,
             ["case"],
             "native",
@@ -140,7 +150,7 @@ class HarnessTests(unittest.TestCase):
             {"case"},
         )
         self.assertEqual(comparisons, [])
-        self.assertEqual(failures, [])
+        self.assertEqual(findings, [])
 
     def test_result_domain_is_configurable_per_backend_run(self) -> None:
         results = {
@@ -148,10 +158,25 @@ class HarnessTests(unittest.TestCase):
             "unknown": success("unknown", "v8"),
         }
         self.assertEqual(
-            harness.result_domain_failures(results, "v8", ["selected", "missing"]),
             [
-                "v8 backend returned unknown cases: unknown",
-                "v8 backend omitted cases: missing",
+                finding.to_json()
+                for finding in harness.result_domain_findings(
+                    results, "v8", ["selected", "missing"]
+                )
+            ],
+            [
+                {
+                    "phase": "result-domain",
+                    "message": "backend returned an unknown case",
+                    "backend": "v8",
+                    "caseId": "unknown",
+                },
+                {
+                    "phase": "result-domain",
+                    "message": "backend omitted the expected case",
+                    "backend": "v8",
+                    "caseId": "missing",
+                },
             ],
         )
 
@@ -454,7 +479,13 @@ class HarnessTests(unittest.TestCase):
                 backend_run: harness.BackendRun,
             ) -> harness.BackendAudit:
                 return harness.BackendAudit(
-                    {"backend": self.name}, list(self.audit_failures)
+                    {"backend": self.name},
+                    [
+                        harness.ValidationFinding(
+                            "audit", message, self.name, "case"
+                        )
+                        for message in self.audit_failures
+                    ],
                 )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -470,18 +501,34 @@ class HarnessTests(unittest.TestCase):
                 success("case", "v8", 42),
                 ["case: candidate audit failed"],
             )
-            comparisons, failures = harness.validate_pair(
+            comparisons, findings = harness.validate_pair(
                 context, reference, candidate
             )
             self.assertFalse(comparisons[0]["equal"])
-            self.assertEqual(len(failures), 2)
-            self.assertIn("candidate audit failed", failures[0])
-            self.assertIn("semantic mismatch", failures[1])
+            self.assertEqual(len(findings), 2)
+            self.assertIn("candidate audit failed", findings[0].message)
+            self.assertIn("semantic mismatch", findings[1].message)
             self.assertTrue(
                 (Path(directory) / "case" / "native" / "result.json").is_file()
             )
             self.assertTrue(
                 (Path(directory) / "case" / "v8" / "result.json").is_file()
+            )
+            artifact = json.loads(
+                (Path(directory) / "comparison.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                [finding["phase"] for finding in artifact["findings"]],
+                ["audit", "comparison"],
+            )
+            self.assertEqual(
+                artifact["summary"],
+                {
+                    "selectedCases": 1,
+                    "comparedCases": 1,
+                    "equalCases": 0,
+                    "findingCount": 2,
+                },
             )
 
     def test_external_adapter_config_uses_argv_not_a_shell_command(self) -> None:
@@ -531,7 +578,7 @@ class HarnessTests(unittest.TestCase):
                 harness.ROOT, out_dir, descriptors, ["case"]
             )
             backend_run = adapter.execute(context)
-            self.assertEqual(backend_run.failures, [])
+            self.assertEqual(backend_run.findings, [])
             self.assertEqual(backend_run.expected_cases, ["case"])
             self.assertEqual(backend_run.results, {"case": record})
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
@@ -587,7 +634,17 @@ class HarnessTests(unittest.TestCase):
         }
         report, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
-            failures, ["case: missing required static LCNF forms: inc"]
+            finding_messages(failures),
+            ["case: missing required static LCNF forms: inc"],
+        )
+        self.assertEqual(
+            failures[0].to_json(),
+            {
+                "phase": "audit",
+                "message": "missing required static LCNF forms: inc",
+                "backend": "lcnf",
+                "caseId": "case",
+            },
         )
         self.assertEqual(
             report["cases"][0]["static"]["missingRequiredForms"], ["inc"]
@@ -599,7 +656,10 @@ class HarnessTests(unittest.TestCase):
             "case": with_form_diagnostics(success("case", "lcnf"), static="return")
         }
         report, failures = harness.coverage_report(manifest, results, ["case"])
-        self.assertEqual(failures, ["case: missing executed-lcnf-forms diagnostic"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing executed-lcnf-forms diagnostic"],
+        )
         executed = report["cases"][0]["executed"]
         self.assertFalse(executed["diagnosticPresent"])
         self.assertFalse(executed["obligationsActive"])
@@ -613,7 +673,10 @@ class HarnessTests(unittest.TestCase):
             )
         }
         _, failures = harness.coverage_report(manifest, missing, ["case"])
-        self.assertEqual(failures, ["case: missing interpreter-steps diagnostic"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing interpreter-steps diagnostic"],
+        )
 
         for invalid in ("0", "-1", "many"):
             with self.subTest(invalid=invalid):
@@ -627,7 +690,7 @@ class HarnessTests(unittest.TestCase):
                 }
                 _, failures = harness.coverage_report(manifest, results, ["case"])
                 self.assertEqual(
-                    failures,
+                    finding_messages(failures),
                     ["case: interpreter-steps must be a positive integer"],
                 )
 
@@ -644,7 +707,8 @@ class HarnessTests(unittest.TestCase):
         }
         report, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
-            failures, ["case: missing required executed LCNF forms: cases"]
+            finding_messages(failures),
+            ["case: missing required executed LCNF forms: cases"],
         )
         self.assertEqual(
             report["cases"][0]["executed"]["missingRequiredForms"], ["cases"]
@@ -747,7 +811,7 @@ class HarnessTests(unittest.TestCase):
         }
         report, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
-            failures,
+            finding_messages(failures),
             [
                 "case: missing required static externals: Nat.add",
                 "case: missing required executed externals: Nat.add",
@@ -768,7 +832,7 @@ class HarnessTests(unittest.TestCase):
         )
         _, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
-            failures,
+            finding_messages(failures),
             [
                 "case: missing-externals diagnostic disagrees with obligations "
                 "(reported=Ghost.external; computed=)"
@@ -790,7 +854,7 @@ class HarnessTests(unittest.TestCase):
         }
         report, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
-            failures,
+            finding_messages(failures),
             [
                 "case: missing externals diagnostic",
                 "case: missing missing-externals diagnostic",
