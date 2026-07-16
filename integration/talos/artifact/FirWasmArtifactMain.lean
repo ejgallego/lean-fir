@@ -61,12 +61,23 @@ def importJson (import_ : Fir.Wasm.Import) : Except String Json := do
     ("name", import_.itemName),
     ("operation", ← operationJson operation)]
 
+def entryResultKind (module : Fir.Wasm.Module) (entry : Name) : Except String AbiKind := do
+  unless module.exports.contains entry do
+    throw s!"entry {entry} is not exported"
+  let some function := module.functions.toList.find? (·.name == entry) |
+    throw s!"entry {entry} is not a lowered function"
+  match function.results.toList with
+  | [kind] => pure kind
+  | results => throw s!"entry {entry} must return exactly one ABI value, got {results.length}"
+
 def manifestJson (fixture : CorpusFixture) (module : Fir.Wasm.Module) : Except String Json := do
+  let entry := `main
+  let result ← entryResultKind module entry
   let imports ← module.imports.toList.mapM importJson
   return Json.mkObj [
     ("fixture", fixture.name),
-    ("entry", "main"),
-    ("result", "tobject"),
+    ("entry", entry.toString),
+    ("result", abiKindName result),
     ("imports", Json.arr imports.toArray)]
 
 def prepareFixture (fixture : CorpusFixture) : Except String (ByteArray × String) := do
@@ -90,8 +101,9 @@ def emitFixture (fixture : CorpusFixture) (path : System.FilePath) : IO Unit := 
   IO.println s!"{fixture.name}: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
 def usage : String :=
-  "usage: fir-wasm-artifact <literal|ctor-projection|case|default-case> <output.wasm>\n" ++
-  "       fir-wasm-artifact all <output-directory>"
+  let names := String.intercalate "|" (fixtures.map (·.name))
+  s!"usage: fir-wasm-artifact <{names}> <output.wasm>\n" ++
+    "       fir-wasm-artifact all <output-directory>"
 
 def main (args : List String) : IO UInt32 := do
   try

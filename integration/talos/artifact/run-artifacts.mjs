@@ -68,16 +68,50 @@ class SemanticHost {
   }
 
   decode(kind, physical) {
-    const handle = Number(physical) >>> 0;
-    if (kind === "erased") {
-      assert.equal(handle, 0, "erased sentinel must use handle zero");
-      return { kind: "erased" };
+    switch (kind) {
+      case "uint8":
+      case "uint16":
+      case "uint32": {
+        assert.equal(typeof physical, "number", `${kind} must use the WebAssembly i32 lane`);
+        const value = Number(physical) >>> 0;
+        if (kind === "uint8") {
+          assert.ok(value <= 0xff, `uint8 result is out of range: ${value}`);
+        } else if (kind === "uint16") {
+          assert.ok(value <= 0xffff, `uint16 result is out of range: ${value}`);
+        }
+        return { kind: "scalar", scalarKind: kind, value: BigInt(value) };
+      }
+      case "uint64":
+        assert.equal(typeof physical, "bigint", "uint64 must use the WebAssembly i64 lane");
+        return {
+          kind: "scalar",
+          scalarKind: "uint64",
+          value: BigInt.asUintN(64, physical),
+        };
+      case "usize":
+        assert.equal(typeof physical, "bigint", "usize must use the WebAssembly i64 lane");
+        return { kind: "usize", value: BigInt.asUintN(64, physical) };
+      case "erased": {
+        assert.equal(typeof physical, "number", "erased must use the WebAssembly i32 lane");
+        const handle = Number(physical) >>> 0;
+        assert.equal(handle, 0, "erased sentinel must use handle zero");
+        return { kind: "erased" };
+      }
+      case "object":
+      case "tagged":
+      case "tobject":
+      case "reuseToken": {
+        assert.equal(typeof physical, "number", `${kind} must use the WebAssembly i32 lane`);
+        const handle = Number(physical) >>> 0;
+        assert.notEqual(handle, 0, `${kind} cannot use the reserved handle`);
+        const value = this.handles.get(handle);
+        assert.ok(value, `unknown FIR handle ${handle}`);
+        assert.ok(this.accepts(kind, value), `handle ${handle} does not refine ${kind}`);
+        return value;
+      }
+      default:
+        throw new Error(`unsupported result ABI kind: ${kind}`);
     }
-    assert.notEqual(handle, 0, `${kind} cannot use the reserved handle`);
-    const value = this.handles.get(handle);
-    assert.ok(value, `unknown FIR handle ${handle}`);
-    assert.ok(this.accepts(kind, value), `handle ${handle} does not refine ${kind}`);
-    return value;
   }
 
   alloc(object, persistent = false) {
