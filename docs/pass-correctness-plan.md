@@ -73,6 +73,9 @@ The following work is implemented and checked by the default build:
   unreachable alternatives when the phase invariant selects a reachable arm.
   It also proves a generic selected-branch rewrite theorem and reduces default
   folding to the explicit semantic soundness obligation for `Code.alphaEqv`.
+  `Passes/AlphaEqv.lean` relates alpha-renamed syntactic scopes to interpreter
+  environments, proves related arguments evaluate identically, and proves the
+  binder-extension step once hygiene classifies new versus existing variables.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
   alpha-renamed folding results against Lean 4.32's actual `simpCase.run`.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
@@ -253,10 +256,17 @@ at the impure phase boundary. The executable witness, fix, and permanent
 regression are recorded in `FIR-BUG-impure-simpCase-alpha-hygiene`; this was a
 FIR invariant gap, not evidence of a compiler error on compiler-generated LCNF.
 
+The first alpha-soundness layer is also integrated. It defines environment
+coverage and agreement over Lean's right-to-left `FVarIdMap`, establishes the
+identity base case, proves lookup and argument-array evaluation preservation,
+and isolates binder extension behind the exact classification fact supplied by
+`withFVar` plus hygiene.
+
 The remaining bounded work is:
 
-1. prove `Code.alphaEqv` sound for hygienic impure code, using an environment
-   renaming relation internally while preserving observations;
+1. derive binder classification from `withFVar` and hygiene, bridge Lean's
+   array checker to the argument relation, and extend the simulation through
+   let values and recursive code to prove `Code.alphaEqv` sound;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 3. lift the resulting theorem through recursive code, declarations, and program
