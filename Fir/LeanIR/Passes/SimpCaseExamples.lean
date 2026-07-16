@@ -46,6 +46,33 @@ def alphaFoldExpected : LCNF.Code .impure :=
     .ctorAlt thirdInfo selectedBranch,
     .default alphaLeft])
 
+/-!
+`Code.alphaEqv` relies on the compiler invariant that every local `FVarId` is
+globally fresh within a declaration. Reusing `x` below makes the Boolean test
+accept programs with different observations; this is the minimized witness in
+`FIR-BUG-impure-simpCase-alpha-hygiene`.
+-/
+def nonHygienicAlphaLeft : LCNF.Code .impure :=
+  .let (letDecl x objType (.lit (.nat 5))) <|
+  .let (letDecl x objType (.lit (.nat 6))) <|
+  .return x
+
+def nonHygienicAlphaRight : LCNF.Code .impure :=
+  .let (letDecl y objType (.lit (.nat 5))) <|
+  .let (letDecl z objType (.lit (.nat 6))) <|
+  .return y
+
+#guard nonHygienicAlphaLeft.alphaEqv nonHygienicAlphaRight
+
+def nonHygienicAlphaLeftProgram : ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code nonHygienicAlphaLeft)] }
+
+def nonHygienicAlphaRightProgram : ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code nonHygienicAlphaRight)] }
+
+#guard returned? (runMain nonHygienicAlphaLeftProgram) (.object (.tagged 6))
+#guard returned? (runMain nonHygienicAlphaRightProgram) (.object (.tagged 5))
+
 def fixtureDecl (name : Name) (code : LCNF.Code .impure) : LCNF.Decl .impure :=
   decl name #[param c, param x] objType (.code code)
 
