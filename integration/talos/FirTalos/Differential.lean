@@ -112,6 +112,8 @@ private def heapObjectSummary : HeapObject → String
   | .boxed type value => s!"boxed(type={repr type}, value={repr value})"
   | .string value => s!"string({repr value})"
   | .natural value => s!"natural({value})"
+  | .integer value => s!"integer({value})"
+  | .byteArray value => s!"byteArray({repr value})"
   | .opaque typeName => s!"opaque({typeName})"
 
 private def heapSummary (heap : Heap) : String :=
