@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 
@@ -78,6 +78,28 @@ class ValidationInput:
         return {"kind": self.kind, "name": self.name, "sha256": self.sha256}
 
 
+@dataclass(frozen=True)
+class ProductDeclaration:
+    kind: str
+    path: str
+
+
+@dataclass(frozen=True)
+class ValidationProduct:
+    backend: str
+    kind: str
+    name: str
+    sha256: str
+
+    def to_json(self) -> dict[str, str]:
+        return {
+            "backend": self.backend,
+            "kind": self.kind,
+            "name": self.name,
+            "sha256": self.sha256,
+        }
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -95,6 +117,63 @@ def validation_input_from_file(
     except ValueError:
         name = resolved.name
     return ValidationInput(kind, name, sha256_bytes(content))
+
+
+def checked_relative_posix_path(value: object, context: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValidationError(
+            f"{context}: path must be a nonempty relative POSIX path"
+        )
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or "\\" in value
+        or value != path.as_posix()
+        or any(part in ("", ".", "..") for part in path.parts)
+    ):
+        raise ValidationError(
+            f"{context}: path must be a normalized relative POSIX path"
+        )
+    return value
+
+
+def validation_product_from_file(
+    backend: str,
+    declaration: ProductDeclaration,
+    out_dir: Path,
+) -> ValidationProduct:
+    backend_name = validate_backend_name(backend)
+    kind = validate_backend_name(declaration.kind, f"{backend_name} product kind")
+    product_path = checked_relative_posix_path(
+        declaration.path, f"{backend_name} product"
+    )
+    backend_root = (out_dir / backend_name).resolve()
+    path = backend_root.joinpath(*PurePosixPath(product_path).parts)
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(backend_root)
+    except ValueError as error:
+        raise ValidationError(
+            f"{backend_name} product escapes its output directory: "
+            f"{product_path}"
+        ) from error
+    if path.is_symlink() or not path.is_file():
+        raise ValidationError(
+            f"{backend_name} product is not a regular file: {product_path}"
+        )
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise ValidationError(
+            f"cannot hash {backend_name} product {product_path}: {error}"
+        ) from error
+    return ValidationProduct(
+        backend_name,
+        kind,
+        product_path,
+        sha256_bytes(content),
+    )
 
 
 def run(
@@ -556,6 +635,7 @@ class BackendRun:
     results: dict[str, dict] = field(default_factory=dict)
     findings: list[ValidationFinding] = field(default_factory=list)
     blocked_cases: set[str] = field(default_factory=set)
+    products: list[ValidationProduct] = field(default_factory=list)
 
 
 @dataclass
@@ -580,7 +660,7 @@ class BackendAdapter(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExternalCommandAdapter:
     """Protocol adapter driven by shell-free commands from a JSON config."""
 
@@ -589,6 +669,10 @@ class ExternalCommandAdapter:
     result_domain: str
     build_command: list[str] = field(default_factory=list)
     timeout_seconds: int = 120
+    product_declarations: tuple[ProductDeclaration, ...] = ()
+    _built_products: tuple[ValidationProduct, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
         return descriptors
@@ -600,27 +684,64 @@ class ExternalCommandAdapter:
             "FIR_VALIDATION_PROTOCOL_VERSION": str(PROTOCOL_VERSION),
         }
 
-    def build(self, context: BuildContext) -> None:
-        if context.no_build or not self.build_command:
-            return
-        destination = context.out_dir / self.name / "build"
-        destination.mkdir(parents=True, exist_ok=True)
-        completed = run(
-            self.build_command,
-            context.root,
-            self.timeout_seconds,
-            self.environment(context.out_dir),
-        )
-        write_process_artifacts(destination, completed)
-        if completed.returncode != 0:
-            raise ValidationError(
-                f"failed to build {self.name} validation backend; "
-                f"see {destination}"
+    def collect_products(self, out_dir: Path) -> tuple[ValidationProduct, ...]:
+        return tuple(
+            validation_product_from_file(self.name, declaration, out_dir)
+            for declaration in sorted(
+                self.product_declarations,
+                key=lambda item: (item.kind, item.path),
             )
+        )
+
+    def remove_stale_products(self, out_dir: Path) -> None:
+        backend_root = (out_dir / self.name).resolve()
+        for declaration in self.product_declarations:
+            path = backend_root.joinpath(*PurePosixPath(declaration.path).parts)
+            if path.is_symlink() or path.is_file():
+                try:
+                    path.unlink()
+                except OSError as error:
+                    raise ValidationError(
+                        f"cannot remove stale {self.name} product "
+                        f"{declaration.path}: {error}"
+                    ) from error
+            elif path.exists():
+                raise ValidationError(
+                    f"{self.name} product path is not a regular file: "
+                    f"{declaration.path}"
+                )
+
+    def build(self, context: BuildContext) -> None:
+        self._built_products = None
+        if not context.no_build and self.build_command:
+            destination = context.out_dir / self.name / "build"
+            destination.mkdir(parents=True, exist_ok=True)
+            self.remove_stale_products(context.out_dir)
+            completed = run(
+                self.build_command,
+                context.root,
+                self.timeout_seconds,
+                self.environment(context.out_dir),
+            )
+            write_process_artifacts(destination, completed)
+            if completed.returncode != 0:
+                raise ValidationError(
+                    f"failed to build {self.name} validation backend; "
+                    f"see {destination}"
+                )
+        self._built_products = self.collect_products(context.out_dir)
 
     def execute(self, context: RunContext) -> BackendRun:
         destination = context.out_dir / self.name
         destination.mkdir(parents=True, exist_ok=True)
+        if self._built_products is None:
+            raise ValidationError(
+                f"{self.name} adapter must be built before execution"
+            )
+        if self.collect_products(context.out_dir) != self._built_products:
+            raise ValidationError(
+                f"{self.name} products changed between build and execution"
+            )
         environment = self.environment(context.out_dir)
         environment.update(
             {
@@ -629,6 +750,23 @@ class ExternalCommandAdapter:
                 ),
                 "FIR_VALIDATION_CORPUS": str(
                     (context.out_dir / "corpus.json").resolve()
+                ),
+                "FIR_VALIDATION_PRODUCTS": json.dumps(
+                    [
+                        {
+                            **product.to_json(),
+                            "path": str(
+                                (
+                                    context.out_dir
+                                    / product.backend
+                                    / product.name
+                                ).resolve()
+                            ),
+                        }
+                        for product in self._built_products
+                    ],
+                    separators=(",", ":"),
+                    sort_keys=True,
                 ),
             }
         )
@@ -639,12 +777,20 @@ class ExternalCommandAdapter:
             environment,
         )
         write_process_artifacts(destination, completed)
+        if self.collect_products(context.out_dir) != self._built_products:
+            raise ValidationError(
+                f"{self.name} products changed during execution"
+            )
         expected_cases = (
             context.selected
             if self.result_domain == "selected"
             else context.all_cases
         )
-        backend_run = BackendRun(self.name, list(expected_cases))
+        backend_run = BackendRun(
+            self.name,
+            list(expected_cases),
+            products=list(self._built_products),
+        )
         if completed.returncode != 0:
             backend_run.findings.append(
                 ValidationFinding(
@@ -673,7 +819,7 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
     if not isinstance(value, dict):
         raise ValidationError(f"adapter config {path}: expected a JSON object")
     required = {"name", "runCommand", "resultDomain"}
-    optional = {"buildCommand", "timeoutSeconds"}
+    optional = {"buildCommand", "timeoutSeconds", "products"}
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
     if missing:
@@ -716,12 +862,45 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
         raise ValidationError(
             f"adapter config {path}: timeoutSeconds must be a positive integer"
         )
+    raw_products = value.get("products", [])
+    if not isinstance(raw_products, list):
+        raise ValidationError(
+            f"adapter config {path}: products must be an object array"
+        )
+    product_declarations: list[ProductDeclaration] = []
+    product_paths: set[str] = set()
+    for index, product in enumerate(raw_products):
+        product_context = f"adapter config {path}/products/{index}"
+        if not isinstance(product, dict) or set(product) != {"kind", "path"}:
+            raise ValidationError(
+                f"{product_context}: expected kind and path fields"
+            )
+        kind = validate_backend_name(product["kind"], product_context)
+        product_path = checked_relative_posix_path(
+            product["path"], product_context
+        )
+        if product_path in product_paths:
+            raise ValidationError(
+                f"adapter config {path}: duplicate product path: {product_path}"
+            )
+        product_paths.add(product_path)
+        product_declarations.append(ProductDeclaration(kind, product_path))
+    if product_declarations and not build_command:
+        raise ValidationError(
+            f"adapter config {path}: products require buildCommand"
+        )
     return ExternalCommandAdapter(
-        name,
-        run_command,
-        result_domain,
-        build_command,
-        timeout_seconds,
+        name=name,
+        run_command=run_command,
+        result_domain=result_domain,
+        build_command=build_command,
+        timeout_seconds=timeout_seconds,
+        product_declarations=tuple(
+            sorted(
+                product_declarations,
+                key=lambda declaration: (declaration.kind, declaration.path),
+            )
+        ),
     )
 
 
@@ -820,6 +999,7 @@ def write_matrix_artifact(
     backend_names: list[str],
     pair_results: list[PairValidationResult],
     findings: list[ValidationFinding],
+    products: tuple[ValidationProduct, ...] = (),
 ) -> None:
     context.out_dir.mkdir(parents=True, exist_ok=True)
     inputs = (
@@ -833,6 +1013,29 @@ def write_matrix_artifact(
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
         raise ValidationError("validation matrix contains duplicate provenance inputs")
+    sorted_products = sorted(
+        products,
+        key=lambda product: (product.backend, product.kind, product.name),
+    )
+    for product in sorted_products:
+        validate_backend_name(product.backend, "validation product backend")
+        validate_backend_name(product.kind, "validation product kind")
+        checked_relative_posix_path(product.name, "validation product")
+        if product.backend not in backend_names:
+            raise ValidationError(
+                f"validation product names inactive backend: {product.backend}"
+            )
+        if len(product.sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in product.sha256
+        ):
+            raise ValidationError("validation product has malformed SHA-256")
+    product_keys = [
+        (product.backend, product.kind, product.name)
+        for product in sorted_products
+    ]
+    if len(set(product_keys)) != len(product_keys):
+        raise ValidationError("validation matrix contains duplicate backend products")
     pairs = []
     for result in pair_results:
         artifact = comparison_artifact_path(
@@ -858,6 +1061,7 @@ def write_matrix_artifact(
                 "selectedCases": list(context.selected),
                 "backends": backend_names,
                 "inputs": [item.to_json() for item in inputs],
+                "products": [product.to_json() for product in sorted_products],
                 "pairs": pairs,
                 "findings": [finding.to_json() for finding in findings],
                 "summary": {
@@ -874,6 +1078,7 @@ def write_matrix_artifact(
                     ),
                     "findingCount": len(findings),
                     "inputCount": len(inputs),
+                    "productCount": len(sorted_products),
                 },
             },
             indent=2,
@@ -977,8 +1182,13 @@ def validate_matrix(
                 findings,
             )
         )
+    products = tuple(
+        product
+        for backend_run in backend_runs.values()
+        for product in backend_run.products
+    )
     write_matrix_artifact(
-        context, list(adapters), pair_results, all_findings
+        context, list(adapters), pair_results, all_findings, products
     )
     return pair_results, all_findings
 

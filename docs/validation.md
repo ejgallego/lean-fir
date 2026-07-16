@@ -57,8 +57,8 @@ the validation plan when present, and every external adapter config with
 SHA-256.  Paths inside the checkout use stable root-relative names; inputs from
 outside it use only their basename, while the digest remains authoritative.
 The corpus hash is computed from the same canonical bytes written to disk.
-This establishes the provenance shape that compiler-produced Wasm modules can
-join once the compiler adapter is ready.
+Compiler-produced files are kept separately in the matrix's `products` array,
+so configuration inputs and executable semantic products cannot be confused.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
@@ -126,7 +126,10 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "buildCommand": ["node", "scripts/build-lean-wasm.mjs"],
   "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
   "resultDomain": "selected",
-  "timeoutSeconds": 120
+  "timeoutSeconds": 120,
+  "products": [
+    {"kind": "wasm-module", "path": "modules/validation.wasm"}
+  ]
 }
 ```
 
@@ -146,6 +149,27 @@ protocol JSONL to stdout; stdout, stderr, result records, domain failures, and
 comparisons then follow the same path as built-in adapters.  This contract does
 not assume how a Wasm module is produced or initialized, so it can be exercised
 only after the compiler track deliberately supplies those pieces.
+
+The optional `products` array declares regular build outputs whose bytes affect
+the backend's semantics.  Each declaration has a restricted lowercase `kind`
+and a normalized relative POSIX `path` beneath that backend's
+`FIR_VALIDATION_OUT_DIR`; absolute paths, traversal, duplicate paths,
+directories, and symlinks are rejected.  Products require `buildCommand`.
+Before an ordinary build the harness removes any declared stale files, then
+hashes the newly produced raw bytes with SHA-256 immediately after the build.
+`--no-build` instead captures the existing declared files for deliberate reuse.
+Before starting the engine and again after it exits, the harness verifies that
+every product still has the captured digest.  Missing or mutated products are
+structural validation errors rather than semantic mismatches.
+
+The run command receives `FIR_VALIDATION_PRODUCTS`, a compact JSON array with
+each verified product's backend, kind, stable output-relative name, SHA-256,
+and absolute local path.  `matrix.json` records the same entries without the
+machine-local path under `products`, sorted deterministically and counted as
+`productCount`.  A future V8 adapter can therefore execute the exact declared
+`.wasm` bytes and retain their identity in the report.  This establishes only
+the generic producer/engine handoff: it neither invokes the developing Wasm
+compiler nor assumes how V8 and Talos will later share one module.
 
 ## Case and observation contract
 

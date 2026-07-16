@@ -679,6 +679,7 @@ class HarnessTests(unittest.TestCase):
                     "equalComparisonCount": 3,
                     "findingCount": 0,
                     "inputCount": 1,
+                    "productCount": 0,
                 },
             )
             self.assertEqual(
@@ -693,6 +694,7 @@ class HarnessTests(unittest.TestCase):
                     }
                 ],
             )
+            self.assertEqual(matrix["products"], [])
             harness.write_matrix_artifact(
                 context,
                 ["native", "lcnf", "v8", "talos"],
@@ -730,6 +732,48 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(native.execute_count, 1)
             self.assertEqual(v8.execute_count, 1)
 
+    def test_matrix_products_are_sorted_and_unique(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            descriptors = [descriptor("case")]
+            context = harness.RunContext(
+                harness.ROOT, out_dir, descriptors, ["case"]
+            )
+            products = (
+                harness.ValidationProduct(
+                    "v8", "wasm-module", "modules/z.wasm", "2" * 64
+                ),
+                harness.ValidationProduct(
+                    "v8", "debug-info", "modules/z.map", "1" * 64
+                ),
+            )
+            harness.write_matrix_artifact(
+                context, ["v8"], [], [], products
+            )
+            matrix_path = out_dir / "matrix.json"
+            first = matrix_path.read_bytes()
+            matrix = json.loads(first)
+            self.assertEqual(
+                [product["kind"] for product in matrix["products"]],
+                ["debug-info", "wasm-module"],
+            )
+            self.assertEqual(matrix["summary"]["productCount"], 2)
+            harness.write_matrix_artifact(
+                context, ["v8"], [], [], tuple(reversed(products))
+            )
+            self.assertEqual(first, matrix_path.read_bytes())
+
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate backend products"
+            ):
+                harness.write_matrix_artifact(
+                    context,
+                    ["v8"],
+                    [],
+                    [],
+                    (products[0], products[0]),
+                )
+
     def test_pair_spec_is_directed_and_strict(self) -> None:
         self.assertEqual(
             harness.parse_pair_spec("v8:talos"), ("v8", "talos")
@@ -750,6 +794,12 @@ class HarnessTests(unittest.TestCase):
                         "runCommand": ["node", "scripts/run-v8.mjs"],
                         "resultDomain": "selected",
                         "timeoutSeconds": 30,
+                        "products": [
+                            {
+                                "kind": "wasm-module",
+                                "path": "modules/validation.wasm",
+                            }
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -759,11 +809,68 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(adapter.run_command, ["node", "scripts/run-v8.mjs"])
             self.assertEqual(adapter.result_domain, "selected")
             self.assertEqual(adapter.timeout_seconds, 30)
+            self.assertEqual(
+                adapter.product_declarations,
+                (
+                    harness.ProductDeclaration(
+                        "wasm-module", "modules/validation.wasm"
+                    ),
+                ),
+            )
 
             value = json.loads(path.read_text(encoding="utf-8"))
             value["runCommand"] = "node scripts/run-v8.mjs"
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(harness.ValidationError, "argv array"):
+                harness.external_adapter_from_config(path)
+
+    def test_external_adapter_product_config_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = {
+                "name": "v8",
+                "buildCommand": ["node", "build.mjs"],
+                "runCommand": ["node", "run.mjs"],
+                "resultDomain": "selected",
+            }
+
+            for product_path in (
+                "../escape.wasm",
+                "/tmp/escape.wasm",
+                "a/./b",
+                ".",
+                "modules\\validation.wasm",
+            ):
+                value = dict(base)
+                value["products"] = [
+                    {"kind": "wasm-module", "path": product_path}
+                ]
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "normalized relative POSIX path"
+                ):
+                    harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["products"] = [
+                {"kind": "wasm-module", "path": "module.wasm"},
+                {"kind": "debug-info", "path": "module.wasm"},
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate product path"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            del value["buildCommand"]
+            value["products"] = [
+                {"kind": "wasm-module", "path": "module.wasm"}
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "products require buildCommand"
+            ):
                 harness.external_adapter_from_config(path)
 
     def test_validation_input_hashes_bytes_with_stable_path_labels(self) -> None:
@@ -881,14 +988,44 @@ class HarnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             out_dir = root / "out"
+            product_path = out_dir / "v8" / "modules" / "validation.wasm"
+            product_path.parent.mkdir(parents=True)
+            product_bytes = b"\0asm\x01\0\0\0test-product"
+            product_path.write_bytes(b"stale-product")
             adapter_path = root / "v8.json"
-            program = f"print({json.dumps(json.dumps(success('case', 'v8')))})"
+            product_sha256 = harness.sha256_bytes(product_bytes)
+            build_program = (
+                "import os,pathlib;"
+                "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
+                "'modules','validation.wasm');"
+                "path.parent.mkdir(parents=True,exist_ok=True);"
+                f"path.write_bytes({product_bytes!r})"
+            )
+            program = (
+                "import json,os,pathlib;"
+                "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
+                "assert len(products)==1;"
+                f"assert products[0]['sha256']=={product_sha256!r};"
+                f"assert pathlib.Path(products[0]['path']).read_bytes()=={product_bytes!r};"
+                f"print({json.dumps(json.dumps(success('case', 'v8')))})"
+            )
             adapter_path.write_text(
                 json.dumps(
                     {
                         "name": "v8",
+                        "buildCommand": [
+                            sys.executable,
+                            "-c",
+                            build_program,
+                        ],
                         "runCommand": [sys.executable, "-c", program],
                         "resultDomain": "selected",
+                        "products": [
+                            {
+                                "kind": "wasm-module",
+                                "path": "modules/validation.wasm",
+                            }
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -912,7 +1049,6 @@ class HarnessTests(unittest.TestCase):
                 str(plan_path),
                 "--out-dir",
                 str(out_dir),
-                "--no-build",
             ]
             with (
                 mock.patch.object(
@@ -947,6 +1083,18 @@ class HarnessTests(unittest.TestCase):
                     harness.sha256_bytes(adapter_path.read_bytes()),
                 ],
             )
+            self.assertEqual(
+                matrix["products"],
+                [
+                    {
+                        "backend": "v8",
+                        "kind": "wasm-module",
+                        "name": "modules/validation.wasm",
+                        "sha256": product_sha256,
+                    }
+                ],
+            )
+            self.assertEqual(matrix["summary"]["productCount"], 1)
             self.assertTrue(
                 (out_dir / "comparisons" / "native--v8.json").is_file()
             )
@@ -971,11 +1119,70 @@ class HarnessTests(unittest.TestCase):
             context = harness.RunContext(
                 harness.ROOT, out_dir, descriptors, ["case"]
             )
+            adapter.build(harness.BuildContext(harness.ROOT, out_dir, True))
             backend_run = adapter.execute(context)
             self.assertEqual(backend_run.findings, [])
             self.assertEqual(backend_run.expected_cases, ["case"])
             self.assertEqual(backend_run.results, {"case": record})
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
+
+    def test_external_products_fail_closed_on_missing_escape_and_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory) / "out"
+            backend_dir = out_dir / "v8"
+            backend_dir.mkdir(parents=True)
+            declaration = harness.ProductDeclaration(
+                "wasm-module", "module.wasm"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=[sys.executable, "-c", "pass"],
+                run_command=[sys.executable, "-c", "pass"],
+                result_domain="selected",
+                product_declarations=(declaration,),
+            )
+            build_context = harness.BuildContext(harness.ROOT, out_dir, True)
+
+            with self.assertRaisesRegex(
+                harness.ValidationError, "product is not a regular file"
+            ):
+                adapter.build(build_context)
+
+            outside = Path(directory) / "outside.wasm"
+            outside.write_bytes(b"outside")
+            (backend_dir / "module.wasm").symlink_to(outside)
+            with self.assertRaisesRegex(
+                harness.ValidationError, "product escapes its output directory"
+            ):
+                adapter.build(build_context)
+            (backend_dir / "module.wasm").unlink()
+
+            module = backend_dir / "module.wasm"
+            module.write_bytes(b"before")
+            mutating_program = (
+                "import os,pathlib;"
+                "pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
+                "'module.wasm').write_bytes(b'after')"
+            )
+            adapter.run_command = [sys.executable, "-c", mutating_program]
+            adapter.build(build_context)
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            context = harness.RunContext(
+                harness.ROOT, out_dir, descriptors, ["case"]
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "products changed during execution"
+            ):
+                adapter.execute(context)
+
+            module.write_bytes(b"stale")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "product is not a regular file"
+            ):
+                adapter.build(
+                    harness.BuildContext(harness.ROOT, out_dir, False)
+                )
 
     def test_coverage_separates_static_and_executed_forms(self) -> None:
         manifest = [
