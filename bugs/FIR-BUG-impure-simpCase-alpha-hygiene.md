@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-simpCase-alpha-hygiene
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: simpCase-0
 discovered-by: proof
 first-seen: 2026-07-16
 reproduction: Fir/LeanIR/Passes/SimpCaseExamples.lean#nonHygienicAlphaLeft
-regression: none
+regression: Fir/LeanIR/HygieneExamples.lean#reusedBinderCode
 ---
 
 # Summary
@@ -71,9 +71,8 @@ current phase invariant does not express that discipline.
 
 ## Workaround
 
-Keep `AlphaEqvSoundAt` as an explicit hypothesis until the impure checked-program
-invariant includes global binder freshness and the alpha-equivalence proof uses
-it.
+none. `WellFormedAt .impure` now requires the executable hygiene invariant; the
+semantic alpha-equivalence proof must consume that fact.
 
 ## Upstream tracking
 
@@ -81,4 +80,7 @@ none
 
 ## Resolution and regression
 
-unresolved
+Revision `98330ff` adds declaration-wide binder freshness and lexical-scope
+checking to impure `WellFormedAt`. `HygieneExamples.lean` permanently checks
+that the minimized repeated-binder witness is rejected and that the corrected
+interpreter corpus is accepted.
