@@ -79,6 +79,26 @@ compiler-shape fixtures spanning every impure `Code` constructor.
 #guard localMatchesUpstream nonHygienicAlphaLeft nonHygienicAlphaRight
 #guard localMatchesUpstream alphaLeft selectedBranch
 
+theorem alphaCodeSideConditions :
+    CodeSideConditions ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight := by
+  apply CodeSideConditions.letE
+  · rfl
+  · rfl
+  · rfl
+  · trivial
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · apply CodeSideConditions.ret
+    · native_decide
+    · native_decide
+
+/-- The transparent checker closes the complete alpha-renamed `let` fixture. -/
+theorem alphaLocalCodeRelated :
+    CodeRelated ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight :=
+  codeRelated_of_local_accepts alphaCodeSideConditions ⟨2, by native_decide⟩
+
 def alphaEqvRegressionCodes : Array (LCNF.Code .impure) := #[
   literalCode,
   erasedCode,

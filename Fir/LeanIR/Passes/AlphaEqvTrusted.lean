@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.AlphaEqvCode
+import Fir.LeanIR.Passes.AlphaEqvLocalSound
 
 namespace Fir.LeanIR.Passes.AlphaEqv
 
@@ -26,9 +26,21 @@ theorem localAccepts_of_upstream
   lean432UpstreamBridge.accepted left right accepted
 
 /--
+Compiler-facing construction of the declarative code relation for the
+currently modeled fragment. All semantic side conditions remain explicit;
+only correspondence with Lean's opaque Boolean checker is trusted.
+-/
+theorem trustedCodeRelated_of_upstream
+    (side : CodeSideConditions ({} : FVarIdMap Lean.FVarId)
+      scope scope left right)
+    (accepted : left.alphaEqv right = true) :
+    CodeRelated ({} : FVarIdMap Lean.FVarId) scope scope left right :=
+  codeRelated_of_local_accepts side (localAccepts_of_upstream accepted)
+
+/--
 Compiler-facing terminal soundness using the single Lean-4.32 trust axiom.
-The substantive semantic proof remains in the axiom-free `AlphaEqvCode`
-module and consumes the local-soundness premise explicitly.
+The substantive semantic proof remains independent of that project axiom in
+`AlphaEqvCode` and consumes the local-soundness premise explicitly.
 -/
 theorem trustedAlphaEqvSoundAt_of_local_terminal_sound
     (localSound : Local.Accepts left right →

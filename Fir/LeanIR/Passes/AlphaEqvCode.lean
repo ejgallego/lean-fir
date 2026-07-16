@@ -808,8 +808,8 @@ theorem alphaEqvSoundAt_of_terminal_bridge
 
 /--
 Keep local-checker soundness separate from correspondence with Lean's opaque
-checker. This theorem and all of its dependencies are axiom-free when the two
-premises are supplied by the caller.
+checker. This theorem does not depend on FIR's trusted upstream-correspondence
+axiom when the two premises are supplied by the caller.
 -/
 theorem alphaEqvSoundAt_of_local_terminal_sound
     (upstream : UpstreamBridge)

@@ -22,6 +22,54 @@ AXIOM_RE = re.compile(r"^\s*axiom\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.MULTILINE)
 PARTIAL_DEF_RE = re.compile(r"^\s*partial\s+def\s+", re.MULTILINE)
 
 
+def lean_code(text: str) -> str:
+    """Replace Lean comments and string contents while preserving newlines."""
+    output: list[str] = []
+    index = 0
+    block_depth = 0
+    in_string = False
+    while index < len(text):
+        if block_depth:
+            if text.startswith("/-", index):
+                output.extend("  ")
+                block_depth += 1
+                index += 2
+            elif text.startswith("-/", index):
+                output.extend("  ")
+                block_depth -= 1
+                index += 2
+            else:
+                output.append("\n" if text[index] == "\n" else " ")
+                index += 1
+        elif in_string:
+            if text[index] == "\\" and index + 1 < len(text):
+                output.extend("  ")
+                index += 2
+            elif text[index] == '"':
+                output.append(" ")
+                in_string = False
+                index += 1
+            else:
+                output.append("\n" if text[index] == "\n" else " ")
+                index += 1
+        elif text.startswith("--", index):
+            while index < len(text) and text[index] != "\n":
+                output.append(" ")
+                index += 1
+        elif text.startswith("/-", index):
+            output.extend("  ")
+            block_depth = 1
+            index += 2
+        elif text[index] == '"':
+            output.append(" ")
+            in_string = True
+            index += 1
+        else:
+            output.append(text[index])
+            index += 1
+    return "".join(output)
+
+
 def upstream_source() -> Path:
     lean = Path(
         subprocess.check_output(["elan", "which", "lean"], text=True).strip()
@@ -54,8 +102,8 @@ def main() -> int:
     actual_axioms: set[tuple[Path, str]] = set()
     for path in sorted((ROOT / "Fir").rglob("*.lean")):
         relative = path.relative_to(ROOT)
-        text = path.read_text(encoding="utf-8")
-        actual_axioms.update((relative, name) for name in AXIOM_RE.findall(text))
+        code = lean_code(path.read_text(encoding="utf-8"))
+        actual_axioms.update((relative, name) for name in AXIOM_RE.findall(code))
 
     unexpected = actual_axioms - EXPECTED_AXIOMS
     missing = EXPECTED_AXIOMS - actual_axioms
@@ -65,7 +113,7 @@ def main() -> int:
         errors.append(f"missing registered axiom {name} in {path}")
 
     local = ROOT / "Fir/LeanIR/Passes/AlphaEqvLocal.lean"
-    if PARTIAL_DEF_RE.search(local.read_text(encoding="utf-8")):
+    if PARTIAL_DEF_RE.search(lean_code(local.read_text(encoding="utf-8"))):
         errors.append("AlphaEqvLocal must remain total and transparent")
 
     if errors:

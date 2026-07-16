@@ -78,7 +78,11 @@ kernel-facing recursion principle suitable for downstream verification.
 ## Workaround
 
 FIR ships a total, transparent, fuel-indexed copy of Lean 4.32's checker in
-`AlphaEqvLocal.lean`. Semantic proofs target that copy and remain axiom-free.
+`AlphaEqvLocal.lean`. Semantic proofs target that copy without depending on
+FIR's trusted upstream-correspondence axiom.
+`AlphaEqvLocalSound.lean` now derives the declarative relation for terminal
+code, recursive value bindings, and sequential impure effects from local
+acceptance plus explicit well-formedness and runtime-metadata premises.
 `AlphaEqvTrusted.lean` contains one explicitly named axiom saying that every
 successful upstream check has a finite accepting local run. The adapter
 records the audited upstream source hash; `make check` verifies the pinned

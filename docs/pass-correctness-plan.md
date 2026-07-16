@@ -82,6 +82,9 @@ The following work is implemented and checked by the default build:
   relation through terminal code, value bindings, saved bind frames, machine
   controls, states, and core-step results. `Passes/AlphaEqvLocal.lean` provides
   a total transparent copy of Lean 4.32's recursive checker;
+  `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
+  declarative relation for terminal code, value bindings, and sequential
+  impure effects under explicit well-formedness/runtime-metadata premises;
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
@@ -345,17 +348,25 @@ exports no safe equation theorem, so a successful `Code.alphaEqv` check cannot
 be unfolded even for two `return` instructions.
 
 FIR now ships `AlphaEqv.Local.eqv`, a total transparent fuel-indexed copy of
-the full Lean 4.32 checker. `AlphaEqvCode` consumes local acceptance without
-axioms and proves the checker-to-relation step for terminal returns.
-`AlphaEqvTrusted` is opt-in and contains the sole correspondence axiom:
+the full Lean 4.32 checker. `AlphaEqvLocalSound` defines
+`CodeSideConditions`, containing lexical scope, binder freshness, and exact
+runtime-observed type metadata not established by alpha-equivalence. Its
+theorem `codeRelated_of_local_accepts` does not depend on FIR's trusted bridge
+and proves that a successful local check constructs `CodeRelated` through
+`return`, `unreach`, recursive value bindings, and every sequential
+mutation/ownership instruction currently represented by that relation.
+`AlphaEqvTrusted` is opt-in and contains the sole project correspondence axiom:
 upstream acceptance implies a finite accepting local run. The adapter records
 the audited upstream source hash. `make check` rejects toolchain/source drift,
 additional project axioms, or a `partial def` in the local checker, while
 executable guards compare the two implementations over every impure code
-constructor represented in the interpreter corpus. The exact compiler Boolean
-is therefore usable through a small, explicit trust boundary; replacing that
-axiom with an upstream theorem remains the desired final resolution. Details
-are recorded in `FIR-BUG-impure-alphaEqv-opaque-eqv`.
+constructor represented in the interpreter corpus. A Lean proof regression
+also closes the genuinely alpha-renamed `let` fixture through
+`CodeSideConditions`, local acceptance, and `CodeRelated`. The exact compiler
+Boolean is therefore usable through a small, explicit trust boundary;
+replacing that axiom with an upstream theorem remains the desired final
+resolution. Details are recorded in
+`FIR-BUG-impure-alphaEqv-opaque-eqv`.
 
 The remaining bounded work is:
 
