@@ -103,51 +103,72 @@ private def executedForm? (state : MachineState) : Option String :=
   | .invokeName .. | .invokeValue .. =>
       if (externalRequest? state).isSome then some "extern" else none
 
+/-- Heap states on either side of one successful external call, retained for effect decoding. -/
+private structure ExternalSnapshot where
+  event : ExternalEvent
+  before : RuntimeState
+  after : RuntimeState
+
 private structure InstrumentedRun where
   result : RunResult
   executedForms : Array String
   executedExternals : Array Name
+  externalSnapshots : Array ExternalSnapshot
   steps : Nat
 
 /-- Validation-only telemetry layered over the canonical interpreter transition function. -/
 private def runInstrumentedGo (externals : ExternalImpl) :
-    Nat → MachineState → Array String → Array Name → Nat → InstrumentedRun
-  | 0, state, forms, externalNames, steps =>
+    Nat → MachineState → Array String → Array Name →
+      Array ExternalSnapshot → Nat → InstrumentedRun
+  | 0, state, forms, externalNames, externalSnapshots, steps =>
       { result := .outOfFuel state, executedForms := forms,
-        executedExternals := externalNames, steps }
-  | fuel + 1, state, forms, externalNames, steps =>
+        executedExternals := externalNames, externalSnapshots, steps }
+  | fuel + 1, state, forms, externalNames, externalSnapshots, steps =>
       let forms := match executedForm? state with
         | some form => pushUnique forms form
         | none => forms
-      let externalNames := match externalRequest? state with
+      let request? := externalRequest? state
+      let externalNames := match request? with
         | some request => pushUniqueName externalNames request.name
         | none => externalNames
       match executeStep externals state with
       | .done observation =>
           { result := .done observation, executedForms := forms,
-            executedExternals := externalNames, steps := steps + 1 }
-      | .next state => runInstrumentedGo externals fuel state forms externalNames (steps + 1)
+            executedExternals := externalNames, externalSnapshots, steps := steps + 1 }
+      | .next nextState =>
+          let externalSnapshots := match request?, nextState.runtime.trace.back? with
+            | some request, some event =>
+                if event.name == request.name then
+                  externalSnapshots.push {
+                    event
+                    before := state.runtime
+                    after := nextState.runtime }
+                else externalSnapshots
+            | _, _ => externalSnapshots
+          runInstrumentedGo externals fuel nextState forms externalNames externalSnapshots
+            (steps + 1)
 
 private def runInstrumented (fuel : Nat) (externals : ExternalImpl) (state : MachineState) :
     InstrumentedRun :=
-  runInstrumentedGo externals fuel state #[] #[] 0
+  runInstrumentedGo externals fuel state #[] #[] #[] 0
 
 private theorem runInstrumentedGo_result (externals : ExternalImpl) :
-    ∀ fuel state forms externalNames steps,
-      (runInstrumentedGo externals fuel state forms externalNames steps).result =
+    ∀ fuel state forms externalNames externalSnapshots steps,
+      (runInstrumentedGo externals fuel state forms externalNames externalSnapshots steps).result =
         run fuel externals state
-  | 0, state, forms, externalNames, steps => by simp [runInstrumentedGo, run]
-  | fuel + 1, state, forms, externalNames, steps => by
+  | 0, state, forms, externalNames, externalSnapshots, steps => by
+      simp [runInstrumentedGo, run]
+  | fuel + 1, state, forms, externalNames, externalSnapshots, steps => by
       simp only [runInstrumentedGo, run]
       split <;> rename_i transition
       · simp [transition]
       · simpa [transition] using
-          runInstrumentedGo_result externals fuel _ _ _ (steps + 1)
+          runInstrumentedGo_result externals fuel _ _ _ _ (steps + 1)
 
 private theorem runInstrumented_result (fuel : Nat) (externals : ExternalImpl)
     (state : MachineState) :
     (runInstrumented fuel externals state).result = run fuel externals state := by
-  exact runInstrumentedGo_result externals fuel state #[] #[] 0
+  exact runInstrumentedGo_result externals fuel state #[] #[] #[] 0
 
 private def runProgramInstrumented (fuel : Nat) (externals : ExternalImpl)
     (program : ImpureProgram) (entry : Name) (args : Array Value)
@@ -311,6 +332,14 @@ private def byteArraySetRequest (array : Value) (index : Nat) (byte : UInt8) :
   resultType := default
   args := #[array, .object (.tagged (UInt64.ofNat index)), .scalar (.uint8 byte)] }
 
+private def recordByteArrayExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [array, byte] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let byte ← externalUInt8 request byte
+  let response ← byteArraySetExternal (byteArraySetRequest array 0 byte) runtime
+  return { response with world := response.world + 1 }
+
 private def byteArraySetUniqueGuard : Bool :=
   let original : Array UInt8 := #[0, 127, 128, 255]
   let expected : Array UInt8 := #[255, 127, 128, 255]
@@ -409,6 +438,8 @@ private def validationExternals : ExternalImpl where
       natAddExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
+    else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then
+      recordByteArrayExternal request runtime
     else if request.name == ``ByteArray.size then
       byteArraySizeExternal request runtime
     else if request.name == ``ByteArray.get! then
@@ -555,25 +586,26 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       return .ctor name tag fields
   | _, _ => throw s!"cannot decode {repr value} as {repr schema}"
 
-private def decodeEffect (runtime : RuntimeState) (projection : Corpus.EffectProjection)
-    (event : ExternalEvent) : Except String EffectEvent := do
+private def decodeEffect (projection : Corpus.EffectProjection)
+    (snapshot : ExternalSnapshot) : Except String EffectEvent := do
+  let event := snapshot.event
   if projection.argSchemas.size != event.args.size then
     throw (s!"effect projection {projection.operation} expected {projection.argSchemas.size} " ++
       s!"arguments, got {event.args.size}")
   let args ← projection.argSchemas.zip event.args |>.mapM fun (schema, value) =>
-    decodeValue runtime schema value
+    decodeValue snapshot.before schema value
   let result ← match projection.resultSchema with
     | none => pure none
-    | some schema => some <$> decodeValue runtime schema event.result
+    | some schema => some <$> decodeValue snapshot.after schema event.result
   return { operation := projection.operation, args, result }
 
-private def decodeEffects (runtime : RuntimeState)
-    (projections : Array Corpus.EffectProjection) (trace : Array ExternalEvent) :
+private def decodeEffects (projections : Array Corpus.EffectProjection)
+    (snapshots : Array ExternalSnapshot) :
     Except String (Array EffectEvent) :=
-  trace.foldlM (init := #[]) fun effects event => do
-    let some projection := projections.find? (·.external == event.name)
+  snapshots.foldlM (init := #[]) fun effects snapshot => do
+    let some projection := projections.find? (·.external == snapshot.event.name)
       | return effects
-    return effects.push (← decodeEffect runtime projection event)
+    return effects.push (← decodeEffect projection snapshot)
 
 private def faultKind : RuntimeFault -> String
   | .unknownVar .. => "unknown-var"
@@ -627,35 +659,41 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
           value := String.intercalate "," (execution.executedExternals.toList.map toString) },
         { key := "missing-executed-externals",
           value := String.intercalate "," (missingExecutedExternals.toList.map toString) },
+        { key := "external-events", value := toString execution.externalSnapshots.size },
         { key := "interpreter-steps", value := toString execution.steps }]
       match execution.result with
       | .outOfFuel _ =>
           { caseId := case.id, backend := "lcnf", outcome := .outOfFuel case.fuel, diagnostics }
       | .done observation =>
-          let finalRuntime : RuntimeState := {
-            runtime with
-            heap := observation.heap
-            world := observation.world
-            trace := observation.trace }
-          match decodeEffects finalRuntime case.effectProjections observation.trace with
-          | .error message =>
-              { caseId := case.id, backend := "lcnf", outcome := .failure message, diagnostics }
-          | .ok effects =>
-              match observation.outcome with
-              | .fault fault =>
-                  { caseId := case.id, backend := "lcnf",
-                    outcome := .success {
-                      termination := .runtimeFault (faultKind fault) (toString (repr fault))
-                      effects },
-                    diagnostics }
-              | .returned value =>
-                  match decodeValue finalRuntime case.resultSchema value with
-                  | .error message =>
-                      { caseId := case.id, backend := "lcnf", outcome := .failure message,
-                        diagnostics }
-                  | .ok datum =>
-                      { caseId := case.id, backend := "lcnf",
-                        outcome := .success { termination := .returned datum, effects }, diagnostics }
+          if execution.externalSnapshots.size != observation.trace.size then
+            { caseId := case.id, backend := "lcnf",
+              outcome := .failure "external event-time snapshot telemetry diverged from the trace",
+              diagnostics }
+          else
+            let finalRuntime : RuntimeState := {
+              runtime with
+              heap := observation.heap
+              world := observation.world
+              trace := observation.trace }
+            match decodeEffects case.effectProjections execution.externalSnapshots with
+            | .error message =>
+                { caseId := case.id, backend := "lcnf", outcome := .failure message, diagnostics }
+            | .ok effects =>
+                match observation.outcome with
+                | .fault fault =>
+                    { caseId := case.id, backend := "lcnf",
+                      outcome := .success {
+                        termination := .runtimeFault (faultKind fault) (toString (repr fault))
+                        effects },
+                      diagnostics }
+                | .returned value =>
+                    match decodeValue finalRuntime case.resultSchema value with
+                    | .error message =>
+                        { caseId := case.id, backend := "lcnf", outcome := .failure message,
+                          diagnostics }
+                    | .ok datum =>
+                        { caseId := case.id, backend := "lcnf",
+                          outcome := .success { termination := .returned datum, effects }, diagnostics }
 
 def runCase (case : Corpus.Case) : CoreM (BackendResult × Artifact) := do
   let artifact ← compileEntry case.entry case.dependencies

@@ -15,6 +15,9 @@ namespace NativeEffects
 
 private initialize effectLog : IO.Ref (Array EffectEvent) ← IO.mkRef #[]
 
+private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
+  .bytes (value.data.map (UInt8.toNat ·))
+
 def reset : IO Unit :=
   effectLog.set #[]
 
@@ -28,6 +31,17 @@ unsafe def recordImpl (value : Nat) : Nat :=
       operation := "validation.record"
       args := #[.nat value]
       result := some (.nat result) })
+    return result
+
+unsafe def recordByteArrayImpl (value : ByteArray) (byte : UInt8) : ByteArray :=
+  unsafeBaseIO do
+    let argument := byteArrayDatum value
+    let result := value.set! 0 byte
+    let resultDatum := byteArrayDatum result
+    effectLog.modify (·.push {
+      operation := "validation.recordByteArray"
+      args := #[argument, .bits 8 (UInt64.ofNat byte.toNat)]
+      result := some resultDatum })
     return result
 
 end NativeEffects
@@ -297,6 +311,14 @@ def recordOnce (value : Nat) : Nat :=
 @[noinline]
 def recordTwice (value : Nat) : Nat :=
   record (record value)
+
+@[implemented_by NativeEffects.recordByteArrayImpl]
+def recordByteArray (value : ByteArray) (byte : UInt8) : ByteArray :=
+  value.set! 0 byte
+
+@[noinline]
+def recordByteArrayTwice (value : ByteArray) : ByteArray :=
+  recordByteArray (recordByteArray value 1) 2
 
 @[noinline]
 def idByteArray (value : ByteArray) : ByteArray :=
@@ -955,6 +977,28 @@ def cases : Array Case := #[
       resultSchema := some .nat }]
     provenance := firProvenance
       "Preserve the count and order of two native-recorded external effects" },
+  { id := "effect-record-byte-array-twice"
+    entry := ``Source.recordByteArrayTwice
+    args := #[.bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.recordByteArrayTwice ⟨#[0, 127, 128, 255]⟩)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "external", "bytes", "heap", "mutation", "snapshot", "sequence"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Preserve two mutable heap arguments and results at their external event-time states" },
   { id := "byte-array-roundtrip"
     entry := ``Source.idByteArray
     args := #[.bytes #[0, 127, 128, 255]]
