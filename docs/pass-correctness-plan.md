@@ -78,7 +78,9 @@ The following work is implemented and checked by the default build:
   `Passes/AlphaEqv.lean` relates alpha-renamed syntactic scopes to interpreter
   environments, proves related arguments and impure let values evaluate
   identically, and proves the binder-extension step once hygiene classifies new
-  versus existing variables.
+  versus existing variables. `Passes/AlphaEqvCode.lean` now carries that
+  relation through terminal code, value bindings, saved bind frames, machine
+  controls, states, and core-step results.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
   alpha-renamed folding results against Lean 4.32's actual `simpCase.run`.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
@@ -307,9 +309,19 @@ yields the exact new-pair/old-pair split required by `envsAgree_bind`. Thus the
 recursive simulation can extend both the renaming and runtime environments
 without carrying an extra classification hypothesis.
 
-The terminal recursive-code layer is integrated. `TerminalCodeRelated`
-covers `return` and `unreach`; `coreStep_terminal_related` proves matching
-immediate outcomes under related environments, and
+The first recursive-code layer is integrated. `TerminalCodeRelated` covers
+`return` and `unreach`, while `CodeRelated` adds recursive value bindings under
+the same right-to-left renaming update as Lean's checker. `FrameRelated`,
+`ControlRelated`, `MachineStateRelated`, and `CoreResultRelated` make the
+one-step invariant explicit. `coreStep_code_related` covers faults and all
+three successful let actions: immediate values extend both environments,
+whereas named and value calls save the agreement, freshness, and continuation
+relation in paired bind frames. `coreStep_yielded_bind_related` proves that a
+returned call value pops those frames and resumes the related continuations
+under the extended binders.
+
+The older terminal boundary theorems remain useful independently:
+`coreStep_terminal_related` proves matching immediate outcomes, and
 `terminalCodeRelated_empty_sound` discharges both terminal cases at the
 top-level semantic boundary. The proof also isolates the exact remaining
 executable bridge in `alphaEqvSoundAt_of_terminal_bridge`.
@@ -324,9 +336,9 @@ boundary until Lean exposes a proof-facing definition or recursion theorem.
 
 The remaining bounded work is:
 
-1. extend the declarative code relation through `let`, saved bind frames, and
-   the remaining recursive code constructors while threading
-   `RenamingScoped` and environment agreement;
+1. extend the declarative state simulation through join points, cases,
+   mutation/ownership continuations, calls, and the remaining frame forms,
+   reusing the now-proved `let`/bind-frame invariant;
 2. discharge or refine the exact runtime-type premises at the impure phase
    boundary and resolve or upstream the opaque-checker bridge needed for the
    exact `Code.alphaEqv` Boolean;
