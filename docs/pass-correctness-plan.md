@@ -85,8 +85,8 @@ The following work is implemented and checked by the default build:
   recursive checker, including a proof-facing structural alternative traversal;
   `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
   declarative relation for terminal code, value bindings, sequential impure
-  effects, and one canonical case table under explicit
-  well-formedness/runtime-metadata premises;
+  effects, and one deterministic case table under explicit normalization,
+  well-formedness, and runtime-metadata premises;
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
@@ -346,6 +346,15 @@ selection rule. The `cases` branch of `coreStep_code_related` now covers
 discriminator lookup faults, tag-reading faults, missing alternatives, and
 successful entry into related branch bodies.
 
+Case selection is now proved insensitive to table order under the exact
+semantic condition it needs: each constructor tag and the default selector
+determine at most one body. Successful and failed constructor/default lookups
+are first characterized by table membership, then transported through
+`List.Perm`; `chooseAlt_eq_of_perm` combines the two lookup results.
+`CaseTableNormalizationInvariant` packages selector determinism with the fact
+that Lean's `sortAlts` output is a permutation, and `chooseAlt_sortAlts_eq`
+proves that normalization preserves interpreter selection.
+
 The older terminal boundary theorems remain useful independently:
 `coreStep_terminal_related` proves matching immediate outcomes, and
 `terminalCodeRelated_empty_sound` discharges both terminal cases at the
@@ -369,13 +378,16 @@ The local alternative loop is now a transparent list recursion after Lean's
 normalizing sort. `altsRelated_of_local_check` proves that an accepting
 ordered traversal constructs the semantic alternative relation, and
 `codeRelated_cases_of_local_accepts` lifts it through one `cases` node whose
-branch bodies lie in the existing recursive fragment. For now this theorem
-requires both alternative arrays to be fixed points of `sortAlts`; this states
-precisely why the checker's comparison order agrees with the interpreter's
-selection order instead of assuming that fact. The trusted adapter exposes the
-matching compiler-facing case theorem. An axiom-free proof regression covers
-the empty-table selection-failure path, while the executable differential
-corpus continues to exercise populated case tables.
+branch bodies lie in the existing recursive fragment. Branch side conditions
+are indexed by constructor tag/default rather than array position, so the
+proof can follow the checker's normalized traversal and then return to the
+interpreter's original order. The earlier fixed-point/canonical-array premise
+is gone; `CaseTableNormalizationInvariant` instead exposes the strictly weaker
+permutation and determinism obligations. The trusted adapter exposes the
+matching compiler-facing case theorem. Axiom-free proof regressions cover the
+empty-table selection-failure path and a populated constructor/default table
+reordering, while the executable differential corpus exercises full case
+programs.
 `AlphaEqvTrusted` is opt-in and contains the sole project correspondence axiom:
 upstream acceptance implies a finite accepting local run. The adapter records
 the audited upstream source hash. `make check` rejects toolchain/source drift,
@@ -391,9 +403,10 @@ resolution. Details are recorded in
 
 The remaining bounded work is:
 
-1. prove that `sortAlts` preserves `chooseAlt` under the compiler's case-table
-   invariants, remove the temporary canonical-array premise, and extend the
-   recursive side-condition relation to nested case bodies;
+1. prove the generic permutation theorem for Lean 4.32's `Array.qsort` (the
+   implementation exports no such theorem), derive selector determinism from
+   the compiler's case-table invariant, and extend the recursive
+   side-condition relation to nested case bodies;
 2. extend the declarative state simulation through join points, jumps, calls,
    and the remaining frame forms, reusing the now-proved `let`, case,
    bind-frame, and sequential-effect invariants;

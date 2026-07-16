@@ -9,6 +9,7 @@ open Lean
 open Lean.Elab.Command
 open Lean.Compiler
 open Fir.LeanIR.InterpreterExamples
+open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
 
 def selectedBranch : LCNF.Code .impure :=
@@ -105,14 +106,34 @@ def proofCaseTable : LCNF.Cases .impure :=
 def proofCaseCode : LCNF.Code .impure :=
   .cases proofCaseTable
 
-theorem proofCaseAltsSideConditions :
-    AltsSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
-      proofCaseTable.alts.toList proofCaseTable.alts.toList := by
-  exact .nil
+theorem proofCaseDeterministic :
+    CaseTableDeterministic proofCaseTable.alts.toList := by
+  constructor
+  · intro tag left right leftHas rightHas
+    exfalso
+    simp [proofCaseTable, LCNF.Cases.alts, HasCtorAlt] at leftHas
+  · intro left right leftHas rightHas
+    exfalso
+    simp [proofCaseTable, LCNF.Cases.alts, HasDefaultAlt] at leftHas
 
-theorem proofCaseCanonical :
-    LCNF.AlphaEqv.sortAlts proofCaseTable.alts = proofCaseTable.alts := by
-  rfl
+theorem proofCaseNormalization : proofCaseTable.alts.toList.Perm
+    (LCNF.AlphaEqv.sortAlts proofCaseTable.alts).toList := by
+  exact .refl _
+
+theorem proofCaseNormalizationInvariant :
+    CaseTableNormalizationInvariant proofCaseTable.alts :=
+  ⟨proofCaseDeterministic, proofCaseNormalization⟩
+
+theorem proofCaseBranches :
+    CaseBranchesSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+      proofCaseTable.alts.toList proofCaseTable.alts.toList := by
+  constructor
+  · intro tag left right leftHas rightHas
+    exfalso
+    simp [proofCaseTable, LCNF.Cases.alts, HasCtorAlt] at leftHas
+  · intro left right leftHas rightHas
+    exfalso
+    simp [proofCaseTable, LCNF.Cases.alts, HasDefaultAlt] at leftHas
 
 /-- The local checker proves that equal empty case tables fail selection alike. -/
 theorem proofCaseLocalCodeRelated :
@@ -121,10 +142,39 @@ theorem proofCaseLocalCodeRelated :
   apply codeRelated_cases_of_local_accepts
   · native_decide
   · native_decide
-  · exact proofCaseCanonical
-  · exact proofCaseCanonical
-  · exact proofCaseAltsSideConditions
+  · exact proofCaseNormalizationInvariant
+  · exact proofCaseNormalizationInvariant
+  · exact proofCaseBranches
   · exact ⟨1, by native_decide⟩
+
+def populatedCaseAlts : List (LCNF.Alt .impure) := [
+  .ctorAlt falseInfo (.return x),
+  .default (.unreach objType)]
+
+def reorderedCaseAlts : List (LCNF.Alt .impure) :=
+  populatedCaseAlts.reverse
+
+theorem populatedCaseAltsPermutation :
+    populatedCaseAlts.Perm reorderedCaseAlts := by
+  simpa [reorderedCaseAlts] using (List.reverse_perm populatedCaseAlts).symm
+
+theorem populatedCaseAltsDeterministic :
+    CaseTableDeterministic populatedCaseAlts := by
+  constructor
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp [populatedCaseAlts] at leftMember rightMember
+    simp_all
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt, populatedCaseAlts] at leftHas rightHas
+    simp_all
+
+/-- Constructor and default selection survive a populated table reordering. -/
+theorem populatedCaseSelectionOrderIndependent (tag : Nat) :
+    chooseAlt tag populatedCaseAlts = chooseAlt tag reorderedCaseAlts :=
+  chooseAlt_eq_of_perm populatedCaseAltsDeterministic
+    populatedCaseAltsPermutation
 
 def alphaEqvRegressionCodes : Array (LCNF.Code .impure) := #[
   literalCode,

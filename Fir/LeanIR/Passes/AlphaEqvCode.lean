@@ -131,6 +131,36 @@ abbrev AltsRelated (rho : FVarIdMap FVarId)
     (left right : List (LCNF.Alt .impure)) : Prop :=
   ListRel (AltRelated rho leftScope rightScope) left right
 
+/-- A table contains a constructor alternative selecting `code` for `tag`. -/
+def HasCtorAlt (tag : Nat) (code : LCNF.Code .impure)
+    (alts : List (LCNF.Alt .impure)) : Prop :=
+  ∃ info, .ctorAlt info code ∈ alts ∧ info.cidx == tag
+
+/-- A table contains `code` as a default alternative. -/
+def HasDefaultAlt (code : LCNF.Code .impure)
+    (alts : List (LCNF.Alt .impure)) : Prop :=
+  .default code ∈ alts
+
+/--
+Every selector in a case table determines at most one branch body. Duplicate
+alternatives are permitted when they select the same code.
+-/
+structure CaseTableDeterministic (alts : List (LCNF.Alt .impure)) : Prop where
+  ctor : ∀ tag left right,
+    HasCtorAlt tag left alts → HasCtorAlt tag right alts → left = right
+  default : ∀ left right,
+    HasDefaultAlt left alts → HasDefaultAlt right alts → left = right
+
+/--
+The exact phase invariant needed to move between interpreter order and Lean's
+alpha-equivalence normalization. Lean 4.32 does not export the generic qsort
+permutation theorem, so that fact remains explicit here.
+-/
+structure CaseTableNormalizationInvariant
+    (alts : Array (LCNF.Alt .impure)) : Prop where
+  deterministic : CaseTableDeterministic alts.toList
+  permutation : alts.toList.Perm (LCNF.AlphaEqv.sortAlts alts).toList
+
 /--
 Saved continuations are related when they remember agreeing environments and
 resume with related code under the binders they introduce. Apply and cache
@@ -196,6 +226,185 @@ inductive CoreResultRelated : CoreResult → CoreResult → Prop where
       CoreResultRelated (.external request left) (.external request right)
   | done (observation : Observation) :
       CoreResultRelated (.done observation) (.done observation)
+
+/-- Successful constructor lookup identifies a matching table member. -/
+theorem hasCtorAlt_of_findCtorAlt_eq_some
+    (found : findCtorAlt tag alts = some code) : HasCtorAlt tag code alts := by
+  induction alts with
+  | nil => simp [findCtorAlt] at found
+  | cons alt rest ih =>
+      cases alt with
+      | alt =>
+          rename_i ctorName params head purity
+          contradiction
+      | ctorAlt =>
+          rename_i ctorInfo head purity
+          by_cases tagEq : ctorInfo.cidx = tag
+          · simp [findCtorAlt, tagEq] at found
+            subst code
+            exact ⟨ctorInfo, by simp, by simpa using tagEq⟩
+          · have tailFound : findCtorAlt tag rest = some code := by
+              simpa [findCtorAlt, tagEq] using found
+            rcases ih tailFound with ⟨selected, member, selectedTagEq⟩
+            exact ⟨selected, by simp [member], selectedTagEq⟩
+      | default =>
+          rename_i head
+          have tailFound : findCtorAlt tag rest = some code := by
+            simpa [findCtorAlt] using found
+          rcases ih tailFound with ⟨selected, member, selectedTagEq⟩
+          exact ⟨selected, by simp [member], selectedTagEq⟩
+
+/-- Failed constructor lookup excludes every matching table member. -/
+theorem not_hasCtorAlt_of_findCtorAlt_eq_none
+    (notFound : findCtorAlt tag alts = none) : ¬ HasCtorAlt tag code alts := by
+  intro has
+  induction alts with
+  | nil => simp [HasCtorAlt] at has
+  | cons alt rest ih =>
+      cases alt with
+      | alt =>
+          rename_i ctorName params head purity
+          contradiction
+      | ctorAlt =>
+          rename_i headInfo headCode purity
+          by_cases headTag : headInfo.cidx = tag
+          · simp [findCtorAlt, headTag] at notFound
+          · have tailNotFound : findCtorAlt tag rest = none := by
+              simpa [findCtorAlt, headTag] using notFound
+            rcases has with ⟨selectedInfo, member, selectedTag⟩
+            simp only [List.mem_cons] at member
+            rcases member with member | member
+            · have infoEq : selectedInfo = headInfo := by
+                injection member
+              subst selectedInfo
+              exact headTag (by simpa using selectedTag)
+            · exact ih tailNotFound ⟨selectedInfo, member, selectedTag⟩
+      | default =>
+          rename_i headCode
+          have tailNotFound : findCtorAlt tag rest = none := by
+            simpa [findCtorAlt] using notFound
+          rcases has with ⟨selectedInfo, member, selectedTag⟩
+          simp only [List.mem_cons] at member
+          rcases member with member | member
+          · contradiction
+          · exact ih tailNotFound ⟨selectedInfo, member, selectedTag⟩
+
+/-- Successful default lookup identifies a matching table member. -/
+theorem hasDefaultAlt_of_findDefaultAlt_eq_some
+    (found : findDefaultAlt alts = some code) : HasDefaultAlt code alts := by
+  induction alts with
+  | nil => simp [findDefaultAlt] at found
+  | cons alt rest ih =>
+      cases alt with
+      | alt =>
+          rename_i ctorName params head purity
+          contradiction
+      | ctorAlt =>
+          have tailFound : findDefaultAlt rest = some code := by
+            simpa [findDefaultAlt] using found
+          exact by simpa [HasDefaultAlt] using ih tailFound
+      | default =>
+          rename_i head
+          simp [findDefaultAlt] at found
+          subst code
+          simp [HasDefaultAlt]
+
+/-- Failed default lookup excludes every default table member. -/
+theorem not_hasDefaultAlt_of_findDefaultAlt_eq_none
+    (notFound : findDefaultAlt alts = none) : ¬ HasDefaultAlt code alts := by
+  intro has
+  induction alts with
+  | nil => simp [HasDefaultAlt] at has
+  | cons alt rest ih =>
+      cases alt with
+      | alt =>
+          rename_i ctorName params head purity
+          contradiction
+      | ctorAlt =>
+          have tailNotFound : findDefaultAlt rest = none := by
+            simpa [findDefaultAlt] using notFound
+          have tailHas : HasDefaultAlt code rest := by
+            simpa [HasDefaultAlt] using has
+          exact ih tailNotFound tailHas
+      | default => simp [findDefaultAlt] at notFound
+
+/-- Constructor membership is invariant under table permutations. -/
+theorem hasCtorAlt_iff_of_perm (permutation : left.Perm right) :
+    HasCtorAlt tag code left ↔ HasCtorAlt tag code right := by
+  constructor
+  · rintro ⟨info, member, tagEq⟩
+    exact ⟨info, permutation.mem_iff.mp member, tagEq⟩
+  · rintro ⟨info, member, tagEq⟩
+    exact ⟨info, permutation.mem_iff.mpr member, tagEq⟩
+
+/-- Default membership is invariant under table permutations. -/
+theorem hasDefaultAlt_iff_of_perm (permutation : left.Perm right) :
+    HasDefaultAlt code left ↔ HasDefaultAlt code right := by
+  exact permutation.mem_iff
+
+/-- Constructor lookup is order-insensitive for deterministic case tables. -/
+theorem findCtorAlt_eq_of_perm
+    (deterministic : CaseTableDeterministic left)
+    (permutation : left.Perm right) :
+    findCtorAlt tag left = findCtorAlt tag right := by
+  cases leftFound : findCtorAlt tag left with
+  | none =>
+      cases rightFound : findCtorAlt tag right with
+      | none => rfl
+      | some rightCode =>
+          have rightHas := hasCtorAlt_of_findCtorAlt_eq_some rightFound
+          have leftHas := (hasCtorAlt_iff_of_perm permutation).mpr rightHas
+          exact (not_hasCtorAlt_of_findCtorAlt_eq_none leftFound leftHas).elim
+  | some leftCode =>
+      have leftHas := hasCtorAlt_of_findCtorAlt_eq_some leftFound
+      cases rightFound : findCtorAlt tag right with
+      | none =>
+          have rightHas := (hasCtorAlt_iff_of_perm permutation).mp leftHas
+          exact (not_hasCtorAlt_of_findCtorAlt_eq_none rightFound rightHas).elim
+      | some rightCode =>
+          have rightHas := hasCtorAlt_of_findCtorAlt_eq_some rightFound
+          have rightHasLeft := (hasCtorAlt_iff_of_perm permutation).mpr rightHas
+          rw [deterministic.ctor tag leftCode rightCode leftHas rightHasLeft]
+
+/-- Default lookup is order-insensitive for deterministic case tables. -/
+theorem findDefaultAlt_eq_of_perm
+    (deterministic : CaseTableDeterministic left)
+    (permutation : left.Perm right) :
+    findDefaultAlt left = findDefaultAlt right := by
+  cases leftFound : findDefaultAlt left with
+  | none =>
+      cases rightFound : findDefaultAlt right with
+      | none => rfl
+      | some rightCode =>
+          have rightHas := hasDefaultAlt_of_findDefaultAlt_eq_some rightFound
+          have leftHas := (hasDefaultAlt_iff_of_perm permutation).mpr rightHas
+          exact (not_hasDefaultAlt_of_findDefaultAlt_eq_none leftFound leftHas).elim
+  | some leftCode =>
+      have leftHas := hasDefaultAlt_of_findDefaultAlt_eq_some leftFound
+      cases rightFound : findDefaultAlt right with
+      | none =>
+          have rightHas := (hasDefaultAlt_iff_of_perm permutation).mp leftHas
+          exact (not_hasDefaultAlt_of_findDefaultAlt_eq_none rightFound rightHas).elim
+      | some rightCode =>
+          have rightHas := hasDefaultAlt_of_findDefaultAlt_eq_some rightFound
+          have rightHasLeft := (hasDefaultAlt_iff_of_perm permutation).mpr rightHas
+          rw [deterministic.default leftCode rightCode leftHas rightHasLeft]
+
+/-- Full case selection is invariant under deterministic table permutations. -/
+theorem chooseAlt_eq_of_perm
+    (deterministic : CaseTableDeterministic left)
+    (permutation : left.Perm right) :
+    chooseAlt tag left = chooseAlt tag right := by
+  unfold chooseAlt
+  rw [findCtorAlt_eq_of_perm deterministic permutation]
+  rw [findDefaultAlt_eq_of_perm deterministic permutation]
+
+/-- Lean's alternative normalization preserves interpreter selection. -/
+theorem chooseAlt_sortAlts_eq
+    (invariant : CaseTableNormalizationInvariant alts) :
+    chooseAlt tag alts.toList =
+      chooseAlt tag (LCNF.AlphaEqv.sortAlts alts).toList :=
+  chooseAlt_eq_of_perm invariant.deterministic invariant.permutation
 
 /-- Optional selected branches agree structurally. -/
 theorem findCtorAlt_related
