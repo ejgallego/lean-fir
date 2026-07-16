@@ -96,7 +96,7 @@ def caseCode : LCNF.Code .impure :=
   .let (letDecl c taggedType (.ctor trueInfo #[])) <|
   .cases (.mk ``Bool objType c #[
     .ctorAlt falseInfo (.let (letDecl r objType (.lit (.nat 0))) (.return r)),
-    .ctorAlt trueInfo (.let (letDecl r objType (.lit (.nat 1))) (.return r))])
+    .ctorAlt trueInfo (.let (letDecl u objType (.lit (.nat 1))) (.return u))])
 
 def caseProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code caseCode)] }
@@ -208,7 +208,7 @@ def tagMutationCode : LCNF.Code .impure :=
   .setTag p 9 <|
   .cases (.mk `Changed objType p #[
     .ctorAlt changedTagInfo (.let (letDecl r objType (.lit (.nat 99))) (.return r)),
-    .default (.let (letDecl r objType (.lit (.nat 0))) (.return r))])
+    .default (.let (letDecl u objType (.lit (.nat 0))) (.return u))])
 
 def tagMutationProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code tagMutationCode)] }
@@ -219,7 +219,7 @@ def defaultCaseCode : LCNF.Code .impure :=
   .let (letDecl c taggedType (.ctor trueInfo #[])) <|
   .cases (.mk ``Bool objType c #[
     .default (.let (letDecl r objType (.lit (.nat 5))) (.return r)),
-    .ctorAlt falseInfo (.let (letDecl r objType (.lit (.nat 0))) (.return r))])
+    .ctorAlt falseInfo (.let (letDecl u objType (.lit (.nat 0))) (.return u))])
 
 def defaultCaseProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code defaultCaseCode)] }
@@ -256,8 +256,8 @@ def resetReuseCode : LCNF.Code .impure :=
   .let (letDecl r objType (.reset 1 p)) <|
   .let (letDecl y objType (.lit (.nat 71))) <|
   .let (letDecl z objType (.reuse r { pairInfo with size := 1 } false #[.fvar y])) <|
-  .let (letDecl x objType (.oproj 0 z)) <|
-  .return x
+  .let (letDecl s objType (.oproj 0 z)) <|
+  .return s
 
 def resetReuseProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code resetReuseCode)] }
@@ -271,8 +271,8 @@ def sharedResetCode : LCNF.Code .impure :=
   .let (letDecl r objType (.reset 1 p)) <|
   .let (letDecl y objType (.lit (.nat 81))) <|
   .let (letDecl z objType (.reuse r changedTagInfo true #[.fvar y])) <|
-  .let (letDecl x objType (.oproj 0 z)) <|
-  .return x
+  .let (letDecl s objType (.oproj 0 z)) <|
+  .return s
 
 def sharedResetProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code sharedResetCode)] }

@@ -4,7 +4,8 @@ build:
 	lake build
 
 examples:
-	lake build Fir.LeanIR.LegacyExamples Fir.LeanIR.InterpreterExamples \
+	lake build Fir.LeanIR.LegacyExamples Fir.LeanIR.HygieneExamples \
+		Fir.LeanIR.InterpreterExamples \
 		Fir.LeanIR.Passes.SimpCaseExamples Fir.Wasm.Examples
 
 inspect:
@@ -26,6 +27,7 @@ beam:
 	lean-beam sync Fir/Wasm.lean
 	lean-beam sync Fir.lean
 	lean-beam sync Fir/LeanIR/LegacyExamples.lean
+	lean-beam sync Fir/LeanIR/HygieneExamples.lean
 	lean-beam sync Fir/LeanIR/InterpreterExamples.lean
 	lean-beam sync Fir/Wasm/Examples.lean
 	lean-beam sync Inspect
