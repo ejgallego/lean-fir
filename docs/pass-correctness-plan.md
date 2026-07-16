@@ -46,6 +46,9 @@ The following work is implemented and checked by the default build:
 - Lean and all pipeline expectations are pinned to 4.32.0.
 - `Fir.LeanIR` and `Fir.Wasm` are the consolidated public imports; executable
   examples and the legacy differential evaluator remain test-only modules.
+- `Hygiene.lean` checks lexical variable/join-point scope and declaration-wide
+  binder freshness for impure LCNF; `WellFormedAt .impure` carries this inherited
+  compiler invariant, and the full interpreter corpus is a positive regression.
 - `Pipeline.lean` checks every built-in pass key, occurrence, phase, and phase
   transition against `LCNF.builtinPassManager`.
 - `Checkpoint.lean` can wrap Lean's actual `simpCase`, capture its input and
@@ -245,16 +248,15 @@ mere syntactic equality. No discrepancy was found.
 Attempting to remove the `AlphaEqvSoundAt` hypothesis exposed a necessary
 phase invariant. `Code.alphaEqv` accepts a minimized pair with different
 observations when local `FVarId`s are reused. Lean's compiler intends these IDs
-to be globally fresh, but FIR's current impure `WellFormedAt` does not say so.
-The executable witness and triage are recorded in
-`FIR-BUG-impure-simpCase-alpha-hygiene`; this is currently a FIR invariant gap,
-not evidence of a compiler error on compiler-generated LCNF.
+to be globally fresh. FIR now checks that invariant, along with lexical scope,
+at the impure phase boundary. The executable witness, fix, and permanent
+regression are recorded in `FIR-BUG-impure-simpCase-alpha-hygiene`; this was a
+FIR invariant gap, not evidence of a compiler error on compiler-generated LCNF.
 
 The remaining bounded work is:
 
-1. strengthen impure checked-program well-formedness with global binder
-   freshness and lexical scope, then prove `Code.alphaEqv` sound using an
-   environment renaming relation internally while preserving observations;
+1. prove `Code.alphaEqv` sound for hygienic impure code, using an environment
+   renaming relation internally while preserving observations;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 3. lift the resulting theorem through recursive code, declarations, and program
