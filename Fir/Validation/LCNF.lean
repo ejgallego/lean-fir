@@ -205,6 +205,15 @@ private def externalInt (request : ExternalRequest) (runtime : RuntimeState)
       return value
   | _ => throw (.externalFailure request.name "expected a signed integer")
 
+private def externalByteArray (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault (Array UInt8) := do
+  let .object (.heap location) := value
+    | throw (.externalFailure request.name "expected a byte array")
+  let cell ← getLiveCell runtime location
+  let .byteArray value := cell.object
+    | throw (.externalFailure request.name "expected a byte array")
+  return value
+
 private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
@@ -222,14 +231,24 @@ private def byteArraySizeExternal (request : ExternalRequest) (runtime : Runtime
     Except RuntimeFault ExternalResponse := do
   let [value] := request.args.toList
     | throw (.arityMismatch 1 request.args.size)
-  let .object (.heap location) := value
-    | throw (.externalFailure request.name "expected a byte array")
-  let cell ← getLiveCell runtime location
-  let .byteArray value := cell.object
-    | throw (.externalFailure request.name "expected a byte array")
+  let value ← externalByteArray request runtime value
   let (runtime, value) := literal runtime (.nat value.size)
   return {
     value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def byteArrayGetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value, index] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let value ← externalByteArray request runtime value
+  let index ← externalNat request runtime index
+  let some value := value[index]?
+    | throw (.externalFailure request.name s!"byte-array index {index} is out of bounds")
+  return {
+    value := .scalar (.uint8 value)
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
@@ -277,6 +296,8 @@ private def validationExternals : ExternalImpl where
       natAddExternal request runtime
     else if request.name == ``ByteArray.size then
       byteArraySizeExternal request runtime
+    else if request.name == ``ByteArray.get! then
+      byteArrayGetExternal request runtime
     else if request.name == ``Int.ofNat then
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then

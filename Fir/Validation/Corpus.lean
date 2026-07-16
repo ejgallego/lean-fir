@@ -250,6 +250,10 @@ def idByteArray (value : ByteArray) : ByteArray :=
 def byteArraySize (value : ByteArray) : Nat :=
   value.size
 
+@[noinline]
+def byteArrayGet (value : ByteArray) (index : Nat) : UInt8 :=
+  value.get! index
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -774,7 +778,48 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.size]
     requiredExecutedExternals := #[``ByteArray.size]
-    provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" }
+    provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" },
+  { id := "byte-array-get-zero"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[0, 127, 128, 255], .nat 0]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.byteArrayGet ⟨#[0, 127, 128, 255]⟩ 0).toNat)
+    tags := #["quick", "bytes", "packed-layout", "external", "pure", "index", "scalar"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance "Read a zero byte through ByteArray.get!" },
+  { id := "byte-array-get-high-bit"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[0, 127, 128, 255], .nat 2]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.byteArrayGet ⟨#[0, 127, 128, 255]⟩ 2).toNat)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "pure", "index", "scalar", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance "Read the first high-bit byte through ByteArray.get!" },
+  { id := "byte-array-get-max"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[0, 127, 128, 255], .nat 3]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.byteArrayGet ⟨#[0, 127, 128, 255]⟩ 3).toNat)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "pure", "index", "scalar", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance "Read the maximum byte through ByteArray.get!" }
 ]
 
 def findCase? (id : String) : Option Case :=
