@@ -39,6 +39,59 @@ def ArgsRelated (rho : FVarIdMap FVarId)
     (left right : Array (LCNF.Arg .impure)) : Prop :=
   ListRel (ArgRelated rho leftScope rightScope) left.toList right.toList
 
+def ScopedFVarRelated (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId) (left right : FVarId) : Prop :=
+  leftScope.contains left = true ∧
+    rightScope.contains right = true ∧
+    FVarRelated rho left right
+
+/--
+The semantic fragment of impure `LetValue` alpha-equivalence. Constructor
+metadata that affects the interpreter is deliberately required to be equal;
+the remaining proof obligation is to derive this relation from Lean's
+executable `LCNF.AlphaEqv.eqvLetValue` checker.
+-/
+inductive LetValueRelated (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId) :
+    LCNF.LetValue .impure → LCNF.LetValue .impure → Prop where
+  | lit (value : LCNF.LitValue) : LetValueRelated rho leftScope rightScope (.lit value) (.lit value)
+  | erased : LetValueRelated rho leftScope rightScope .erased .erased
+  | fvar (related : ScopedFVarRelated rho leftScope rightScope leftFn rightFn)
+      (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      LetValueRelated rho leftScope rightScope (.fvar leftFn leftArgs) (.fvar rightFn rightArgs)
+  | ctor (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      LetValueRelated rho leftScope rightScope (.ctor info leftArgs) (.ctor info rightArgs)
+  | oproj (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.oproj index leftVar) (.oproj index rightVar)
+  | uproj (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.uproj index leftVar) (.uproj index rightVar)
+  | sproj (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope
+        (.sproj width offset leftVar) (.sproj width offset rightVar)
+  | fap (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      LetValueRelated rho leftScope rightScope (.fap name leftArgs) (.fap name rightArgs)
+  | pap (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      LetValueRelated rho leftScope rightScope (.pap name leftArgs) (.pap name rightArgs)
+  | reset (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.reset count leftVar) (.reset count rightVar)
+  | reuse (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar)
+      (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      LetValueRelated rho leftScope rightScope
+        (.reuse leftVar info updateHeader leftArgs) (.reuse rightVar info updateHeader rightArgs)
+  | box (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.box type leftVar) (.box type rightVar)
+  | unbox (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.unbox leftVar) (.unbox rightVar)
+  | isShared (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
+      LetValueRelated rho leftScope rightScope (.isShared leftVar) (.isShared rightVar)
+
+/-- Declaration data inspected while evaluating a `let` value. -/
+structure LetDeclValueRelated (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId)
+    (left right : LCNF.LetDecl .impure) : Prop where
+  type_eq : left.type = right.type
+  value : LetValueRelated rho leftScope rightScope left.value right.value
+
 /-- A fresh binder does not reuse the runtime lookup name of an older scope entry. -/
 def FreshForScope (fvarId : FVarId) (scope : List FVarId) : Prop :=
   ∀ oldId, scope.contains oldId = true → fvarId.name ≠ oldId.name
@@ -77,6 +130,12 @@ theorem lookupValue_eq_of_related
   obtain ⟨value, leftFound, rightFound⟩ :=
     agree leftId leftScoped rightId rightScoped related
   simp [lookupValue, leftFound, rightFound]
+
+theorem lookupValue_eq_of_scoped_related
+    (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
+    (related : ScopedFVarRelated rho leftScope rightScope leftId rightId) :
+    lookupValue leftEnv leftId = lookupValue rightEnv rightId := by
+  exact lookupValue_eq_of_related agree related.1 related.2.1 related.2.2
 
 /--
 Extend related environments with one equal runtime value. The `classify`
@@ -148,5 +207,62 @@ theorem evalArgs_eq_of_related
     evalArgs leftEnv leftArgs = evalArgs rightEnv rightArgs := by
   simp only [evalArgs, Array.mapM_eq_mapM_toList]
   rw [evalArgList_eq_of_related agree related]
+
+/--
+Evaluation of the semantic `LetValue` fragment is invariant under
+alpha-renaming. Both executions share the program and runtime state; only the
+free-variable environment and related declaration syntax differ.
+-/
+theorem evalLetValue_eq_of_related
+    (state : MachineState)
+    (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
+    (related : LetDeclValueRelated rho leftScope rightScope leftDecl rightDecl) :
+    evalLetValue ({ state with env := leftEnv }) leftDecl =
+      evalLetValue ({ state with env := rightEnv }) rightDecl := by
+  cases leftDecl
+  cases rightDecl
+  rcases related with ⟨typeEq, valueRelated⟩
+  cases typeEq
+  cases valueRelated with
+  | lit value => rfl
+  | erased => rfl
+  | fvar varRelated argsRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+      rw [evalArgs_eq_of_related agree argsRelated]
+  | ctor argsRelated =>
+      simp only [evalLetValue]
+      rw [evalArgs_eq_of_related agree argsRelated]
+  | oproj varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | uproj varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | sproj varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | fap argsRelated =>
+      simp only [evalLetValue]
+      rw [evalArgs_eq_of_related agree argsRelated]
+  | pap argsRelated =>
+      simp only [evalLetValue]
+      rw [evalArgs_eq_of_related agree argsRelated]
+  | reset varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | reuse varRelated argsRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+      rw [evalArgs_eq_of_related agree argsRelated]
+  | box varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | unbox varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
+  | isShared varRelated =>
+      simp only [evalLetValue]
+      rw [lookupValue_eq_of_scoped_related agree varRelated]
 
 end Fir.LeanIR.Passes.AlphaEqv
