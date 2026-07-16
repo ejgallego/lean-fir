@@ -351,9 +351,12 @@ semantic condition it needs: each constructor tag and the default selector
 determine at most one body. Successful and failed constructor/default lookups
 are first characterized by table membership, then transported through
 `List.Perm`; `chooseAlt_eq_of_perm` combines the two lookup results.
-`CaseTableNormalizationInvariant` packages selector determinism with the fact
-that Lean's `sortAlts` output is a permutation, and `chooseAlt_sortAlts_eq`
-proves that normalization preserves interpreter selection.
+`QSortPerm` proves directly against Lean 4.32's private partition and sort
+workers that `Array.qsort` returns a permutation. `sortAlts_perm` specializes
+that generic theorem to Lean's alternative comparator. Consequently,
+`CaseTableNormalizationInvariant` now contains only the genuine compiler-side
+obligation—selector determinism—and `chooseAlt_sortAlts_eq` derives the
+normalization permutation internally.
 
 The older terminal boundary theorems remain useful independently:
 `coreStep_terminal_related` proves matching immediate outcomes, and
@@ -382,9 +385,10 @@ branch bodies lie in the existing recursive fragment. Branch side conditions
 are indexed by constructor tag/default rather than array position, so the
 proof can follow the checker's normalized traversal and then return to the
 interpreter's original order. The earlier fixed-point/canonical-array premise
-is gone; `CaseTableNormalizationInvariant` instead exposes the strictly weaker
-permutation and determinism obligations. The trusted adapter exposes the
-matching compiler-facing case theorem. Axiom-free proof regressions cover the
+is gone; `CaseTableNormalizationInvariant` instead exposes only the strictly
+weaker selector-determinism obligation, because normalization's permutation
+property is now a theorem. The trusted adapter exposes the matching
+compiler-facing case theorem. Axiom-free proof regressions cover the
 empty-table selection-failure path and a populated constructor/default table
 reordering, while the executable differential corpus exercises full case
 programs.
@@ -403,10 +407,8 @@ resolution. Details are recorded in
 
 The remaining bounded work is:
 
-1. prove the generic permutation theorem for Lean 4.32's `Array.qsort` (the
-   implementation exports no such theorem), derive selector determinism from
-   the compiler's case-table invariant, and extend the recursive
-   side-condition relation to nested case bodies;
+1. derive selector determinism from the compiler's case-table invariant and
+   extend the recursive side-condition relation to nested case bodies;
 2. extend the declarative state simulation through join points, jumps, calls,
    and the remaining frame forms, reusing the now-proved `let`, case,
    bind-frame, and sequential-effect invariants;

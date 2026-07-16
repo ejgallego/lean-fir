@@ -118,11 +118,11 @@ theorem proofCaseDeterministic :
 
 theorem proofCaseNormalization : proofCaseTable.alts.toList.Perm
     (LCNF.AlphaEqv.sortAlts proofCaseTable.alts).toList := by
-  exact .refl _
+  exact sortAlts_perm proofCaseTable.alts
 
 theorem proofCaseNormalizationInvariant :
     CaseTableNormalizationInvariant proofCaseTable.alts :=
-  ⟨proofCaseDeterministic, proofCaseNormalization⟩
+  ⟨proofCaseDeterministic⟩
 
 theorem proofCaseBranches :
     CaseBranchesSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]

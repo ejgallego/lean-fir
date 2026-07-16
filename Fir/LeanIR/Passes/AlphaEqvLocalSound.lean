@@ -496,8 +496,8 @@ theorem codeRelated_cases_of_local_accepts
       unfold Local.eqvAltsUsing at alternativesAccepted
       split at alternativesAccepted
       · have alternativesRelated := altsRelated_of_local_check_by_selector side
-          (fun alt member => leftNormalization.permutation.mem_iff.mpr member)
-          (fun alt member => rightNormalization.permutation.mem_iff.mpr member)
+          (fun alt member => (sortAlts_perm leftCases.alts).mem_iff.mpr member)
+          (fun alt member => (sortAlts_perm rightCases.alts).mem_iff.mpr member)
           alternativesAccepted
         rw [chooseAlt_sortAlts_eq leftNormalization]
         rw [chooseAlt_sortAlts_eq rightNormalization]

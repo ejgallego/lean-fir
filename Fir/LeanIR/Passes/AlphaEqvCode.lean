@@ -1,5 +1,6 @@
 import Fir.LeanIR.Passes.SimpCase
 import Fir.LeanIR.Passes.AlphaEqvLocal
+import Fir.LeanIR.Passes.QSortPerm
 
 namespace Fir.LeanIR.Passes.AlphaEqv
 
@@ -153,13 +154,18 @@ structure CaseTableDeterministic (alts : List (LCNF.Alt .impure)) : Prop where
 
 /--
 The exact phase invariant needed to move between interpreter order and Lean's
-alpha-equivalence normalization. Lean 4.32 does not export the generic qsort
-permutation theorem, so that fact remains explicit here.
+alpha-equivalence normalization. Quicksort's permutation property is now
+proved generically, so callers provide only selector determinism.
 -/
 structure CaseTableNormalizationInvariant
     (alts : Array (LCNF.Alt .impure)) : Prop where
   deterministic : CaseTableDeterministic alts.toList
-  permutation : alts.toList.Perm (LCNF.AlphaEqv.sortAlts alts).toList
+
+/-- Lean's alternative normalization is a permutation of the original table. -/
+theorem sortAlts_perm (alts : Array (LCNF.Alt pu)) :
+    alts.toList.Perm (LCNF.AlphaEqv.sortAlts alts).toList := by
+  unfold LCNF.AlphaEqv.sortAlts
+  exact (QSortPerm.qsort_perm alts _).symm.toList
 
 /--
 Saved continuations are related when they remember agreeing environments and
@@ -404,7 +410,7 @@ theorem chooseAlt_sortAlts_eq
     (invariant : CaseTableNormalizationInvariant alts) :
     chooseAlt tag alts.toList =
       chooseAlt tag (LCNF.AlphaEqv.sortAlts alts).toList :=
-  chooseAlt_eq_of_perm invariant.deterministic invariant.permutation
+  chooseAlt_eq_of_perm invariant.deterministic (sortAlts_perm alts)
 
 /-- Optional selected branches agree structurally. -/
 theorem findCtorAlt_related
