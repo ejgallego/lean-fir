@@ -64,18 +64,31 @@ so configuration inputs and executable semantic products cannot be confused.
 The matrix also derives two full SHA-256 identities from compact canonical JSON.
 `identity.selection` binds the corpus digest and ordered selected case IDs.
 `identity.run` binds that selection, participating backends, directed pair
-order, every input digest, and every sorted backend product.  Observations and
-findings are deliberately excluded, so repeated executions of the same
-evidence contract share an identity even when they expose nondeterminism or a
-regression.
+order, every input digest, every sorted backend product, and the exact backend
+tool files.  Observations and findings are deliberately excluded, so repeated
+executions of the same evidence contract share an identity even when they
+expose nondeterminism or a regression.
 
-Every input, backend product, and pair comparison is copied into an append-only
-content-addressed location beneath `evidence/inputs`, `evidence/products`, or
-`evidence/comparisons`.  Matrix entries carry the canonical report-relative
-artifact path and raw-byte SHA-256.  Existing blobs are reused only when their
-bytes agree; symlinks, non-regular files, and digest collisions fail closed.
-The mutable original config, product, or comparison path is therefore not
-needed to verify the completed report.
+Backend tools are distinct from semantic products and do not require product
+receipts.  Native validation binds the built `fir-native-oracle` executable and
+invokes that captured path directly; it no longer uses `lake exe`, which could
+silently rebuild after capture.  LCNF validation binds the resolved Lean
+engine, `FirValidationLCNF.lean`, and the consumed
+`Fir/Validation/LCNF.olean`, then verifies all captured backend tool files
+before and after execution.  The current LCNF module hash relies on Lean's
+embedded import fingerprints for its transitive closure; inventorying every
+loaded olean and host dynamic library remains future hardening.  A V8 adapter
+will analogously register the engine and runner as tools while keeping the
+compiler-produced `.wasm` as a product.
+
+Every input, backend tool, backend product, and pair comparison is copied into
+an append-only content-addressed location beneath `evidence/inputs`,
+`evidence/tools`, `evidence/products`, or `evidence/comparisons`.  Matrix
+entries carry the canonical report-relative artifact path and raw-byte SHA-256.
+Existing blobs are reused only when their bytes agree; symlinks, non-regular
+files, and digest collisions fail closed.  The mutable original config, tool,
+product, or comparison path is therefore not needed to verify the completed
+report.
 
 Verification is read-only and does not execute any backend:
 
@@ -87,8 +100,9 @@ python3 scripts/validate_interpreters.py \
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run.
 
-The verifier strictly checks schema, names and paths, retained input/product/
-comparison bytes, ordering and uniqueness, summary counts, and both identities.
+The verifier strictly checks schema, names and paths, retained input/tool/
+product/comparison bytes, ordering and uniqueness, summary counts, and both
+identities.
 Findings or unequal comparisons are valid evidence and do not make structural
 verification fail.  `--verify-matrix` is exclusive with run options.  This
 stage verifies the comparison reports referenced by the matrix; retaining and

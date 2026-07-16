@@ -21,6 +21,7 @@ from validation_harness import (
     ValidationInput,
     ValidationPlan,
     ValidationProduct,
+    ValidationTool,
     canonical_json_sha256,
     checked_record,
     comparison_artifact_path,
@@ -35,6 +36,7 @@ from validation_harness import (
     retain_evidence_blob,
     result_domain_findings,
     result_map,
+    resolve_lake_command,
     run,
     select_cases,
     sha256_bytes,
@@ -48,6 +50,7 @@ from validation_harness import (
     validation_selection_sha256,
     validation_input_from_file,
     validation_product_from_file,
+    validation_tool_from_file,
     write_comparison_artifact,
     write_corpus_manifest,
     write_matrix_artifact,
@@ -69,21 +72,72 @@ DEFAULT_OUT = ROOT / "_build" / "validation"
 class NativeAdapter:
     name = "native"
 
+    def __init__(self) -> None:
+        self.root: Path | None = None
+        self.executable: Path | None = None
+        self.tool: ValidationTool | None = None
+
     def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
         return descriptors
 
     def build(self, context: BuildContext) -> None:
+        self.root = None
+        self.executable = None
+        self.tool = None
         if context.no_build:
-            return
-        built = run(["lake", "build", "fir-native-oracle"], context.root)
-        if built.returncode != 0:
-            sys.stderr.write(built.stdout + built.stderr)
-            raise ValidationError("failed to build native validation backend")
+            pass
+        else:
+            built = run(["lake", "build", "fir-native-oracle"], context.root)
+            if built.returncode != 0:
+                sys.stderr.write(built.stdout + built.stderr)
+                raise ValidationError("failed to build native validation backend")
+        self.executable = resolve_lake_command(
+            context.root, "fir-native-oracle"
+        )
+        self.root = context.root
+        self.tool = validation_tool_from_file(
+            self.name,
+            "executable",
+            ".lake/build/bin/fir-native-oracle",
+            self.executable,
+        )
+
+    def verify_tool(self) -> None:
+        if self.executable is None or self.tool is None:
+            raise ValidationError("native adapter must be built before execution")
+        current = validation_tool_from_file(
+            self.name,
+            self.tool.kind,
+            self.tool.name,
+            self.executable,
+        )
+        if current != self.tool:
+            raise ValidationError("native validation executable changed during run")
+
+    def manifest(self) -> list[dict]:
+        self.verify_tool()
+        if self.executable is None or self.root is None:
+            raise ValidationError("native adapter must be built before execution")
+        command = [str(self.executable), "--manifest"]
+        completed = run(command, self.root)
+        self.verify_tool()
+        if completed.returncode != 0:
+            raise ValidationError(
+                f"failed to read corpus manifest:\n{completed.stderr}"
+            )
+        return parse_manifest_from_output(completed.stdout, command)
 
     def execute(self, context: RunContext) -> BackendRun:
-        backend_run = BackendRun(self.name, list(context.selected))
+        self.verify_tool()
+        if self.executable is None or self.tool is None:
+            raise ValidationError("native adapter must be built before execution")
+        backend_run = BackendRun(
+            self.name,
+            list(context.selected),
+            tools=[self.tool],
+        )
         for case_id in context.selected:
-            command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
+            command = [str(self.executable), "--case", case_id]
             completed = run(command, context.root)
             write_process_artifacts(
                 context.out_dir / case_id / self.name, completed
@@ -114,14 +168,18 @@ class NativeAdapter:
                 backend_run.blocked_cases.add(case_id)
                 continue
             backend_run.results[case_id] = case_results[case_id]
+        self.verify_tool()
         return backend_run
 
     def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
         return BackendAudit()
 
 
+NATIVE_ADAPTER = NativeAdapter()
+
+
 BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
-    "native": NativeAdapter(),
+    "native": NATIVE_ADAPTER,
     "lcnf": LcnfAdapter(),
 }
 
@@ -132,11 +190,7 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
 
 
 def corpus_manifest() -> list[dict]:
-    command = ["lake", "exe", "fir-native-oracle", "--manifest"]
-    completed = run(command, ROOT)
-    if completed.returncode != 0:
-        raise ValidationError(f"failed to read corpus manifest:\n{completed.stderr}")
-    return parse_manifest_from_output(completed.stdout, command)
+    return NATIVE_ADAPTER.manifest()
 
 
 def parse_pair_spec(specification: str) -> tuple[str, str]:

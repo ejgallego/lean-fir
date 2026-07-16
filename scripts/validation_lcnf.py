@@ -15,9 +15,12 @@ from validation_harness import (
     RunContext,
     ValidationError,
     ValidationFinding,
+    ValidationTool,
     records_from_output,
+    resolve_lake_command,
     result_map,
     run,
+    validation_tool_from_file,
     write_process_artifacts,
 )
 
@@ -374,22 +377,91 @@ def write_coverage_artifact(out_dir: Path, report: dict) -> None:
 class LcnfAdapter:
     name = "lcnf"
 
+    def __init__(self) -> None:
+        self.engine: Path | None = None
+        self.lean_path: str | None = None
+        self.tools: tuple[ValidationTool, ...] | None = None
+
     def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
         return prepare_manifest(descriptors)
 
     def build(self, context: BuildContext) -> None:
-        if context.no_build:
-            return
-        built = run(["lake", "build", "Fir.Validation"], context.root)
-        if built.returncode != 0:
-            sys.stderr.write(built.stdout + built.stderr)
-            raise ValidationError("failed to build LCNF validation backend")
+        self.engine = None
+        self.lean_path = None
+        self.tools = None
+        if not context.no_build:
+            built = run(["lake", "build", "Fir.Validation"], context.root)
+            if built.returncode != 0:
+                sys.stderr.write(built.stdout + built.stderr)
+                raise ValidationError("failed to build LCNF validation backend")
+        self.engine = resolve_lake_command(context.root, "lean")
+        runner = context.root / "FirValidationLCNF.lean"
+        module = (
+            context.root
+            / ".lake"
+            / "build"
+            / "lib"
+            / "lean"
+            / "Fir"
+            / "Validation"
+            / "LCNF.olean"
+        )
+        self.tools = (
+            validation_tool_from_file(
+                self.name, "engine", "lean-toolchain/bin/lean", self.engine
+            ),
+            validation_tool_from_file(
+                self.name, "runner-source", "FirValidationLCNF.lean", runner
+            ),
+            validation_tool_from_file(
+                self.name,
+                "module",
+                ".lake/build/lib/lean/Fir/Validation/LCNF.olean",
+                module,
+            ),
+        )
+        environment = run(
+            ["lake", "env", "printenv", "LEAN_PATH"], context.root
+        )
+        if environment.returncode != 0 or not environment.stdout.strip():
+            raise ValidationError("failed to resolve LCNF validation LEAN_PATH")
+        self.lean_path = environment.stdout.strip()
+
+    def verify_tools(self) -> None:
+        if self.engine is None or self.tools is None:
+            raise ValidationError("LCNF adapter must be built before execution")
+        current: list[ValidationTool] = []
+        for tool in self.tools:
+            if tool.source_path is None:
+                raise ValidationError("LCNF tool has no source path")
+            current.append(
+                validation_tool_from_file(
+                    tool.backend,
+                    tool.kind,
+                    tool.name,
+                    tool.source_path,
+                )
+            )
+        if tuple(current) != self.tools:
+            raise ValidationError("LCNF validation tools changed during run")
 
     def execute(self, context: RunContext) -> BackendRun:
-        command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
-        completed = run(command, context.root)
+        self.verify_tools()
+        if self.engine is None or self.lean_path is None or self.tools is None:
+            raise ValidationError("LCNF adapter must be built before execution")
+        command = [str(self.engine), "FirValidationLCNF.lean"]
+        completed = run(
+            command,
+            context.root,
+            extra_env={"LEAN_PATH": self.lean_path},
+        )
         write_process_artifacts(context.out_dir / self.name, completed)
-        backend_run = BackendRun(self.name, context.all_cases)
+        self.verify_tools()
+        backend_run = BackendRun(
+            self.name,
+            context.all_cases,
+            tools=list(self.tools),
+        )
         if completed.returncode != 0:
             backend_run.findings.append(
                 ValidationFinding(

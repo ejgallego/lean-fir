@@ -716,6 +716,7 @@ class HarnessTests(unittest.TestCase):
                     "findingCount": 0,
                     "inputCount": 1,
                     "productCount": 0,
+                    "toolCount": 0,
                 },
             )
             self.assertEqual(
@@ -761,6 +762,7 @@ class HarnessTests(unittest.TestCase):
                 },
             )
             self.assertEqual(matrix["products"], [])
+            self.assertEqual(matrix["tools"], [])
             harness.write_matrix_artifact(
                 context,
                 ["native", "lcnf", "v8", "talos"],
@@ -856,6 +858,21 @@ class HarnessTests(unittest.TestCase):
                 ],
             ),
         )
+        self.assertNotEqual(
+            run,
+            harness.validation_run_sha256(
+                selection,
+                ["native", "v8"],
+                [("native", "v8")],
+                inputs,
+                [product],
+                [
+                    harness.ValidationTool(
+                        "v8", "engine", "v8", "4" * 64
+                    )
+                ],
+            ),
+        )
 
     def test_matrix_products_are_sorted_and_unique(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -881,8 +898,20 @@ class HarnessTests(unittest.TestCase):
             (out_dir / "v8" / "modules").mkdir(parents=True)
             (out_dir / "v8" / "modules" / "z.wasm").write_bytes(b"wasm")
             (out_dir / "v8" / "modules" / "z.map").write_bytes(b"map")
+            engine_path = out_dir / "engine"
+            runner_path = out_dir / "runner.mjs"
+            engine_path.write_bytes(b"engine")
+            runner_path.write_bytes(b"runner")
+            tools = (
+                harness.validation_tool_from_file(
+                    "v8", "runner", "runner.mjs", runner_path
+                ),
+                harness.validation_tool_from_file(
+                    "v8", "engine", "v8-engine", engine_path
+                ),
+            )
             harness.write_matrix_artifact(
-                context, ["v8"], [], [], products
+                context, ["v8"], [], [], products, tools
             )
             matrix_path = out_dir / "matrix.json"
             first = matrix_path.read_bytes()
@@ -892,8 +921,18 @@ class HarnessTests(unittest.TestCase):
                 ["debug-info", "wasm-module"],
             )
             self.assertEqual(matrix["summary"]["productCount"], 2)
+            self.assertEqual(
+                [tool["kind"] for tool in matrix["tools"]],
+                ["engine", "runner"],
+            )
+            self.assertEqual(matrix["summary"]["toolCount"], 2)
             harness.write_matrix_artifact(
-                context, ["v8"], [], [], tuple(reversed(products))
+                context,
+                ["v8"],
+                [],
+                [],
+                tuple(reversed(products)),
+                tuple(reversed(tools)),
             )
             self.assertEqual(first, matrix_path.read_bytes())
 
@@ -906,6 +945,17 @@ class HarnessTests(unittest.TestCase):
                     [],
                     [],
                     (products[0], products[0]),
+                )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate backend tools"
+            ):
+                harness.write_matrix_artifact(
+                    context,
+                    ["v8"],
+                    [],
+                    [],
+                    products,
+                    (tools[0], tools[0]),
                 )
 
     def test_product_receipts_allow_per_case_subsets_and_require_attestation(self) -> None:
@@ -1437,6 +1487,43 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(backend_run.expected_cases, ["case"])
             self.assertEqual(backend_run.results, {"case": record})
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
+
+    def test_native_adapter_executes_the_captured_binary_directly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "fir-native-oracle"
+            executable.write_bytes(b"captured native executable")
+            adapter = harness.NativeAdapter()
+            with mock.patch.object(
+                harness, "resolve_lake_command", return_value=executable
+            ):
+                adapter.build(harness.BuildContext(root, root / "out", True))
+
+            record = success("case", "native")
+            completed = mock.Mock(
+                returncode=0,
+                stdout=json.dumps(record) + "\n",
+                stderr="",
+            )
+            context = harness.RunContext(
+                root, root / "out", [descriptor("case")], ["case"]
+            )
+            with mock.patch.object(harness, "run", return_value=completed) as run_mock:
+                backend_run = adapter.execute(context)
+            command = run_mock.call_args.args[0]
+            self.assertEqual(command, [str(executable), "--case", "case"])
+            self.assertNotIn("lake", command)
+            self.assertEqual(backend_run.results, {"case": record})
+            self.assertEqual(
+                [(tool.kind, tool.name) for tool in backend_run.tools],
+                [("executable", ".lake/build/bin/fir-native-oracle")],
+            )
+
+            executable.write_bytes(b"mutated native executable")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "executable changed during run"
+            ):
+                adapter.execute(context)
 
     def test_external_products_fail_closed_on_missing_escape_and_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

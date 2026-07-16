@@ -102,6 +102,24 @@ class ValidationProduct:
         }
 
 
+@dataclass(frozen=True)
+class ValidationTool:
+    backend: str
+    kind: str
+    name: str
+    sha256: str
+    content: bytes | None = field(default=None, compare=False, repr=False)
+    source_path: Path | None = field(default=None, compare=False, repr=False)
+
+    def to_json(self) -> dict[str, str]:
+        return {
+            "backend": self.backend,
+            "kind": self.kind,
+            "name": self.name,
+            "sha256": self.sha256,
+        }
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -134,6 +152,7 @@ def validation_run_sha256(
     pair_names: list[tuple[str, str]],
     inputs: tuple[ValidationInput, ...],
     products: list[ValidationProduct],
+    tools: list[ValidationTool] | None = None,
 ) -> str:
     return canonical_json_sha256(
         {
@@ -146,6 +165,7 @@ def validation_run_sha256(
             ],
             "inputs": [item.to_json() for item in inputs],
             "products": [product.to_json() for product in products],
+            "tools": [tool.to_json() for tool in (tools or [])],
         }
     )
 
@@ -231,6 +251,42 @@ def validation_product_from_file(
         product_path,
         sha256_bytes(content),
     )
+
+
+def validation_tool_from_file(
+    backend: str,
+    kind: str,
+    name: str,
+    path: Path,
+) -> ValidationTool:
+    backend_name = validate_backend_name(backend, "validation tool backend")
+    checked_kind = validate_backend_name(kind, "validation tool kind")
+    checked_name = checked_relative_posix_path(name, "validation tool name")
+    if path.is_symlink() or not path.is_file():
+        raise ValidationError(f"validation tool is not a regular file: {path}")
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise ValidationError(f"cannot hash validation tool {path}: {error}") from error
+    return ValidationTool(
+        backend_name,
+        checked_kind,
+        checked_name,
+        sha256_bytes(content),
+        content,
+        path.resolve(),
+    )
+
+
+def resolve_lake_command(root: Path, command: str) -> Path:
+    completed = run(["lake", "env", "which", command], root)
+    paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if completed.returncode != 0 or len(paths) != 1:
+        raise ValidationError(f"cannot resolve Lake command: {command}")
+    path = Path(paths[0])
+    if not path.is_absolute():
+        raise ValidationError(f"Lake resolved a relative command path: {command}")
+    return path
 
 
 def run(
@@ -586,6 +642,39 @@ def retain_validation_products(
     return retained
 
 
+def retain_validation_tools(
+    context: RunContext,
+    tools: list[ValidationTool],
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for tool in tools:
+        if tool.source_path is None or tool.content is None:
+            raise ValidationError(
+                f"validation tool has no retainable source: "
+                f"{tool.backend}:{tool.kind}:{tool.name}"
+            )
+        captured = validation_tool_from_file(
+            tool.backend,
+            tool.kind,
+            tool.name,
+            tool.source_path,
+        )
+        if captured != tool:
+            raise ValidationError(
+                f"validation tool changed before evidence retention: "
+                f"{tool.backend}:{tool.kind}:{tool.name}"
+            )
+        retained.append(
+            {
+                **tool.to_json(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir, "tools", tool.sha256, tool.content
+                ),
+            }
+        )
+    return retained
+
+
 def checked_record(record: dict, backend: str) -> tuple[str, dict]:
     if record.get("version") != PROTOCOL_VERSION:
         raise ValidationError(
@@ -836,6 +925,7 @@ class BackendRun:
     findings: list[ValidationFinding] = field(default_factory=list)
     blocked_cases: set[str] = field(default_factory=set)
     products: list[ValidationProduct] = field(default_factory=list)
+    tools: list[ValidationTool] = field(default_factory=list)
 
 
 @dataclass
@@ -1299,6 +1389,7 @@ def write_matrix_artifact(
     pair_results: list[PairValidationResult],
     findings: list[ValidationFinding],
     products: tuple[ValidationProduct, ...] = (),
+    tools: tuple[ValidationTool, ...] = (),
 ) -> None:
     context.out_dir.mkdir(parents=True, exist_ok=True)
     inputs = (
@@ -1333,6 +1424,23 @@ def write_matrix_artifact(
     if len(set(product_keys)) != len(product_keys):
         raise ValidationError("validation matrix contains duplicate backend products")
     retained_products = retain_validation_products(context, sorted_products)
+    sorted_tools = sorted(
+        tools,
+        key=lambda tool: (tool.backend, tool.kind, tool.name),
+    )
+    for tool in sorted_tools:
+        validate_backend_name(tool.backend, "validation tool backend")
+        validate_backend_name(tool.kind, "validation tool kind")
+        checked_relative_posix_path(tool.name, "validation tool name")
+        if tool.backend not in backend_names:
+            raise ValidationError(
+                f"validation tool names inactive backend: {tool.backend}"
+            )
+        checked_sha256(tool.sha256, "validation tool")
+    tool_keys = [(tool.backend, tool.kind, tool.name) for tool in sorted_tools]
+    if len(set(tool_keys)) != len(tool_keys):
+        raise ValidationError("validation matrix contains duplicate backend tools")
+    retained_tools = retain_validation_tools(context, sorted_tools)
     pairs = []
     for result in pair_results:
         artifact = comparison_artifact_path(
@@ -1376,6 +1484,7 @@ def write_matrix_artifact(
         ],
         inputs,
         sorted_products,
+        sorted_tools,
     )
     (context.out_dir / "matrix.json").write_text(
         json.dumps(
@@ -1390,6 +1499,7 @@ def write_matrix_artifact(
                 "backends": backend_names,
                 "inputs": retained_inputs,
                 "products": retained_products,
+                "tools": retained_tools,
                 "pairs": pairs,
                 "findings": [finding.to_json() for finding in findings],
                 "summary": {
@@ -1407,6 +1517,7 @@ def write_matrix_artifact(
                     "findingCount": len(findings),
                     "inputCount": len(inputs),
                     "productCount": len(sorted_products),
+                    "toolCount": len(sorted_tools),
                 },
             },
             indent=2,
@@ -1465,6 +1576,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "backends",
         "inputs",
         "products",
+        "tools",
         "pairs",
         "findings",
         "summary",
@@ -1560,6 +1672,37 @@ def verify_matrix_artifact(path: Path) -> dict:
         raise ValidationError("validation matrix has duplicate products")
     if product_keys != sorted(product_keys):
         raise ValidationError("validation matrix products are not sorted")
+
+    raw_tools = value["tools"]
+    if not isinstance(raw_tools, list):
+        raise ValidationError("validation matrix has malformed tools")
+    tools: list[ValidationTool] = []
+    for item in raw_tools:
+        if not isinstance(item, dict) or set(item) != {
+            "backend", "kind", "name", "sha256", "artifact"
+        }:
+            raise ValidationError("validation matrix has malformed tool")
+        backend = validate_backend_name(item["backend"], "validation tool backend")
+        kind = validate_backend_name(item["kind"], "validation tool kind")
+        name = checked_relative_posix_path(item["name"], "validation tool name")
+        digest = checked_sha256(item["sha256"], "validation tool")
+        if backend not in checked_backends:
+            raise ValidationError("validation tool names inactive backend")
+        expected_artifact = f"evidence/tools/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError("validation tool has noncanonical artifact path")
+        verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation tool {backend}:{kind}:{name}",
+        )
+        tools.append(ValidationTool(backend, kind, name, digest))
+    tool_keys = [(tool.backend, tool.kind, tool.name) for tool in tools]
+    if len(set(tool_keys)) != len(tool_keys):
+        raise ValidationError("validation matrix has duplicate tools")
+    if tool_keys != sorted(tool_keys):
+        raise ValidationError("validation matrix tools are not sorted")
 
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
@@ -1683,6 +1826,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "findingCount",
         "inputCount",
         "productCount",
+        "toolCount",
     }
     if not isinstance(summary, dict) or set(summary) != expected_summary_fields:
         raise ValidationError("validation matrix has malformed summary")
@@ -1700,6 +1844,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "findingCount": len(findings),
         "inputCount": len(inputs),
         "productCount": len(products),
+        "toolCount": len(tools),
     }
     if summary != expected_summary:
         raise ValidationError("validation matrix summary disagrees with contents")
@@ -1726,6 +1871,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         pair_names,
         tuple(inputs),
         products,
+        tools,
     )
     if run_sha256 != expected_run_sha256:
         raise ValidationError("validation run identity mismatch")
@@ -1830,8 +1976,13 @@ def validate_matrix(
         for backend_run in backend_runs.values()
         for product in backend_run.products
     )
+    tools = tuple(
+        tool
+        for backend_run in backend_runs.values()
+        for tool in backend_run.tools
+    )
     write_matrix_artifact(
-        context, list(adapters), pair_results, all_findings, products
+        context, list(adapters), pair_results, all_findings, products, tools
     )
     return pair_results, all_findings
 
