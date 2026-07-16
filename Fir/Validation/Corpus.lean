@@ -199,6 +199,20 @@ def mkBigCtor (x : Nat) : BigCtor :=
 def bigCtorField (x : Nat) : Nat :=
   (mkBigCtor x).f70
 
+inductive ScalarChoice where
+  | first
+  | second
+  | third
+
+@[noinline]
+def selectScalarChoice : ScalarChoice → Nat
+  | .first => 10
+  | .second => 20
+  | .third => 30
+
+def scalarCasesInternal : Nat :=
+  selectScalarChoice .third
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -496,7 +510,16 @@ def cases : Array Case := #[
     requiredLcnfForms := #["fap", "oproj", "inc", "dec", "lit", "ctor", "return"]
     requiredExecutedLcnfForms := #["fap", "oproj", "inc", "dec", "lit", "ctor", "return"]
     provenance := leanCompileProvenance "tests/compile/bigctor.lean"
-      "70-object-field constructor preserving the original stress size" }
+      "70-object-field constructor preserving the original stress size" },
+  { id := "scalar-enum-cases"
+    entry := ``Source.scalarCasesInternal
+    dependencies := #[``Source.selectScalarChoice]
+    resultSchema := .nat
+    native := fun _ => .nat Source.scalarCasesInternal
+    tags := #["quick", "scalar", "control-flow", "enum", "regression"]
+    requiredLcnfForms := #["fap", "inc", "return", "lit", "cases"]
+    requiredExecutedLcnfForms := #["fap", "lit", "cases", "return", "inc"]
+    provenance := firProvenance "Nullary enum lowered to UInt8 and matched internally" }
 ]
 
 def findCase? (id : String) : Option Case :=
