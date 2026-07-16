@@ -230,6 +230,8 @@ partial def compileCaseChain (context : Context) (discr : FVarId)
   | .default _ :: rest => compileCaseChain context discr rest fallback
   | .alt _ _ _ h :: _ => nomatch h
   | .ctorAlt info code :: rest =>
+      unless constructorTagFitsI32 info do
+        throw (.malformed s!"constructor tag {info.cidx} does not fit the i32 case ABI")
       let thenBody ← compileCode context code
       let elseBody ← compileCaseChain context discr rest fallback
       return [

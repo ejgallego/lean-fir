@@ -98,7 +98,9 @@ partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind
 
 partial def supportedAlt (locals : LocalKinds) (expectedResult : Option AbiKind) :
     LCNF.Alt .impure → Bool
-  | .ctorAlt _ code | .default code => supportedCode locals expectedResult code
+  | .ctorAlt info code =>
+      constructorTagFitsI32 info && supportedCode locals expectedResult code
+  | .default code => supportedCode locals expectedResult code
   | .alt _ _ _ h => nomatch h
 
 end

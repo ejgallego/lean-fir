@@ -121,6 +121,10 @@ def AbiKind.acceptsLiteralInvariant (kind : AbiKind) (literal : LCNF.LitValue) :
 def constructorKind (info : LCNF.CtorInfo) : AbiKind :=
   if info.size == 0 && info.usize == 0 && info.ssize == 0 then .tagged else .object
 
+/-- Case dispatch uses an `i32` tag lane, so source `Nat` tags must not wrap. -/
+def constructorTagFitsI32 (info : LCNF.CtorInfo) : Bool :=
+  decide (info.cidx < UInt32.size)
+
 /--
 Scalar literals must match exactly. The wider object-like cases preserve the
 existing hand-built fixtures tracked by

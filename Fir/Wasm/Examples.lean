@@ -247,6 +247,16 @@ def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt falseInfo
           (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u))]))] }
 
+def oversizedTagInfo : LCNF.CtorInfo :=
+  { name := `Oversized.tag, cidx := UInt32.size, size := 1, usize := 0, ssize := 0 }
+
+def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 0))) <|
+      .let (letDecl c objType (.ctor oversizedTagInfo #[.fvar x])) <|
+      .cases (.mk `Oversized tobjectType c #[
+        .ctorAlt oversizedTagInfo (.return x)]))] }
+
 #guard !supportedProgram literalProgram
 #guard !supportedProgram erasedProgram
 #guard !supportedProgram ctorProjectionProgram
@@ -257,6 +267,7 @@ def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiCtorProjectionProgram
 #guard supportedProgram abiCaseProgram
 #guard supportedProgram abiDefaultCaseProgram
+#guard !supportedProgram oversizedTagCaseProgram
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
 #guard !supportedProgram mutationProgram
@@ -265,6 +276,10 @@ def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
 #guard match lowerSupported abiCaseProgram with
   | .ok _ => true
   | .error _ => false
+
+#guard match lower oversizedTagCaseProgram with
+  | .error (.malformed message) => message.contains "does not fit the i32 case ABI"
+  | _ => false
 
 #guard match validateSupported directCallProgram with
   | .error (.unsupportedCode `main) => true
