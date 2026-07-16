@@ -5,38 +5,166 @@ namespace Fir.Wasm
 open Lean
 open Lean.Compiler
 
+/-- The physical WebAssembly value classes used by FIR. -/
 inductive ValueType where
   | i32
   | i64
+  | f32
+  | f64
   deriving Inhabited, BEq, Repr
 
-def valueType (type : Expr) : ValueType :=
-  if type == LCNF.ImpureType.uint64 || type == LCNF.ImpureType.usize then .i64 else .i32
+/--
+Semantic value classes at the LCNF/WebAssembly boundary.
 
-def resultTypes (type : Expr) : Array ValueType :=
-  if type.isVoid then #[] else #[valueType type]
+Several of these classes have the same physical WebAssembly representation.  They
+remain distinct here so that lowering, imports, and the future correctness
+statements do not silently forget the LCNF contract.
+-/
+inductive AbiKind where
+  | object
+  | tagged
+  | tobject
+  | erased
+  | reuseToken
+  | uint8
+  | uint16
+  | uint32
+  | uint64
+  | usize
+  | float32
+  | float
+  deriving Inhabited, BEq, Repr
+
+def AbiKind.valueType : AbiKind → ValueType
+  | .object | .tagged | .tobject | .erased | .reuseToken
+  | .uint8 | .uint16 | .uint32 => .i32
+  | .uint64 | .usize => .i64
+  | .float32 => .f32
+  | .float => .f64
+
+/-- The only semantic subtyping in the ABI is a precise object representation into `tobject`. -/
+def AbiKind.refines (actual expected : AbiKind) : Bool :=
+  actual == expected ||
+    expected == .tobject && (actual == .object || actual == .tagged)
+
+def AbiKind.isObjectLike : AbiKind → Bool
+  | .object | .tagged | .tobject => true
+  | _ => false
+
+def AbiKind.isObjectField : AbiKind → Bool
+  | .object | .tagged | .tobject | .erased => true
+  | _ => false
+
+def AbiKind.isScalar : AbiKind → Bool
+  | .uint8 | .uint16 | .uint32 | .uint64 | .usize | .float32 | .float => true
+  | _ => false
+
+inductive AbiError where
+  | unsupportedType (type : Expr)
+  | expectedValueType (type : Expr)
+  deriving Inhabited, BEq, Repr
+
+/--
+Classify an impure LCNF type. `none` is the ABI representation of `void`: it
+contributes no parameter, local, or result. Unknown types are rejected.
+-/
+def abiKind? (type : Expr) : Except AbiError (Option AbiKind) :=
+  if type == LCNF.ImpureType.object then
+    pure (some .object)
+  else if type == LCNF.ImpureType.tagged then
+    pure (some .tagged)
+  else if type == LCNF.ImpureType.tobject then
+    pure (some .tobject)
+  else if type == LCNF.ImpureType.erased then
+    pure (some .erased)
+  else if type == LCNF.ImpureType.uint8 then
+    pure (some .uint8)
+  else if type == LCNF.ImpureType.uint16 then
+    pure (some .uint16)
+  else if type == LCNF.ImpureType.uint32 then
+    pure (some .uint32)
+  else if type == LCNF.ImpureType.uint64 then
+    pure (some .uint64)
+  else if type == LCNF.ImpureType.usize then
+    pure (some .usize)
+  else if type == LCNF.ImpureType.float32 then
+    pure (some .float32)
+  else if type == LCNF.ImpureType.float then
+    pure (some .float)
+  else if type == LCNF.ImpureType.void then
+    pure none
+  else
+    throw (.unsupportedType type)
+
+def abiKind (type : Expr) : Except AbiError AbiKind := do
+  let some kind ← abiKind? type | throw (.expectedValueType type)
+  return kind
+
+def resultKinds (type : Expr) : Except AbiError (Array AbiKind) := do
+  match ← abiKind? type with
+  | some kind => return #[kind]
+  | none => return #[]
+
+def literalKind : LCNF.LitValue → AbiKind
+  | .nat _ => .tobject
+  | .str _ => .object
+  | .uint8 _ => .uint8
+  | .uint16 _ => .uint16
+  | .uint32 _ => .uint32
+  | .uint64 _ => .uint64
+  | .usize _ => .usize
+
+/-- The invariant expected of compiler-produced final impure LCNF. -/
+def AbiKind.acceptsLiteralInvariant (kind : AbiKind) (literal : LCNF.LitValue) : Bool :=
+  (literalKind literal).refines kind
+
+def constructorKind (info : LCNF.CtorInfo) : AbiKind :=
+  if info.size == 0 && info.usize == 0 && info.ssize == 0 then .tagged else .object
+
+/--
+Scalar literals must match exactly. The wider object-like cases preserve the
+existing hand-built fixtures tracked by
+`FIR-BUG-wasm-none-object-nat-fixture`; compiler-produced `Nat` literals are
+expected to use `tobject`.
+-/
+def AbiKind.acceptsLiteral (kind : AbiKind) (literal : LCNF.LitValue) : Bool :=
+  match literal with
+  | .nat _ => kind == .object || kind == .tagged || kind == .tobject
+  | .str _ => kind == .object || kind == .tobject
+  | literal => kind == literalKind literal
 
 structure Signature where
+  params : Array AbiKind
+  results : Array AbiKind
+  deriving Inhabited, BEq
+
+structure PhysicalSignature where
   params : Array ValueType
   results : Array ValueType
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq
+
+def Signature.physical (signature : Signature) : PhysicalSignature :=
+  { params := signature.params.map AbiKind.valueType
+    results := signature.results.map AbiKind.valueType }
 
 inductive RuntimeOp where
-  | literal (value : LCNF.LitValue)
-  | allocCtor (info : LCNF.CtorInfo) (fields : Array ValueType)
-  | objectProj (index : Nat)
+  | literal (value : LCNF.LitValue) (result : AbiKind)
+  | allocCtor (info : LCNF.CtorInfo) (fields : Array AbiKind) (result : AbiKind)
+  | objectProj (index : Nat) (result : AbiKind)
   | usizeProj (index : Nat)
-  | scalarProj (width offset : Nat) (result : ValueType)
-  | partialApply (function : Name) (arity fixed : Nat) (fields : Array ValueType)
-  | closureApply (args : Array ValueType) (result : Array ValueType)
+  | scalarProj (width offset : Nat) (result : AbiKind)
+  | partialApply (function : Name) (arity fixed : Nat) (fields : Array AbiKind)
+      (result : AbiKind)
+  | closureApply (args : Array AbiKind) (result : Array AbiKind)
   | reset (objectFields : Nat)
-  | reuse (info : LCNF.CtorInfo) (updateHeader : Bool) (fields : Array ValueType)
-  | box (scalar : ValueType)
-  | unbox (scalar : ValueType)
+  | reuse (info : LCNF.CtorInfo) (updateHeader : Bool) (fields : Array AbiKind)
+      (result : AbiKind)
+  | box (scalar result : AbiKind)
+  | unbox (scalar : AbiKind)
   | isShared
-  | objectSet (index : Nat) (field : ValueType)
+  | objectSet (index : Nat) (field : AbiKind)
   | usizeSet (index : Nat)
-  | scalarSet (width offset : Nat) (field : ValueType)
+  | scalarSet (width offset : Nat) (field : AbiKind)
   | setTag (tag : Nat)
   | inc (amount : Nat) (check : Bool)
   | dec (amount : Nat) (check : Bool) (objectFields? : Option Nat)
@@ -44,30 +172,54 @@ inductive RuntimeOp where
   | getTag
   deriving Inhabited, BEq
 
+/-- Operation-specific semantic constraints not expressible by the plain constructor fields. -/
+def RuntimeOp.abiWellFormed : RuntimeOp → Bool
+  | .literal value result => result.acceptsLiteral value
+  | .allocCtor info fields result =>
+      info.size == fields.size && fields.all AbiKind.isObjectField &&
+        (constructorKind info).refines result
+  | .objectProj _ result => result.isObjectField
+  | .usizeProj _ => true
+  | .scalarProj _ _ result => result.isScalar
+  | .partialApply _ arity fixed _ result => fixed < arity && result.isObjectLike
+  | .closureApply _ results => results.size <= 1
+  | .reset _ => true
+  | .reuse info _ fields result =>
+      info.size == fields.size && fields.all AbiKind.isObjectField &&
+        (constructorKind info).refines result
+  | .box scalar result => scalar.isScalar && result.isObjectLike
+  | .unbox scalar => scalar.isScalar
+  | .isShared => true
+  | .objectSet _ field => field.isObjectField
+  | .usizeSet _ => true
+  | .scalarSet _ _ field => field.isScalar
+  | .setTag _ | .inc _ _ | .dec _ _ _ | .delete | .getTag => true
+
 def RuntimeOp.signature : RuntimeOp → Signature
-  | .literal _ => { params := #[], results := #[.i32] }
-  | .allocCtor _ fields => { params := fields, results := #[.i32] }
-  | .objectProj _ => { params := #[.i32], results := #[.i32] }
-  | .usizeProj _ => { params := #[.i32], results := #[.i64] }
-  | .scalarProj _ _ result => { params := #[.i32], results := #[result] }
-  | .partialApply _ _ _ fields => { params := fields, results := #[.i32] }
-  | .closureApply args result => { params := #[.i32] ++ args, results := result }
-  | .reset _ => { params := #[.i32], results := #[.i32] }
-  | .reuse _ _ fields => { params := #[.i32] ++ fields, results := #[.i32] }
-  | .box scalar => { params := #[scalar], results := #[.i32] }
-  | .unbox scalar => { params := #[.i32], results := #[scalar] }
-  | .isShared => { params := #[.i32], results := #[.i32] }
-  | .objectSet _ field => { params := #[.i32, field], results := #[] }
-  | .usizeSet _ => { params := #[.i32, .i64], results := #[] }
-  | .scalarSet _ _ field => { params := #[.i32, field], results := #[] }
-  | .setTag _ => { params := #[.i32], results := #[] }
-  | .inc _ _ => { params := #[.i32], results := #[] }
-  | .dec _ _ _ => { params := #[.i32], results := #[] }
-  | .delete => { params := #[.i32], results := #[] }
-  | .getTag => { params := #[.i32], results := #[.i32] }
+  | .literal _ result => { params := #[], results := #[result] }
+  | .allocCtor _ fields result => { params := fields, results := #[result] }
+  | .objectProj _ result => { params := #[.tobject], results := #[result] }
+  | .usizeProj _ => { params := #[.tobject], results := #[.usize] }
+  | .scalarProj _ _ result => { params := #[.tobject], results := #[result] }
+  | .partialApply _ _ _ fields result => { params := fields, results := #[result] }
+  | .closureApply args result => { params := #[.tobject] ++ args, results := result }
+  | .reset _ => { params := #[.tobject], results := #[.reuseToken] }
+  | .reuse _ _ fields result =>
+      { params := #[.reuseToken] ++ fields, results := #[result] }
+  | .box scalar result => { params := #[scalar], results := #[result] }
+  | .unbox scalar => { params := #[.tobject], results := #[scalar] }
+  | .isShared => { params := #[.tobject], results := #[.uint8] }
+  | .objectSet _ field => { params := #[.object, field], results := #[] }
+  | .usizeSet _ => { params := #[.object, .usize], results := #[] }
+  | .scalarSet _ _ field => { params := #[.object, field], results := #[] }
+  | .setTag _ => { params := #[.object], results := #[] }
+  | .inc _ _ => { params := #[.tobject], results := #[] }
+  | .dec _ _ _ => { params := #[.tobject], results := #[] }
+  | .delete => { params := #[.object], results := #[] }
+  | .getTag => { params := #[.tobject], results := #[.uint32] }
 
 def RuntimeOp.stem : RuntimeOp → String
-  | .literal _ => "literal"
+  | .literal .. => "literal"
   | .allocCtor .. => "alloc_ctor"
   | .objectProj .. => "oproj"
   | .usizeProj .. => "uproj"
@@ -88,26 +240,46 @@ def RuntimeOp.stem : RuntimeOp → String
   | .delete => "delete"
   | .getTag => "get_tag"
 
+/-- Stable semantic identity, independent of an import's presentation ordinal. -/
+inductive ImportKey where
+  | runtime (operation : RuntimeOp)
+  | external (declaration : Name)
+  deriving Inhabited, BEq
+
 structure Import where
+  key : ImportKey
   moduleName : String
   itemName : String
   signature : Signature
-  operation? : Option RuntimeOp := none
-  declaration? : Option Name := none
   deriving Inhabited, BEq
 
-def runtimeImport (index : Nat) (operation : RuntimeOp) : Import :=
-  { moduleName := "fir"
-    itemName := s!"{operation.stem}_{index}"
-    signature := operation.signature
-    operation? := some operation }
+def Import.operation? (import_ : Import) : Option RuntimeOp :=
+  match import_.key with
+  | .runtime operation => some operation
+  | .external _ => none
 
-def externalImport (decl : LCNF.Decl .impure) : Import :=
-  { moduleName := "lean.extern"
+def Import.declaration? (import_ : Import) : Option Name :=
+  match import_.key with
+  | .runtime _ => none
+  | .external declaration => some declaration
+
+/-- Runtime imports are numbered in first-use order; their semantic key is stable. -/
+def runtimeImport (index : Nat) (operation : RuntimeOp) : Import :=
+  { key := .runtime operation
+    moduleName := "fir"
+    itemName := s!"{operation.stem}_{index}"
+    signature := operation.signature }
+
+def externalImport (decl : LCNF.Decl .impure) : Except AbiError Import := do
+  let params ← decl.params.foldlM (init := #[]) fun params param => do
+    match ← abiKind? param.type with
+    | some kind => return params.push kind
+    | none => return params
+  let results ← resultKinds decl.type
+  return {
+    key := .external decl.name
+    moduleName := "lean.extern"
     itemName := decl.name.toString
-    signature := {
-      params := decl.params.map (valueType ·.type)
-      results := resultTypes decl.type }
-    declaration? := some decl.name }
+    signature := { params, results } }
 
 end Fir.Wasm

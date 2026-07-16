@@ -14,6 +14,11 @@ inductive AdapterError where
 def valueType : Fir.Wasm.ValueType → Wasm.ValueType
   | .i32 => .i32
   | .i64 => .i64
+  | .f32 => .f32
+  | .f64 => .f64
+
+def abiKind (kind : Fir.Wasm.AbiKind) : Wasm.ValueType :=
+  valueType kind.valueType
 
 def findFVar? : List (FVarId × α) → FVarId → Option Nat
   | [], _ => none
@@ -79,15 +84,15 @@ end
 def importDecl (sourceImport : Fir.Wasm.Import) : Wasm.ImportDecl :=
   { module := sourceImport.moduleName
     name := sourceImport.itemName
-    params := sourceImport.signature.params.toList.map valueType
-    results := sourceImport.signature.results.toList.map valueType }
+    params := sourceImport.signature.params.toList.map abiKind
+    results := sourceImport.signature.results.toList.map abiKind }
 
 def function (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
     Except AdapterError Wasm.Function := do
   return {
-    params := source.params.toList.map fun entry => valueType entry.snd
-    locals := source.locals.toList.map fun entry => valueType entry.snd
-    results := source.results.toList.map valueType
+    params := source.params.toList.map fun entry => abiKind entry.snd
+    locals := source.locals.toList.map fun entry => abiKind entry.snd
+    results := source.results.toList.map abiKind
     body := ← instructions module source [] source.body }
 
 def module (source : Fir.Wasm.Module) : Except AdapterError Wasm.Module := do

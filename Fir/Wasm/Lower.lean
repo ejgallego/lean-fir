@@ -26,9 +26,9 @@ inductive Instruction where
 
 structure Function where
   name : Name
-  params : Array (FVarId × ValueType)
-  results : Array ValueType
-  locals : Array (FVarId × ValueType)
+  params : Array (FVarId × AbiKind)
+  results : Array AbiKind
+  locals : Array (FVarId × AbiKind)
   body : List Instruction
   deriving Inhabited, BEq
 
@@ -41,6 +41,7 @@ structure Module where
   deriving Inhabited, BEq
 
 inductive CompileError where
+  | abi (error : AbiError)
   | unknownVariable (fvarId : FVarId)
   | unknownDeclaration (name : Name)
   | unknownJoinPoint (fvarId : FVarId)
@@ -48,41 +49,63 @@ inductive CompileError where
   | malformed (message : String)
   deriving Inhabited, BEq, Repr
 
-abbrev LocalTypes := List (FVarId × ValueType)
+abbrev LocalKinds := List (FVarId × AbiKind)
 abbrev JoinPoints := List (FVarId × LCNF.FunDecl .impure)
 
 structure Context where
   program : Fir.LeanIR.ImpureProgram
-  localTypes : LocalTypes
+  localKinds : LocalKinds
   joins : JoinPoints := []
 
-def insertLocal (locals : LocalTypes) (fvarId : FVarId) (type : ValueType) : LocalTypes :=
-  (fvarId, type) :: locals.filter fun entry => entry.fst.name != fvarId.name
+def insertLocal (locals : LocalKinds) (fvarId : FVarId) (kind : AbiKind) : LocalKinds :=
+  (fvarId, kind) :: locals.filter fun entry => entry.fst.name != fvarId.name
 
-def findLocalType? : LocalTypes → FVarId → Option ValueType
+def findLocalKind? : LocalKinds → FVarId → Option AbiKind
   | [], _ => none
-  | (candidate, type) :: rest, fvarId =>
-      if candidate.name == fvarId.name then some type else findLocalType? rest fvarId
+  | (candidate, kind) :: rest, fvarId =>
+      if candidate.name == fvarId.name then some kind else findLocalKind? rest fvarId
 
 def findJoinPoint? : JoinPoints → FVarId → Option (LCNF.FunDecl .impure)
   | [], _ => none
   | (candidate, decl) :: rest, fvarId =>
       if candidate.name == fvarId.name then some decl else findJoinPoint? rest fvarId
 
-def addParams (locals : LocalTypes) (params : Array (LCNF.Param .impure)) : LocalTypes :=
-  params.foldl (init := locals) fun locals param =>
-    insertLocal locals param.fvarId (valueType param.type)
+def checkedAbiKind? (type : Expr) : Except CompileError (Option AbiKind) :=
+  match abiKind? type with
+  | .ok kind? => pure kind?
+  | .error error => throw (.abi error)
 
-partial def collectLocals (locals : LocalTypes) : LCNF.Code .impure → LocalTypes
-  | .let decl continuation =>
-      collectLocals (insertLocal locals decl.fvarId (valueType decl.type)) continuation
+def checkedAbiKind (type : Expr) : Except CompileError AbiKind :=
+  match abiKind type with
+  | .ok kind => pure kind
+  | .error error => throw (.abi error)
+
+def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
+  match decl.value with
+  | .erased => pure .erased
+  | .reset .. => pure .reuseToken
+  | _ => checkedAbiKind decl.type
+
+def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
+    Except CompileError LocalKinds := do
+  params.foldlM (init := locals) fun locals param => do
+    match ← checkedAbiKind? param.type with
+    | some kind => return insertLocal locals param.fvarId kind
+    | none => return locals
+
+partial def collectLocals (locals : LocalKinds) :
+    LCNF.Code .impure → Except CompileError LocalKinds
+  | .let decl continuation => do
+      let kind ← letValueKind decl
+      collectLocals (insertLocal locals decl.fvarId kind) continuation
   | .fun _ _ h => nomatch h
-  | .jp decl continuation =>
-      let locals := addParams locals decl.params
-      collectLocals (collectLocals locals decl.value) continuation
-  | .jmp .. | .return .. | .unreach .. => locals
-  | .cases cases =>
-      cases.alts.foldl (init := locals) fun locals alt =>
+  | .jp decl continuation => do
+      let locals ← addParams locals decl.params
+      let locals ← collectLocals locals decl.value
+      collectLocals locals continuation
+  | .jmp .. | .return .. | .unreach .. => pure locals
+  | .cases cases => do
+      cases.alts.foldlM (init := locals) fun locals alt =>
         match alt with
         | .ctorAlt _ code => collectLocals locals code
         | .default code => collectLocals locals code
@@ -95,85 +118,97 @@ partial def collectLocals (locals : LocalTypes) : LCNF.Code .impure → LocalTyp
   | .dec _ _ _ _ _ continuation
   | .del _ continuation => collectLocals locals continuation
 
-def compileArg (context : Context) : LCNF.Arg .impure → Except CompileError (List Instruction × ValueType)
-  | .erased => .ok ([.i32Const 0], .i32)
+def compileArg (context : Context) :
+    LCNF.Arg .impure → Except CompileError (List Instruction × AbiKind)
+  | .erased => .ok ([.i32Const 0], .erased)
   | .fvar fvarId =>
-      match findLocalType? context.localTypes fvarId with
-      | some type => .ok ([.localGet fvarId], type)
+      match findLocalKind? context.localKinds fvarId with
+      | some kind => .ok ([.localGet fvarId], kind)
       | none => .error (.unknownVariable fvarId)
   | .type _ h => nomatch h
 
 def compileArgs (context : Context) (args : Array (LCNF.Arg .impure)) :
-    Except CompileError (List Instruction × Array ValueType) := do
-  args.foldlM (init := ([], #[])) fun (instructions, types) arg => do
-    let (argument, type) ← compileArg context arg
-    return (instructions ++ argument, types.push type)
+    Except CompileError (List Instruction × Array AbiKind) := do
+  args.foldlM (init := ([], #[])) fun (instructions, kinds) arg => do
+    let (argument, kind) ← compileArg context arg
+    return (instructions ++ argument, kinds.push kind)
 
-def getLocal (context : Context) (fvarId : FVarId) : Except CompileError (Instruction × ValueType) :=
-  match findLocalType? context.localTypes fvarId with
-  | some type => .ok (.localGet fvarId, type)
+def getLocal (context : Context) (fvarId : FVarId) :
+    Except CompileError (Instruction × AbiKind) :=
+  match findLocalKind? context.localKinds fvarId with
+  | some kind => .ok (.localGet fvarId, kind)
   | none => .error (.unknownVariable fvarId)
 
-def compileLiteral : LCNF.LitValue → List Instruction
+def compileLiteral (result : AbiKind) : LCNF.LitValue → List Instruction
   | .uint8 value => [.i32Const (UInt32.ofNat value.toNat)]
   | .uint16 value => [.i32Const (UInt32.ofNat value.toNat)]
   | .uint32 value => [.i32Const value]
   | .uint64 value => [.i64Const value]
   | .usize value => [.i64Const value]
-  | value@(.nat _) | value@(.str _) => [.call (.runtime (.literal value))]
+  | value@(.nat _) | value@(.str _) => [.call (.runtime (.literal value result))]
 
 def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
     Except CompileError (List Instruction) := do
+  let resultKind ← letValueKind decl
   match decl.value with
-  | .lit literal => return compileLiteral literal
+  | .lit literal =>
+      unless resultKind.acceptsLiteral literal do
+        throw (.malformed "literal kind does not match its declaration")
+      return compileLiteral resultKind literal
   | .erased => return [.i32Const 0]
   | .proj _ _ _ h => nomatch h
   | .const _ _ _ h => nomatch h
   | .fvar fvarId args =>
       let (function, _) ← getLocal context fvarId
-      let (arguments, types) ← compileArgs context args
+      let (arguments, kinds) ← compileArgs context args
       return function :: arguments ++
-        [.call (.runtime (.closureApply types (resultTypes decl.type)))]
+        [.call (.runtime (.closureApply kinds #[resultKind]))]
   | .ctor info args =>
-      let (arguments, types) ← compileArgs context args
-      return arguments ++ [.call (.runtime (.allocCtor info types))]
+      let (arguments, kinds) ← compileArgs context args
+      return arguments ++ [.call (.runtime (.allocCtor info kinds resultKind))]
   | .oproj index fvarId =>
       let (object, _) ← getLocal context fvarId
-      return [object, .call (.runtime (.objectProj index))]
+      return [object, .call (.runtime (.objectProj index resultKind))]
   | .uproj index fvarId =>
       let (object, _) ← getLocal context fvarId
+      unless resultKind == .usize do
+        throw (.malformed "usize projection must produce USize")
       return [object, .call (.runtime (.usizeProj index))]
   | .sproj width offset fvarId =>
       let (object, _) ← getLocal context fvarId
-      return [object, .call (.runtime (.scalarProj width offset (valueType decl.type)))]
+      return [object, .call (.runtime (.scalarProj width offset resultKind))]
   | .fap name args =>
       let (arguments, _) ← compileArgs context args
       let some _ := context.program.findDecl? name | throw (.unknownDeclaration name)
       return arguments ++ [.call (.declaration name)]
   | .pap name args =>
-      let (arguments, types) ← compileArgs context args
+      let (arguments, kinds) ← compileArgs context args
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
       if args.size >= target.params.size then
         throw (.malformed s!"partial application {name} fixes too many parameters")
       return arguments ++ [
-        .call (.runtime (.partialApply name target.params.size args.size types))]
+        .call (.runtime (.partialApply name target.params.size args.size kinds resultKind))]
   | .reset count fvarId =>
       let (object, _) ← getLocal context fvarId
       return [object, .call (.runtime (.reset count))]
   | .reuse fvarId info updateHeader args =>
       let (token, _) ← getLocal context fvarId
-      let (arguments, types) ← compileArgs context args
-      return token :: arguments ++ [.call (.runtime (.reuse info updateHeader types))]
+      let (arguments, kinds) ← compileArgs context args
+      return token :: arguments ++
+        [.call (.runtime (.reuse info updateHeader kinds resultKind))]
   | .box type fvarId =>
-      let (scalar, scalarType) ← getLocal context fvarId
-      if valueType type != scalarType then
+      let (scalar, scalarKind) ← getLocal context fvarId
+      let annotationKind ← checkedAbiKind type
+      if annotationKind != scalarKind then
         throw (.malformed "box operand type does not match its annotation")
-      return [scalar, .call (.runtime (.box scalarType))]
+      return [scalar, .call (.runtime (.box scalarKind resultKind))]
   | .unbox fvarId =>
       let (object, _) ← getLocal context fvarId
-      return [object, .call (.runtime (.unbox (valueType decl.type)))]
+      return [object, .call (.runtime (.unbox resultKind))]
   | .isShared fvarId =>
       let (object, _) ← getLocal context fvarId
+      unless resultKind == .uint8 do
+        throw (.malformed "isShared must produce UInt8")
       return [object, .call (.runtime .isShared)]
 
 def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .impure)) :
@@ -284,27 +319,36 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure) :
   match decl.value with
   | .extern _ => return none
   | .code code =>
-      let paramLocals := addParams [] decl.params
-      let allLocals := collectLocals paramLocals code
-      let context : Context := { program, localTypes := allLocals }
+      let paramLocals ← addParams [] decl.params
+      let allLocals ← collectLocals paramLocals code
+      let context : Context := { program, localKinds := allLocals }
       let body ← compileCode context code
       let isParam (fvarId : FVarId) := decl.params.any (·.fvarId.name == fvarId.name)
       let locals := allLocals.reverse.filter fun entry => !isParam entry.fst
+      let results ←
+        match resultKinds decl.type with
+        | .ok results => pure results
+        | .error error => throw (.abi error)
       return some {
         name := decl.name
-        params := decl.params.map fun param => (param.fvarId, valueType param.type)
-        results := resultTypes decl.type
+        params := paramLocals.reverse.toArray
+        results
         locals := locals.toArray
         body }
 
 def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := do
   let functions ← program.decls.filterMapM (lowerDecl program)
   let operations := collectRuntimeOps functions
+  unless operations.all RuntimeOp.abiWellFormed do
+    throw (.malformed "generated runtime operation violates the semantic ABI")
   let runtimeImports := operations.mapIdx runtimeImport
-  let externalImports := program.decls.filterMap fun decl =>
+  let externalImports ← program.decls.filterMapM fun decl =>
     match decl.value with
-    | .extern _ => some (externalImport decl)
-    | .code _ => none
+    | .extern _ => do
+        match externalImport decl with
+        | .ok import_ => return some import_
+        | .error error => throw (.abi error)
+    | .code _ => pure none
   let exports := functions.map (·.name)
   let initializers := program.decls.filterMap fun decl =>
     if decl.params.isEmpty then some decl.name else none

@@ -25,4 +25,19 @@ def scalarIdModule : Wasm.Module :=
 #guard Wasm.Examples.runValues 5 scalarIdModule 0
   (scalarIdModule.initialStore (α := Unit)) [.i64 123] == [.i64 123]
 
+def floatIdModule : Wasm.Module :=
+  match Fir.Wasm.floatIdModule? with
+  | none => default
+  | some source =>
+      match module source with
+      | .ok target => target
+      | .error _ => default
+
+#guard floatIdModule.funcs[0]?.any fun function =>
+  function.params == [.f32] && function.results == [.f32]
+
+#guard Fir.Wasm.floatExternalImport?.any fun sourceImport =>
+  let target := importDecl sourceImport
+  target.params == [.f32] && target.results == [.f64]
+
 end FirTalos
