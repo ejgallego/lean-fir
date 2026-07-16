@@ -54,6 +54,29 @@ paths, de-duplicated global findings, and aggregate backend/pair/comparison
 counts.  Automation can start there and open only the detailed pair reports it
 needs.
 
+CI can check the requested graph into a strict, versioned plan instead of
+assembling flags.  `make validate` uses
+`validation-plans/native-lcnf.json`; a future Wasm plan can add adapter configs
+without changing the harness:
+
+```json
+{
+  "version": 1,
+  "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
+  "pairs": [
+    {"reference": "native", "candidate": "lcnf"},
+    {"reference": "native", "candidate": "v8"},
+    {"reference": "v8", "candidate": "talos"}
+  ]
+}
+```
+
+Adapter-config paths are resolved relative to the plan file, not the invoking
+shell.  Unknown fields, protocol-version drift, duplicate paths or pairs,
+self-comparisons, malformed backend names, and an empty graph are rejected.
+`--plan` is exclusive with the pair/adapter flags; `--case`, `--tag`,
+`--out-dir`, and `--no-build` remain valid runtime controls.
+
 The driver discovers the corpus from the native executable, then composes two
 named backend adapters.  Each adapter owns its build and execution strategy and
 an optional backend-specific audit; the shared driver owns protocol result

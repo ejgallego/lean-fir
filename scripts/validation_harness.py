@@ -691,6 +691,88 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
     )
 
 
+@dataclass(frozen=True)
+class ValidationPlan:
+    adapter_configs: tuple[Path, ...]
+    pairs: tuple[tuple[str, str], ...]
+
+
+def validation_plan_from_config(path: Path) -> ValidationPlan:
+    """Load a strict matrix plan, resolving adapter paths beside the plan."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValidationError(f"cannot read validation plan {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValidationError(f"validation plan {path}: expected a JSON object")
+    required = {"version", "adapterConfigs", "pairs"}
+    missing = sorted(required - value.keys())
+    unknown = sorted(value.keys() - required)
+    if missing:
+        raise ValidationError(
+            f"validation plan {path}: missing fields: {', '.join(missing)}"
+        )
+    if unknown:
+        raise ValidationError(
+            f"validation plan {path}: unknown fields: {', '.join(unknown)}"
+        )
+    version = value["version"]
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version != PROTOCOL_VERSION
+    ):
+        raise ValidationError(
+            f"validation plan {path}: version {version} "
+            f"is not {PROTOCOL_VERSION}"
+        )
+
+    raw_configs = value["adapterConfigs"]
+    if not isinstance(raw_configs, list) or not all(
+        isinstance(config, str) and config for config in raw_configs
+    ):
+        raise ValidationError(
+            f"validation plan {path}: adapterConfigs must be a path array"
+        )
+    adapter_configs = tuple(
+        (
+            Path(config)
+            if Path(config).is_absolute()
+            else path.parent / config
+        ).resolve()
+        for config in raw_configs
+    )
+    if len(set(adapter_configs)) != len(adapter_configs):
+        raise ValidationError(
+            f"validation plan {path}: duplicate adapterConfigs"
+        )
+
+    raw_pairs = value["pairs"]
+    if not isinstance(raw_pairs, list) or not raw_pairs:
+        raise ValidationError(
+            f"validation plan {path}: pairs must be a nonempty object array"
+        )
+    pairs: list[tuple[str, str]] = []
+    for index, pair in enumerate(raw_pairs):
+        pair_context = f"validation plan {path}/pairs/{index}"
+        if not isinstance(pair, dict) or set(pair) != {"reference", "candidate"}:
+            raise ValidationError(
+                f"{pair_context}: expected reference and candidate fields"
+            )
+        reference = validate_backend_name(pair["reference"], pair_context)
+        candidate = validate_backend_name(pair["candidate"], pair_context)
+        if reference == candidate:
+            raise ValidationError(
+                f"{pair_context}: comparison backends must be distinct"
+            )
+        pairs.append((reference, candidate))
+    if len(set(pairs)) != len(pairs):
+        raise ValidationError(
+            f"validation plan {path}: duplicate comparison pairs"
+        )
+    return ValidationPlan(adapter_configs, tuple(pairs))
+
+
 @dataclass
 class PairValidationResult:
     reference: str

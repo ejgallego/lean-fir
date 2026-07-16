@@ -730,6 +730,61 @@ class HarnessTests(unittest.TestCase):
             with self.assertRaisesRegex(harness.ValidationError, "argv array"):
                 harness.external_adapter_from_config(path)
 
+    def test_validation_plan_resolves_configs_and_preserves_pair_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            path = plan_dir / "wasm-matrix.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "adapterConfigs": [
+                            "../adapters/v8.json",
+                            "../adapters/talos.json",
+                        ],
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"},
+                            {"reference": "native", "candidate": "v8"},
+                            {"reference": "v8", "candidate": "talos"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = harness.validation_plan_from_config(path)
+            self.assertEqual(
+                plan.adapter_configs,
+                (
+                    (root / "adapters" / "v8.json").resolve(),
+                    (root / "adapters" / "talos.json").resolve(),
+                ),
+            )
+            self.assertEqual(
+                plan.pairs,
+                (
+                    ("native", "lcnf"),
+                    ("native", "v8"),
+                    ("v8", "talos"),
+                ),
+            )
+
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["pairs"].append(value["pairs"][0])
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate comparison pairs"
+            ):
+                harness.validation_plan_from_config(path)
+
+    def test_checked_native_lcnf_plan_matches_default_matrix(self) -> None:
+        plan = harness.validation_plan_from_config(
+            harness.ROOT / "validation-plans" / "native-lcnf.json"
+        )
+        self.assertEqual(plan.adapter_configs, ())
+        self.assertEqual(plan.pairs, (("native", "lcnf"),))
+
     def test_external_adapter_receives_corpus_and_selection_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             out_dir = Path(directory)

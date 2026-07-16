@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "adapterConfigs": [],
+  "pairs": [
+    {
+      "reference": "native",
+      "candidate": "lcnf"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ from validation_harness import (
     RunContext,
     ValidationError,
     ValidationFinding,
+    ValidationPlan,
     checked_record,
     comparison_artifact_path,
     compare_backend_results,
@@ -32,6 +33,7 @@ from validation_harness import (
     validate_pair,
     validate_backend_name,
     validate_matrix,
+    validation_plan_from_config,
     write_comparison_artifact,
     write_corpus_manifest,
     write_matrix_artifact,
@@ -154,12 +156,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--reference",
-        default="native",
+        default=None,
         help="single-pair reference when --pair is absent",
     )
     parser.add_argument(
         "--candidate",
-        default="lcnf",
+        default=None,
         help="single-pair candidate when --pair is absent",
     )
     parser.add_argument(
@@ -176,17 +178,37 @@ def main() -> int:
         default=[],
         help="register an external protocol backend from this JSON file",
     )
+    parser.add_argument(
+        "--plan",
+        type=Path,
+        help="load adapter configs and directed pairs from this JSON plan",
+    )
     args = parser.parse_args()
 
-    pair_names = (
-        [parse_pair_spec(specification) for specification in args.pair]
-        if args.pair
-        else [parse_pair_spec(f"{args.reference}:{args.candidate}")]
-    )
+    if args.plan is not None:
+        if args.pair or args.adapter_config or args.reference or args.candidate:
+            raise ValidationError(
+                "--plan cannot be combined with --pair, --adapter-config, "
+                "--reference, or --candidate"
+            )
+        plan = validation_plan_from_config(args.plan)
+        pair_names = list(plan.pairs)
+        adapter_config_paths = list(plan.adapter_configs)
+    else:
+        pair_names = (
+            [parse_pair_spec(specification) for specification in args.pair]
+            if args.pair
+            else [
+                parse_pair_spec(
+                    f"{args.reference or 'native'}:{args.candidate or 'lcnf'}"
+                )
+            ]
+        )
+        adapter_config_paths = args.adapter_config
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("comparison pair selected more than once")
     adapters = dict(BACKEND_ADAPTERS)
-    for path in args.adapter_config:
+    for path in adapter_config_paths:
         adapter = external_adapter_from_config(path)
         if adapter.name in adapters:
             raise ValidationError(

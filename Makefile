@@ -13,7 +13,7 @@ inspect:
 
 validate:
 	python3 scripts/test_validate_interpreters.py
-	python3 scripts/validate_interpreters.py
+	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
 
 no-placeholders:
 	@if rg -n "sorry|admit" Fir docs Inspect FirValidation*.lean; then \
