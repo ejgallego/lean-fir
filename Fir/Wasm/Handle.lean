@@ -28,6 +28,7 @@ inductive TargetFailure where
   | invalidHandle (handle : Handle)
   | handleSpaceExhausted
   | invalidHandleTable (next : Nat)
+  | arityMismatch (expected actual : Nat)
   | abiKindMismatch (kind : AbiKind)
   deriving Inhabited, BEq, Repr
 
@@ -76,7 +77,12 @@ structure RuntimeHost where
   runtime : RuntimeState := {}
   handles : HandleTable := {}
   fault? : Option RuntimeFault := none
+  targetFailure? : Option TargetFailure := none
   deriving Inhabited, BEq
+
+/-- Recover the structured cause behind the latest host trap, independently of its message. -/
+def RuntimeHost.trap? (host : RuntimeHost) : Option StructuredTrap :=
+  host.fault?.map .source <|> host.targetFailure?.map .target
 
 def HandleTable.lookup? : List (Handle × Value) → Handle → Option Value
   | [], _ => none
