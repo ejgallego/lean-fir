@@ -147,6 +147,179 @@ theorem proofCaseLocalCodeRelated :
   · exact proofCaseBranches
   · exact ⟨1, by native_decide⟩
 
+theorem ctorDefaultCaseTableDeterministic
+    (info : LCNF.CtorInfo) (ctorCode defaultCode : LCNF.Code .impure) :
+    CaseTableDeterministic [.ctorAlt info ctorCode, .default defaultCode] := by
+  constructor
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp at leftMember rightMember
+    simp_all
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt] at leftHas rightHas
+    simp_all
+
+theorem defaultCtorCaseTableDeterministic
+    (info : LCNF.CtorInfo) (ctorCode defaultCode : LCNF.Code .impure) :
+    CaseTableDeterministic [.default defaultCode, .ctorAlt info ctorCode] := by
+  constructor
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp at leftMember rightMember
+    simp_all
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt] at leftHas rightHas
+    simp_all
+
+def nestedInnerLeftCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .ctorAlt falseInfo (.return x),
+    .default (.unreach objType)]
+
+def nestedInnerRightCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.unreach objType),
+    .ctorAlt falseInfo (.return x)]
+
+def nestedInnerDefaultMismatchCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return x),
+    .ctorAlt falseInfo (.return x)]
+
+def nestedInnerCtorMismatchCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.unreach objType),
+    .ctorAlt falseInfo (.unreach objType)]
+
+def nestedOuterLeftCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .ctorAlt falseInfo (.cases nestedInnerLeftCases),
+    .default (.return x)]
+
+def nestedOuterRightCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return x),
+    .ctorAlt falseInfo (.cases nestedInnerRightCases)]
+
+def nestedOuterDefaultMismatchCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return x),
+    .ctorAlt falseInfo (.cases nestedInnerDefaultMismatchCases)]
+
+def nestedOuterCtorMismatchCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return x),
+    .ctorAlt falseInfo (.cases nestedInnerCtorMismatchCases)]
+
+def nestedLeftCode : LCNF.Code .impure :=
+  .cases nestedOuterLeftCases
+
+def nestedRightCode : LCNF.Code .impure :=
+  .cases nestedOuterRightCases
+
+def nestedDefaultMismatchCode : LCNF.Code .impure :=
+  .cases nestedOuterDefaultMismatchCases
+
+def nestedCtorMismatchCode : LCNF.Code .impure :=
+  .cases nestedOuterCtorMismatchCases
+
+theorem nestedInnerLeftNormalization :
+    CaseTableNormalizationInvariant nestedInnerLeftCases.alts := by
+  constructor
+  simpa [nestedInnerLeftCases, LCNF.Cases.alts] using
+    ctorDefaultCaseTableDeterministic falseInfo (.return x) (.unreach objType)
+
+theorem nestedInnerRightNormalization :
+    CaseTableNormalizationInvariant nestedInnerRightCases.alts := by
+  constructor
+  simpa [nestedInnerRightCases, LCNF.Cases.alts] using
+    defaultCtorCaseTableDeterministic falseInfo (.return x) (.unreach objType)
+
+theorem nestedOuterLeftNormalization :
+    CaseTableNormalizationInvariant nestedOuterLeftCases.alts := by
+  constructor
+  simpa [nestedOuterLeftCases, LCNF.Cases.alts] using
+    ctorDefaultCaseTableDeterministic falseInfo
+      (.cases nestedInnerLeftCases) (.return x)
+
+theorem nestedOuterRightNormalization :
+    CaseTableNormalizationInvariant nestedOuterRightCases.alts := by
+  constructor
+  simpa [nestedOuterRightCases, LCNF.Cases.alts] using
+    defaultCtorCaseTableDeterministic falseInfo
+      (.cases nestedInnerRightCases) (.return x)
+
+theorem nestedInnerCodeSideConditions :
+    CodeSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+      (.cases nestedInnerLeftCases) (.cases nestedInnerRightCases) := by
+  apply CodeSideConditions.cases
+  · native_decide
+  · native_decide
+  · exact nestedInnerLeftNormalization
+  · exact nestedInnerRightNormalization
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp [nestedInnerLeftCases, LCNF.Cases.alts] at leftMember
+    simp [nestedInnerRightCases, LCNF.Cases.alts] at rightMember
+    rcases leftMember with ⟨rfl, rfl⟩
+    rcases rightMember with ⟨rfl, rfl⟩
+    exact .ret (by native_decide) (by native_decide)
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt, nestedInnerLeftCases, nestedInnerRightCases,
+      LCNF.Cases.alts] at leftHas rightHas
+    subst left
+    subst right
+    exact .unreachable
+
+theorem nestedCodeSideConditions :
+    CodeSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+      nestedLeftCode nestedRightCode := by
+  unfold nestedLeftCode nestedRightCode
+  apply CodeSideConditions.cases
+  · native_decide
+  · native_decide
+  · exact nestedOuterLeftNormalization
+  · exact nestedOuterRightNormalization
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp [nestedOuterLeftCases, LCNF.Cases.alts] at leftMember
+    simp [nestedOuterRightCases, LCNF.Cases.alts] at rightMember
+    rcases leftMember with ⟨rfl, rfl⟩
+    rcases rightMember with ⟨rfl, rfl⟩
+    exact nestedInnerCodeSideConditions
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt, nestedOuterLeftCases, nestedOuterRightCases,
+      LCNF.Cases.alts] at leftHas rightHas
+    subst left
+    subst right
+    exact .ret (by native_decide) (by native_decide)
+
+/-- Recursive side conditions close two normalized nested case tables. -/
+theorem nestedLocalCodeRelated :
+    CodeRelated ({} : FVarIdMap FVarId) [c, x] [c, x]
+      nestedLeftCode nestedRightCode :=
+  codeRelated_of_local_accepts nestedCodeSideConditions
+    ⟨8, by native_decide⟩
+
+theorem nestedDefaultMismatchRejected :
+    Local.check 8 nestedLeftCode nestedDefaultMismatchCode = false := by
+  native_decide
+
+theorem nestedCtorMismatchRejected :
+    Local.check 8 nestedLeftCode nestedCtorMismatchCode = false := by
+  native_decide
+
+#guard Local.check 8 nestedLeftCode nestedRightCode
+#guard !Local.check 8 nestedLeftCode nestedDefaultMismatchCode
+#guard !Local.check 8 nestedLeftCode nestedCtorMismatchCode
+#guard localMatchesUpstream nestedLeftCode nestedRightCode
+#guard localMatchesUpstream nestedLeftCode nestedDefaultMismatchCode
+#guard localMatchesUpstream nestedLeftCode nestedCtorMismatchCode
+
 def populatedCaseAlts : List (LCNF.Alt .impure) := [
   .ctorAlt falseInfo (.return x),
   .default (.unreach objType)]

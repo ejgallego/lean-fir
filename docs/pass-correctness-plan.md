@@ -85,8 +85,8 @@ The following work is implemented and checked by the default build:
   recursive checker, including a proof-facing structural alternative traversal;
   `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
   declarative relation for terminal code, value bindings, sequential impure
-  effects, and one deterministic case table under explicit normalization,
-  well-formedness, and runtime-metadata premises;
+  effects, and recursively nested deterministic case tables under explicit
+  normalization, well-formedness, and runtime-metadata premises;
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
@@ -377,21 +377,35 @@ theorem `codeRelated_of_local_accepts` does not depend on FIR's trusted bridge
 and proves that a successful local check constructs `CodeRelated` through
 `return`, `unreach`, recursive value bindings, and every sequential
 mutation/ownership instruction currently represented by that relation.
+`CodeSideConditions.cases` is recursive: constructor/default side conditions
+are indexed by semantic selector and may themselves contain cases beneath any
+already-supported continuation constructor.
 The local alternative loop is now a transparent list recursion after Lean's
 normalizing sort. `altsRelated_of_local_check` proves that an accepting
 ordered traversal constructs the semantic alternative relation, and
-`codeRelated_cases_of_local_accepts` lifts it through one `cases` node whose
-branch bodies lie in the existing recursive fragment. Branch side conditions
-are indexed by constructor tag/default rather than array position, so the
-proof can follow the checker's normalized traversal and then return to the
-interpreter's original order. The earlier fixed-point/canonical-array premise
-is gone; `CaseTableNormalizationInvariant` instead exposes only the strictly
-weaker selector-determinism obligation, because normalization's permutation
-property is now a theorem. The trusted adapter exposes the matching
-compiler-facing case theorem. Axiom-free proof regressions cover the
-empty-table selection-failure path and a populated constructor/default table
-reordering, while the executable differential corpus exercises full case
-programs.
+`codeRelated_of_local_accepts` uses its structural branch induction hypotheses
+to lift that traversal through arbitrarily nested `cases` nodes. Branch side
+conditions are indexed by constructor tag/default rather than array position,
+so the proof can follow the checker's normalized traversal and then return to
+the interpreter's original order. The earlier fixed-point/canonical-array
+premise is gone; `CaseTableNormalizationInvariant` instead exposes only the
+strictly weaker selector-determinism obligation, because normalization's
+permutation property is now a theorem. The trusted adapter exposes the
+matching compiler-facing case theorem. Proof regressions cover the empty-table
+selection-failure path, a populated constructor/default table reordering, a
+two-level normalized case relation, and rejection of mismatched nested
+constructor/default bodies; executable guards compare each nested fixture with
+the upstream checker.
+
+The Lean 4.32 phase audit found no public invariant from which selector
+determinism can be derived. The pure checker rejects duplicate constructor
+names but assigns its `hasDefault` flag without consulting it, while impure
+`Cases` contains an unrestricted alternative array and no preservation
+theorem through `Alt.toImpure`. FIR therefore keeps
+`CaseTableNormalizationInvariant` as the exact minimal phase bridge rather
+than weakening semantic selection. The missing upstream proof interface and
+duplicate-default check are recorded in
+`FIR-BUG-impure-case-table-selector-determinism`.
 `AlphaEqvTrusted` is opt-in and contains the sole project correspondence axiom:
 upstream acceptance implies a finite accepting local run. The adapter records
 the audited upstream source hash. `make check` rejects toolchain/source drift,
@@ -407,21 +421,19 @@ resolution. Details are recorded in
 
 The remaining bounded work is:
 
-1. derive selector determinism from the compiler's case-table invariant and
-   extend the recursive side-condition relation to nested case bodies;
-2. extend the declarative state simulation through join points, jumps, calls,
+1. extend the declarative state simulation through join points, jumps, calls,
    and the remaining frame forms, reusing the now-proved `let`, case,
    bind-frame, and sequential-effect invariants;
-3. prove the transparent local checker sound for each newly added declarative
+2. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-5. lift the resulting theorem through recursive code, declarations, and program
+4. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-6. expand the compiler-generated conformance corpus around the whole pass;
-7. in parallel, continue the Talos runtime work and run
+5. expand the compiler-generated conformance corpus around the whole pass;
+6. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first

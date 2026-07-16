@@ -35,6 +35,21 @@ inductive CodeSideConditions :
           leftContinuation rightContinuation) :
       CodeSideConditions rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
+  | cases
+      (leftDiscrScoped : leftScope.contains leftCases.discr = true)
+      (rightDiscrScoped : rightScope.contains rightCases.discr = true)
+      (leftNormalization : CaseTableNormalizationInvariant leftCases.alts)
+      (rightNormalization : CaseTableNormalizationInvariant rightCases.alts)
+      (ctorBranches : ∀ tag leftCode rightCode,
+        HasCtorAlt tag leftCode leftCases.alts.toList →
+        HasCtorAlt tag rightCode rightCases.alts.toList →
+        CodeSideConditions rho leftScope rightScope leftCode rightCode)
+      (defaultBranches : ∀ leftCode rightCode,
+        HasDefaultAlt leftCode leftCases.alts.toList →
+        HasDefaultAlt rightCode rightCases.alts.toList →
+        CodeSideConditions rho leftScope rightScope leftCode rightCode) :
+      CodeSideConditions rho leftScope rightScope
+        (.cases leftCases) (.cases rightCases)
   | oset
       (leftObjectScoped : leftScope.contains leftObject = true)
       (rightObjectScoped : rightScope.contains rightObject = true)
@@ -154,6 +169,96 @@ private theorem ctorInfo_eq_of_beq_local {left right : LCNF.CtorInfo}
   simp_all [LCNF.instBEqCtorInfo.beq]
 
 /--
+Internal ordered-alternative proof parameterized by soundness callbacks for
+selected branch bodies. Keeping the callbacks abstract lets the main code
+proof use its structural induction hypotheses when a branch is itself a case.
+-/
+private theorem altsRelated_of_local_check_by_selector_using
+    (ctorSound : ∀ tag leftCode rightCode,
+      HasCtorAlt tag leftCode originalLeft →
+      HasCtorAlt tag rightCode originalRight →
+      Local.AcceptsAt rho leftCode rightCode →
+      CodeRelated rho leftScope rightScope leftCode rightCode)
+    (defaultSound : ∀ leftCode rightCode,
+      HasDefaultAlt leftCode originalLeft →
+      HasDefaultAlt rightCode originalRight →
+      Local.AcceptsAt rho leftCode rightCode →
+      CodeRelated rho leftScope rightScope leftCode rightCode)
+    (leftSubset : ∀ alt, alt ∈ left → alt ∈ originalLeft)
+    (rightSubset : ∀ alt, alt ∈ right → alt ∈ originalRight)
+    (accepted :
+      (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
+    AltsRelated rho leftScope rightScope left right := by
+  induction left generalizing right with
+  | nil =>
+      cases right with
+      | nil => exact .nil
+      | cons rightAlt rightTail =>
+          simp [Local.eqvAltListsUsing] at accepted
+  | cons leftAlt leftTail ih =>
+      cases right with
+      | nil => simp [Local.eqvAltListsUsing] at accepted
+      | cons rightAlt rightTail =>
+          cases leftAlt with
+          | alt =>
+              rename_i ctorName params code purity
+              contradiction
+          | ctorAlt =>
+              rename_i leftInfo leftCode purity
+              cases rightAlt with
+              | alt =>
+                  rename_i ctorName params code impossible
+                  contradiction
+              | ctorAlt =>
+                  rename_i rightInfo rightCode rightPurity
+                  simp only [Local.eqvAltListsUsing] at accepted
+                  rw [reader_andM_run_eq_true_iff] at accepted
+                  rw [reader_andM_run_eq_true_iff] at accepted
+                  have infoEq : leftInfo = rightInfo :=
+                    ctorInfo_eq_of_beq_local accepted.1
+                  subst rightInfo
+                  have leftHas :
+                      HasCtorAlt leftInfo.cidx leftCode originalLeft :=
+                    ⟨leftInfo, leftSubset _ List.mem_cons_self, by simp⟩
+                  have rightHas :
+                      HasCtorAlt leftInfo.cidx rightCode originalRight :=
+                    ⟨leftInfo, rightSubset _ List.mem_cons_self, by simp⟩
+                  exact .cons
+                    (.ctor (ctorSound leftInfo.cidx leftCode rightCode
+                      leftHas rightHas ⟨fuel, accepted.2.1⟩))
+                    (ih
+                      (fun alt member =>
+                        leftSubset alt (List.mem_cons_of_mem _ member))
+                      (fun alt member =>
+                        rightSubset alt (List.mem_cons_of_mem _ member))
+                      accepted.2.2)
+              | default => simp [Local.eqvAltListsUsing] at accepted
+          | default =>
+              rename_i leftCode
+              cases rightAlt with
+              | alt =>
+                  rename_i ctorName params code impossible
+                  contradiction
+              | ctorAlt => simp [Local.eqvAltListsUsing] at accepted
+              | default =>
+                  rename_i rightCode
+                  simp only [Local.eqvAltListsUsing] at accepted
+                  rw [reader_andM_run_eq_true_iff] at accepted
+                  have leftHas : HasDefaultAlt leftCode originalLeft :=
+                    leftSubset _ List.mem_cons_self
+                  have rightHas : HasDefaultAlt rightCode originalRight :=
+                    rightSubset _ List.mem_cons_self
+                  exact .cons
+                    (.default (defaultSound leftCode rightCode leftHas rightHas
+                      ⟨fuel, accepted.1⟩))
+                    (ih
+                      (fun alt member =>
+                        leftSubset alt (List.mem_cons_of_mem _ member))
+                      (fun alt member =>
+                        rightSubset alt (List.mem_cons_of_mem _ member))
+                      accepted.2)
+
+/--
 For the code fragment represented by `CodeRelated`, transparent local
 acceptance plus the explicit side conditions constructs the declarative
 relation. This theorem is independent of the upstream correspondence axiom.
@@ -188,6 +293,36 @@ theorem codeRelated_of_local_accepts
         · exact leftFresh
         · exact rightFresh
         · exact continuation_ih ⟨fuel, accepted.2.2⟩
+  | cases leftDiscrScoped rightDiscrScoped leftNormalization rightNormalization
+      ctorBranches defaultBranches ctorBranches_ih defaultBranches_ih =>
+      rename_i rho' leftScope' rightScope' leftCases rightCases
+      rcases accepted with ⟨_ | fuel, accepted⟩
+      · simp [Local.checkAt, Local.eqv] at accepted
+      · change
+          (LCNF.AlphaEqv.eqvFVar leftCases.discr rightCases.discr <&&>
+            LCNF.AlphaEqv.eqvType leftCases.resultType rightCases.resultType <&&>
+            Local.eqvAltsUsing (Local.eqv fuel) leftCases.alts rightCases.alts).run
+              rho' = true at accepted
+        rw [reader_andM_run_eq_true_iff] at accepted
+        rw [reader_andM_run_eq_true_iff] at accepted
+        apply CodeRelated.cases
+        · exact ⟨leftDiscrScoped, rightDiscrScoped, accepted.1⟩
+        · intro tag
+          have alternativesAccepted := accepted.2.2
+          unfold Local.eqvAltsUsing at alternativesAccepted
+          split at alternativesAccepted
+          · have alternativesRelated :=
+              altsRelated_of_local_check_by_selector_using
+                ctorBranches_ih defaultBranches_ih
+                (fun alt member =>
+                  (sortAlts_perm leftCases.alts).mem_iff.mpr member)
+                (fun alt member =>
+                  (sortAlts_perm rightCases.alts).mem_iff.mpr member)
+                alternativesAccepted
+            rw [chooseAlt_sortAlts_eq leftNormalization]
+            rw [chooseAlt_sortAlts_eq rightNormalization]
+            exact chooseAlt_related alternativesRelated
+          · contradiction
   | oset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
       continuation continuation_ih =>
       rename_i leftScope' leftField rightScope' rightField rho'
@@ -387,89 +522,29 @@ branch premises are supplied by selector. The subset hypotheses connect each
 ordered traversal back to its original interpreter table.
 -/
 theorem altsRelated_of_local_check_by_selector
-    (side : CaseBranchesSideConditions rho leftScope rightScope
-      originalLeft originalRight)
+    (ctorSound : ∀ tag leftCode rightCode,
+      HasCtorAlt tag leftCode originalLeft →
+      HasCtorAlt tag rightCode originalRight →
+      Local.AcceptsAt rho leftCode rightCode →
+      CodeRelated rho leftScope rightScope leftCode rightCode)
+    (defaultSound : ∀ leftCode rightCode,
+      HasDefaultAlt leftCode originalLeft →
+      HasDefaultAlt rightCode originalRight →
+      Local.AcceptsAt rho leftCode rightCode →
+      CodeRelated rho leftScope rightScope leftCode rightCode)
     (leftSubset : ∀ alt, alt ∈ left → alt ∈ originalLeft)
     (rightSubset : ∀ alt, alt ∈ right → alt ∈ originalRight)
     (accepted :
       (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
-    AltsRelated rho leftScope rightScope left right := by
-  induction left generalizing right with
-  | nil =>
-      cases right with
-      | nil => exact .nil
-      | cons rightAlt rightTail =>
-          simp [Local.eqvAltListsUsing] at accepted
-  | cons leftAlt leftTail ih =>
-      cases right with
-      | nil => simp [Local.eqvAltListsUsing] at accepted
-      | cons rightAlt rightTail =>
-          cases leftAlt with
-          | alt =>
-              rename_i ctorName params code purity
-              contradiction
-          | ctorAlt =>
-              rename_i leftInfo leftCode purity
-              cases rightAlt with
-              | alt =>
-                  rename_i ctorName params code impossible
-                  contradiction
-              | ctorAlt =>
-                  rename_i rightInfo rightCode rightPurity
-                  simp only [Local.eqvAltListsUsing] at accepted
-                  rw [reader_andM_run_eq_true_iff] at accepted
-                  rw [reader_andM_run_eq_true_iff] at accepted
-                  have infoEq : leftInfo = rightInfo :=
-                    ctorInfo_eq_of_beq_local accepted.1
-                  subst rightInfo
-                  have leftHas :
-                      HasCtorAlt leftInfo.cidx leftCode originalLeft :=
-                    ⟨leftInfo, leftSubset _ List.mem_cons_self, by simp⟩
-                  have rightHas :
-                      HasCtorAlt leftInfo.cidx rightCode originalRight :=
-                    ⟨leftInfo, rightSubset _ List.mem_cons_self, by simp⟩
-                  exact .cons
-                    (.ctor (codeRelated_of_local_accepts
-                      (side.ctor leftInfo.cidx leftCode rightCode leftHas rightHas)
-                      ⟨fuel, accepted.2.1⟩))
-                    (ih
-                      (fun alt member =>
-                        leftSubset alt (List.mem_cons_of_mem _ member))
-                      (fun alt member =>
-                        rightSubset alt (List.mem_cons_of_mem _ member))
-                      accepted.2.2)
-              | default => simp [Local.eqvAltListsUsing] at accepted
-          | default =>
-              rename_i leftCode
-              cases rightAlt with
-              | alt =>
-                  rename_i ctorName params code impossible
-                  contradiction
-              | ctorAlt => simp [Local.eqvAltListsUsing] at accepted
-              | default =>
-                  rename_i rightCode
-                  simp only [Local.eqvAltListsUsing] at accepted
-                  rw [reader_andM_run_eq_true_iff] at accepted
-                  have leftHas : HasDefaultAlt leftCode originalLeft :=
-                    leftSubset _ List.mem_cons_self
-                  have rightHas : HasDefaultAlt rightCode originalRight :=
-                    rightSubset _ List.mem_cons_self
-                  exact .cons
-                    (.default (codeRelated_of_local_accepts
-                      (side.default leftCode rightCode leftHas rightHas)
-                      ⟨fuel, accepted.1⟩))
-                    (ih
-                      (fun alt member =>
-                        leftSubset alt (List.mem_cons_of_mem _ member))
-                      (fun alt member =>
-                        rightSubset alt (List.mem_cons_of_mem _ member))
-                      accepted.2)
+    AltsRelated rho leftScope rightScope left right :=
+  altsRelated_of_local_check_by_selector_using ctorSound defaultSound
+    leftSubset rightSubset accepted
 
 /--
-Transparent local acceptance is sound for one impure `cases` node whose
-alternative normalization is a permutation and whose selectors determine
-unique branch bodies. These premises make the checker's sorted traversal
-semantically interchangeable with the interpreter's table order.
+Transparent local acceptance is sound for an impure `cases` node whose
+selectors determine unique branch bodies. Quicksort's permutation theorem
+makes the checker's sorted traversal interchangeable with interpreter order;
+the recursive branch side conditions may contain further case nodes.
 -/
 theorem codeRelated_cases_of_local_accepts
     (leftDiscrScoped : leftScope.contains leftCases.discr = true)
@@ -479,29 +554,10 @@ theorem codeRelated_cases_of_local_accepts
     (side : CaseBranchesSideConditions rho leftScope rightScope
       leftCases.alts.toList rightCases.alts.toList)
     (accepted : Local.AcceptsAt rho (.cases leftCases) (.cases rightCases)) :
-    CodeRelated rho leftScope rightScope (.cases leftCases) (.cases rightCases) := by
-  rcases accepted with ⟨_ | fuel, accepted⟩
-  · simp [Local.checkAt, Local.eqv] at accepted
-  · change
-      (LCNF.AlphaEqv.eqvFVar leftCases.discr rightCases.discr <&&>
-        LCNF.AlphaEqv.eqvType leftCases.resultType rightCases.resultType <&&>
-        Local.eqvAltsUsing (Local.eqv fuel) leftCases.alts rightCases.alts).run
-          rho = true at accepted
-    rw [reader_andM_run_eq_true_iff] at accepted
-    rw [reader_andM_run_eq_true_iff] at accepted
-    apply CodeRelated.cases
-    · exact ⟨leftDiscrScoped, rightDiscrScoped, accepted.1⟩
-    · intro tag
-      have alternativesAccepted := accepted.2.2
-      unfold Local.eqvAltsUsing at alternativesAccepted
-      split at alternativesAccepted
-      · have alternativesRelated := altsRelated_of_local_check_by_selector side
-          (fun alt member => (sortAlts_perm leftCases.alts).mem_iff.mpr member)
-          (fun alt member => (sortAlts_perm rightCases.alts).mem_iff.mpr member)
-          alternativesAccepted
-        rw [chooseAlt_sortAlts_eq leftNormalization]
-        rw [chooseAlt_sortAlts_eq rightNormalization]
-        exact chooseAlt_related alternativesRelated
-      · contradiction
+    CodeRelated rho leftScope rightScope (.cases leftCases) (.cases rightCases) :=
+  codeRelated_of_local_accepts
+    (.cases leftDiscrScoped rightDiscrScoped leftNormalization rightNormalization
+      side.ctor side.default)
+    accepted
 
 end Fir.LeanIR.Passes.AlphaEqv
