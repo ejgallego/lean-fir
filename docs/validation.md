@@ -103,13 +103,15 @@ path instead of silently inheriting telemetry-only coverage.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 45 cases.  Beyond literals,
+The compiler-generated corpus currently has 47 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
 polymorphic box/unbox, packed USize/scalar structure updates and `uproj`, and
-nested tuple projection/reallocation.  Stress fixtures additionally execute compiler-lowered
-ownership/reuse during recursive reassociation, retain 17 closure captures,
+nested tuple projection/reallocation.  Stress fixtures additionally execute
+compiler-lowered ownership/reuse during recursive reassociation, change the
+tag of a uniquely reused constructor through `setTag`, delete a unique object
+before allocating a larger replacement, retain 17 closure captures,
 allocate/project a 70-object-field constructor, and match a nullary enum that
 Lean lowers to a scalar discriminant.  Several fixtures carry exact provenance
 into Lean's `tests/compile` suite at `v4.32.0-rc1`.  The corpus contains no
@@ -137,9 +139,9 @@ follow-ups.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`, and
-`ByteArray.get!` are currently allowlisted.  Natural addition decodes tagged or heap operands,
-computes with Lean `Nat`, and re-encodes through the same tagged/heap boundary
-as the interpreter.  The integer primitives decode and re-encode both the
+`ByteArray.get!` are currently allowlisted.  Natural addition decodes tagged or
+heap operands, computes with Lean `Nat`, and re-encodes through the same
+tagged/heap boundary as the interpreter.  The integer primitives decode and re-encode both the
 signed immediate and heap representations; `Int.decLt` returns the scalar
 `UInt8` discriminant consumed by lowered pattern matching.  Byte-array size
 reads the packed heap object and returns a tagged natural; byte-array indexing

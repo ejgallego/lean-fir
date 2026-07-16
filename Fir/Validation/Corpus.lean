@@ -112,6 +112,22 @@ namespace Assoc
 
 end Assoc
 
+inductive GrowSwitch where
+  | left (value : Nat)
+  | right (value : Nat)
+  | big (first second : Nat)
+
+@[noinline]
+def holdNat (value : Nat) : Nat :=
+  value
+
+@[noinline]
+def changeOrGrow (change : Bool) : GrowSwitch → GrowSwitch
+  | .left value =>
+      let value := holdNat value
+      if change then .right value else .big value value
+  | value => value
+
 @[noinline]
 def applyCaptureList (f : Nat → List Nat) (y : Nat) : List Nat :=
   f y
@@ -350,6 +366,11 @@ private partial def assocSchema : Source.Assoc → ValidationSchema
   | .atom _ => .ctor "Assoc.atom" 0 #[.nat]
   | .node left right => .ctor "Assoc.node" 1 #[assocSchema left, assocSchema right]
 
+private def growSwitchDatum : Source.GrowSwitch → ValidationDatum
+  | .left value => .ctor "GrowSwitch.left" 0 #[.nat value]
+  | .right value => .ctor "GrowSwitch.right" 1 #[.nat value]
+  | .big first second => .ctor "GrowSwitch.big" 2 #[.nat first, .nat second]
+
 private def assocInput : Source.Assoc :=
   .node (.node (.atom 1) (.atom 2)) (.node (.atom 3) (.atom 4))
 
@@ -564,6 +585,38 @@ def cases : Array Case := #[
         "return"]
     provenance := leanCompileProvenance "tests/compile/reusebug.lean"
       "Pure terminating reassociation adapted to execute the ownership/reuse path" },
+  { id := "reuse-change-tag"
+    entry := ``Source.changeOrGrow
+    dependencies := #[``Source.holdNat]
+    args := #[.bool true, .ctor "GrowSwitch.left" 0 #[.nat 7]]
+    argSchemas := #[.bool, .ctor "GrowSwitch.left" 0 #[.nat]]
+    resultSchema := .ctor "GrowSwitch.right" 1 #[.nat]
+    native := fun _ => growSwitchDatum (Source.changeOrGrow true (.left 7))
+    tags := #["stress", "ownership", "reuse", "constructor", "set-tag", "boundary"]
+    requiredLcnfForms :=
+      #["cases", "oproj", "join", "fap", "dec", "del", "inc", "ctor", "return",
+        "setTag", "oset", "jump", "isShared"]
+    requiredExecutedLcnfForms :=
+      #["cases", "oproj", "join", "isShared", "jump", "fap", "inc", "return", "dec",
+        "setTag", "oset"]
+    provenance := firProvenance
+      "Reuse a unique constructor at the same size while changing its runtime tag" },
+  { id := "reuse-grow-delete"
+    entry := ``Source.changeOrGrow
+    dependencies := #[``Source.holdNat]
+    args := #[.bool false, .ctor "GrowSwitch.left" 0 #[.nat 7]]
+    argSchemas := #[.bool, .ctor "GrowSwitch.left" 0 #[.nat]]
+    resultSchema := .ctor "GrowSwitch.big" 2 #[.nat, .nat]
+    native := fun _ => growSwitchDatum (Source.changeOrGrow false (.left 7))
+    tags := #["stress", "ownership", "reuse", "constructor", "delete", "boundary"]
+    requiredLcnfForms :=
+      #["cases", "oproj", "join", "fap", "dec", "del", "inc", "ctor", "return",
+        "setTag", "oset", "jump", "isShared"]
+    requiredExecutedLcnfForms :=
+      #["cases", "oproj", "join", "isShared", "jump", "fap", "inc", "return", "dec",
+        "del", "ctor"]
+    provenance := firProvenance
+      "Delete a unique constructor before allocating a larger replacement" },
   { id := "capture-17-list"
     entry := ``Source.capture17List
     dependencies := #[``Source.applyCaptureList]
