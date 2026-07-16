@@ -99,15 +99,18 @@ production heap layout.
   compiler-resolved related locals. `CodeWP` combines that invariant with the
   real compiler/adapter witness and Talos total-correctness `wp`.
   `LetStepSimulates` is the reusable recursive boundary for direct `let`
-  operations. Its first closed theorem proves a complete natural-literal
-  `let; return` chain, including source evaluation, handle encoding, checked
+  operations. Closed theorems prove complete natural- and string-literal
+  `let; return` chains, including source evaluation, handle encoding, checked
   local binding, target return, and decoding of the exact source result.
+  Constructor allocation and object projection now instantiate the same
+  recursive boundary, including multi-local argument loading, source heap
+  operations, handle-table extension, and continuation composition.
 
-The next W4 slice instantiates the same semantic boundary for string literals,
-constructor allocation, and object projection, then threads it through the
-structural case relation. The completed fragment can then lift through
-`RelatedPost` to whole exported functions. The adapter still rejects
-initializers and closures.
+The next W4 slice threads `CodeWP` through the structural case relation using
+the existing source-facing tag-test WP rule and the already adapted fallback/
+constructor chains. The completed fragment can then lift through `RelatedPost`
+to whole exported functions. The adapter still rejects initializers and
+closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -412,10 +415,11 @@ relation, checked-write preservation, and handle-allocation chaining needed at
 each recursive boundary. The structural relation now also follows the actual
 compiler through default selection and recursive constructor-case chains. Its
 semantic induction now has a common related-state/`CodeWP` judgment, a generic
-direct-`let` rule, and a closed natural-literal-to-return instance. Its active
-proof obligation is to instantiate the same boundary for the remaining
-constructor/projection operations and thread it through cases. Layer 5 can then
-instantiate the bridge without mentioning runner fuel in the public theorem.
+direct-`let` rule, closed natural/string literal-to-return instances, and
+recursive constructor/projection instances. Its active proof obligation is to
+thread the same state invariant and postcondition through constructor cases.
+Layer 5 can then instantiate the bridge without mentioning runner fuel in the
+public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an

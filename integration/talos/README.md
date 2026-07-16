@@ -69,8 +69,10 @@ common related-state invariant, a `CodeWP` judgment over the actual compiler
 and adapter witnesses, and a continuation-polymorphic direct-`let` rule. Its
 first closed theorem covers a natural-literal `let; return` program from source
 evaluation through handle encoding and checked local storage to a Talos return
-whose result decodes to the exact source value. String literals, constructors,
-projections, and cases are the next instances of the same boundary.
+whose result decodes to the exact source value. String literals now have the
+same closed theorem, while constructor allocation and object projection use the
+same recursive rule for arbitrary continuations. Semantic constructor cases
+are the next instance of the boundary.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
