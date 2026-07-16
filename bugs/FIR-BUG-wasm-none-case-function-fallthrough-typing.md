@@ -80,8 +80,9 @@ none
 
 ## Resolution and regression
 
-`Fir.Wasm.Emit.Binary.encodeFunctionBody` now emits the explicit terminal
-`unreachable` for no-fallthrough bodies. `integration/talos/artifact/check.sh`
+Revision `1836ef3` makes `Fir.Wasm.Emit.Binary.encodeFunctionBody` emit the
+explicit terminal `unreachable` for no-fallthrough bodies.
+`integration/talos/artifact/check.sh`
 emits the four-module corpus twice, checks byte-for-byte reproducibility, and
 uses Node's standard WebAssembly engine to validate, instantiate, execute,
 and compare all four semantic observations.
