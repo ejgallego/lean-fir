@@ -205,14 +205,24 @@ private def externalInt (request : ExternalRequest) (runtime : RuntimeState)
       return value
   | _ => throw (.externalFailure request.name "expected a signed integer")
 
-private def externalByteArray (request : ExternalRequest) (runtime : RuntimeState)
-    (value : Value) : Except RuntimeFault (Array UInt8) := do
+private def externalByteArrayCell (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault (Location × HeapCell × Array UInt8) := do
   let .object (.heap location) := value
     | throw (.externalFailure request.name "expected a byte array")
   let cell ← getLiveCell runtime location
   let .byteArray value := cell.object
     | throw (.externalFailure request.name "expected a byte array")
+  return (location, cell, value)
+
+private def externalByteArray (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault (Array UInt8) := do
+  let (_, _, value) ← externalByteArrayCell request runtime value
   return value
+
+private def externalUInt8 (request : ExternalRequest) (value : Value) : Except RuntimeFault UInt8 :=
+  match value with
+  | .scalar (.uint8 value) => .ok value
+  | _ => .error (.externalFailure request.name "expected a UInt8 scalar")
 
 private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -252,6 +262,97 @@ private def byteArrayGetExternal (request : ExternalRequest) (runtime : RuntimeS
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
+
+private def byteArraySetExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [array, index, byte] := request.args.toList
+    | throw (.arityMismatch 3 request.args.size)
+  let (location, cell, bytes) ← externalByteArrayCell request runtime array
+  let index ← externalNat request runtime index
+  let byte ← externalUInt8 request byte
+  if index >= bytes.size then
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let bytes := bytes.set! index byte
+  if !cell.persistent && cell.rc == 1 then
+    let runtime ← setCell runtime location { cell with object := .byteArray bytes }
+    return {
+      value := array
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let runtime ← if cell.persistent then pure runtime else decLocation runtime location
+  let (runtime, reference) := alloc runtime (.byteArray bytes)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def byteArraySetRequest (array : Value) (index : Nat) (byte : UInt8) :
+    ExternalRequest := {
+  name := ``ByteArray.set!
+  paramTypes := #[]
+  resultType := default
+  args := #[array, .object (.tagged (UInt64.ofNat index)), .scalar (.uint8 byte)] }
+
+private def byteArraySetUniqueGuard : Bool :=
+  let original : Array UInt8 := #[0, 127, 128, 255]
+  let expected : Array UInt8 := #[255, 127, 128, 255]
+  let (runtime, reference) := alloc {} (.byteArray original)
+  match reference with
+  | .tagged _ => false
+  | .heap location =>
+      match byteArraySetExternal (byteArraySetRequest (.object reference) 0 255) runtime with
+      | .error _ => false
+      | .ok response =>
+          let after : RuntimeState := {
+            runtime with
+            heap := response.heap
+            nextLocation := response.nextLocation
+            world := response.world }
+          match getLiveCell after location with
+          | .error _ => false
+          | .ok cell =>
+              response.value == .object reference &&
+              response.nextLocation == runtime.nextLocation &&
+              cell.rc == 1 && cell.object == .byteArray expected
+
+private def byteArraySetSharedGuard : Bool :=
+  let original : Array UInt8 := #[0, 127, 128, 255]
+  let expected : Array UInt8 := #[0, 127, 255, 255]
+  let (runtime, reference) := alloc {} (.byteArray original)
+  match reference with
+  | .tagged _ => false
+  | .heap oldLocation =>
+      match incLocation runtime oldLocation 1 with
+      | .error _ => false
+      | .ok runtime =>
+          match byteArraySetExternal (byteArraySetRequest (.object reference) 2 255) runtime with
+          | .error _ => false
+          | .ok response =>
+              match response.value with
+              | .object (.heap newLocation) =>
+                  let after : RuntimeState := {
+                    runtime with
+                    heap := response.heap
+                    nextLocation := response.nextLocation
+                    world := response.world }
+                  match getLiveCell after oldLocation, getLiveCell after newLocation with
+                  | .ok oldCell, .ok newCell =>
+                      oldLocation != newLocation &&
+                      newLocation == runtime.nextLocation &&
+                      response.nextLocation == runtime.nextLocation + 1 &&
+                      oldCell.rc == 1 && oldCell.object == .byteArray original &&
+                      newCell.rc == 1 && newCell.object == .byteArray expected
+                  | _, _ => false
+              | _ => false
+
+#guard byteArraySetUniqueGuard
+#guard byteArraySetSharedGuard
 
 private def intOfNatExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -298,6 +399,8 @@ private def validationExternals : ExternalImpl where
       byteArraySizeExternal request runtime
     else if request.name == ``ByteArray.get! then
       byteArrayGetExternal request runtime
+    else if request.name == ``ByteArray.set! then
+      byteArraySetExternal request runtime
     else if request.name == ``Int.ofNat then
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then

@@ -106,7 +106,7 @@ lower corpus-wide instruction coverage.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 47 cases.  Beyond literals,
+The compiler-generated corpus currently has 49 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -126,9 +126,11 @@ runner-supplied identity, compiler-built literals through `Int.ofNat` and
 codec behavior, external results, and scalar-driven control flow cannot mask
 one another.  Controlled `Nat.add` cases execute a real imported runtime
 primitive with tagged inputs, a tagged-to-heap result transition, and a
-heap-natural input/result.  Runner-supplied `ByteArray` identity, size, and
-indexing fixtures validate the packed scalar-array heap ABI, including scalar
-reads of zero, high-bit, and maximum byte values.
+heap-natural input/result.  Runner-supplied `ByteArray` identity, size,
+indexing, and mutation fixtures validate the packed scalar-array heap ABI,
+including scalar reads of zero, high-bit, and maximum byte values.  Mutation
+separately covers a unique in-place update and a shared copy-on-write update
+that preserves the original alias.
 
 The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports
@@ -136,19 +138,24 @@ only the shapes needed by the checked corpus.  Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
 signed-integer heap object.  Externally supplied packed constructors,
 boxed-object arrays, and observable external effects remain vertical slices
-with matching native cases.  Packed byte-array identity, size, and in-bounds
-indexing are supported; out-of-bounds behavior and mutation remain controlled
-external-primitive follow-ups.
+with matching native cases.  Packed byte-array identity, size, in-bounds
+indexing, and unique/shared mutation are supported; out-of-bounds behavior
+remains a controlled external-primitive follow-up.
 
 The validation backend's external implementation is reject-by-default.
-`Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`, and
-`ByteArray.get!` are currently allowlisted.  Natural addition decodes tagged or
-heap operands, computes with Lean `Nat`, and re-encodes through the same
-tagged/heap boundary as the interpreter.  The integer primitives decode and
-re-encode both the signed immediate and heap representations; `Int.decLt`
-returns the scalar `UInt8` discriminant consumed by lowered pattern matching.
-Byte-array size reads the packed heap object and returns a tagged natural;
-byte-array indexing returns the selected packed byte as a scalar `UInt8`.
+`Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`,
+`ByteArray.get!`, and `ByteArray.set!` are currently allowlisted.  Natural
+addition decodes tagged or heap operands, computes with Lean `Nat`, and
+re-encodes through the same tagged/heap boundary as the interpreter.  The
+integer primitives decode and re-encode both the signed immediate and heap
+representations; `Int.decLt` returns the scalar `UInt8` discriminant consumed
+by lowered pattern matching.  Byte-array size reads the packed heap object and
+returns a tagged natural; byte-array indexing returns the selected packed byte
+as a scalar `UInt8`.  Byte-array mutation consumes its array argument: unique
+cells update in place, while shared cells decrement the consumed reference and
+return a newly allocated copy.  Validation-only guards check both paths'
+locations, allocation counts, contents, and reference counts in addition to
+the native observation comparison.
 `extern` must be present both statically and in executed-form coverage for every
 runtime primitive fixture, while the matching name must independently satisfy
 both external-name obligations.

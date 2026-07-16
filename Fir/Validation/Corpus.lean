@@ -277,6 +277,15 @@ def byteArraySize (value : ByteArray) : Nat :=
 def byteArrayGet (value : ByteArray) (index : Nat) : UInt8 :=
   value.get! index
 
+@[noinline]
+def byteArraySetUnique (value : ByteArray) : ByteArray :=
+  value.set! 0 255
+
+@[noinline]
+def byteArraySetShared (value : ByteArray) : ByteArray × ByteArray :=
+  let updated := value.set! 2 255
+  (value, updated)
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -357,6 +366,9 @@ private def natListDatum (xs : List Nat) : ValidationDatum :=
 
 private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
   .bytes (value.data.map (UInt8.toNat ·))
+
+private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -903,7 +915,38 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
-    provenance := firProvenance "Read the maximum byte through ByteArray.get!" }
+    provenance := firProvenance "Read the maximum byte through ByteArray.get!" },
+  { id := "byte-array-set-unique"
+    entry := ``Source.byteArraySetUnique
+    args := #[.bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.byteArraySetUnique ⟨#[0, 127, 128, 255]⟩)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "mutation", "ownership", "unique"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    provenance := firProvenance
+      "Mutate a uniquely owned byte array in place through ByteArray.set!" },
+  { id := "byte-array-set-shared"
+    entry := ``Source.byteArraySetShared
+    args := #[.bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes]
+    resultSchema := .ctor "Prod.mk" 0 #[.bytes, .bytes]
+    native := fun _ => byteArrayPairDatum
+      (Source.byteArraySetShared ⟨#[0, 127, 128, 255]⟩)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "mutation", "ownership", "shared",
+        "copy-on-write"]
+    requiredLcnfForms := #["lit", "inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["lit", "inc", "fap", "extern", "ctor", "return"]
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    provenance := firProvenance
+      "Copy a shared byte array while preserving its original alias through ByteArray.set!" }
 ]
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
