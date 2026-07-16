@@ -83,14 +83,19 @@ loaded olean and host dynamic library remains future hardening.  A V8 adapter
 will analogously register the engine and runner as tools while keeping the
 compiler-produced `.wasm` as a product.
 
-Every input, backend tool, backend product, and pair comparison is copied into
+Every input, backend tool, backend product, backend result/process artifact,
+and pair comparison is copied into
 an append-only content-addressed location beneath `evidence/inputs`,
-`evidence/tools`, `evidence/products`, or `evidence/comparisons`.  Matrix
+`evidence/tools`, `evidence/products`, `evidence/artifacts`, or
+`evidence/comparisons`.  Matrix
 entries carry the canonical report-relative artifact path and raw-byte SHA-256.
 Existing blobs are reused only when their bytes agree; symlinks, non-regular
 files, and digest collisions fail closed.  The mutable original config, tool,
-product, or comparison path is therefore not needed to verify the completed
-report.
+product, result, log, or comparison path is therefore not needed to verify the
+completed report.  The sorted `artifacts` inventory includes every successfully
+parsed per-case backend result and the exact stdout/stderr pair from each
+current execution or external build.  It is assembled from bytes captured when
+the files are written, not by scanning a possibly stale output tree.
 
 Verification is read-only and does not execute any backend:
 
@@ -102,14 +107,18 @@ python3 scripts/validate_interpreters.py \
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run.
 
-The verifier strictly checks schema, names and paths, retained input/tool/
-product/comparison bytes, ordering and uniqueness, summary counts, and both
-identities.
+The verifier strictly checks schema, names and paths, every retained byte,
+ordering and uniqueness, stdout/stderr pairing, summary counts, and both
+identities.  It parses retained backend results, checks their case/backend
+labels, requires both results used by every comparison, and recomputes each
+reported equality from those retained observations.  Results and logs remain
+outside `identity.run`, so nondeterministic evidence can expose different bytes
+without pretending that the semantic input/tool/product contract changed.
 Findings or unequal comparisons are valid evidence and do not make structural
 verification fail.  `--verify-matrix` is exclusive with run options.  This
-stage verifies the comparison reports referenced by the matrix; retaining and
-inventorying every diagnostic log and per-case result is a later evidence-
-bundle layer.
+stage verifies the complete artifact inventory referenced by the matrix.  An
+immutable manifest layer for preserving multiple executions with the same run
+identity remains separate future hardening.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses

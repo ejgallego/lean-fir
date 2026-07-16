@@ -148,6 +148,15 @@ class HarnessTests(unittest.TestCase):
         ):
             lcnf.prepare_manifest(parsed)
 
+        unsafe = dict(item)
+        unsafe["id"] = "../case"
+        with self.assertRaisesRegex(
+            harness.ValidationError, "case ID: name must use lowercase"
+        ):
+            core.manifest_from_output(
+                json.dumps(unsafe), ["native", "--manifest"]
+            )
+
     def test_equal_successes(self) -> None:
         equal, _, _ = harness.compare_success(success("case", "native"), success("case", "lcnf"))
         self.assertTrue(equal)
@@ -506,6 +515,108 @@ class HarnessTests(unittest.TestCase):
                     out_dir, "inputs", harness.sha256_bytes(b"other"), b"other"
                 )
 
+    def test_backend_artifact_inventory_is_sorted_and_content_addressed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            descriptors = [descriptor("case")]
+            context = harness.RunContext(
+                harness.ROOT, out_dir, descriptors, ["case"]
+            )
+            harness.write_corpus_manifest(out_dir, descriptors)
+            result = harness.write_artifact(
+                out_dir, "case", "v8", success("case", "v8")
+            )
+            process = harness.write_process_artifacts(
+                out_dir / "v8",
+                mock.Mock(stdout="", stderr="", returncode=0),
+                "v8",
+            )
+            artifacts = (result, *process)
+            harness.write_matrix_artifact(
+                context,
+                ["v8"],
+                [],
+                [],
+                artifacts=tuple(reversed(artifacts)),
+            )
+            matrix_path = out_dir / "matrix.json"
+            first = matrix_path.read_bytes()
+            matrix = json.loads(first)
+            self.assertEqual(
+                [(item["kind"], item["name"]) for item in matrix["artifacts"]],
+                [
+                    ("backend-result", "case/v8/result.json"),
+                    ("process-stderr", "v8/stderr.log"),
+                    ("process-stdout", "v8/stdout.jsonl"),
+                ],
+            )
+            self.assertEqual(matrix["summary"]["artifactCount"], 3)
+            self.assertEqual(process[0].sha256, process[1].sha256)
+            self.assertEqual(
+                matrix["artifacts"][1]["artifact"],
+                matrix["artifacts"][2]["artifact"],
+            )
+            harness.write_matrix_artifact(
+                context,
+                ["v8"],
+                [],
+                [],
+                artifacts=artifacts,
+            )
+            self.assertEqual(first, matrix_path.read_bytes())
+
+            changed_process = harness.write_process_artifacts(
+                out_dir / "v8",
+                mock.Mock(
+                    stdout="engine chatter\n",
+                    stderr="diagnostic\n",
+                    returncode=0,
+                ),
+                "v8",
+            )
+            harness.write_matrix_artifact(
+                context,
+                ["v8"],
+                [],
+                [],
+                artifacts=(result, *changed_process),
+            )
+            changed_matrix = json.loads(matrix_path.read_bytes())
+            self.assertEqual(
+                matrix["identity"]["run"], changed_matrix["identity"]["run"]
+            )
+            self.assertNotEqual(
+                matrix["artifacts"], changed_matrix["artifacts"]
+            )
+
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate artifacts"
+            ):
+                harness.write_matrix_artifact(
+                    context,
+                    ["v8"],
+                    [],
+                    [],
+                    artifacts=(result, result),
+                )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "inactive backend"
+            ):
+                harness.write_matrix_artifact(
+                    context,
+                    ["v8"],
+                    [],
+                    [],
+                    artifacts=(
+                        harness.ValidationArtifact(
+                            "backend-result",
+                            "case/talos/result.json",
+                            result.sha256,
+                            result.content,
+                        ),
+                    ),
+                )
+
     def test_comparison_artifact_names_actual_backends_and_is_deterministic(self) -> None:
         comparisons = [
             {
@@ -718,6 +829,7 @@ class HarnessTests(unittest.TestCase):
                     "inputCount": 1,
                     "productCount": 0,
                     "toolCount": 0,
+                    "artifactCount": 4,
                 },
             )
             self.assertEqual(
@@ -764,11 +876,30 @@ class HarnessTests(unittest.TestCase):
             )
             self.assertEqual(matrix["products"], [])
             self.assertEqual(matrix["tools"], [])
+            self.assertEqual(
+                [artifact["name"] for artifact in matrix["artifacts"]],
+                [
+                    "case/lcnf/result.json",
+                    "case/native/result.json",
+                    "case/talos/result.json",
+                    "case/v8/result.json",
+                ],
+            )
+            captured_artifacts = tuple(
+                harness.ValidationArtifact(
+                    artifact["kind"],
+                    artifact["name"],
+                    artifact["sha256"],
+                    (out_dir / artifact["artifact"]).read_bytes(),
+                )
+                for artifact in matrix["artifacts"]
+            )
             harness.write_matrix_artifact(
                 context,
                 ["native", "lcnf", "v8", "talos"],
                 pair_results,
                 findings,
+                artifacts=captured_artifacts,
             )
             self.assertEqual(matrix_bytes, matrix_path.read_bytes())
 
@@ -1623,6 +1754,22 @@ class HarnessTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(matrix["summary"]["toolCount"], 2)
+            self.assertEqual(matrix["summary"]["artifactCount"], 6)
+            self.assertEqual(
+                [(item["kind"], item["name"]) for item in matrix["artifacts"]],
+                [
+                    ("backend-result", "case/native/result.json"),
+                    ("backend-result", "case/v8/result.json"),
+                    ("process-stderr", "v8/build/stderr.log"),
+                    ("process-stderr", "v8/stderr.log"),
+                    ("process-stdout", "v8/build/stdout.jsonl"),
+                    ("process-stdout", "v8/stdout.jsonl"),
+                ],
+            )
+            for item in matrix["artifacts"]:
+                self.assertEqual(
+                    item["artifact"], f"evidence/artifacts/{item['sha256']}"
+                )
             self.assertTrue(
                 (out_dir / "comparisons" / "native--v8.json").is_file()
             )
@@ -1637,6 +1784,8 @@ class HarnessTests(unittest.TestCase):
             runner_path.unlink()
             product_path.unlink()
             (out_dir / "comparisons" / "native--v8.json").unlink()
+            for item in matrix["artifacts"]:
+                (out_dir / item["name"]).unlink()
             self.assertEqual(
                 harness.verify_matrix_artifact(matrix_path)["identity"],
                 matrix["identity"],
@@ -1659,6 +1808,13 @@ class HarnessTests(unittest.TestCase):
                 harness.verify_matrix_artifact(matrix_path)
             retained_input.write_bytes(retained_bytes)
 
+            retained_artifact = out_dir / matrix["artifacts"][0]["artifact"]
+            retained_artifact_bytes = retained_artifact.read_bytes()
+            retained_artifact.write_bytes(b"tampered artifact")
+            with self.assertRaisesRegex(harness.ValidationError, "SHA-256 mismatch"):
+                harness.verify_matrix_artifact(matrix_path)
+            retained_artifact.write_bytes(retained_artifact_bytes)
+
             invalid_matrix = dict(matrix)
             invalid_matrix["summary"] = dict(matrix["summary"])
             invalid_matrix["summary"]["inputCount"] = False
@@ -1674,6 +1830,64 @@ class HarnessTests(unittest.TestCase):
             matrix_path.write_text(json.dumps(invalid_matrix), encoding="utf-8")
             with self.assertRaisesRegex(
                 harness.ValidationError, "run identity mismatch"
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+
+            invalid_matrix = dict(matrix)
+            invalid_matrix["artifacts"] = [
+                item
+                for item in matrix["artifacts"]
+                if not (
+                    item["kind"] == "backend-result"
+                    and item["name"] == "case/v8/result.json"
+                )
+            ]
+            invalid_matrix["summary"] = dict(matrix["summary"])
+            invalid_matrix["summary"]["artifactCount"] -= 1
+            matrix_path.write_text(json.dumps(invalid_matrix), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "no retained backend result"
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+
+            native_result = next(
+                item
+                for item in matrix["artifacts"]
+                if item["name"] == "case/native/result.json"
+            )
+            invalid_matrix = dict(matrix)
+            invalid_matrix["artifacts"] = [
+                (
+                    {
+                        **item,
+                        "sha256": native_result["sha256"],
+                        "artifact": native_result["artifact"],
+                    }
+                    if item["name"] == "case/v8/result.json"
+                    else item
+                )
+                for item in matrix["artifacts"]
+            ]
+            matrix_path.write_text(json.dumps(invalid_matrix), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "expected backend v8, got native"
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+
+            invalid_matrix = dict(matrix)
+            invalid_matrix["artifacts"] = [
+                item
+                for item in matrix["artifacts"]
+                if not (
+                    item["kind"] == "process-stderr"
+                    and item["name"] == "v8/stderr.log"
+                )
+            ]
+            invalid_matrix["summary"] = dict(matrix["summary"])
+            invalid_matrix["summary"]["artifactCount"] -= 1
+            matrix_path.write_text(json.dumps(invalid_matrix), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "process artifacts are not paired"
             ):
                 harness.verify_matrix_artifact(matrix_path)
 
@@ -1694,6 +1908,14 @@ class HarnessTests(unittest.TestCase):
     def test_external_adapter_receives_corpus_and_selection_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             out_dir = Path(directory)
+            stale_build = out_dir / "v8" / "build"
+            stale_build.mkdir(parents=True)
+            (stale_build / "stdout.jsonl").write_text(
+                "stale build stdout", encoding="utf-8"
+            )
+            (stale_build / "stderr.log").write_text(
+                "stale build stderr", encoding="utf-8"
+            )
             descriptors = [descriptor("case")]
             harness.write_corpus_manifest(out_dir, descriptors)
             record = success("case", "v8")
@@ -1717,6 +1939,10 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(backend_run.findings, [])
             self.assertEqual(backend_run.expected_cases, ["case"])
             self.assertEqual(backend_run.results, {"case": record})
+            self.assertEqual(
+                [artifact.name for artifact in backend_run.artifacts],
+                ["v8/stdout.jsonl", "v8/stderr.log"],
+            )
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
 
     def test_external_adapter_binds_and_verifies_exact_declared_tools(self) -> None:

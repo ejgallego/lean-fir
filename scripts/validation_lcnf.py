@@ -455,12 +455,15 @@ class LcnfAdapter:
             context.root,
             extra_env={"LEAN_PATH": self.lean_path},
         )
-        write_process_artifacts(context.out_dir / self.name, completed)
+        execution_artifacts = write_process_artifacts(
+            context.out_dir / self.name, completed, self.name
+        )
         self.verify_tools()
         backend_run = BackendRun(
             self.name,
             context.all_cases,
             tools=list(self.tools),
+            artifacts=list(execution_artifacts),
         )
         if completed.returncode != 0:
             backend_run.findings.append(

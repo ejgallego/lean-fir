@@ -130,6 +130,21 @@ class ValidationTool:
         }
 
 
+@dataclass(frozen=True)
+class ValidationArtifact:
+    kind: str
+    name: str
+    sha256: str
+    content: bytes = field(compare=False, repr=False)
+
+    def to_json(self) -> dict[str, str]:
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "sha256": self.sha256,
+        }
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -417,7 +432,9 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
                 f"at line {line_number} from {' '.join(command)}{detail}"
             )
 
-        case_id = value["id"]
+        case_id = validate_backend_name(
+            value["id"], f"native corpus manifest line {line_number} case ID"
+        )
         entry = value["entry"]
         version = value["version"]
         dependencies = value["dependencies"]
@@ -433,8 +450,6 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
                 f"native corpus manifest/{case_id}: protocol version {version} "
                 f"is not {PROTOCOL_VERSION}"
             )
-        if not isinstance(case_id, str) or not case_id:
-            raise ValidationError(f"native corpus manifest line {line_number}: missing id")
         if not isinstance(entry, str) or not entry:
             raise ValidationError(f"native corpus manifest/{case_id}: missing entry")
         if not isinstance(dependencies, list) or not all(
@@ -725,6 +740,89 @@ def retain_validation_tools(
     return retained
 
 
+VALIDATION_ARTIFACT_KINDS = {
+    "backend-result",
+    "process-stdout",
+    "process-stderr",
+}
+
+
+def validation_artifact_scope(
+    kind: object,
+    name: object,
+    backend_names: list[str],
+    selected_cases: list[str],
+) -> tuple[str, str | None, str]:
+    checked_kind = validate_backend_name(kind, "validation artifact kind")
+    checked_name = checked_relative_posix_path(
+        name, "validation artifact name"
+    )
+    if checked_kind not in VALIDATION_ARTIFACT_KINDS:
+        raise ValidationError(
+            f"unsupported validation artifact kind: {checked_kind}"
+        )
+    parts = PurePosixPath(checked_name).parts
+    case_id: str | None = None
+    if checked_kind == "backend-result":
+        if len(parts) != 3 or parts[2] != "result.json":
+            raise ValidationError("backend-result artifact has noncanonical name")
+        case_id, backend, scope = parts[0], parts[1], "result"
+    else:
+        suffix = (
+            "stdout.jsonl"
+            if checked_kind == "process-stdout"
+            else "stderr.log"
+        )
+        if parts[-1] != suffix:
+            raise ValidationError(
+                f"{checked_kind} artifact has noncanonical name"
+            )
+        if len(parts) == 2:
+            backend, scope = parts[0], "execute"
+        elif len(parts) == 3 and parts[1] == "build":
+            backend, scope = parts[0], "build"
+        elif len(parts) == 3:
+            case_id, backend, scope = parts[0], parts[1], "execute"
+        else:
+            raise ValidationError(
+                f"{checked_kind} artifact has noncanonical name"
+            )
+    validate_backend_name(backend, "validation artifact backend")
+    if backend not in backend_names:
+        raise ValidationError("validation artifact names inactive backend")
+    if case_id is not None:
+        validate_backend_name(case_id, "validation artifact case ID")
+        if case_id not in selected_cases:
+            raise ValidationError("validation artifact names unselected case")
+    return backend, case_id, scope
+
+
+def retain_validation_artifacts(
+    context: RunContext,
+    artifacts: list[ValidationArtifact],
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for artifact in artifacts:
+        digest = checked_sha256(artifact.sha256, "validation artifact")
+        if sha256_bytes(artifact.content) != digest:
+            raise ValidationError(
+                f"validation artifact content disagrees with SHA-256: "
+                f"{artifact.kind}:{artifact.name}"
+            )
+        retained.append(
+            {
+                **artifact.to_json(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir,
+                    "artifacts",
+                    digest,
+                    artifact.content,
+                ),
+            }
+        )
+    return retained
+
+
 def checked_record(record: dict, backend: str) -> tuple[str, dict]:
     if record.get("version") != PROTOCOL_VERSION:
         raise ValidationError(
@@ -880,20 +978,52 @@ def compare_backend_results(
             )
     return comparisons, findings
 
-def write_artifact(out_dir: Path, case_id: str, backend: str, record: dict) -> None:
-    destination = out_dir / case_id / backend
+def write_artifact(
+    out_dir: Path, case_id: str, backend: str, record: dict
+) -> ValidationArtifact:
+    checked_case_id = validate_backend_name(case_id, "validation case ID")
+    checked_backend = validate_backend_name(backend, "validation backend")
+    destination = out_dir / checked_case_id / checked_backend
     destination.mkdir(parents=True, exist_ok=True)
-    (destination / "result.json").write_text(
-        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    content = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+    (destination / "result.json").write_bytes(content)
+    return ValidationArtifact(
+        "backend-result",
+        f"{checked_case_id}/{checked_backend}/result.json",
+        sha256_bytes(content),
+        content,
     )
 
 
 def write_process_artifacts(
-    destination: Path, completed: subprocess.CompletedProcess[str]
-) -> None:
+    destination: Path,
+    completed: subprocess.CompletedProcess[str],
+    artifact_prefix: str,
+) -> tuple[ValidationArtifact, ValidationArtifact]:
+    prefix = checked_relative_posix_path(
+        artifact_prefix, "validation process artifact prefix"
+    )
     destination.mkdir(parents=True, exist_ok=True)
-    (destination / "stdout.jsonl").write_text(completed.stdout, encoding="utf-8")
-    (destination / "stderr.log").write_text(completed.stderr, encoding="utf-8")
+    stdout = completed.stdout.encode("utf-8")
+    stderr = completed.stderr.encode("utf-8")
+    (destination / "stdout.jsonl").write_bytes(stdout)
+    (destination / "stderr.log").write_bytes(stderr)
+    return (
+        ValidationArtifact(
+            "process-stdout",
+            f"{prefix}/stdout.jsonl",
+            sha256_bytes(stdout),
+            stdout,
+        ),
+        ValidationArtifact(
+            "process-stderr",
+            f"{prefix}/stderr.log",
+            sha256_bytes(stderr),
+            stderr,
+        ),
+    )
 
 
 def write_comparison_artifact(
@@ -976,6 +1106,7 @@ class BackendRun:
     blocked_cases: set[str] = field(default_factory=set)
     products: list[ValidationProduct] = field(default_factory=list)
     tools: list[ValidationTool] = field(default_factory=list)
+    artifacts: list[ValidationArtifact] = field(default_factory=list)
 
 
 @dataclass
@@ -1113,6 +1244,9 @@ class ExternalCommandAdapter:
     _built_run_command: tuple[str, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _build_artifacts: tuple[ValidationArtifact, ...] = field(
+        default=(), init=False, repr=False, compare=False
+    )
 
     def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
         return descriptors
@@ -1246,6 +1380,7 @@ class ExternalCommandAdapter:
         self._built_products = None
         self._built_tools = None
         self._built_run_command = None
+        self._build_artifacts = ()
         if not context.no_build and self.build_command:
             destination = context.out_dir / self.name / "build"
             destination.mkdir(parents=True, exist_ok=True)
@@ -1256,7 +1391,9 @@ class ExternalCommandAdapter:
                 self.timeout_seconds,
                 self.environment(context.out_dir),
             )
-            write_process_artifacts(destination, completed)
+            self._build_artifacts = write_process_artifacts(
+                destination, completed, f"{self.name}/build"
+            )
             if completed.returncode != 0:
                 raise ValidationError(
                     f"failed to build {self.name} validation backend; "
@@ -1327,7 +1464,9 @@ class ExternalCommandAdapter:
             self.timeout_seconds,
             environment,
         )
-        write_process_artifacts(destination, completed)
+        execution_artifacts = write_process_artifacts(
+            destination, completed, self.name
+        )
         if self.collect_products(context.out_dir) != self._built_products:
             raise ValidationError(
                 f"{self.name} products changed during execution"
@@ -1343,6 +1482,7 @@ class ExternalCommandAdapter:
             list(expected_cases),
             products=list(self._built_products),
             tools=list(self._built_tools),
+            artifacts=[*self._build_artifacts, *execution_artifacts],
         )
         if completed.returncode != 0:
             backend_run.findings.append(
@@ -1652,6 +1792,7 @@ def write_matrix_artifact(
     findings: list[ValidationFinding],
     products: tuple[ValidationProduct, ...] = (),
     tools: tuple[ValidationTool, ...] = (),
+    artifacts: tuple[ValidationArtifact, ...] = (),
 ) -> None:
     context.out_dir.mkdir(parents=True, exist_ok=True)
     inputs = (
@@ -1703,6 +1844,24 @@ def write_matrix_artifact(
     if len(set(tool_keys)) != len(tool_keys):
         raise ValidationError("validation matrix contains duplicate backend tools")
     retained_tools = retain_validation_tools(context, sorted_tools)
+    sorted_artifacts = sorted(
+        artifacts,
+        key=lambda artifact: (artifact.kind, artifact.name),
+    )
+    for artifact in sorted_artifacts:
+        validation_artifact_scope(
+            artifact.kind,
+            artifact.name,
+            backend_names,
+            list(context.selected),
+        )
+        checked_sha256(artifact.sha256, "validation artifact")
+    artifact_keys = [
+        (artifact.kind, artifact.name) for artifact in sorted_artifacts
+    ]
+    if len(set(artifact_keys)) != len(artifact_keys):
+        raise ValidationError("validation matrix contains duplicate artifacts")
+    retained_artifacts = retain_validation_artifacts(context, sorted_artifacts)
     pairs = []
     for result in pair_results:
         artifact = comparison_artifact_path(
@@ -1762,6 +1921,7 @@ def write_matrix_artifact(
                 "inputs": retained_inputs,
                 "products": retained_products,
                 "tools": retained_tools,
+                "artifacts": retained_artifacts,
                 "pairs": pairs,
                 "findings": [finding.to_json() for finding in findings],
                 "summary": {
@@ -1780,6 +1940,7 @@ def write_matrix_artifact(
                     "inputCount": len(inputs),
                     "productCount": len(sorted_products),
                     "toolCount": len(sorted_tools),
+                    "artifactCount": len(sorted_artifacts),
                 },
             },
             indent=2,
@@ -1824,7 +1985,7 @@ def verify_evidence_file(
 
 
 def verify_matrix_artifact(path: Path) -> dict:
-    """Verify retained inputs, products, comparisons, counts, and identities."""
+    """Verify retained run evidence, semantic comparisons, and identities."""
     if path.is_symlink() or not path.is_file():
         raise ValidationError(f"validation matrix is not a regular file: {path}")
     try:
@@ -1839,6 +2000,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "inputs",
         "products",
         "tools",
+        "artifacts",
         "pairs",
         "findings",
         "summary",
@@ -1878,6 +2040,7 @@ def verify_matrix_artifact(path: Path) -> dict:
     if not isinstance(raw_inputs, list) or not raw_inputs:
         raise ValidationError("validation matrix has malformed inputs")
     inputs: list[ValidationInput] = []
+    corpus_content: bytes | None = None
     for index, item in enumerate(raw_inputs):
         if not isinstance(item, dict) or set(item) != {
             "kind", "name", "sha256", "artifact"
@@ -1889,7 +2052,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         expected_artifact = f"evidence/inputs/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation input has noncanonical artifact path")
-        verify_evidence_file(
+        input_content = verify_evidence_file(
             report_root,
             item["artifact"],
             digest,
@@ -1897,10 +2060,38 @@ def verify_matrix_artifact(path: Path) -> dict:
         )
         if index == 0 and (kind != "corpus" or name != "corpus.json"):
             raise ValidationError("first validation input must be corpus.json")
+        if index == 0:
+            corpus_content = input_content
         inputs.append(ValidationInput(kind, name, digest))
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
         raise ValidationError("validation matrix has duplicate inputs")
+    if corpus_content is None:
+        raise ValidationError("validation matrix has no retained corpus")
+    try:
+        corpus = json.loads(corpus_content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError("retained validation corpus is not JSON") from error
+    if (
+        not isinstance(corpus, dict)
+        or set(corpus) != {"version", "cases"}
+        or corpus["version"] != PROTOCOL_VERSION
+        or isinstance(corpus["version"], bool)
+        or not isinstance(corpus["cases"], list)
+    ):
+        raise ValidationError("retained validation corpus is malformed")
+    corpus_cases: dict[str, dict] = {}
+    for descriptor in corpus["cases"]:
+        if not isinstance(descriptor, dict):
+            raise ValidationError("retained validation corpus is malformed")
+        case_id = validate_backend_name(
+            descriptor.get("id"), "retained validation corpus case ID"
+        )
+        if case_id in corpus_cases:
+            raise ValidationError("retained validation corpus has duplicate cases")
+        corpus_cases[case_id] = descriptor
+    if any(case_id not in corpus_cases for case_id in selected_cases):
+        raise ValidationError("validation selection names unknown corpus case")
 
     raw_products = value["products"]
     if not isinstance(raw_products, list):
@@ -1965,6 +2156,67 @@ def verify_matrix_artifact(path: Path) -> dict:
         raise ValidationError("validation matrix has duplicate tools")
     if tool_keys != sorted(tool_keys):
         raise ValidationError("validation matrix tools are not sorted")
+
+    raw_artifacts = value["artifacts"]
+    if not isinstance(raw_artifacts, list):
+        raise ValidationError("validation matrix has malformed artifacts")
+    artifacts: list[ValidationArtifact] = []
+    result_records: dict[tuple[str, str], dict] = {}
+    stdout_scopes: set[tuple[str, str | None, str]] = set()
+    stderr_scopes: set[tuple[str, str | None, str]] = set()
+    for item in raw_artifacts:
+        if not isinstance(item, dict) or set(item) != {
+            "kind", "name", "sha256", "artifact"
+        }:
+            raise ValidationError("validation matrix has malformed artifact")
+        kind = validate_backend_name(item["kind"], "validation artifact kind")
+        name = checked_relative_posix_path(
+            item["name"], "validation artifact name"
+        )
+        digest = checked_sha256(item["sha256"], "validation artifact")
+        backend, case_id, scope = validation_artifact_scope(
+            kind, name, checked_backends, selected_cases
+        )
+        expected_artifact = f"evidence/artifacts/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError(
+                "validation artifact has noncanonical artifact path"
+            )
+        content = verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation artifact {kind}:{name}",
+        )
+        artifacts.append(ValidationArtifact(kind, name, digest, content))
+        if kind == "backend-result":
+            if case_id is None:
+                raise ValidationError("backend-result artifact has no case")
+            try:
+                record = json.loads(content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "backend-result artifact is not JSON"
+                ) from error
+            if not isinstance(record, dict):
+                raise ValidationError("backend-result artifact is malformed")
+            recorded_case_id, _ = checked_record(record, backend)
+            if recorded_case_id != case_id:
+                raise ValidationError(
+                    "backend-result artifact disagrees with its name"
+                )
+            result_records[(case_id, backend)] = record
+        elif kind == "process-stdout":
+            stdout_scopes.add((backend, case_id, scope))
+        else:
+            stderr_scopes.add((backend, case_id, scope))
+    artifact_keys = [(artifact.kind, artifact.name) for artifact in artifacts]
+    if len(set(artifact_keys)) != len(artifact_keys):
+        raise ValidationError("validation matrix has duplicate artifacts")
+    if artifact_keys != sorted(artifact_keys):
+        raise ValidationError("validation matrix artifacts are not sorted")
+    if stdout_scopes != stderr_scopes:
+        raise ValidationError("validation process artifacts are not paired")
 
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
@@ -2051,6 +2303,59 @@ def verify_matrix_artifact(path: Path) -> dict:
             or len(comparison["findings"]) != item["findingCount"]
         ):
             raise ValidationError("validation comparison artifact is malformed")
+        compared_case_ids: list[str] = []
+        for compared in comparison["comparisons"]:
+            if not isinstance(compared, dict) or set(compared) != {
+                "caseId", "reference", "candidate", "equal", "case"
+            }:
+                raise ValidationError("validation comparison entry is malformed")
+            case_id = validate_backend_name(
+                compared["caseId"], "validation comparison case ID"
+            )
+            if (
+                case_id not in selected_cases
+                or compared["reference"] != reference
+                or compared["candidate"] != candidate
+                or not isinstance(compared["equal"], bool)
+                or compared["case"] != corpus_cases[case_id]
+            ):
+                raise ValidationError(
+                    "validation comparison entry disagrees with retained evidence"
+                )
+            reference_record = result_records.get((case_id, reference))
+            candidate_record = result_records.get((case_id, candidate))
+            if reference_record is None or candidate_record is None:
+                raise ValidationError(
+                    "validation comparison has no retained backend result"
+                )
+            try:
+                equal, _, _ = compare_success(
+                    reference_record, candidate_record
+                )
+            except ValidationError as error:
+                raise ValidationError(
+                    "validation comparison references a non-success result"
+                ) from error
+            if compared["equal"] != equal:
+                raise ValidationError(
+                    "validation comparison disagrees with retained backend results"
+                )
+            compared_case_ids.append(case_id)
+        if (
+            len(set(compared_case_ids)) != len(compared_case_ids)
+            or compared_case_ids
+            != [
+                case_id
+                for case_id in selected_cases
+                if case_id in set(compared_case_ids)
+            ]
+            or sum(
+                int(compared["equal"])
+                for compared in comparison["comparisons"]
+            )
+            != equal_cases
+        ):
+            raise ValidationError("validation comparison entries are malformed")
         expected_comparison_summary = {
             "selectedCases": len(selected_cases),
             "comparedCases": compared_cases,
@@ -2089,6 +2394,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "inputCount",
         "productCount",
         "toolCount",
+        "artifactCount",
     }
     if not isinstance(summary, dict) or set(summary) != expected_summary_fields:
         raise ValidationError("validation matrix has malformed summary")
@@ -2107,6 +2413,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         "inputCount": len(inputs),
         "productCount": len(products),
         "toolCount": len(tools),
+        "artifactCount": len(artifacts),
     }
     if summary != expected_summary:
         raise ValidationError("validation matrix summary disagrees with contents")
@@ -2196,7 +2503,9 @@ def validate_matrix(
         for case_id in context.selected:
             record = backend_run.results.get(case_id)
             if record is not None:
-                write_artifact(context.out_dir, case_id, name, record)
+                backend_run.artifacts.append(
+                    write_artifact(context.out_dir, case_id, name, record)
+                )
 
     pair_results: list[PairValidationResult] = []
     for reference, candidate in pairs:
@@ -2243,8 +2552,19 @@ def validate_matrix(
         for backend_run in backend_runs.values()
         for tool in backend_run.tools
     )
+    artifacts = tuple(
+        artifact
+        for backend_run in backend_runs.values()
+        for artifact in backend_run.artifacts
+    )
     write_matrix_artifact(
-        context, list(adapters), pair_results, all_findings, products, tools
+        context,
+        list(adapters),
+        pair_results,
+        all_findings,
+        products,
+        tools,
+        artifacts,
     )
     return pair_results, all_findings
 

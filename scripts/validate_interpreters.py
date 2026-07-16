@@ -17,6 +17,7 @@ from validation_harness import (
     ProductDeclaration,
     RunContext,
     ToolDeclaration,
+    ValidationArtifact,
     ValidationError,
     ValidationFinding,
     ValidationInput,
@@ -50,11 +51,13 @@ from validation_harness import (
     validation_run_sha256,
     validation_selection_sha256,
     validation_input_from_file,
+    validation_artifact_scope,
     validation_product_from_file,
     validation_tool_from_file,
     validation_tool_from_declaration,
     write_comparison_artifact,
     write_corpus_manifest,
+    write_artifact,
     write_matrix_artifact,
     write_process_artifacts,
 )
@@ -141,8 +144,12 @@ class NativeAdapter:
         for case_id in context.selected:
             command = [str(self.executable), "--case", case_id]
             completed = run(command, context.root)
-            write_process_artifacts(
-                context.out_dir / case_id / self.name, completed
+            backend_run.artifacts.extend(
+                write_process_artifacts(
+                    context.out_dir / case_id / self.name,
+                    completed,
+                    f"{case_id}/{self.name}",
+                )
             )
             if completed.returncode != 0:
                 backend_run.findings.append(
