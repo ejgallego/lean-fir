@@ -1,5 +1,6 @@
 import Fir.LeanIR.PassCorrectness
 import Lean.Compiler.LCNF.AlphaEqv
+import Std.Tactic.Do
 
 namespace Fir.LeanIR.Passes.AlphaEqv
 
@@ -38,6 +39,96 @@ def ArgsRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
     (left right : Array (LCNF.Arg .impure)) : Prop :=
   ListRel (ArgRelated rho leftScope rightScope) left.toList right.toList
+
+private theorem listRel_length_eq
+    (related : ListRel relation left right) : left.length = right.length := by
+  induction related with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
+
+private theorem subarray_toList_eq_nil_of_next?_eq_none
+    {stream : Subarray α} (next : Std.Stream.next? stream = none) :
+    stream.toList = [] := by
+  simp only [Std.Stream.next?] at next
+  split at next
+  · contradiction
+  · apply List.eq_nil_of_length_eq_zero
+    rw [Subarray.length_toList, Subarray.size_eq]
+    omega
+
+private theorem subarray_toList_eq_cons_of_next?_eq_some
+    {stream rest : Subarray α} {head : α}
+    (next : Std.Stream.next? stream = some (head, rest)) :
+    stream.toList = head :: rest.toList := by
+  simp only [Std.Stream.next?] at next
+  split at next
+  · rename_i inBounds
+    change stream.internalRepresentation.start < stream.internalRepresentation.stop at inBounds
+    have arrayBound := stream.stop_le_array_size
+    change stream.internalRepresentation.stop ≤ stream.internalRepresentation.array.size at arrayBound
+    simp only [Option.some.injEq, Prod.mk.injEq] at next
+    rcases next with ⟨rfl, rfl⟩
+    rw [Subarray.toList_eq_drop_take]
+    rw [Subarray.toList_eq_drop_take]
+    simp only [Subarray.array, Subarray.start, Subarray.stop]
+    rw [List.drop_eq_getElem_cons]
+    · rw [List.getElem_take, Array.getElem_toList]
+    · simp only [List.length_take, Array.length_toList]
+      omega
+  · contradiction
+
+open Std.Do in
+set_option mvcgen.warning false in
+/-- Lean's executable parallel-array checker accepts every pointwise-related argument array. -/
+theorem eqvArgs_true_of_related
+    (related : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+    (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true := by
+  have sizes : leftArgs.size = rightArgs.size := by
+    simpa using listRel_length_eq related
+  generalize h : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = result
+  apply ReaderM.of_wp_run_eq h
+  simp only [LCNF.AlphaEqv.eqvArgs, sizes, ↓reduceIte, WP.bind, SPred.entails_nil,
+    SPred.down_pure, forall_const]
+  mvcgen invariants
+  | inv1 => Invariant.withEarlyReturnNewDo
+      (fun cursor stream current =>
+        ⌜current = rho ∧
+          ListRel (ArgRelated rho leftScope rightScope) cursor.suffix stream.toList⌝)
+      (fun _ _ _ => ⌜False⌝)
+  next _ _ _ _ state streamEnd _ invariant =>
+    rcases invariant with ⟨_, _, relatedSuffix⟩ | returned
+    · rw [subarray_toList_eq_nil_of_next?_eq_none streamEnd] at relatedSuffix
+      cases relatedSuffix
+    · simp_all
+  next _ leftArg _ _ state rightArg rest streamNext current invariant =>
+    rcases invariant with ⟨_, currentEq, relatedSuffix⟩ | returned
+    · subst current
+      rw [subarray_toList_eq_cons_of_next?_eq_some streamNext] at relatedSuffix
+      cases relatedSuffix with
+      | cons headRelated tailRelated =>
+          rcases headRelated with ⟨_, _, check⟩
+          cases leftArg with
+          | erased =>
+              cases rightArg with
+              | erased => simp_all [LCNF.AlphaEqv.eqvArg]
+              | fvar _ => simp [LCNF.AlphaEqv.eqvArg] at check
+              | type _ impossible => nomatch impossible
+          | fvar leftId =>
+              cases rightArg with
+              | erased => simp [LCNF.AlphaEqv.eqvArg] at check
+              | fvar rightId =>
+                  change (leftId == (rho.get? rightId).getD rightId) = true at check
+                  simp [LCNF.AlphaEqv.eqvArg, LCNF.AlphaEqv.eqvFVar, check,
+                    tailRelated]
+              | type _ impossible => nomatch impossible
+          | type _ impossible => nomatch impossible
+    · simp_all
+  next =>
+    refine Or.inl ⟨True.intro, True.intro, ?_⟩
+    change ListRel (ArgRelated rho leftScope rightScope)
+      leftArgs.toList rightArgs.toList at related
+    simpa [Std.toStream] using related
+  next => simp_all
 
 def ScopedFVarRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId) (left right : FVarId) : Prop :=
