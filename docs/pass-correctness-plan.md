@@ -68,8 +68,10 @@ The following work is implemented and checked by the default build:
 - `Passes/SimpCase.lean` proves internal-step prefix equivalence, selected-arm
   elimination, singleton default/constructor elimination, and removal of
   unreachable alternatives when the phase invariant selects a reachable arm.
-  `SimpCaseExamples.lean` checks the corresponding singleton and filtering
-  results against Lean 4.32's actual `simpCase.run` implementation.
+  It also proves a generic selected-branch rewrite theorem and reduces default
+  folding to the explicit semantic soundness obligation for `Code.alphaEqv`.
+  `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
+  alpha-renamed folding results against Lean 4.32's actual `simpCase.run`.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
   to symbolic core-Wasm instructions and imports.
 - `integration/talos` pins a Lean-4.32-compatible Talos revision, converts the
@@ -218,28 +220,38 @@ minimized. Classify it as `compiler`, `fir-semantics`, `wasm-adapter`, or
 `upstream-drift`; link the eventual permanent regression before marking it
 fixed. Workarounds belong in the card rather than silently weakening a theorem.
 
-## Current `simpCase` slice
+## Current `simpCase` proof
 
-The first proof slice is integrated. It specifies and proves the two rewrites
-that discard control-flow structure:
+Two bounded proof slices are integrated. The first specifies and proves the
+two rewrites that discard control-flow structure:
 
 1. removing unreachable alternatives, under the explicit invariant that the
    runtime-selected arm is reachable;
 2. eliminating a singleton default arm, or a singleton constructor arm whose
    tag invariant holds.
 
-The executable corpus also runs Lean's actual pass on both shapes and checks
-that it produces the specification result. No discrepancy was found.
+The second proves that an arbitrary case-table rewrite is correct whenever the
+branches selected before and after the rewrite are semantically equivalent.
+It defines `AlphaEqvSoundAt` as the exact missing bridge from Lean's Boolean
+`Code.alphaEqv` test to that semantic equivalence, and proves default folding
+correct conditional on this bridge. This exposes the remaining trust boundary
+rather than treating alpha-equivalence as an unproved semantic fact.
+
+The executable corpus runs Lean's actual pass on all three shapes and checks
+that it produces the specification result. The folding fixture uses different
+local `FVarId`s in its equal bodies, so it exercises alpha-renaming rather than
+mere syntactic equality. No discrepancy was found.
 
 The remaining bounded work is:
 
-1. specify alpha-equivalent alternative folding into a default arm;
-2. prove the folded default preserves observations modulo alpha-renaming;
-3. lift the local rewrites through recursive code, declarations, and program
+1. prove `Code.alphaEqv` sound for the interpreter, using an environment
+   renaming relation internally while preserving external observations;
+2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+   to the local rewrite theorems, creating a bug card for every mismatch;
+3. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-4. expand implementation conformance from the executable corpus to the pass
-   kernel, creating a bug card for every mismatch;
-5. in parallel, implement the first heap-bearing Talos runtime imports and run
+4. expand the compiler-generated conformance corpus around the whole pass;
+5. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first
