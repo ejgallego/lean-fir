@@ -50,6 +50,13 @@ that selects the same arm as the source `Nat` comparison. The proof found a
 missing allocation-side tag bound; constructor allocations and alternatives
 are now both rejected before an out-of-range tag can be narrowed to `i32`.
 
+`FirTalos/Correctness/Composition.lean` adds the next W4 layer: generated
+local-load prefixes, checked destination stores, complete constant/literal/
+constructor/projection `let` sequences, and adapter equations for concatenated
+instruction lists. The remaining recursive step needs an explicit relation
+between source environments and target locals and a transparent structural
+proof interface for the general lowerer's opaque `compileCode` recursion.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
 first standards-consumable, host-backed Wasm artifact for the W3 corpus. It

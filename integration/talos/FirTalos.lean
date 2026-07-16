@@ -10,3 +10,4 @@ import FirTalos.Correctness.Adapter
 import FirTalos.Correctness.Host
 import FirTalos.Correctness.Execution
 import FirTalos.Correctness.Lowering
+import FirTalos.Correctness.Composition

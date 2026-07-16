@@ -72,12 +72,22 @@ production heap layout.
   including restoration of the operand tail across both arms. Completing that
   proof exposed and fixed the missing allocation-side constructor-tag bound;
   both allocated and compared tags are now checked before narrowing to `i32`.
+- W4 straight-line composition now covers checked `local.get` sequences and
+  `local.set`, i32/i64 constant lets, natural/string literal lets, constructor
+  lets with local fields, and object-projection lets. Adapter proofs distribute
+  instruction conversion over concatenation and join independently adapted
+  value/continuation sequences at the resolved numeric destination local.
 
-The next W4 slice composes these generated-stack rules recursively over the
-call-free code fragment, starting with straight-line `let`/`local.set` chains
-and then the recursive case chain. That result can then be lifted through
-`RelatedPost` to whole exported functions. The adapter still rejects
-initializers and closures.
+The next W4 slice introduces the source-environment/target-local relation and
+proves it is preserved by a successful destination binding and handle-table
+extension. It must also expose a transparent structural proof interface for
+the call-free portion of `compileCode`: the general compiler is deliberately
+an opaque `partial def`, so recursive proof equations must be obtained by a
+non-duplicating refactor or an explicit lowering derivation rather than an
+unrelated proof-only compiler. With that interface, the local rules compose
+over `let` chains and the recursive case chain, then lift through `RelatedPost`
+to whole exported functions. The adapter still rejects initializers and
+closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -372,10 +382,12 @@ Layers 1--3 and the fuel-free executable-to-observation bridge are checked in
 `FirTalos/Correctness/`. Layer 4 now covers lowering and host steps for the
 whole initial fragment, provides their common instruction-level host-call
 lifting, instantiates constructor/projection stack shapes, and proves one
-complete source-related constructor-case test. Its active proof obligation is
-recursive composition over straight-line code and the case chain; layer 5 can
-then instantiate the bridge without mentioning runner fuel in the public
-theorem.
+complete source-related constructor-case test. A separate composition module
+now packages local loads, destination stores, complete initial-fragment let
+sequences, and adapter concatenation. Its active proof obligation is the
+source-environment/local relation plus a transparent structural interface for
+recursive `compileCode` composition; layer 5 can then instantiate the bridge
+without mentioning runner fuel in the public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
