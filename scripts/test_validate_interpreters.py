@@ -694,6 +694,32 @@ class HarnessTests(unittest.TestCase):
                     }
                 ],
             )
+            corpus_sha256 = matrix["inputs"][0]["sha256"]
+            selection_sha256 = harness.validation_selection_sha256(
+                corpus_sha256, ["case"]
+            )
+            self.assertEqual(
+                matrix["identity"],
+                {
+                    "algorithm": "sha256",
+                    "selection": selection_sha256,
+                    "run": harness.validation_run_sha256(
+                        selection_sha256,
+                        ["native", "lcnf", "v8", "talos"],
+                        [
+                            ("native", "lcnf"),
+                            ("native", "v8"),
+                            ("v8", "talos"),
+                        ],
+                        (
+                            harness.ValidationInput(
+                                "corpus", "corpus.json", corpus_sha256
+                            ),
+                        ),
+                        [],
+                    ),
+                },
+            )
             self.assertEqual(matrix["products"], [])
             harness.write_matrix_artifact(
                 context,
@@ -731,6 +757,65 @@ class HarnessTests(unittest.TestCase):
                 )
             self.assertEqual(native.execute_count, 1)
             self.assertEqual(v8.execute_count, 1)
+
+    def test_validation_identity_is_deterministic_and_sensitive(self) -> None:
+        inputs = (
+            harness.ValidationInput("corpus", "corpus.json", "0" * 64),
+            harness.ValidationInput("adapter-config", "v8.json", "1" * 64),
+        )
+        product = harness.ValidationProduct(
+            "v8", "wasm-module", "module.wasm", "2" * 64
+        )
+        selection = harness.validation_selection_sha256(
+            inputs[0].sha256, ["first", "second"]
+        )
+        run = harness.validation_run_sha256(
+            selection,
+            ["native", "v8"],
+            [("native", "v8")],
+            inputs,
+            [product],
+        )
+        self.assertEqual(
+            run,
+            harness.validation_run_sha256(
+                selection,
+                ["native", "v8"],
+                [("native", "v8")],
+                inputs,
+                [product],
+            ),
+        )
+        self.assertNotEqual(
+            selection,
+            harness.validation_selection_sha256(
+                inputs[0].sha256, ["second", "first"]
+            ),
+        )
+        self.assertNotEqual(
+            run,
+            harness.validation_run_sha256(
+                selection,
+                ["native", "v8"],
+                [("v8", "native")],
+                inputs,
+                [product],
+            ),
+        )
+        self.assertNotEqual(
+            run,
+            harness.validation_run_sha256(
+                selection,
+                ["native", "v8"],
+                [("native", "v8")],
+                inputs,
+                [
+                    harness.ValidationProduct(
+                        "v8", "wasm-module", "module.wasm", "3" * 64
+                    )
+                ],
+            ),
+        )
 
     def test_matrix_products_are_sorted_and_unique(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

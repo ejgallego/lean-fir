@@ -104,6 +104,50 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def canonical_json_sha256(value: object) -> str:
+    content = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256_bytes(content)
+
+
+def validation_selection_sha256(
+    corpus_sha256: str, selected_cases: list[str]
+) -> str:
+    return canonical_json_sha256(
+        {
+            "version": PROTOCOL_VERSION,
+            "corpusSha256": corpus_sha256,
+            "selectedCases": selected_cases,
+        }
+    )
+
+
+def validation_run_sha256(
+    selection_sha256: str,
+    backend_names: list[str],
+    pair_names: list[tuple[str, str]],
+    inputs: tuple[ValidationInput, ...],
+    products: list[ValidationProduct],
+) -> str:
+    return canonical_json_sha256(
+        {
+            "version": PROTOCOL_VERSION,
+            "selectionSha256": selection_sha256,
+            "backends": backend_names,
+            "pairs": [
+                {"reference": reference, "candidate": candidate}
+                for reference, candidate in pair_names
+            ],
+            "inputs": [item.to_json() for item in inputs],
+            "products": [product.to_json() for product in products],
+        }
+    )
+
+
 def validation_input_from_file(
     kind: str, path: Path, root: Path
 ) -> ValidationInput:
@@ -1147,10 +1191,28 @@ def write_matrix_artifact(
                 "findingCount": len(result.findings),
             }
         )
+    selection_sha256 = validation_selection_sha256(
+        inputs[0].sha256, list(context.selected)
+    )
+    run_sha256 = validation_run_sha256(
+        selection_sha256,
+        backend_names,
+        [
+            (result.reference, result.candidate)
+            for result in pair_results
+        ],
+        inputs,
+        sorted_products,
+    )
     (context.out_dir / "matrix.json").write_text(
         json.dumps(
             {
                 "version": PROTOCOL_VERSION,
+                "identity": {
+                    "algorithm": "sha256",
+                    "selection": selection_sha256,
+                    "run": run_sha256,
+                },
                 "selectedCases": list(context.selected),
                 "backends": backend_names,
                 "inputs": [item.to_json() for item in inputs],

@@ -59,6 +59,13 @@ outside it use only their basename, while the digest remains authoritative.
 The corpus hash is computed from the same canonical bytes written to disk.
 Compiler-produced files are kept separately in the matrix's `products` array,
 so configuration inputs and executable semantic products cannot be confused.
+The matrix also derives two full SHA-256 identities from compact canonical JSON.
+`identity.selection` binds the corpus digest and ordered selected case IDs.
+`identity.run` binds that selection, participating backends, directed pair
+order, every input digest, and every sorted backend product.  Observations and
+findings are deliberately excluded, so repeated executions of the same
+evidence contract share an identity even when they expose nondeterminism or a
+regression.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
