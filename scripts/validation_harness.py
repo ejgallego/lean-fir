@@ -644,6 +644,99 @@ class BackendAudit:
     findings: list[ValidationFinding] = field(default_factory=list)
 
 
+PRODUCT_RECEIPT_DIAGNOSTIC = "validation-products"
+
+
+def product_receipt_value(products: list[ValidationProduct]) -> str:
+    entries = sorted(
+        (
+            {
+                "kind": product.kind,
+                "name": product.name,
+                "sha256": product.sha256,
+            }
+            for product in products
+        ),
+        key=lambda entry: (entry["kind"], entry["name"], entry["sha256"]),
+    )
+    return json.dumps(entries, separators=(",", ":"), sort_keys=True)
+
+
+def product_receipt_findings(backend_run: BackendRun) -> list[ValidationFinding]:
+    if not backend_run.products:
+        return []
+    declared = {
+        (product.kind, product.name, product.sha256)
+        for product in backend_run.products
+    }
+    findings: list[ValidationFinding] = []
+
+    def finding(message: str, case_id: str | None = None) -> None:
+        findings.append(
+            ValidationFinding("audit", message, backend_run.backend, case_id)
+        )
+
+    for case_id, record in sorted(backend_run.results.items()):
+        diagnostics = record.get("diagnostics", [])
+        if not isinstance(diagnostics, list) or not all(
+            isinstance(item, dict) for item in diagnostics
+        ):
+            finding("malformed diagnostics while reading product receipt", case_id)
+            continue
+        receipts = [
+            item for item in diagnostics
+            if item.get("key") == PRODUCT_RECEIPT_DIAGNOSTIC
+        ]
+        if not receipts:
+            finding("missing validation-products diagnostic", case_id)
+            continue
+        if len(receipts) != 1 or set(receipts[0]) != {"key", "value"}:
+            finding("malformed validation-products diagnostic", case_id)
+            continue
+        try:
+            value = json.loads(receipts[0]["value"])
+        except (TypeError, json.JSONDecodeError):
+            finding("malformed validation-products diagnostic", case_id)
+            continue
+        if not isinstance(value, list):
+            finding("malformed validation-products diagnostic", case_id)
+            continue
+        reported: list[tuple[str, str, str]] = []
+        malformed = False
+        for entry in value:
+            if not isinstance(entry, dict) or set(entry) != {
+                "kind", "name", "sha256"
+            }:
+                malformed = True
+                break
+            kind = entry["kind"]
+            name = entry["name"]
+            sha256 = entry["sha256"]
+            if not all(isinstance(item, str) for item in (kind, name, sha256)):
+                malformed = True
+                break
+            reported.append((kind, name, sha256))
+        if malformed or len(set(reported)) != len(reported):
+            finding("malformed validation-products diagnostic", case_id)
+            continue
+        if not reported:
+            finding(
+                "validation-products diagnostic reports no consumed products",
+                case_id,
+            )
+            continue
+        unknown = sorted(set(reported) - declared)
+        if unknown:
+            finding(
+                "product receipt contains undeclared products: "
+                + ", ".join(
+                    f"{kind}:{name}@{sha256}" for kind, name, sha256 in unknown
+                ),
+                case_id,
+            )
+    return findings
+
+
 class BackendAdapter(Protocol):
     name: str
 
@@ -807,7 +900,7 @@ class ExternalCommandAdapter:
         return backend_run
 
     def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
-        return BackendAudit()
+        return BackendAudit(findings=product_receipt_findings(backend_run))
 
 
 def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:

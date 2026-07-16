@@ -774,6 +774,71 @@ class HarnessTests(unittest.TestCase):
                     (products[0], products[0]),
                 )
 
+    def test_product_receipts_allow_per_case_subsets_and_require_attestation(self) -> None:
+        first = harness.ValidationProduct(
+            "v8", "wasm-module", "modules/first.wasm", "1" * 64
+        )
+        second = harness.ValidationProduct(
+            "v8", "wasm-module", "modules/second.wasm", "2" * 64
+        )
+
+        def received(case_id: str, products: list[harness.ValidationProduct]) -> dict:
+            record = success(case_id, "v8")
+            record["diagnostics"] = [
+                {
+                    "key": "validation-products",
+                    "value": harness.product_receipt_value(products),
+                }
+            ]
+            return record
+
+        backend_run = harness.BackendRun(
+            "v8",
+            ["first", "second"],
+            results={
+                "first": received("first", [first]),
+                "second": received("second", [second]),
+            },
+            products=[second, first],
+        )
+        self.assertEqual(harness.product_receipt_findings(backend_run), [])
+
+        backend_run.results["second"] = success("second", "v8")
+        self.assertEqual(
+            finding_messages(harness.product_receipt_findings(backend_run)),
+            ["second: missing validation-products diagnostic"],
+        )
+
+        unknown = harness.ValidationProduct(
+            "v8", "wasm-module", "modules/ghost.wasm", "3" * 64
+        )
+        backend_run.results["second"] = received("second", [second, unknown])
+        self.assertEqual(
+            finding_messages(harness.product_receipt_findings(backend_run)),
+            [
+                "second: product receipt contains undeclared products: "
+                "wasm-module:modules/ghost.wasm@" + "3" * 64
+            ],
+        )
+
+        malformed = success("second", "v8")
+        malformed["diagnostics"] = [
+            {"key": "validation-products", "value": "not-json"}
+        ]
+        backend_run.results["second"] = malformed
+        self.assertEqual(
+            finding_messages(harness.product_receipt_findings(backend_run)),
+            ["second: malformed validation-products diagnostic"],
+        )
+
+        backend_run.results["second"] = received("second", [])
+        self.assertEqual(
+            finding_messages(harness.product_receipt_findings(backend_run)),
+            [
+                "second: validation-products diagnostic reports no consumed products"
+            ],
+        )
+
     def test_pair_spec_is_directed_and_strict(self) -> None:
         self.assertEqual(
             harness.parse_pair_spec("v8:talos"), ("v8", "talos")
@@ -1002,12 +1067,18 @@ class HarnessTests(unittest.TestCase):
                 f"path.write_bytes({product_bytes!r})"
             )
             program = (
-                "import json,os,pathlib;"
+                "import hashlib,json,os,pathlib;"
                 "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
                 "assert len(products)==1;"
                 f"assert products[0]['sha256']=={product_sha256!r};"
                 f"assert pathlib.Path(products[0]['path']).read_bytes()=={product_bytes!r};"
-                f"print({json.dumps(json.dumps(success('case', 'v8')))})"
+                f"record=json.loads({json.dumps(json.dumps(success('case', 'v8')))});"
+                "receipt=[{'kind':product['kind'],'name':product['name'],"
+                "'sha256':hashlib.sha256(pathlib.Path(product['path']).read_bytes()).hexdigest()}"
+                " for product in products];"
+                "record['diagnostics']=[{'key':'validation-products',"
+                "'value':json.dumps(receipt,separators=(',',':'),sort_keys=True)}];"
+                "print(json.dumps(record))"
             )
             adapter_path.write_text(
                 json.dumps(

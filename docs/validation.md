@@ -171,6 +171,17 @@ machine-local path under `products`, sorted deterministically and counted as
 the generic producer/engine handoff: it neither invokes the developing Wasm
 compiler nor assumes how V8 and Talos will later share one module.
 
+Handoff is not, by itself, consumption evidence.  When products are declared,
+each protocol result from the external engine must include exactly one
+`validation-products` diagnostic.  Its string value is a JSON array of the
+products that case actually loaded, with `kind`, stable `name`, and the SHA-256
+recomputed from the loaded bytes.  Every returned result must report a nonempty
+subset of the declared products.  This permits a selected case to load only its
+own module without falsely claiming the other retained corpus products.
+Missing, empty, malformed, duplicate, or undeclared receipts become structured
+`audit` findings.  Thus the future V8 evidence will distinguish “the harness
+produced this module” from “the engine reports consuming this exact module.”
+
 ## Case and observation contract
 
 `Fir.Validation.Corpus` defines each case once.  A case names its source entry,

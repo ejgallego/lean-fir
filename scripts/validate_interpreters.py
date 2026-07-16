@@ -28,6 +28,8 @@ from validation_harness import (
     corpus_artifact_bytes,
     external_adapter_from_config,
     manifest_from_output as parse_manifest_from_output,
+    product_receipt_findings,
+    product_receipt_value,
     records_from_output,
     result_domain_findings,
     result_map,
