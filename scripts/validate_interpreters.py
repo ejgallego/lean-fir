@@ -129,10 +129,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.no_build:
-        built = run(["lake", "build", "fir-native-oracle"])
+        built = run(["lake", "build", "fir-native-oracle", "Fir.Validation"])
         if built.returncode != 0:
             sys.stderr.write(built.stdout + built.stderr)
-            raise ValidationError("failed to build fir-native-oracle")
+            raise ValidationError("failed to build validation backends")
 
     list_command = ["lake", "exe", "fir-native-oracle", "--list"]
     listed = run(list_command)
