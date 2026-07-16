@@ -195,6 +195,39 @@ def validation_run_sha256(
     )
 
 
+def validation_evidence_sha256(
+    run_sha256: str, matrix_sha256: str
+) -> str:
+    return canonical_json_sha256(
+        {
+            "version": PROTOCOL_VERSION,
+            "runSha256": checked_sha256(
+                run_sha256, "validation evidence run"
+            ),
+            "matrixSha256": checked_sha256(
+                matrix_sha256, "validation evidence matrix"
+            ),
+        }
+    )
+
+
+def validation_evidence_manifest_path(
+    out_dir: Path, run_sha256: str, matrix_sha256: str
+) -> Path:
+    run_digest = checked_sha256(run_sha256, "validation evidence run")
+    matrix_digest = checked_sha256(
+        matrix_sha256, "validation evidence matrix"
+    )
+    evidence_digest = validation_evidence_sha256(run_digest, matrix_digest)
+    return (
+        out_dir
+        / "evidence"
+        / "runs"
+        / run_digest
+        / f"{evidence_digest}.json"
+    )
+
+
 def validation_input_from_file(
     kind: str, path: Path, root: Path
 ) -> ValidationInput:
@@ -640,6 +673,131 @@ def retain_evidence_blob(
                         f"{temporary_path}: {error}"
                     ) from error
     return artifact.relative_to(root).as_posix()
+
+
+def retain_evidence_bundle(
+    out_dir: Path,
+    run_sha256: str,
+    evidence_sha256: str,
+    content: bytes,
+) -> str:
+    """Publish one immutable matrix under its run and evidence identities."""
+    run_digest = checked_sha256(run_sha256, "validation bundle run")
+    evidence_digest = checked_sha256(
+        evidence_sha256, "validation bundle evidence"
+    )
+    root = out_dir.resolve()
+    directory = root
+    for part in ("evidence", "runs", run_digest):
+        directory = directory / part
+        if directory.is_symlink():
+            raise ValidationError(
+                f"evidence directory contains a symlink: {directory}"
+            )
+        try:
+            directory.mkdir(exist_ok=True)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot create evidence directory {directory}: {error}"
+            ) from error
+        if not directory.is_dir():
+            raise ValidationError(f"evidence path is not a directory: {directory}")
+    bundle = directory / f"{evidence_digest}.json"
+    if bundle.is_symlink() or (bundle.exists() and not bundle.is_file()):
+        raise ValidationError(
+            f"validation evidence bundle is not a regular file: {bundle}"
+        )
+    if bundle.exists():
+        try:
+            existing = bundle.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read validation evidence bundle {bundle}: {error}"
+            ) from error
+        if existing != content:
+            raise ValidationError(
+                f"validation evidence bundle disagrees with its identity: "
+                f"{evidence_digest}"
+            )
+    else:
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=directory,
+                prefix=".validation-bundle-",
+                delete=False,
+            ) as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary_path = Path(temporary.name)
+            os.link(temporary_path, bundle)
+        except FileExistsError:
+            try:
+                existing = bundle.read_bytes()
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot read concurrently retained validation evidence "
+                    f"bundle {bundle}: {error}"
+                ) from error
+            if existing != content:
+                raise ValidationError(
+                    f"validation evidence bundle disagrees with its identity: "
+                    f"{evidence_digest}"
+                )
+        except OSError as error:
+            raise ValidationError(
+                f"cannot retain validation evidence bundle {bundle}: {error}"
+            ) from error
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError as error:
+                    raise ValidationError(
+                        f"cannot remove temporary validation bundle "
+                        f"{temporary_path}: {error}"
+                    ) from error
+    return bundle.relative_to(root).as_posix()
+
+
+def write_evidence_manifest(
+    out_dir: Path,
+    matrix_content: bytes,
+    run_sha256: str,
+) -> Path:
+    run_digest = checked_sha256(run_sha256, "validation evidence run")
+    matrix_digest = sha256_bytes(matrix_content)
+    matrix_artifact = retain_evidence_blob(
+        out_dir, "matrices", matrix_digest, matrix_content
+    )
+    evidence_digest = validation_evidence_sha256(run_digest, matrix_digest)
+    manifest_content = (
+        json.dumps(
+            {
+                "version": PROTOCOL_VERSION,
+                "identity": {
+                    "algorithm": "sha256",
+                    "run": run_digest,
+                    "evidence": evidence_digest,
+                },
+                "matrix": {
+                    "sha256": matrix_digest,
+                    "artifact": matrix_artifact,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    relative = retain_evidence_bundle(
+        out_dir,
+        run_digest,
+        evidence_digest,
+        manifest_content,
+    )
+    return out_dir / relative
 
 
 def retain_validation_inputs(
@@ -1793,7 +1951,7 @@ def write_matrix_artifact(
     products: tuple[ValidationProduct, ...] = (),
     tools: tuple[ValidationTool, ...] = (),
     artifacts: tuple[ValidationArtifact, ...] = (),
-) -> None:
+) -> Path:
     context.out_dir.mkdir(parents=True, exist_ok=True)
     inputs = (
         ValidationInput(
@@ -1907,47 +2065,48 @@ def write_matrix_artifact(
         sorted_products,
         sorted_tools,
     )
-    (context.out_dir / "matrix.json").write_text(
-        json.dumps(
-            {
-                "version": PROTOCOL_VERSION,
-                "identity": {
-                    "algorithm": "sha256",
-                    "selection": selection_sha256,
-                    "run": run_sha256,
-                },
-                "selectedCases": list(context.selected),
-                "backends": backend_names,
-                "inputs": retained_inputs,
-                "products": retained_products,
-                "tools": retained_tools,
-                "artifacts": retained_artifacts,
-                "pairs": pairs,
-                "findings": [finding.to_json() for finding in findings],
-                "summary": {
-                    "selectedCaseCount": len(context.selected),
-                    "backendCount": len(backend_names),
-                    "pairCount": len(pair_results),
-                    "comparisonCount": sum(
-                        len(result.comparisons) for result in pair_results
-                    ),
-                    "equalComparisonCount": sum(
-                        int(comparison["equal"])
-                        for result in pair_results
-                        for comparison in result.comparisons
-                    ),
-                    "findingCount": len(findings),
-                    "inputCount": len(inputs),
-                    "productCount": len(sorted_products),
-                    "toolCount": len(sorted_tools),
-                    "artifactCount": len(sorted_artifacts),
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    matrix_value = {
+        "version": PROTOCOL_VERSION,
+        "identity": {
+            "algorithm": "sha256",
+            "selection": selection_sha256,
+            "run": run_sha256,
+        },
+        "selectedCases": list(context.selected),
+        "backends": backend_names,
+        "inputs": retained_inputs,
+        "products": retained_products,
+        "tools": retained_tools,
+        "artifacts": retained_artifacts,
+        "pairs": pairs,
+        "findings": [finding.to_json() for finding in findings],
+        "summary": {
+            "selectedCaseCount": len(context.selected),
+            "backendCount": len(backend_names),
+            "pairCount": len(pair_results),
+            "comparisonCount": sum(
+                len(result.comparisons) for result in pair_results
+            ),
+            "equalComparisonCount": sum(
+                int(comparison["equal"])
+                for result in pair_results
+                for comparison in result.comparisons
+            ),
+            "findingCount": len(findings),
+            "inputCount": len(inputs),
+            "productCount": len(sorted_products),
+            "toolCount": len(sorted_tools),
+            "artifactCount": len(sorted_artifacts),
+        },
+    }
+    matrix_content = (
+        json.dumps(matrix_value, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    (context.out_dir / "matrix.json").write_bytes(matrix_content)
+    return write_evidence_manifest(
+        context.out_dir,
+        matrix_content,
+        run_sha256,
     )
 
 
@@ -1984,7 +2143,9 @@ def verify_evidence_file(
     return content
 
 
-def verify_matrix_artifact(path: Path) -> dict:
+def verify_matrix_artifact(
+    path: Path, report_root: Path | None = None
+) -> dict:
     """Verify retained run evidence, semantic comparisons, and identities."""
     if path.is_symlink() or not path.is_file():
         raise ValidationError(f"validation matrix is not a regular file: {path}")
@@ -2013,7 +2174,7 @@ def verify_matrix_artifact(path: Path) -> dict:
         or value["version"] != PROTOCOL_VERSION
     ):
         raise ValidationError("validation matrix has unsupported version")
-    report_root = path.parent
+    report_root = path.parent if report_root is None else report_root
 
     selected_cases = value["selectedCases"]
     if (
@@ -2445,6 +2606,109 @@ def verify_matrix_artifact(path: Path) -> dict:
     if run_sha256 != expected_run_sha256:
         raise ValidationError("validation run identity mismatch")
     return value
+
+
+def verify_evidence_manifest(path: Path) -> dict:
+    """Verify one append-only evidence manifest and its retained matrix."""
+    absolute = Path(os.path.abspath(path))
+    run_directory = absolute.parent
+    runs_directory = run_directory.parent
+    evidence_directory = runs_directory.parent
+    report_root = evidence_directory.parent
+    if (
+        evidence_directory.name != "evidence"
+        or runs_directory.name != "runs"
+        or absolute.suffix != ".json"
+    ):
+        raise ValidationError(
+            "validation evidence manifest has noncanonical path"
+        )
+    for component in (
+        evidence_directory,
+        runs_directory,
+        run_directory,
+        absolute,
+    ):
+        if component.is_symlink():
+            raise ValidationError(
+                "validation evidence manifest path contains a symlink"
+            )
+    if not absolute.is_file():
+        raise ValidationError(
+            f"validation evidence manifest is not a regular file: {path}"
+        )
+    try:
+        manifest = json.loads(absolute.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot read validation evidence manifest {path}: {error}"
+        ) from error
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "version", "identity", "matrix"
+    }:
+        raise ValidationError("validation evidence manifest is malformed")
+    if (
+        not isinstance(manifest["version"], int)
+        or isinstance(manifest["version"], bool)
+        or manifest["version"] != PROTOCOL_VERSION
+    ):
+        raise ValidationError(
+            "validation evidence manifest has unsupported version"
+        )
+    identity = manifest["identity"]
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"algorithm", "run", "evidence"}
+        or identity["algorithm"] != "sha256"
+    ):
+        raise ValidationError(
+            "validation evidence manifest has malformed identity"
+        )
+    run_sha256 = checked_sha256(identity["run"], "validation evidence run")
+    evidence_sha256 = checked_sha256(
+        identity["evidence"], "validation evidence identity"
+    )
+    matrix = manifest["matrix"]
+    if not isinstance(matrix, dict) or set(matrix) != {"sha256", "artifact"}:
+        raise ValidationError(
+            "validation evidence manifest has malformed matrix"
+        )
+    matrix_sha256 = checked_sha256(
+        matrix["sha256"], "validation evidence matrix"
+    )
+    if run_directory.name != run_sha256:
+        raise ValidationError(
+            "validation evidence manifest run directory mismatch"
+        )
+    if absolute.stem != evidence_sha256:
+        raise ValidationError(
+            "validation evidence manifest filename mismatch"
+        )
+    expected_evidence_sha256 = validation_evidence_sha256(
+        run_sha256, matrix_sha256
+    )
+    if evidence_sha256 != expected_evidence_sha256:
+        raise ValidationError("validation evidence identity mismatch")
+    expected_artifact = f"evidence/matrices/{matrix_sha256}"
+    if matrix["artifact"] != expected_artifact:
+        raise ValidationError(
+            "validation evidence manifest has noncanonical matrix artifact"
+        )
+    verify_evidence_file(
+        report_root,
+        matrix["artifact"],
+        matrix_sha256,
+        "retained validation matrix",
+    )
+    verified_matrix = verify_matrix_artifact(
+        report_root / expected_artifact,
+        report_root=report_root,
+    )
+    if verified_matrix["identity"]["run"] != run_sha256:
+        raise ValidationError(
+            "validation evidence run disagrees with retained matrix"
+        )
+    return manifest
 
 
 def validate_matrix(

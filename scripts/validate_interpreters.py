@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -46,7 +47,10 @@ from validation_harness import (
     validate_pair,
     validate_backend_name,
     validate_matrix,
+    validation_evidence_manifest_path,
+    validation_evidence_sha256,
     verify_matrix_artifact,
+    verify_evidence_manifest,
     validation_plan_from_config,
     validation_run_sha256,
     validation_selection_sha256,
@@ -57,6 +61,7 @@ from validation_harness import (
     validation_tool_from_declaration,
     write_comparison_artifact,
     write_corpus_manifest,
+    write_evidence_manifest,
     write_artifact,
     write_matrix_artifact,
     write_process_artifacts,
@@ -265,11 +270,17 @@ def main() -> int:
         type=Path,
         help="verify retained evidence and identities without running backends",
     )
+    parser.add_argument(
+        "--verify-evidence",
+        type=Path,
+        help="verify an immutable evidence manifest without running backends",
+    )
     args = parser.parse_args()
 
-    if args.verify_matrix is not None:
+    if args.verify_matrix is not None or args.verify_evidence is not None:
         if (
-            args.cases
+            (args.verify_matrix is not None and args.verify_evidence is not None)
+            or args.cases
             or args.tag
             or args.out_dir is not None
             or args.no_build
@@ -280,13 +291,25 @@ def main() -> int:
             or args.plan
         ):
             raise ValidationError(
-                "--verify-matrix cannot be combined with validation run options"
+                "evidence verification options are mutually exclusive and "
+                "cannot be combined with validation run options"
             )
-        matrix = verify_matrix_artifact(args.verify_matrix)
-        print(
-            f"verified validation matrix {args.verify_matrix}: "
-            f"run {matrix['identity']['run']}"
-        )
+        if args.verify_matrix is not None:
+            matrix = verify_matrix_artifact(args.verify_matrix)
+            print(
+                f"verified validation matrix {args.verify_matrix}: "
+                f"run {matrix['identity']['run']}"
+            )
+        else:
+            evidence_path = args.verify_evidence
+            if evidence_path is None:
+                raise ValidationError("missing validation evidence path")
+            manifest = verify_evidence_manifest(evidence_path)
+            print(
+                f"verified validation evidence {evidence_path}: "
+                f"evidence {manifest['identity']['evidence']}, "
+                f"run {manifest['identity']['run']}"
+            )
         return 0
 
     args.out_dir = args.out_dir or DEFAULT_OUT
@@ -369,6 +392,15 @@ def main() -> int:
         tuple(provenance_inputs),
     )
     pair_results, findings = validate_matrix(context, pairs)
+    matrix_content = (args.out_dir / "matrix.json").read_bytes()
+    matrix = json.loads(matrix_content)
+    evidence_path = validation_evidence_manifest_path(
+        args.out_dir,
+        matrix["identity"]["run"],
+        sha256_bytes(matrix_content),
+    )
+    verify_evidence_manifest(evidence_path)
+    print(f"retained validation evidence {evidence_path}")
     for pair_result in pair_results:
         for comparison in pair_result.comparisons:
             if comparison["equal"]:

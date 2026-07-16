@@ -104,6 +104,31 @@ python3 scripts/validate_interpreters.py \
   --verify-matrix _build/validation/matrix.json
 ```
 
+Every completed matrix is also retained byte-for-byte under
+`evidence/matrices/<matrix-sha256>`.  The harness publishes a strict immutable
+manifest at
+`evidence/runs/<run-sha256>/<evidence-sha256>.json`, where the evidence identity
+hashes the protocol version, semantic run identity, and exact matrix digest.
+This one-way wrapper avoids a self-referential matrix hash.  Repeating identical
+evidence is idempotent; different observations, logs, comparisons, or findings
+for the same semantic contract create distinct manifests in the same run
+directory.  A changed input, tool, or product instead changes the run directory.
+The mutable `matrix.json` can therefore remain a convenient latest-run discovery
+file without destroying previous executions.
+
+An immutable execution can be verified directly, even after `matrix.json` and
+all mutable staging files are removed:
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --verify-evidence \
+  _build/validation/evidence/runs/<run>/<evidence>.json
+```
+
+The verifier checks the manifest path, identities, retained matrix digest, and
+then the complete matrix evidence graph.  The report tree remains relocatable
+because all manifest and matrix references are report-relative.
+
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run.
 
@@ -115,10 +140,10 @@ reported equality from those retained observations.  Results and logs remain
 outside `identity.run`, so nondeterministic evidence can expose different bytes
 without pretending that the semantic input/tool/product contract changed.
 Findings or unequal comparisons are valid evidence and do not make structural
-verification fail.  `--verify-matrix` is exclusive with run options.  This
-stage verifies the complete artifact inventory referenced by the matrix.  An
-immutable manifest layer for preserving multiple executions with the same run
-identity remains separate future hardening.
+verification fail.  `--verify-matrix` and `--verify-evidence` are mutually
+exclusive and cannot be combined with run options.  This
+stage verifies the complete artifact inventory referenced by the matrix.  The
+immutable manifest preserves multiple executions with the same run identity.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
