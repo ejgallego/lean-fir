@@ -80,11 +80,13 @@ The following work is implemented and checked by the default build:
   identically, and proves the binder-extension step once hygiene classifies new
   versus existing variables. `Passes/AlphaEqvCode.lean` now carries that
   relation through terminal code, value bindings, saved bind frames, machine
-  controls, states, and core-step results. `Passes/AlphaEqvLocal.lean` provides
-  a total transparent copy of Lean 4.32's recursive checker;
+  controls, states, core-step results, and impure case selection.
+  `Passes/AlphaEqvLocal.lean` provides a total transparent copy of Lean 4.32's
+  recursive checker, including a proof-facing structural alternative traversal;
   `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
-  declarative relation for terminal code, value bindings, and sequential
-  impure effects under explicit well-formedness/runtime-metadata premises;
+  declarative relation for terminal code, value bindings, sequential impure
+  effects, and one canonical case table under explicit
+  well-formedness/runtime-metadata premises;
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
@@ -336,6 +338,14 @@ instructions take the matching no-op path. The `sset` type annotation is left
 unconstrained in the semantic relation because the interpreter does not
 observe it; relating Lean's type checker remains an executable-bridge concern.
 
+The first branching layer is integrated. `AltRelated` relates constructor and
+default bodies, while `CaseSelectionRelated` states that `chooseAlt` either
+fails on both sides or selects related code. Structural lemmas lift this
+relation through constructor lookup, default lookup, and their combined
+selection rule. The `cases` branch of `coreStep_code_related` now covers
+discriminator lookup faults, tag-reading faults, missing alternatives, and
+successful entry into related branch bodies.
+
 The older terminal boundary theorems remain useful independently:
 `coreStep_terminal_related` proves matching immediate outcomes, and
 `terminalCodeRelated_empty_sound` discharges both terminal cases at the
@@ -355,6 +365,17 @@ theorem `codeRelated_of_local_accepts` does not depend on FIR's trusted bridge
 and proves that a successful local check constructs `CodeRelated` through
 `return`, `unreach`, recursive value bindings, and every sequential
 mutation/ownership instruction currently represented by that relation.
+The local alternative loop is now a transparent list recursion after Lean's
+normalizing sort. `altsRelated_of_local_check` proves that an accepting
+ordered traversal constructs the semantic alternative relation, and
+`codeRelated_cases_of_local_accepts` lifts it through one `cases` node whose
+branch bodies lie in the existing recursive fragment. For now this theorem
+requires both alternative arrays to be fixed points of `sortAlts`; this states
+precisely why the checker's comparison order agrees with the interpreter's
+selection order instead of assuming that fact. The trusted adapter exposes the
+matching compiler-facing case theorem. An axiom-free proof regression covers
+the empty-table selection-failure path, while the executable differential
+corpus continues to exercise populated case tables.
 `AlphaEqvTrusted` is opt-in and contains the sole project correspondence axiom:
 upstream acceptance implies a finite accepting local run. The adapter records
 the audited upstream source hash. `make check` rejects toolchain/source drift,
@@ -370,19 +391,22 @@ resolution. Details are recorded in
 
 The remaining bounded work is:
 
-1. extend the declarative state simulation through join points, jumps, cases,
-   calls, and the remaining frame forms, reusing the now-proved `let`,
+1. prove that `sortAlts` preserves `chooseAlt` under the compiler's case-table
+   invariants, remove the temporary canonical-array premise, and extend the
+   recursive side-condition relation to nested case bodies;
+2. extend the declarative state simulation through join points, jumps, calls,
+   and the remaining frame forms, reusing the now-proved `let`, case,
    bind-frame, and sequential-effect invariants;
-2. prove the transparent local checker sound for each newly added declarative
+3. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-4. lift the resulting theorem through recursive code, declarations, and program
+5. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-5. expand the compiler-generated conformance corpus around the whole pass;
-6. in parallel, continue the Talos runtime work and run
+6. expand the compiler-generated conformance corpus around the whole pass;
+7. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first

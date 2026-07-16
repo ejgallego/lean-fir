@@ -10,31 +10,44 @@ namespace Local
 abbrev EqvM := LCNF.AlphaEqv.EqvM
 
 /--
+Compare two already ordered alternative lists using a supplied recursive code
+checker. Keeping this traversal transparent gives proofs a structural
+induction principle without changing the executable order used by Lean.
+-/
+def eqvAltListsUsing
+    (recurse : LCNF.Code pu → LCNF.Code pu → EqvM Bool) :
+    List (LCNF.Alt pu) → List (LCNF.Alt pu) → EqvM Bool
+  | [], [] => pure true
+  | alt₁ :: rest₁, alt₂ :: rest₂ =>
+      match alt₁, alt₂ with
+      | .alt ctorName₁ ps₁ k₁ _, .alt ctorName₂ ps₂ k₂ _ =>
+          pure (ctorName₁ == ctorName₂) <&&>
+          LCNF.AlphaEqv.withParams ps₁ ps₂ (recurse k₁ k₂) <&&>
+          eqvAltListsUsing recurse rest₁ rest₂
+      | .ctorAlt i₁ k₁ _, .ctorAlt i₂ k₂ _ =>
+          pure (i₁ == i₂) <&&>
+          recurse k₁ k₂ <&&>
+          eqvAltListsUsing recurse rest₁ rest₂
+      | .default k₁, .default k₂ =>
+          recurse k₁ k₂ <&&>
+          eqvAltListsUsing recurse rest₁ rest₂
+      | _, _ => pure false
+  | _, _ => pure false
+
+/--
 Run the alternative checker using a supplied recursive code checker. This is
 the transparent counterpart of the loop inside Lean 4.32's opaque
 `LCNF.AlphaEqv.eqvAlts`.
 -/
-private def eqvAltsUsing
+def eqvAltsUsing
     (recurse : LCNF.Code pu → LCNF.Code pu → EqvM Bool)
     (alts₁ alts₂ : Array (LCNF.Alt pu)) : EqvM Bool := do
   if alts₁.size = alts₂.size then
-    let alts₁ := LCNF.AlphaEqv.sortAlts alts₁
-    let alts₂ := LCNF.AlphaEqv.sortAlts alts₂
-    for alt₁ in alts₁, alt₂ in alts₂ do
-      match alt₁, alt₂ with
-      | .alt ctorName₁ ps₁ k₁ _, .alt ctorName₂ ps₂ k₂ _ =>
-          unless ctorName₁ == ctorName₂ do return false
-          unless (← LCNF.AlphaEqv.withParams ps₁ ps₂ (recurse k₁ k₂)) do
-            return false
-      | .ctorAlt i₁ k₁ _, .ctorAlt i₂ k₂ _ =>
-          unless i₁ == i₂ do return false
-          unless ← recurse k₁ k₂ do return false
-      | .default k₁, .default k₂ =>
-          unless (← recurse k₁ k₂) do return false
-      | _, _ => return false
-    return true
+    eqvAltListsUsing recurse
+      (LCNF.AlphaEqv.sortAlts alts₁).toList
+      (LCNF.AlphaEqv.sortAlts alts₂).toList
   else
-    return false
+    pure false
 
 /--
 A total, transparent copy of Lean 4.32's recursive LCNF alpha-equivalence

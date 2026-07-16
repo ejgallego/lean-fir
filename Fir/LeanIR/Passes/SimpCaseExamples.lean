@@ -99,6 +99,33 @@ theorem alphaLocalCodeRelated :
     CodeRelated ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight :=
   codeRelated_of_local_accepts alphaCodeSideConditions ⟨2, by native_decide⟩
 
+def proofCaseTable : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[]
+
+def proofCaseCode : LCNF.Code .impure :=
+  .cases proofCaseTable
+
+theorem proofCaseAltsSideConditions :
+    AltsSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+      proofCaseTable.alts.toList proofCaseTable.alts.toList := by
+  exact .nil
+
+theorem proofCaseCanonical :
+    LCNF.AlphaEqv.sortAlts proofCaseTable.alts = proofCaseTable.alts := by
+  rfl
+
+/-- The local checker proves that equal empty case tables fail selection alike. -/
+theorem proofCaseLocalCodeRelated :
+    CodeRelated ({} : FVarIdMap FVarId) [c, x] [c, x]
+      proofCaseCode proofCaseCode := by
+  apply codeRelated_cases_of_local_accepts
+  · native_decide
+  · native_decide
+  · exact proofCaseCanonical
+  · exact proofCaseCanonical
+  · exact proofCaseAltsSideConditions
+  · exact ⟨1, by native_decide⟩
+
 def alphaEqvRegressionCodes : Array (LCNF.Code .impure) := #[
   literalCode,
   erasedCode,

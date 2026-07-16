@@ -104,6 +104,25 @@ inductive CodeSideConditions :
       CodeSideConditions rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
 
+/-- Side conditions for one impure case alternative. -/
+inductive AltSideConditions (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor
+      (code : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
+      AltSideConditions rho leftScope rightScope
+        (.ctorAlt leftInfo leftCode) (.ctorAlt rightInfo rightCode)
+  | default
+      (code : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
+      AltSideConditions rho leftScope rightScope
+        (.default leftCode) (.default rightCode)
+
+/-- Pointwise side conditions for an ordered impure alternative table. -/
+abbrev AltsSideConditions (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId)
+    (left right : List (LCNF.Alt .impure)) : Prop :=
+  ListRel (AltSideConditions rho leftScope rightScope) left right
+
 private theorem reader_andM_run_eq_true_iff
     (left right : ReaderM ρ Bool) (env : ρ) :
     (left <&&> right).run env = true ↔
@@ -111,6 +130,13 @@ private theorem reader_andM_run_eq_true_iff
   unfold andM
   simp only [ReaderT.run, ReaderT.bind, Bind.bind, Pure.pure]
   cases h : left env <;> simp [ToBool.toBool, ReaderT.pure]
+
+private theorem ctorInfo_eq_of_beq_local {left right : LCNF.CtorInfo}
+    (equal : (left == right) = true) : left = right := by
+  change LCNF.instBEqCtorInfo.beq left right = true at equal
+  cases left
+  cases right
+  simp_all [LCNF.instBEqCtorInfo.beq]
 
 /--
 For the code fragment represented by `CodeRelated`, transparent local
@@ -306,5 +332,76 @@ theorem codeRelated_of_local_accepts
         apply CodeRelated.del
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.1⟩
         · exact continuation_ih ⟨fuel, accepted.2⟩
+
+/--
+An accepting transparent comparison of ordered alternatives constructs the
+pointwise semantic relation. Alternative bodies may use the complete fragment
+covered by `CodeSideConditions`.
+-/
+theorem altsRelated_of_local_check
+    (side : AltsSideConditions rho leftScope rightScope left right)
+    (accepted :
+      (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
+    AltsRelated rho leftScope rightScope left right := by
+  induction side with
+  | nil => exact .nil
+  | cons head tail tail_ih =>
+      cases head with
+      | ctor code =>
+          rename_i leftCode rightCode leftInfo rightInfo
+          simp only [Local.eqvAltListsUsing] at accepted
+          rw [reader_andM_run_eq_true_iff] at accepted
+          rw [reader_andM_run_eq_true_iff] at accepted
+          have infoEq : leftInfo = rightInfo :=
+            ctorInfo_eq_of_beq_local accepted.1
+          subst rightInfo
+          exact .cons
+            (.ctor (codeRelated_of_local_accepts code ⟨fuel, accepted.2.1⟩))
+            (tail_ih accepted.2.2)
+      | default code =>
+          rename_i leftCode rightCode
+          simp only [Local.eqvAltListsUsing] at accepted
+          rw [reader_andM_run_eq_true_iff] at accepted
+          exact .cons
+            (.default (codeRelated_of_local_accepts code ⟨fuel, accepted.1⟩))
+            (tail_ih accepted.2)
+
+/--
+Transparent local acceptance is sound for one impure `cases` node whose
+already-canonical alternatives satisfy the recursive fragment's side
+conditions. Canonicality makes the checker's sorted traversal coincide with
+the interpreter's table order.
+-/
+theorem codeRelated_cases_of_local_accepts
+    (leftDiscrScoped : leftScope.contains leftCases.discr = true)
+    (rightDiscrScoped : rightScope.contains rightCases.discr = true)
+    (leftCanonical :
+      LCNF.AlphaEqv.sortAlts leftCases.alts = leftCases.alts)
+    (rightCanonical :
+      LCNF.AlphaEqv.sortAlts rightCases.alts = rightCases.alts)
+    (side : AltsSideConditions rho leftScope rightScope
+      leftCases.alts.toList rightCases.alts.toList)
+    (accepted : Local.AcceptsAt rho (.cases leftCases) (.cases rightCases)) :
+    CodeRelated rho leftScope rightScope (.cases leftCases) (.cases rightCases) := by
+  rcases accepted with ⟨_ | fuel, accepted⟩
+  · simp [Local.checkAt, Local.eqv] at accepted
+  · change
+      (LCNF.AlphaEqv.eqvFVar leftCases.discr rightCases.discr <&&>
+        LCNF.AlphaEqv.eqvType leftCases.resultType rightCases.resultType <&&>
+        Local.eqvAltsUsing (Local.eqv fuel) leftCases.alts rightCases.alts).run
+          rho = true at accepted
+    rw [reader_andM_run_eq_true_iff] at accepted
+    rw [reader_andM_run_eq_true_iff] at accepted
+    apply CodeRelated.cases
+    · exact ⟨leftDiscrScoped, rightDiscrScoped, accepted.1⟩
+    · intro tag
+      apply chooseAlt_related
+      apply altsRelated_of_local_check side
+      have alternativesAccepted := accepted.2.2
+      unfold Local.eqvAltsUsing at alternativesAccepted
+      split at alternativesAccepted
+      · rw [leftCanonical, rightCanonical] at alternativesAccepted
+        exact alternativesAccepted
+      · contradiction
 
 end Fir.LeanIR.Passes.AlphaEqv

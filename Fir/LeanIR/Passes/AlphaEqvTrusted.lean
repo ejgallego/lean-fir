@@ -37,6 +37,25 @@ theorem trustedCodeRelated_of_upstream
     CodeRelated ({} : FVarIdMap Lean.FVarId) scope scope left right :=
   codeRelated_of_local_accepts side (localAccepts_of_upstream accepted)
 
+/-- Compiler-facing construction for one canonical impure case table. -/
+theorem trustedCasesCodeRelated_of_upstream
+    (scope : List Lean.FVarId)
+    (leftCases rightCases : LCNF.Cases .impure)
+    (leftDiscrScoped : scope.contains leftCases.discr = true)
+    (rightDiscrScoped : scope.contains rightCases.discr = true)
+    (leftCanonical :
+      LCNF.AlphaEqv.sortAlts leftCases.alts = leftCases.alts)
+    (rightCanonical :
+      LCNF.AlphaEqv.sortAlts rightCases.alts = rightCases.alts)
+    (side : AltsSideConditions ({} : FVarIdMap Lean.FVarId) scope scope
+      leftCases.alts.toList rightCases.alts.toList)
+    (accepted :
+      (LCNF.Code.cases leftCases).alphaEqv (.cases rightCases) = true) :
+    CodeRelated ({} : FVarIdMap Lean.FVarId) scope scope
+      (.cases leftCases) (.cases rightCases) :=
+  codeRelated_cases_of_local_accepts leftDiscrScoped rightDiscrScoped
+    leftCanonical rightCanonical side (localAccepts_of_upstream accepted)
+
 /--
 Compiler-facing terminal soundness using the single Lean-4.32 trust axiom.
 The substantive semantic proof remains independent of that project axiom in

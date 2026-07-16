@@ -17,6 +17,8 @@ inductive TerminalCodeRelated (rho : FVarIdMap FVarId)
   | unreachable :
       TerminalCodeRelated rho leftScope rightScope (.unreach leftType) (.unreach rightType)
 
+mutual
+
 /--
 The proof-facing code relation, covering terminal code, value bindings, and
 the sequential impure heap/ownership instructions. The recursive `let` case
@@ -38,6 +40,15 @@ inductive CodeRelated :
           leftContinuation rightContinuation) :
       CodeRelated rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
+  | cases
+      (discr : ScopedFVarRelated rho leftScope rightScope
+        leftCases.discr rightCases.discr)
+      (selected : ∀ tag,
+        CaseSelectionRelated rho leftScope rightScope
+          (chooseAlt tag leftCases.alts.toList)
+          (chooseAlt tag rightCases.alts.toList)) :
+      CodeRelated rho leftScope rightScope
+        (.cases leftCases) (.cases rightCases)
   | oset
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (field : ArgRelated rho leftScope rightScope leftField rightField)
@@ -89,6 +100,36 @@ inductive CodeRelated :
         CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
       CodeRelated rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
+
+/-- A case-table lookup either fails on both sides or selects related code. -/
+inductive CaseSelectionRelated :
+    FVarIdMap FVarId → List FVarId → List FVarId →
+      Option (LCNF.Code .impure) → Option (LCNF.Code .impure) → Prop where
+  | none : CaseSelectionRelated rho leftScope rightScope none none
+  | some
+      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
+      CaseSelectionRelated rho leftScope rightScope
+        (some leftCode) (some rightCode)
+
+end
+
+/-- Impure alternatives agree on their selector and have related bodies. -/
+inductive AltRelated (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor
+      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
+      AltRelated rho leftScope rightScope
+        (.ctorAlt info leftCode) (.ctorAlt info rightCode)
+  | default
+      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
+      AltRelated rho leftScope rightScope
+        (.default leftCode) (.default rightCode)
+
+abbrev AltsRelated (rho : FVarIdMap FVarId)
+    (leftScope rightScope : List FVarId)
+    (left right : List (LCNF.Alt .impure)) : Prop :=
+  ListRel (AltRelated rho leftScope rightScope) left right
 
 /--
 Saved continuations are related when they remember agreeing environments and
@@ -155,6 +196,56 @@ inductive CoreResultRelated : CoreResult → CoreResult → Prop where
       CoreResultRelated (.external request left) (.external request right)
   | done (observation : Observation) :
       CoreResultRelated (.done observation) (.done observation)
+
+/-- Optional selected branches agree structurally. -/
+theorem findCtorAlt_related
+    (related : AltsRelated rho leftScope rightScope left right) :
+    CaseSelectionRelated rho leftScope rightScope
+      (findCtorAlt tag left) (findCtorAlt tag right) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail tail_ih =>
+      cases head with
+      | ctor code =>
+          rename_i leftCode rightCode info
+          by_cases selected : info.cidx == tag
+          · simpa [findCtorAlt, selected] using CaseSelectionRelated.some code
+          · simpa [findCtorAlt, selected] using tail_ih
+      | default code => simpa [findCtorAlt] using tail_ih
+
+theorem findDefaultAlt_related
+    (related : AltsRelated rho leftScope rightScope left right) :
+    CaseSelectionRelated rho leftScope rightScope
+      (findDefaultAlt left) (findDefaultAlt right) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail tail_ih =>
+      cases head with
+      | ctor code => simpa [findDefaultAlt] using tail_ih
+      | default code =>
+          simpa [findDefaultAlt] using CaseSelectionRelated.some code
+
+/-- Related optional results remain related when the same fallback is used. -/
+theorem caseSelectionRelated_orElse
+    {left right leftFallback rightFallback : Option (LCNF.Code .impure)}
+    (primary : CaseSelectionRelated rho leftScope rightScope left right)
+    (fallback :
+      CaseSelectionRelated rho leftScope rightScope leftFallback rightFallback) :
+    CaseSelectionRelated rho leftScope rightScope
+      (left.orElse fun _ => leftFallback)
+      (right.orElse fun _ => rightFallback) := by
+  cases primary with
+  | none => exact fallback
+  | some code => exact .some code
+
+theorem chooseAlt_related
+    (related : AltsRelated rho leftScope rightScope left right) :
+    CaseSelectionRelated rho leftScope rightScope
+      (chooseAlt tag left) (chooseAlt tag right) := by
+  unfold chooseAlt
+  exact caseSelectionRelated_orElse
+    (findCtorAlt_related (tag := tag) related)
+    (findDefaultAlt_related related)
 
 /-- `evalLetValue` observes only a state's program, runtime, and environment. -/
 theorem evalLetValue_eq_of_state_fields
@@ -419,6 +510,76 @@ theorem coreStep_code_related
                 control := .invokeValue function args
               }
               simpa [pushBindFrame] using CoreResultRelated.next nextRelated
+  | cases discr alternatives =>
+      rename_i leftCases rightCases
+      have discrEq := lookupValue_eq_of_scoped_related agree discr
+      simp only [coreStep]
+      rw [discrEq]
+      generalize discrLookup : lookupValue rightState.env rightCases.discr = discrResult
+      cases discrResult with
+      | error fault =>
+          simp only [fail]
+          rw [observe_eq_of_runtime_eq
+            (left := { leftState with control := .code (.cases leftCases) })
+            (right := { rightState with control := .code (.cases rightCases) })
+            runtimeEq (.fault fault)]
+          exact .done _
+      | ok discrValue =>
+          simp only
+          have tagEq :
+              getTag leftState.runtime discrValue =
+                getTag rightState.runtime discrValue := by
+            rw [runtimeEq]
+          rw [tagEq]
+          generalize tagRead : getTag rightState.runtime discrValue = tagResult
+          cases tagResult with
+          | error fault =>
+              simp only [fail]
+              rw [observe_eq_of_runtime_eq
+                (left := { leftState with control := .code (.cases leftCases) })
+                (right := { rightState with control := .code (.cases rightCases) })
+                runtimeEq (.fault fault)]
+              exact .done _
+          | ok tag =>
+              simp only
+              have selected := alternatives tag
+              cases leftChoice : chooseAlt tag leftCases.alts.toList with
+              | none =>
+                  cases rightChoice : chooseAlt tag rightCases.alts.toList with
+                  | none =>
+                      simp only [fail]
+                      rw [observe_eq_of_runtime_eq
+                        (left :=
+                          { leftState with control := .code (.cases leftCases) })
+                        (right :=
+                          { rightState with control := .code (.cases rightCases) })
+                        runtimeEq (.fault .invalidCases)]
+                      exact .done _
+                  | some rightCode =>
+                      have impossible :
+                          CaseSelectionRelated rho leftScope rightScope
+                            none (some rightCode) := by
+                        simpa [leftChoice, rightChoice] using selected
+                      cases impossible
+              | some leftCode =>
+                  cases rightChoice : chooseAlt tag rightCases.alts.toList with
+                  | none =>
+                      have impossible :
+                          CaseSelectionRelated rho leftScope rightScope
+                            (some leftCode) none := by
+                        simpa [leftChoice, rightChoice] using selected
+                      cases impossible
+                  | some rightCode =>
+                      have branches :
+                          CaseSelectionRelated rho leftScope rightScope
+                            (some leftCode) (some rightCode) := by
+                        simpa [leftChoice, rightChoice] using selected
+                      cases branches with
+                      | some branch =>
+                          simpa only [leftChoice, rightChoice] using
+                            continuationResult_related leftState rightState
+                              programEq runtimeEq joinsEq framesRelated agree
+                              renamingScoped branch
   | oset object field continuation =>
       rename_i leftObject rightObject leftField rightField
         leftContinuation rightContinuation index
