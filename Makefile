@@ -4,9 +4,7 @@ build:
 	lake build
 
 examples:
-	lake env lean Fir/LeanIR/LegacyExamples.lean
-	lake env lean Fir/LeanIR/InterpreterExamples.lean
-	lake env lean Fir/Wasm/Examples.lean
+	lake build Fir.LeanIR.LegacyExamples Fir.LeanIR.InterpreterExamples Fir.Wasm.Examples
 
 inspect:
 	lake lean Inspect
