@@ -43,6 +43,13 @@ the `Nat`-to-`i32` case comparison can truncate them. A common Talos `wp`
 theorem lifts any exact successful semantic-host step through its abstract
 host contract.
 
+Generated constructor and object-projection call stacks now use that common
+rule directly. The full adapted constructor test—from discriminator
+`local.get` through `getTag`, `i32.eq`, and `if`—has a source-facing `wp` rule
+that selects the same arm as the source `Nat` comparison. The proof found a
+missing allocation-side tag bound; constructor allocations and alternatives
+are now both rejected before an out-of-range tag can be narrowed to `i32`.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
 first standards-consumable, host-backed Wasm artifact for the W3 corpus. It

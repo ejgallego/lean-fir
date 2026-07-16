@@ -1,6 +1,7 @@
 import FirTalos.Correctness.ABI
 import FirTalos.Correctness.Execution
 import Interpreter.Wasm.Wp.Call
+import Interpreter.Wasm.Wp.Tactic
 
 namespace FirTalos.Correctness
 
@@ -31,11 +32,12 @@ theorem compileLetValue_constructor
     {resultKind : AbiKind} {argumentCode : List Instruction}
     {fieldKinds : Array AbiKind}
     (valueEq : decl.value = .ctor info args)
+    (fits : constructorTagFitsI32 info = true)
     (resultEq : letValueKind decl = .ok resultKind)
     (argumentsEq : compileArgs context args = .ok (argumentCode, fieldKinds)) :
     compileLetValue context decl =
       .ok (argumentCode ++ [.call (.runtime (.allocCtor info fieldKinds resultKind))]) := by
-  simp [compileLetValue, valueEq, resultEq, argumentsEq]
+  simp [compileLetValue, valueEq, fits, resultEq, argumentsEq]
   rfl
 
 theorem compileLetValue_objectProjection
@@ -286,6 +288,37 @@ theorem wp_host_call_of_return
     contradiction
 
 /--
+Stack-shaped form of `wp_host_call_of_return`. Generated argument code pushes
+source-order arguments onto the front of the operand stack, so the physical
+call stack contains `physicalArgs.reverse`; Talos reverses that prefix at the
+host boundary and preserves the untouched tail after the call.
+-/
+theorem wp_host_call_on_stack_of_return
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {operation : HostOperation} {rest : Wasm.Program}
+    {Q : Wasm.Assertion RuntimeHost} {initial final : Wasm.Store RuntimeHost}
+    {locals : Wasm.Locals} {physicalArgs results tail : List Wasm.Value}
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract operation))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (step : hostStep operation initial physicalArgs = .Return results final)
+    (continued :
+      Wasm.wp module rest Q final
+        { locals with values := results.take imp.results.length ++ tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_of_return
+    (physicalArgs := physicalArgs) (results := results)
+    hImp hSat hi hContract
+  · rw [hStack, hParams]
+    simp
+  · exact step
+  · simpa [hStack, hParams] using continued
+
+/--
 Instruction-level lifting for a natural-literal import. The premise about the
 continuation is stated after the exact successful host state and physical
 result; Talos's abstract host contract rules out both an unstructured trap and
@@ -385,5 +418,245 @@ theorem wp_stringLiteral_call
     simp only [List.length_nil, List.take_zero, List.reverse_nil] at contract
     rw [hostStep_stringLiteral_of_encode initial value encoded] at contract
     contradiction
+
+/--
+The exact stack transformer generated after a constructor-tag lookup: push the
+candidate tag, compare it with the lookup result, and dispatch to the matching
+branch. Both arms start with the pre-comparison operand tail, while normal
+fallthrough from an arm restores that tail because the generated `if` has no
+parameters or results.
+-/
+theorem wp_i32Eq_ifElse
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {store : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (actual expected : UInt32) (tail : List Wasm.Value)
+    (hBody :
+      Wasm.wp module (if actual = expected then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := tail } env) :
+    Wasm.wp module
+      (.const expected :: .eq :: .iff 0 0 thenBody elseBody :: rest)
+      Q store { locals with values := .i32 actual :: tail } env := by
+  rw [Wasm.wp_const_cons, Wasm.wp_eq_cons]
+  apply Wasm.wp_iff_cons
+    (c := if actual = expected then 1 else 0) (vs := tail) rfl
+  convert hBody using 1
+  all_goals simp
+  all_goals
+    funext continuation
+    cases continuation with
+    | Break level nextStore nextLocals =>
+        cases level <;> rfl
+    | _ => rfl
+
+/--
+Composition rule for the exact Talos sequence produced by one constructor-case
+test after adaptation. It resolves the discriminator local, invokes the
+abstract `getTag` contract on the generated one-argument stack, compares the
+returned lane, and selects the corresponding arm without exposing the
+concrete host resolver.
+-/
+theorem wp_getTag_case_test_of_return
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial final : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {localIndex : Nat} {handle actual expected : UInt32}
+    (hLocal : locals.get localIndex = some (.i32 handle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .getTag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (step :
+      hostStep .getTag initial [.i32 handle] =
+        .Return [.i32 actual] final)
+    (hBody :
+      Wasm.wp module (if actual = expected then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        final { locals with values := locals.values } env) :
+    Wasm.wp module
+      (.localGet localIndex :: .call id :: .const expected :: .eq ::
+        .iff 0 0 thenBody elseBody :: rest)
+      Q initial locals env := by
+  rw [Wasm.wp_localGet_cons, hLocal]
+  apply wp_host_call_of_return
+    (physicalArgs := [.i32 handle]) (results := [.i32 actual])
+    hImp hSat hi hContract
+  · simp [hParams]
+  · exact step
+  · simpa [hParams, hResults] using
+      wp_i32Eq_ifElse actual expected locals.values hBody
+
+/--
+Source-facing constructor-case rule. The source discriminator and candidate
+tags are compared as naturals, while the generated target compares their
+`i32` encodings. The two explicit range premises are precisely the executable
+invariants enforced for constructor allocations and case alternatives.
+-/
+theorem wp_getTag_case_test
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {localIndex : Nat} {handle : UInt32}
+    (sourceObject : Value) (actualTag expectedTag : Nat)
+    (hLocal : locals.get localIndex = some (.i32 handle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .getTag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded :
+      decodeArgs initial.host.handles #[.tobject] [.i32 handle] =
+        .ok #[sourceObject])
+    (tagged : getTag initial.host.runtime sourceObject = .ok actualTag)
+    (actualFits : actualTag < UInt32.size)
+    (expectedFits : expectedTag < UInt32.size)
+    (hBody :
+      Wasm.wp module (if actualTag = expectedTag then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := locals.values } env) :
+    Wasm.wp module
+      (.localGet localIndex :: .call id ::
+        .const (UInt32.ofNat expectedTag) :: .eq ::
+        .iff 0 0 thenBody elseBody :: rest)
+      Q initial locals env := by
+  apply wp_getTag_case_test_of_return
+    hLocal hImp hSat hi hContract hParams hResults
+  · exact hostStep_getTag_of_decode initial [.i32 handle]
+      sourceObject actualTag decoded tagged
+  · simpa only [constructorTag_i32_eq_iff actualFits expectedFits] using hBody
+
+/--
+Generated-stack rule for constructor allocation. Source-order physical fields
+appear reversed on the Talos operand stack, are decoded in source order by the
+host boundary, and are replaced by the single encoded constructor handle.
+-/
+theorem wp_constructor_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (resultKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (semanticArgs : Array Value) (sourceRuntime : RuntimeState)
+    (sourceValue : Value) (after : HandleTable) (handle : Handle)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract :
+      spec.contracts[id]? =
+        some (hostContract (.allocCtor info fieldKinds resultKind)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (decoded :
+      decodeArgs initial.host.handles fieldKinds physicalArgs = .ok semanticArgs)
+    (allocated :
+      allocCtor initial.host.runtime info semanticArgs =
+        .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded :
+      initial.host.handles.encode resultKind sourceValue = .ok (after, handle))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 handle :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [.i32 handle])
+    hImp hSat hi hContract hParams hStack
+  · exact hostStep_allocCtor_of_decode_encode initial info fieldKinds resultKind
+      physicalArgs semanticArgs sourceRuntime sourceValue decoded allocated usesHandle encoded
+  · simpa [hResults] using continued
+
+/--
+Generated-stack rule for object projection. The discriminator handle is the
+single call argument and is replaced by the encoded projected field while the
+operand tail and source runtime are preserved.
+-/
+theorem wp_objectProjection_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (index : Nat) (resultKind : AbiKind) (objectHandle : Handle)
+    (sourceObject sourceValue : Value) (after : HandleTable)
+    (resultHandle : Handle) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract :
+      spec.contracts[id]? =
+        some (hostContract (.objectProj index resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = .i32 objectHandle :: tail)
+    (decoded :
+      decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+        .ok #[sourceObject])
+    (projected :
+      getObjectField initial.host.runtime sourceObject index = .ok sourceValue)
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded :
+      initial.host.handles.encode resultKind sourceValue = .ok (after, resultHandle))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 resultHandle :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [.i32 objectHandle]) (results := [.i32 resultHandle])
+    hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_objectProj_of_decode_encode initial index resultKind
+      [.i32 objectHandle] sourceObject sourceValue decoded projected usesHandle encoded
+  · simpa [hResults] using continued
 
 end FirTalos.Correctness

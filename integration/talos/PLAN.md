@@ -66,11 +66,17 @@ production heap layout.
   lifting through abstract host contracts, with specialized literal rules.
   Target handle-space availability is an explicit premise rather than an
   implicit infinity assumption.
+- Generated constructor and projection call stacks now instantiate that common
+  `wp` rule. The complete adapted `local.get; getTag; const; i32.eq; if`
+  sequence selects the same constructor arm as the source `Nat` comparison,
+  including restoration of the operand tail across both arms. Completing that
+  proof exposed and fixed the missing allocation-side constructor-tag bound;
+  both allocated and compared tags are now checked before narrowing to `i32`.
 
-The next W4 slice instantiates the common `wp` rule against the generated
-constructor/projection/tag stack shapes, proves `if` dispatch, and composes the
-local rules over the call-free code fragment. That result can then be lifted
-through `RelatedPost` to whole exported functions. The adapter still rejects
+The next W4 slice composes these generated-stack rules recursively over the
+call-free code fragment, starting with straight-line `let`/`local.set` chains
+and then the recursive case chain. That result can then be lifted through
+`RelatedPost` to whole exported functions. The adapter still rejects
 initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
@@ -332,10 +338,12 @@ Proof layers:
 
 Layers 1--3 and the fuel-free executable-to-observation bridge are checked in
 `FirTalos/Correctness/`. Layer 4 now covers lowering and host steps for the
-whole initial fragment and provides their common instruction-level host-call
-lifting. Its active proof obligation is composition against generated stack
-shapes and case control flow; layer 5 can then instantiate the bridge without
-mentioning runner fuel in the public theorem.
+whole initial fragment, provides their common instruction-level host-call
+lifting, instantiates constructor/projection stack shapes, and proves one
+complete source-related constructor-case test. Its active proof obligation is
+recursive composition over straight-line code and the case chain; layer 5 can
+then instantiate the bridge without mentioning runner fuel in the public
+theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
