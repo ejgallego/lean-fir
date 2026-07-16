@@ -40,11 +40,35 @@ def ArgsRelated (rho : FVarIdMap FVarId)
     (left right : Array (LCNF.Arg .impure)) : Prop :=
   ListRel (ArgRelated rho leftScope rightScope) left.toList right.toList
 
+private def ArgCheckRelated (rho : FVarIdMap FVarId)
+    (left right : LCNF.Arg .impure) : Prop :=
+  (LCNF.AlphaEqv.eqvArg left right).run rho = true
+
 private theorem listRel_length_eq
     (related : ListRel relation left right) : left.length = right.length := by
   induction related with
   | nil => rfl
   | cons _ _ ih => simp [ih]
+
+private theorem listRel_append_singleton
+    (related : ListRel relation left right) (last : relation leftLast rightLast) :
+    ListRel relation (left ++ [leftLast]) (right ++ [rightLast]) := by
+  induction related with
+  | nil => exact .cons last .nil
+  | cons head tail ih => exact .cons head ih
+
+private theorem listRel_strengthen_of_all
+    (related : ListRel relation left right)
+    (leftAll : left.all leftPredicate = true)
+    (rightAll : right.all rightPredicate = true) :
+    ListRel (fun left right =>
+      leftPredicate left = true ∧ rightPredicate right = true ∧ relation left right)
+      left right := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      simp only [List.all_cons, Bool.and_eq_true] at leftAll rightAll
+      exact .cons ⟨leftAll.1, rightAll.1, head⟩ (ih leftAll.2 rightAll.2)
 
 private theorem subarray_toList_eq_nil_of_next?_eq_none
     {stream : Subarray α} (next : Std.Stream.next? stream = none) :
@@ -129,6 +153,121 @@ theorem eqvArgs_true_of_related
       leftArgs.toList rightArgs.toList at related
     simpa [Std.toStream] using related
   next => simp_all
+
+open Std.Do in
+set_option mvcgen.warning false in
+private theorem eqvArgs_sound
+    (accepted : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true) :
+    ListRel (ArgCheckRelated rho) leftArgs.toList rightArgs.toList := by
+  generalize hrun : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = result at accepted
+  have resultSound : result = true →
+      ListRel (ArgCheckRelated rho) leftArgs.toList rightArgs.toList := by
+    apply ReaderM.of_wp_run_eq hrun
+    simp only [LCNF.AlphaEqv.eqvArgs, SPred.entails_nil, SPred.down_pure,
+      forall_const]
+    mvcgen invariants
+    | inv1 => Invariant.withEarlyReturnNewDo
+        (fun cursor stream current =>
+          ⌜current = rho ∧ ∃ rightPrefix,
+            rightArgs.toList = rightPrefix ++ stream.toList ∧
+            ListRel (ArgCheckRelated rho) cursor.prefix rightPrefix⌝)
+        (fun returned _ _ => ⌜returned = false⌝)
+    next _ _ _ leftDecomposition _ streamEnd _ invariant =>
+      rcases invariant with
+        ⟨_, _, rightPrefix, rightDecomposition, prefixRelated⟩ | returned
+      · have streamNil := subarray_toList_eq_nil_of_next?_eq_none streamEnd
+        rw [streamNil, List.append_nil] at rightDecomposition
+        have arrayLengths : leftArgs.toList.length = rightArgs.toList.length := by
+          simpa using ‹leftArgs.size = rightArgs.size›
+        have prefixLengths := listRel_length_eq prefixRelated
+        have leftLengths := congrArg List.length leftDecomposition
+        have rightLengths := congrArg List.length rightDecomposition
+        simp only [List.length_append, List.length_cons] at leftLengths rightLengths
+        omega
+      · simp_all
+    next _ currentArg _ _ state rightArg rest streamNext current invariant =>
+      rcases invariant with
+        ⟨_, currentEq, rightPrefix, rightDecomposition, prefixRelated⟩ | returned
+      · subst current
+        rw [subarray_toList_eq_cons_of_next?_eq_some streamNext] at rightDecomposition
+        cases currentArg with
+        | erased =>
+            cases rightArg with
+            | erased =>
+                have headRelated :
+                    ArgCheckRelated rho (.erased : LCNF.Arg .impure) .erased := by
+                  rfl
+                have extended := listRel_append_singleton prefixRelated headRelated
+                have extendedDecomposition :
+                    rightArgs.toList = (rightPrefix ++ [.erased]) ++ rest.toList := by
+                  simpa [List.append_assoc] using rightDecomposition
+                simp only [LCNF.AlphaEqv.eqvArg]
+                exact Or.inl ⟨rfl, rfl, rightPrefix ++ [.erased],
+                  extendedDecomposition, extended⟩
+            | fvar _ => simp [LCNF.AlphaEqv.eqvArg]
+            | type _ impossible => nomatch impossible
+        | fvar leftId =>
+            cases rightArg with
+            | erased => simp [LCNF.AlphaEqv.eqvArg]
+            | fvar rightId =>
+                by_cases check : (leftId == (rho.get? rightId).getD rightId) = true
+                · have headRelated :
+                      ArgCheckRelated rho (.fvar leftId) (.fvar rightId) := by
+                    exact check
+                  have extended := listRel_append_singleton prefixRelated headRelated
+                  have extendedDecomposition :
+                      rightArgs.toList =
+                        (rightPrefix ++ [.fvar rightId]) ++ rest.toList := by
+                    simpa [List.append_assoc] using rightDecomposition
+                  simp [LCNF.AlphaEqv.eqvArg, LCNF.AlphaEqv.eqvFVar, check]
+                  exact ⟨rightPrefix ++ [.fvar rightId], extendedDecomposition,
+                    extended⟩
+                · have checkFalse :
+                      (leftId == (rho.get? rightId).getD rightId) = false := by
+                    exact Bool.of_not_eq_true check
+                  simp [LCNF.AlphaEqv.eqvArg, LCNF.AlphaEqv.eqvFVar, checkFalse]
+            | type _ impossible => nomatch impossible
+        | type _ impossible => nomatch impossible
+      · simp_all
+    next =>
+      refine Or.inl ⟨True.intro, True.intro, [], ?_, .nil⟩
+      simp [Std.toStream]
+    next => simp_all
+    next stateEnded _ _ invariant =>
+      rcases invariant with
+        ⟨_, _, rightPrefix, rightDecomposition, prefixRelated⟩ | returned
+      · have arrayLengths : leftArgs.toList.length = rightArgs.toList.length := by
+          simpa using ‹leftArgs.size = rightArgs.size›
+        have prefixLengths := listRel_length_eq prefixRelated
+        have decompositionLengths := congrArg List.length rightDecomposition
+        simp only [List.length_append] at decompositionLengths
+        have streamLength : stateEnded.snd.toList.length = 0 := by omega
+        have streamNil := List.eq_nil_of_length_eq_zero streamLength
+        rw [streamNil, List.append_nil] at rightDecomposition
+        rw [rightDecomposition]
+        exact prefixRelated
+      · simp_all
+    next => simp
+  exact resultSound accepted
+
+/--
+A successful executable argument check, together with lexical scope on both
+sides, yields the pointwise semantic argument relation.
+-/
+theorem argsRelated_of_eqvArgs_true
+    (leftScoped : argsScoped leftScope leftArgs = true)
+    (rightScoped : argsScoped rightScope rightArgs = true)
+    (accepted : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true) :
+    ArgsRelated rho leftScope rightScope leftArgs rightArgs := by
+  have checked : ListRel (ArgCheckRelated rho) leftArgs.toList rightArgs.toList := by
+    exact eqvArgs_sound accepted
+  change leftArgs.all (argScoped leftScope) = true at leftScoped
+  change rightArgs.all (argScoped rightScope) = true at rightScoped
+  have leftList : leftArgs.toList.all (argScoped leftScope) = true := by
+    simpa using leftScoped
+  have rightList : rightArgs.toList.all (argScoped rightScope) = true := by
+    simpa using rightScoped
+  exact listRel_strengthen_of_all checked leftList rightList
 
 def ScopedFVarRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId) (left right : FVarId) : Prop :=

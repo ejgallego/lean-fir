@@ -279,18 +279,17 @@ particular, declaration types remain an explicit premise because `unbox`
 observes them, while Lean's executable checker establishes only type
 alpha-equivalence.
 
-The executable argument-array bridge is now proved in the completeness
-direction: `eqvArgs_true_of_related` verifies that Lean's parallel Array/Subarray
-loop returns `true` for every pointwise-related argument array. Its loop
-invariant relates the unprocessed left suffix to the remaining right stream and
-records that the reader map is unchanged. The converse direction, which
-extracts the pointwise relation from a successful Boolean check, remains the
-soundness obligation needed by the pass proof.
+The executable argument-array bridge is now proved in both directions.
+`eqvArgs_true_of_related` verifies that Lean's parallel Array/Subarray loop
+returns `true` for every pointwise-related argument array, while
+`argsRelated_of_eqvArgs_true` recovers the semantic relation from a successful
+check when both arrays are lexically scoped. Their loop invariants respectively
+track the unprocessed suffixes and the successfully checked prefix while
+recording that the reader map is unchanged.
 
 The remaining bounded work is:
 
-1. derive binder classification from `withFVar` and hygiene, prove the
-   soundness direction of Lean's executable argument checker, bridge the
+1. derive binder classification from `withFVar` and hygiene, bridge the
    let-value checker to the semantic relation, and extend the simulation
    through recursive code to prove `Code.alphaEqv` sound;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
