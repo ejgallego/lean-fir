@@ -59,8 +59,12 @@ local writes preserve the frame, and keeps existing decoded values valid when
 opaque-handle allocations extend the table. The executable `compileCode` now
 uses a proof-transparent `partial_fixpoint` core instead of an opaque
 `partial def`; successful `let`, `return`, and `unreach` equations feed a
-`CodeAdapted` relation over the real compiler and adapter outputs. The next
-recursive step is the constructor-case chain and its default fallback.
+`CodeAdapted` relation over the real compiler and adapter outputs. Successful
+case equations now use the same executable compiler, and the structural
+relations cover selected or generated fallbacks, skipped defaults, recursive
+constructor alternatives, and their adapted Talos `if` programs. The next W4
+step is the semantic induction that threads the local relation and `wp`
+postcondition through complete `let` chains and cases.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

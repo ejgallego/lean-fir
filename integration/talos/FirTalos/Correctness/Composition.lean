@@ -392,6 +392,190 @@ def CodeAdapted (context : Fir.Wasm.Context)
     Fir.Wasm.compileCode context code = .ok symbolic ∧
     instructions sourceModule sourceFunction labels symbolic = .ok target
 
+/--
+The selected default case, or the generated unreachable fallback when no
+default exists, survives both executable compilation stages.
+-/
+def CaseFallbackAdapted (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (alts : List (Lean.Compiler.LCNF.Alt .impure))
+    (target : Wasm.Program) : Prop :=
+  ∃ symbolic,
+    Fir.Wasm.compileCaseFallback context alts = .ok symbolic ∧
+    instructions sourceModule sourceFunction labels symbolic = .ok target
+
+/--
+One compiled constructor-test chain, parameterized by its already selected
+symbolic fallback, survives adaptation to Talos instructions.
+-/
+def CaseChainAdapted (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (discr : Lean.FVarId)
+    (alts : List (Lean.Compiler.LCNF.Alt .impure))
+    (fallback : List Fir.Wasm.Instruction) (target : Wasm.Program) : Prop :=
+  ∃ symbolic,
+    Fir.Wasm.compileCaseChain context discr alts fallback = .ok symbolic ∧
+    instructions sourceModule sourceFunction labels symbolic = .ok target
+
+/-- The complete structural relation for one source `.cases` node. -/
+def CasesAdapted (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (cases : Lean.Compiler.LCNF.Cases .impure)
+    (target : Wasm.Program) : Prop :=
+  ∃ fallback,
+    Fir.Wasm.compileCaseFallback context cases.alts.toList = .ok fallback ∧
+    CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+      cases.alts.toList fallback target
+
+/-- With no source default, the compiler and adapter retain `unreachable`. -/
+theorem caseFallbackAdapted_none
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    (found : alts.find? Fir.Wasm.isDefaultAlt = none) :
+    CaseFallbackAdapted context sourceModule sourceFunction labels alts
+      [.unreachable] := by
+  refine ⟨[.unreachable], ?_, ?_⟩
+  · change Fir.Wasm.compileCaseFallbackWithM (Fir.Wasm.compileCode context) alts =
+      .ok [.unreachable]
+    unfold Fir.Wasm.compileCaseFallbackWithM
+    rw [found]
+    rfl
+  · simp [instructions, instruction]
+    rfl
+
+/-- A selected source default is compiled and adapted exactly once. -/
+theorem caseFallbackAdapted_default
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {code : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (found : alts.find? Fir.Wasm.isDefaultAlt = some (.default code))
+    (adapted : CodeAdapted context sourceModule sourceFunction labels code target) :
+    CaseFallbackAdapted context sourceModule sourceFunction labels alts target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  refine ⟨symbolic, ?_, targetCompiled⟩
+  change Fir.Wasm.compileCaseFallbackWithM (Fir.Wasm.compileCode context) alts =
+    .ok symbolic
+  unfold Fir.Wasm.compileCaseFallbackWithM
+  rw [found]
+  exact compiled
+
+/-- The empty test chain is exactly its previously selected fallback. -/
+theorem caseChainAdapted_nil
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
+    (fallbackAdapted :
+      instructions sourceModule sourceFunction labels fallback = .ok target) :
+    CaseChainAdapted context sourceModule sourceFunction labels discr [] fallback target := by
+  refine ⟨fallback, ?_, fallbackAdapted⟩
+  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context) discr [] fallback =
+    .ok fallback
+  rw [Fir.Wasm.compileCaseChainWithM.eq_def]
+  rfl
+
+/-- Defaults are selected before chain construction and skipped by the chain. -/
+theorem caseChainAdapted_default
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction} {target : Wasm.Program}
+    (restAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback target) :
+    CaseChainAdapted context sourceModule sourceFunction labels discr
+      (.default code :: alts) fallback target := by
+  rcases restAdapted with ⟨symbolic, compiled, targetCompiled⟩
+  refine ⟨symbolic, ?_, targetCompiled⟩
+  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context) discr
+    (.default code :: alts) fallback = .ok symbolic
+  rw [Fir.Wasm.compileCaseChainWithM.eq_def]
+  exact compiled
+
+/--
+A constructor alternative becomes one tag test and a Talos `if`, with both
+branches supplied by the same structural relations used recursively.
+-/
+theorem caseChainAdapted_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {discrIndex getTagIndex : Nat}
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (thenAdapted :
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+    (elseAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback elseTarget)
+    (discrFound :
+      findFVar?
+        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex)
+    (getTagFound :
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex) :
+    CaseChainAdapted context sourceModule sourceFunction labels discr
+      (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget] := by
+  rcases thenAdapted with ⟨thenBody, thenCompiled, thenTargetCompiled⟩
+  rcases elseAdapted with ⟨elseBody, elseCompiled, elseTargetCompiled⟩
+  refine ⟨[.localGet discr, .call (.runtime .getTag),
+    .i32Const .uint32 (UInt32.ofNat info.cidx), .i32Eq,
+    .ifElse thenBody elseBody], ?_, ?_⟩
+  · exact compileCaseChain_constructor fits thenCompiled elseCompiled
+  · simp [instructions, instruction, discrFound, getTagFound,
+      thenTargetCompiled, elseTargetCompiled]
+    rfl
+
+/--
+A separately adapted fallback can seed complete case construction. The caller
+only supplies how the selected fallback target continues through the test
+chain, making default selection independent of constructor order.
+-/
+theorem casesAdapted_of_fallback
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {cases : Lean.Compiler.LCNF.Cases .impure}
+    {fallbackTarget target : Wasm.Program}
+    (fallbackAdapted :
+      CaseFallbackAdapted context sourceModule sourceFunction labels
+        cases.alts.toList fallbackTarget)
+    (chainAdapted :
+      ∀ {fallback},
+        instructions sourceModule sourceFunction labels fallback =
+            .ok fallbackTarget →
+          CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+            cases.alts.toList fallback target) :
+    CasesAdapted context sourceModule sourceFunction labels cases target := by
+  rcases fallbackAdapted with ⟨fallback, fallbackCompiled, targetCompiled⟩
+  exact ⟨fallback, fallbackCompiled, chainAdapted targetCompiled⟩
+
+/-- A complete adapted case relation is a `CodeAdapted` source `.cases`. -/
+theorem codeAdapted_cases
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {cases : Lean.Compiler.LCNF.Cases .impure}
+    {target : Wasm.Program}
+    (adapted : CasesAdapted context sourceModule sourceFunction labels cases target) :
+    CodeAdapted context sourceModule sourceFunction labels (.cases cases) target := by
+  rcases adapted with ⟨fallback, fallbackCompiled, symbolic,
+    chainCompiled, targetCompiled⟩
+  exact ⟨symbolic,
+    Fir.Wasm.compileCode_cases fallbackCompiled chainCompiled,
+    targetCompiled⟩
+
 /-- Base structural rule for a compiled return through the numeric adapter. -/
 theorem codeAdapted_return
     {context : Fir.Wasm.Context}

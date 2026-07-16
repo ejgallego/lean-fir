@@ -87,15 +87,18 @@ production heap layout.
   duplicate compiler. `compileCode` is a stable `Except` wrapper around an
   `ExceptT CompileError Option` `partial_fixpoint` core, whose generated
   equation exposes one structural layer while retaining the same runtime
-  implementation. Successful equations are proved for `let`, `return`, and
-  `unreach`; `CodeAdapted` composes the actual symbolic compiler output with
-  the numeric Talos adapter and already has base and recursive `let` rules.
+  implementation. Successful equations are proved for `let`, `return`,
+  `unreach`, and `cases`. `CodeAdapted` composes the actual symbolic compiler
+  output with the numeric Talos adapter. Its case layer now represents default
+  selection, the generated unreachable fallback, skipped defaults, recursive
+  constructor alternatives, and the final Talos `if` explicitly through
+  `CaseFallbackAdapted`, `CaseChainAdapted`, and `CasesAdapted`.
 
-The next W4 slice extends `CodeAdapted` over the recursive constructor-case
-chain, including default fallback selection. With that structural rule, the
-local WP rules and the environment/local relation can compose over complete
-`let` chains and cases, then lift through `RelatedPost` to whole exported
-functions. The adapter still rejects initializers and closures.
+The next W4 slice is the semantic composition theorem over that structural
+fragment. It combines the `CodeAdapted` recursion with the local `wp` rules and
+the source-environment/target-local relation to cover complete `let` chains and
+cases, then lifts the result through `RelatedPost` to whole exported functions.
+The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -397,8 +400,12 @@ recursive constructor-case rule for `CodeAdapted`. The compiler now exposes
 proof equations through its `partial_fixpoint` core, while
 `FirTalos/Correctness/Locals.lean` provides the source-environment/local
 relation, checked-write preservation, and handle-allocation chaining needed at
-each recursive boundary. Layer 5 can then instantiate the bridge without
-mentioning runner fuel in the public theorem.
+each recursive boundary. The structural relation now also follows the actual
+compiler through default selection and recursive constructor-case chains. Its
+active proof obligation is the semantic induction that threads the local
+relation and `wp` postcondition through those structural rules. Layer 5 can
+then instantiate the bridge without mentioning runner fuel in the public
+theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an

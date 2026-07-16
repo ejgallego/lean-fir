@@ -251,6 +251,18 @@ def compileCaseChainWith
     Except CompileError (List Instruction) :=
   compileCaseChainWithM compile discr alts fallback
 
+def isDefaultAlt : LCNF.Alt .impure → Bool
+  | .default _ => true
+  | _ => false
+
+def compileCaseFallbackWithM [Monad m]
+    (compile : LCNF.Code .impure → m (List Instruction))
+    (alts : List (LCNF.Alt .impure)) : m (List Instruction) := do
+  match alts.find? isDefaultAlt with
+  | some (.default code) => compile code
+  | some (.alt _ _ _ h) => nomatch h
+  | some (.ctorAlt _ _) | none => pure [.unreachable]
+
 /--
 Proof-transparent partiality for the recursive compiler. `Option.none` is the
 least element used by `partial_fixpoint`; every finite compiler result observed
@@ -294,6 +306,26 @@ theorem monotone_compileCaseChainWithM
           · simp [fits]
             apply monotone_const
 
+open Lean.Order in
+@[partial_fixpoint_monotone]
+theorem monotone_compileCaseFallbackWithM
+    {γ : Type} [PartialOrder γ]
+    (compile : γ → LCNF.Code .impure → CompileM (List Instruction))
+    (alts : List (LCNF.Alt .impure))
+    (hmono : monotone compile) :
+    monotone (fun x => compileCaseFallbackWithM (compile x) alts) := by
+  intro left right less
+  unfold compileCaseFallbackWithM
+  generalize foundEq : alts.find? isDefaultAlt = found
+  cases found with
+  | none => exact PartialOrder.rel_refl
+  | some alt =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | ctorAlt info code => exact PartialOrder.rel_refl
+      | default code =>
+          exact hmono left right less code
+
 def compileCodeCore (context : Context) : LCNF.Code .impure → CompileM (List Instruction)
   | .let decl continuation => do
       let value ← liftCompileResult (compileLetValue context decl)
@@ -307,12 +339,7 @@ def compileCodeCore (context : Context) : LCNF.Code .impure → CompileM (List I
       return [.block decl.fvarId entry] ++ body
   | .jmp fvarId args => liftCompileResult (compileJump context fvarId args)
   | .cases cases => do
-      let fallback ←
-        match cases.alts.toList.find? fun alt =>
-          match alt with | .default _ => true | _ => false with
-        | some (.default code) => compileCodeCore context code
-        | some (.alt _ _ _ h) => nomatch h
-        | some (.ctorAlt _ _) | none => pure [.unreachable]
+      let fallback ← compileCaseFallbackWithM (compileCodeCore context) cases.alts.toList
       compileCaseChainWithM (compileCodeCore context) cases.discr cases.alts.toList fallback
   | .return fvarId => do
       let (value, _) ← liftCompileResult (getLocal context fvarId)
@@ -407,6 +434,166 @@ def compileCaseChain (context : Context) (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) :=
   compileCaseChainWith (compileCode context) discr alts fallback
+
+def compileCaseFallback (context : Context) (alts : List (LCNF.Alt .impure)) :
+    Except CompileError (List Instruction) :=
+  compileCaseFallbackWithM (compileCode context) alts
+
+/--
+A successful public fallback selection exposes the corresponding recursive
+compiler result. This is the bridge needed to unfold the `.cases` equation
+without exposing `Option`-based partiality to downstream proofs.
+-/
+theorem compileCaseFallbackCore_of_compileCaseFallback
+    {context : Context} {alts : List (LCNF.Alt .impure)}
+    {fallback : List Instruction}
+    (compiled : compileCaseFallback context alts = .ok fallback) :
+    compileCaseFallbackWithM (compileCodeCore context) alts =
+      some (.ok fallback) := by
+  unfold compileCaseFallback at compiled
+  unfold compileCaseFallbackWithM at compiled ⊢
+  generalize foundEq : alts.find? isDefaultAlt = found at compiled ⊢
+  cases found with
+  | none =>
+      change (.ok [.unreachable] : Except CompileError (List Instruction)) =
+        .ok fallback at compiled
+      change (some (.ok [.unreachable]) : CompileM (List Instruction)) =
+        some (.ok fallback)
+      exact congrArg some compiled
+  | some alt =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | ctorAlt info code =>
+          change (.ok [.unreachable] : Except CompileError (List Instruction)) =
+            .ok fallback at compiled
+          change (some (.ok [.unreachable]) : CompileM (List Instruction)) =
+            some (.ok fallback)
+          exact congrArg some compiled
+      | default code =>
+          change compileCode context code = .ok fallback at compiled
+          change compileCodeCore context code = some (.ok fallback)
+          exact finishCompileResult_eq_ok_iff.mp compiled
+
+/--
+A successful public constructor chain likewise exposes the recursive compiler
+result. Constructor bodies are converted one at a time, so the theorem follows
+the executable chain rather than duplicating it in a proof-only definition.
+-/
+theorem compileCaseChainCore_of_compileCaseChain
+    {context : Context} {discr : FVarId}
+    {alts : List (LCNF.Alt .impure)} {fallback result : List Instruction}
+    (compiled : compileCaseChain context discr alts fallback = .ok result) :
+    compileCaseChainWithM (compileCodeCore context) discr alts fallback =
+      some (.ok result) := by
+  induction alts generalizing result with
+  | nil =>
+      simp [compileCaseChain, compileCaseChainWith, compileCaseChainWithM]
+        at compiled ⊢
+      exact compiled.symm ▸ rfl
+  | cons alt alts ih =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | default code =>
+          rw [compileCaseChainWithM.eq_def]
+          apply ih
+          change compileCaseChainWithM (compileCode context) discr alts fallback =
+            .ok result
+          change compileCaseChainWithM (compileCode context) discr
+            (.default code :: alts) fallback = .ok result at compiled
+          rw [compileCaseChainWithM.eq_def] at compiled
+          exact compiled
+      | ctorAlt info code =>
+          by_cases fits : constructorTagFitsI32 info = true
+          · cases thenResult : compileCode context code with
+            | error error =>
+                have fullError :
+                    compileCaseChain context discr (.ctorAlt info code :: alts)
+                        fallback = .error error := by
+                  change compileCaseChainWithM (compileCode context) discr
+                    (.ctorAlt info code :: alts) fallback = .error error
+                  rw [compileCaseChainWithM.eq_def]
+                  simp only [fits, ↓reduceIte]
+                  rw [thenResult]
+                  rfl
+                rw [fullError] at compiled
+                contradiction
+            | ok thenBody =>
+                cases elseResult : compileCaseChain context discr alts fallback with
+                | error error =>
+                    have fullError :
+                        compileCaseChain context discr
+                            (.ctorAlt info code :: alts) fallback = .error error := by
+                      change compileCaseChainWithM (compileCode context) discr
+                        (.ctorAlt info code :: alts) fallback = .error error
+                      rw [compileCaseChainWithM.eq_def]
+                      simp only [fits, ↓reduceIte]
+                      rw [thenResult]
+                      have elseResult' :
+                          compileCaseChainWithM (compileCode context) discr alts fallback =
+                            .error error := elseResult
+                      rw [elseResult']
+                      rfl
+                    rw [fullError] at compiled
+                    contradiction
+                | ok elseBody =>
+                    change compileCaseChainWithM (compileCode context) discr
+                      (.ctorAlt info code :: alts) fallback = .ok result at compiled
+                    rw [compileCaseChainWithM.eq_def] at compiled
+                    simp only [fits, ↓reduceIte] at compiled
+                    rw [thenResult] at compiled
+                    have elseResult' :
+                        compileCaseChainWithM (compileCode context) discr alts fallback =
+                          .ok elseBody := elseResult
+                    rw [elseResult'] at compiled
+                    injection compiled with resultEq
+                    subst result
+                    have thenCore :
+                        compileCodeCore context code = some (.ok thenBody) :=
+                      finishCompileResult_eq_ok_iff.mp thenResult
+                    have elseCore :
+                        compileCaseChainWithM (compileCodeCore context) discr alts fallback =
+                          some (.ok elseBody) :=
+                      ih elseResult
+                    rw [compileCaseChainWithM.eq_def]
+                    simp only [fits, ↓reduceIte]
+                    rw [thenCore, elseCore]
+                    rfl
+          · change compileCaseChainWithM (compileCode context) discr
+              (.ctorAlt info code :: alts) fallback = .ok result at compiled
+            have notFits : constructorTagFitsI32 info = false := by
+              cases tagFits : constructorTagFitsI32 info with
+              | false => rfl
+              | true => exact (fits tagFits).elim
+            have fullError :
+                compileCaseChainWithM (compileCode context) discr
+                    (.ctorAlt info code :: alts) fallback =
+                  .error (.malformed
+                    s!"constructor tag {info.cidx} does not fit the i32 case ABI") := by
+              rw [compileCaseChainWithM.eq_def]
+              simp only [notFits, Bool.false_eq_true, ↓reduceIte]
+              rfl
+            rw [fullError] at compiled
+            contradiction
+
+/-- Transparent successful equation for source constructor cases. -/
+theorem compileCode_cases
+    {context : Context} {cases : LCNF.Cases .impure}
+    {fallback body : List Instruction}
+    (fallbackCompiled :
+      compileCaseFallback context cases.alts.toList = .ok fallback)
+    (bodyCompiled :
+      compileCaseChain context cases.discr cases.alts.toList fallback = .ok body) :
+    compileCode context (.cases cases) = .ok body := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have fallbackCore :=
+    compileCaseFallbackCore_of_compileCaseFallback fallbackCompiled
+  have bodyCore := compileCaseChainCore_of_compileCaseChain bodyCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [fallbackCore]
+  change compileCaseChainWithM (compileCodeCore context) cases.discr
+    cases.alts.toList fallback = some (.ok body)
+  exact bodyCore
 
 def addUnique [BEq α] (values : Array α) (value : α) : Array α :=
   if values.contains value then values else values.push value
