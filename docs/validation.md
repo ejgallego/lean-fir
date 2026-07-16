@@ -112,7 +112,7 @@ lower corpus-wide instruction coverage.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 50 cases.  Beyond literals,
+The compiler-generated corpus currently has 51 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -140,7 +140,11 @@ that preserves the original alias.  The first controlled-effect case calls a
 validation-owned `implemented_by` primitive: native Lean records the event it
 actually executes, while the LCNF backend projects the matching external trace.
 Both observations contain the ordered `validation.record` event with its
-natural argument and result; no expected effect is stored as the oracle.
+natural argument and result; no expected effect is stored as the oracle.  A
+second case makes two data-dependent calls, requiring both backends to report
+the exact sequence `7 → 8`, then `8 → 9`, as well as the final return value 9.
+This distinguishes ordered semantic effects from the set-like instruction and
+external coverage telemetry.
 
 The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports

@@ -122,6 +122,24 @@ class HarnessTests(unittest.TestCase):
         equal, _, _ = harness.compare_success(native, success("case", "lcnf"))
         self.assertFalse(equal)
 
+    def test_effect_order_is_semantic(self) -> None:
+        native = success("case", "native")
+        candidate = success("case", "lcnf")
+        effects = [
+            {
+                "operation": "validation.record",
+                "args": [{"nat": {"value": value}}],
+                "result": {"nat": {"value": value + 1}},
+            }
+            for value in (7, 8)
+        ]
+        native["outcome"]["success"]["observation"]["effects"] = effects
+        candidate["outcome"]["success"]["observation"]["effects"] = list(
+            reversed(effects)
+        )
+        equal, _, _ = harness.compare_success(native, candidate)
+        self.assertFalse(equal)
+
     def test_duplicate_result_rejected(self) -> None:
         record = success("case", "native")
         with self.assertRaises(harness.ValidationError):

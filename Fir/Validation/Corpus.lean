@@ -295,6 +295,10 @@ def recordOnce (value : Nat) : Nat :=
   record value
 
 @[noinline]
+def recordTwice (value : Nat) : Nat :=
+  record (record value)
+
+@[noinline]
 def idByteArray (value : ByteArray) : ByteArray :=
   value
 
@@ -931,6 +935,26 @@ def cases : Array Case := #[
       resultSchema := some .nat }]
     provenance := firProvenance
       "Native-recorded effect projected from the matching final-impure external" },
+  { id := "effect-record-twice"
+    entry := ``Source.recordTwice
+    args := #[.nat 7]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.recordTwice 7)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags := #["quick", "effect", "external", "nat", "sequence"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``NativeEffects.recordImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordImpl
+      operation := "validation.record"
+      argSchemas := #[.nat]
+      resultSchema := some .nat }]
+    provenance := firProvenance
+      "Preserve the count and order of two native-recorded external effects" },
   { id := "byte-array-roundtrip"
     entry := ``Source.idByteArray
     args := #[.bytes #[0, 127, 128, 255]]
