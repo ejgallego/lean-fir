@@ -230,25 +230,38 @@ def rcCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.str "owned"))) <|
   .inc x 1 true false <|
   .dec x 1 true false none <|
-  .let (letDecl r u8Type (.isShared x)) <|
+  .let (letDecl r objType (.isShared x)) <|
   .return r
 
 def rcProgram : ImpureProgram :=
-  { decls := #[decl `main #[] u8Type (.code rcCode)] }
+  { decls := #[decl `main #[] objType (.code rcCode)] }
 
-#guard returned? (runMain rcProgram) (.scalar (.uint8 0))
+#guard returned? (runMain rcProgram) (.object (.tagged 0))
 
 def persistentRcCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.str "persistent instruction"))) <|
   .inc x 10 false true <|
   .dec x 10 false true none <|
-  .let (letDecl r u8Type (.isShared x)) <|
+  .let (letDecl r objType (.isShared x)) <|
   .return r
 
 def persistentRcProgram : ImpureProgram :=
-  { decls := #[decl `main #[] u8Type (.code persistentRcCode)] }
+  { decls := #[decl `main #[] objType (.code persistentRcCode)] }
 
-#guard returned? (runMain persistentRcProgram) (.scalar (.uint8 0))
+#guard returned? (runMain persistentRcProgram) (.object (.tagged 0))
+
+def isSharedCaseCode : LCNF.Code .impure :=
+  .let (letDecl x objType (.lit (.nat 1))) <|
+  .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+  .let (letDecl r objType (.isShared p)) <|
+  .cases (.mk ``Bool objType r #[
+    .ctorAlt falseInfo (.let (letDecl x objType (.lit (.nat 10))) (.return x)),
+    .ctorAlt trueInfo (.let (letDecl y objType (.lit (.nat 20))) (.return y))])
+
+def isSharedCaseProgram : ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code isSharedCaseCode)] }
+
+#guard returned? (runMain isSharedCaseProgram) (.object (.tagged 10))
 
 def resetReuseCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.nat 70))) <|
