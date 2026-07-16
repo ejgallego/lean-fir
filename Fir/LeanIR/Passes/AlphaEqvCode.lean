@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
+import Fir.LeanIR.Passes.AlphaEqvLocal
 
 namespace Fir.LeanIR.Passes.AlphaEqv
 
@@ -773,6 +774,27 @@ theorem terminalCodeRelated_empty_sound
   | unreachable => exact unreach_codeEquivalentAt _ _
 
 /--
+The transparent local checker already implies the proof-facing return relation;
+only scope membership is an external well-formedness premise. This lemma does
+not depend on the trusted upstream-correspondence axiom.
+-/
+theorem terminalCodeRelated_of_local_return
+    (leftScoped : leftScope.contains leftId = true)
+    (rightScoped : rightScope.contains rightId = true)
+    (accepted : Local.AcceptsAt rho
+      ((.return leftId : LCNF.Code .impure)) (.return rightId)) :
+    TerminalCodeRelated rho leftScope rightScope
+      (.return leftId) (.return rightId) := by
+  rcases accepted with ⟨fuel, accepted⟩
+  cases fuel with
+  | zero => simp [Local.checkAt, Local.eqv] at accepted
+  | succ fuel =>
+      apply TerminalCodeRelated.ret
+      refine ⟨leftScoped, rightScoped, ?_⟩
+      change (LCNF.AlphaEqv.eqvFVar leftId rightId).run rho = true
+      exact accepted
+
+/--
 Reduce executable terminal alpha-soundness to the missing checker-to-relation
 bridge. Lean 4.32 exposes `LCNF.AlphaEqv.eqv` as an opaque `partial def`, so
 that bridge cannot currently be proved by unfolding the checker.
@@ -783,5 +805,19 @@ theorem alphaEqvSoundAt_of_terminal_bridge
     AlphaEqvSoundAt externals state left right := by
   intro accepted
   exact terminalCodeRelated_empty_sound (bridge accepted)
+
+/--
+Keep local-checker soundness separate from correspondence with Lean's opaque
+checker. This theorem and all of its dependencies are axiom-free when the two
+premises are supplied by the caller.
+-/
+theorem alphaEqvSoundAt_of_local_terminal_sound
+    (upstream : UpstreamBridge)
+    (localSound : Local.Accepts left right →
+      TerminalCodeRelated ({} : FVarIdMap FVarId) scope scope left right) :
+    AlphaEqvSoundAt externals state left right := by
+  apply alphaEqvSoundAt_of_terminal_bridge
+  intro accepted
+  exact localSound (upstream.accepted left right accepted)
 
 end Fir.LeanIR.Passes.AlphaEqv

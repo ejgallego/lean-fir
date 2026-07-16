@@ -80,7 +80,10 @@ The following work is implemented and checked by the default build:
   identically, and proves the binder-extension step once hygiene classifies new
   versus existing variables. `Passes/AlphaEqvCode.lean` now carries that
   relation through terminal code, value bindings, saved bind frames, machine
-  controls, states, and core-step results.
+  controls, states, and core-step results. `Passes/AlphaEqvLocal.lean` provides
+  a total transparent copy of Lean 4.32's recursive checker;
+  `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
+  upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
   alpha-renamed folding results against Lean 4.32's actual `simpCase.run`.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
@@ -336,22 +339,33 @@ The older terminal boundary theorems remain useful independently:
 top-level semantic boundary. The proof also isolates the exact remaining
 executable bridge in `alphaEqvSoundAt_of_terminal_bridge`.
 
-Trying to prove that bridge exposed an upstream proof-interface blocker.
-Lean 4.32 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
+Trying to prove that bridge exposed an upstream proof-interface blocker. Lean
+4.32 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
 exports no safe equation theorem, so a successful `Code.alphaEqv` check cannot
-be unfolded even for two `return` instructions. The environment audit and
-workaround are recorded in `FIR-BUG-impure-alphaEqv-opaque-eqv`; declarative
-semantic work can continue, but the exact compiler Boolean remains an explicit
-boundary until Lean exposes a proof-facing definition or recursion theorem.
+be unfolded even for two `return` instructions.
+
+FIR now ships `AlphaEqv.Local.eqv`, a total transparent fuel-indexed copy of
+the full Lean 4.32 checker. `AlphaEqvCode` consumes local acceptance without
+axioms and proves the checker-to-relation step for terminal returns.
+`AlphaEqvTrusted` is opt-in and contains the sole correspondence axiom:
+upstream acceptance implies a finite accepting local run. The adapter records
+the audited upstream source hash. `make check` rejects toolchain/source drift,
+additional project axioms, or a `partial def` in the local checker, while
+executable guards compare the two implementations over every impure code
+constructor represented in the interpreter corpus. The exact compiler Boolean
+is therefore usable through a small, explicit trust boundary; replacing that
+axiom with an upstream theorem remains the desired final resolution. Details
+are recorded in `FIR-BUG-impure-alphaEqv-opaque-eqv`.
 
 The remaining bounded work is:
 
 1. extend the declarative state simulation through join points, jumps, cases,
    calls, and the remaining frame forms, reusing the now-proved `let`,
    bind-frame, and sequential-effect invariants;
-2. discharge or refine the exact runtime-type premises at the impure phase
-   boundary and resolve or upstream the opaque-checker bridge needed for the
-   exact `Code.alphaEqv` Boolean;
+2. prove the transparent local checker sound for each newly added declarative
+   code constructor, discharge or refine the exact runtime-type premises at
+   the impure phase boundary, and eventually replace the audited upstream
+   correspondence axiom with a kernel theorem;
 3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 4. lift the resulting theorem through recursive code, declarations, and program

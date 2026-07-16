@@ -1,4 +1,4 @@
-.PHONY: build examples inspect validate bug-cards no-placeholders check beam talos-setup talos-check clean
+.PHONY: build examples inspect validate bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -24,7 +24,10 @@ no-placeholders:
 bug-cards:
 	python3 scripts/validate_bug_cards.py
 
-check: build examples validate bug-cards no-placeholders
+trusted-assumptions:
+	python3 scripts/validate_trusted_assumptions.py
+
+check: build examples validate bug-cards trusted-assumptions no-placeholders
 
 beam:
 	lean-beam sync Fir/LeanIR.lean

@@ -9,7 +9,7 @@ pass: simpCase-0
 discovered-by: proof
 first-seen: 2026-07-16
 reproduction: Fir/LeanIR/Passes/AlphaEqvCode.lean#alphaEqvSoundAt_of_terminal_bridge
-regression: none
+regression: scripts/validate_trusted_assumptions.py
 ---
 
 # Summary
@@ -77,9 +77,14 @@ kernel-facing recursion principle suitable for downstream verification.
 
 ## Workaround
 
-Prove semantic correctness for a declarative code relation and isolate the
-executable checker-to-relation implication as a named boundary. Do not add an
-axiom or silently identify the two.
+FIR ships a total, transparent, fuel-indexed copy of Lean 4.32's checker in
+`AlphaEqvLocal.lean`. Semantic proofs target that copy and remain axiom-free.
+`AlphaEqvTrusted.lean` contains one explicitly named axiom saying that every
+successful upstream check has a finite accepting local run. The adapter
+records the audited upstream source hash; `make check` verifies the pinned
+toolchain, source hash, absence of other project axioms, and absence of a
+replacement opaque `partial def`. Differential guards compare both checkers
+over the interpreter regression corpus.
 
 ## Upstream tracking
 
@@ -87,6 +92,7 @@ none
 
 ## Resolution and regression
 
-unresolved. A resolution should expose a safe equation theorem or replace the
-checker with a proof-facing definition, then prove the executable bridge and
-turn the terminal proof into a permanent regression.
+The upstream proof-interface problem remains unresolved. FIR's audited local
+adapter makes the assumption usable and visible without blocking semantic
+work. A complete resolution should expose a safe upstream equation theorem,
+prove `UpstreamBridge`, and delete `lean432UpstreamBridge`.

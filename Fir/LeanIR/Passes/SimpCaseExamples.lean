@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
+import Fir.LeanIR.Passes.AlphaEqvTrusted
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
 
@@ -8,6 +9,7 @@ open Lean
 open Lean.Elab.Command
 open Lean.Compiler
 open Fir.LeanIR.InterpreterExamples
+open Fir.LeanIR.Passes.AlphaEqv
 
 def selectedBranch : LCNF.Code .impure :=
   .return x
@@ -63,6 +65,45 @@ def nonHygienicAlphaRight : LCNF.Code .impure :=
   .return y
 
 #guard nonHygienicAlphaLeft.alphaEqv nonHygienicAlphaRight
+
+def localMatchesUpstream (left right : LCNF.Code .impure) : Bool :=
+  Local.check 512 left right == left.alphaEqv right
+
+/-!
+The local copy is executable despite the opacity of Lean's recursive checker.
+These guards compare both implementations over alpha-renamed, rejected, and
+compiler-shape fixtures spanning every impure `Code` constructor.
+-/
+#guard Local.check 512 alphaLeft alphaRight
+#guard localMatchesUpstream alphaLeft alphaRight
+#guard localMatchesUpstream nonHygienicAlphaLeft nonHygienicAlphaRight
+#guard localMatchesUpstream alphaLeft selectedBranch
+
+def alphaEqvRegressionCodes : Array (LCNF.Code .impure) := #[
+  literalCode,
+  erasedCode,
+  ctorProjectionCode,
+  caseCode,
+  directCallCode,
+  closureCallCode,
+  joinCode,
+  scalarBoxCode,
+  mutationCode,
+  usizeProjectionCode,
+  objectMutationCode,
+  tagMutationCode,
+  defaultCaseCode,
+  rcCode,
+  persistentRcCode,
+  isSharedCaseCode,
+  resetReuseCode,
+  sharedResetCode,
+  deletedCode,
+  externalCode,
+  .unreach objType
+]
+
+#guard alphaEqvRegressionCodes.all fun code => localMatchesUpstream code code
 
 def nonHygienicAlphaLeftProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code nonHygienicAlphaLeft)] }
