@@ -84,8 +84,15 @@ structure PackedPoint where
 def PackedPoint.setX (point : PackedPoint) : PackedPoint :=
   { point with x := 1 }
 
+@[noinline]
+def PackedPoint.getX (point : PackedPoint) : USize :=
+  point.x
+
 def packedPreserve (y : UInt32) : UInt32 :=
   (PackedPoint.setX { x := 0, y }).y
+
+def packedProjectUSize (value : USize) : USize :=
+  PackedPoint.getX { x := value, y := 0 }
 
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
@@ -506,6 +513,18 @@ def cases : Array Case := #[
       #["ctor", "uset", "sset", "sproj", "fap", "isShared", "cases", "jump", "return"]
     provenance := leanCompileProvenance "tests/compile/uset.lean"
       "Packed USize/UInt32 structure update preserving the scalar field" },
+  { id := "packed-project-usize"
+    entry := ``Source.packedProjectUSize
+    dependencies := #[``Source.PackedPoint.getX]
+    args := #[.usize 42]
+    argSchemas := #[.usize]
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat (Source.packedProjectUSize 42).toNat)
+    tags := #["quick", "scalar", "packed-layout", "usize", "projection"]
+    requiredLcnfForms := #["lit", "ctor", "uset", "sset", "fap", "dec", "return", "uproj"]
+    requiredExecutedLcnfForms :=
+      #["lit", "ctor", "uset", "sset", "fap", "uproj", "return", "dec"]
+    provenance := firProvenance "Project a USize field from a packed mixed-scalar structure" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]

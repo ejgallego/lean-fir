@@ -103,12 +103,12 @@ path instead of silently inheriting telemetry-only coverage.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 44 cases.  Beyond literals,
+The compiler-generated corpus currently has 45 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
-polymorphic box/unbox, packed USize/scalar structure updates, and nested tuple
-projection/reallocation.  Stress fixtures additionally execute compiler-lowered
+polymorphic box/unbox, packed USize/scalar structure updates and `uproj`, and
+nested tuple projection/reallocation.  Stress fixtures additionally execute compiler-lowered
 ownership/reuse during recursive reassociation, retain 17 closure captures,
 allocate/project a 70-object-field constructor, and match a nullary enum that
 Lean lowers to a scalar discriminant.  Several fixtures carry exact provenance
