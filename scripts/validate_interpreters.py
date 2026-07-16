@@ -13,6 +13,7 @@ from validation_harness import (
     BackendRun,
     BuildContext,
     ExternalCommandAdapter,
+    PairValidationResult,
     RunContext,
     ValidationError,
     ValidationFinding,
@@ -30,6 +31,7 @@ from validation_harness import (
     success_observation,
     validate_pair,
     validate_backend_name,
+    validate_matrix,
     write_comparison_artifact,
     write_corpus_manifest,
     write_process_artifacts,
@@ -120,6 +122,21 @@ def corpus_manifest() -> list[dict]:
     return parse_manifest_from_output(completed.stdout, command)
 
 
+def parse_pair_spec(specification: str) -> tuple[str, str]:
+    parts = specification.split(":")
+    if len(parts) != 2:
+        raise ValidationError(
+            f"comparison pair must be REFERENCE:CANDIDATE: {specification}"
+        )
+    reference = validate_backend_name(parts[0], "reference backend")
+    candidate = validate_backend_name(parts[1], "candidate backend")
+    if reference == candidate:
+        raise ValidationError(
+            f"comparison pair must use distinct backends: {reference}"
+        )
+    return reference, candidate
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="compare protocol observations from two validation backends"
@@ -137,12 +154,19 @@ def main() -> int:
     parser.add_argument(
         "--reference",
         default="native",
-        help="backend supplying the reference observation",
+        help="single-pair reference when --pair is absent",
     )
     parser.add_argument(
         "--candidate",
         default="lcnf",
-        help="backend whose observation is checked",
+        help="single-pair candidate when --pair is absent",
+    )
+    parser.add_argument(
+        "--pair",
+        action="append",
+        default=[],
+        metavar="REFERENCE:CANDIDATE",
+        help="add a directed comparison pair; may be repeated",
     )
     parser.add_argument(
         "--adapter-config",
@@ -153,8 +177,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.reference == args.candidate:
-        raise ValidationError("reference and candidate backends must differ")
+    pair_names = (
+        [parse_pair_spec(specification) for specification in args.pair]
+        if args.pair
+        else [parse_pair_spec(f"{args.reference}:{args.candidate}")]
+    )
+    if len(set(pair_names)) != len(pair_names):
+        raise ValidationError("comparison pair selected more than once")
     adapters = dict(BACKEND_ADAPTERS)
     for path in args.adapter_config:
         adapter = external_adapter_from_config(path)
@@ -163,42 +192,57 @@ def main() -> int:
                 f"backend registered more than once: {adapter.name}"
             )
         adapters[adapter.name] = adapter
-    unknown_backends = sorted({args.reference, args.candidate} - adapters.keys())
+    requested_backends = {
+        backend for pair_name in pair_names for backend in pair_name
+    }
+    unknown_backends = sorted(requested_backends - adapters.keys())
     if unknown_backends:
         raise ValidationError(
             "unknown validation backend(s): "
             f"{', '.join(unknown_backends)}; registered: "
             f"{', '.join(sorted(adapters))}"
         )
-    reference = adapters[args.reference]
-    candidate = adapters[args.candidate]
+    pairs = [
+        (adapters[reference], adapters[candidate])
+        for reference, candidate in pair_names
+    ]
+    participating_adapters = {
+        adapter.name: adapter for pair in pairs for adapter in pair
+    }
     build_context = BuildContext(ROOT, args.out_dir, args.no_build)
     adapters_to_build = {
         adapter.name: adapter
-        for adapter in (adapters["native"], reference, candidate)
+        for adapter in (adapters["native"], *participating_adapters.values())
     }
     for adapter in adapters_to_build.values():
         adapter.build(build_context)
 
     descriptors = corpus_manifest()
-    for adapter in (reference, candidate):
+    for adapter in participating_adapters.values():
         descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
     context = RunContext(ROOT, args.out_dir, descriptors, selected)
-    comparisons, findings = validate_pair(context, reference, candidate)
-    for comparison in comparisons:
-        if comparison["equal"]:
-            case_id = comparison["caseId"]
-            print(f"PASS {case_id:<22} {reference.name} == {candidate.name}")
+    pair_results, findings = validate_matrix(context, pairs)
+    for pair_result in pair_results:
+        for comparison in pair_result.comparisons:
+            if comparison["equal"]:
+                case_id = comparison["caseId"]
+                print(
+                    f"PASS {case_id:<22} "
+                    f"{pair_result.reference} == {pair_result.candidate}"
+                )
 
     if findings:
         for finding in findings:
             print(f"FAIL {finding.render()}", file=sys.stderr)
         return 1
     print(
-        f"validated {len(selected)} case(s): "
-        f"{reference.name} == {candidate.name}"
+        f"validated {len(selected)} case(s) across {len(pair_results)} pair(s): "
+        + ", ".join(
+            f"{result.reference} == {result.candidate}"
+            for result in pair_results
+        )
     )
     return 0
 

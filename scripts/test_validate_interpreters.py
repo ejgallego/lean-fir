@@ -580,6 +580,97 @@ class HarnessTests(unittest.TestCase):
                 },
             )
 
+    def test_validation_matrix_executes_and_audits_each_backend_once(self) -> None:
+        class CountingAdapter:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.execute_count = 0
+                self.audit_count = 0
+
+            def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+                return descriptors
+
+            def build(self, context: harness.BuildContext) -> None:
+                pass
+
+            def execute(self, context: harness.RunContext) -> harness.BackendRun:
+                self.execute_count += 1
+                return harness.BackendRun(
+                    self.name,
+                    list(context.selected),
+                    {"case": success("case", self.name)},
+                )
+
+            def audit(
+                self,
+                context: harness.RunContext,
+                backend_run: harness.BackendRun,
+            ) -> harness.BackendAudit:
+                self.audit_count += 1
+                return harness.BackendAudit()
+
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            context = harness.RunContext(
+                harness.ROOT, out_dir, [descriptor("case")], ["case"]
+            )
+            native = CountingAdapter("native")
+            lcnf_adapter = CountingAdapter("lcnf")
+            v8 = CountingAdapter("v8")
+            talos = CountingAdapter("talos")
+            pair_results, findings = harness.validate_matrix(
+                context,
+                [
+                    (native, lcnf_adapter),
+                    (native, v8),
+                    (v8, talos),
+                ],
+            )
+            self.assertEqual(findings, [])
+            self.assertEqual(
+                [
+                    (result.reference, result.candidate)
+                    for result in pair_results
+                ],
+                [("native", "lcnf"), ("native", "v8"), ("v8", "talos")],
+            )
+            for adapter in (native, lcnf_adapter, v8, talos):
+                self.assertEqual(adapter.execute_count, 1)
+                self.assertEqual(adapter.audit_count, 1)
+                self.assertTrue(
+                    (out_dir / "case" / adapter.name / "result.json").is_file()
+                )
+            for reference, candidate in (
+                ("native", "lcnf"),
+                ("native", "v8"),
+                ("v8", "talos"),
+            ):
+                self.assertTrue(
+                    (
+                        out_dir
+                        / "comparisons"
+                        / f"{reference}--{candidate}.json"
+                    ).is_file()
+                )
+
+            with self.assertRaisesRegex(
+                harness.ValidationError, "selected more than once"
+            ):
+                harness.validate_matrix(
+                    context, [(native, v8), (native, v8)]
+                )
+            self.assertEqual(native.execute_count, 1)
+            self.assertEqual(v8.execute_count, 1)
+
+    def test_pair_spec_is_directed_and_strict(self) -> None:
+        self.assertEqual(
+            harness.parse_pair_spec("v8:talos"), ("v8", "talos")
+        )
+        with self.assertRaisesRegex(harness.ValidationError, "REFERENCE:CANDIDATE"):
+            harness.parse_pair_spec("native-lcnf")
+        with self.assertRaisesRegex(harness.ValidationError, "distinct backends"):
+            harness.parse_pair_spec("native:native")
+
     def test_external_adapter_config_uses_argv_not_a_shell_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "v8.json"

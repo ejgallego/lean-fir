@@ -30,6 +30,25 @@ The backend pair is explicit and defaults to the current validation path:
 python3 scripts/validate_interpreters.py --reference native --candidate lcnf
 ```
 
+Repeated `--pair REFERENCE:CANDIDATE` options request a directed comparison
+matrix and supersede the single `--reference`/`--candidate` pair:
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --adapter-config configs/v8-validation.json \
+  --adapter-config configs/talos-validation.json \
+  --pair native:lcnf \
+  --pair native:v8 \
+  --pair v8:talos
+```
+
+The matrix executes and audits each distinct backend exactly once, persists its
+result records once, and then compares every requested edge from the cached
+protocol results.  Backend execution/domain/audit findings appear in each pair
+that uses that backend, while the process exit status counts each backend
+finding only once.  Duplicate pairs, self-comparisons, unsafe names, and two
+different adapter objects claiming the same name are rejected before execution.
+
 The driver discovers the corpus from the native executable, then composes two
 named backend adapters.  Each adapter owns its build and execution strategy and
 an optional backend-specific audit; the shared driver owns protocol result

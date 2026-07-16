@@ -689,55 +689,118 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
         build_command,
         timeout_seconds,
     )
+
+
+@dataclass
+class PairValidationResult:
+    reference: str
+    candidate: str
+    comparisons: list[dict]
+    findings: list[ValidationFinding]
+
+
+def validate_matrix(
+    context: RunContext,
+    pairs: list[tuple[BackendAdapter, BackendAdapter]],
+) -> tuple[list[PairValidationResult], list[ValidationFinding]]:
+    """Execute each backend once, then compare every requested directed pair."""
+    if not pairs:
+        raise ValidationError("validation matrix contains no comparison pairs")
+
+    adapters: dict[str, BackendAdapter] = {}
+    pair_names: set[tuple[str, str]] = set()
+    for reference, candidate in pairs:
+        reference_name = validate_backend_name(reference.name, "reference backend")
+        candidate_name = validate_backend_name(candidate.name, "candidate backend")
+        if reference_name == candidate_name:
+            raise ValidationError(
+                f"comparison pair must use distinct backends: {reference_name}"
+            )
+        names = (reference_name, candidate_name)
+        if names in pair_names:
+            raise ValidationError(
+                f"comparison pair selected more than once: "
+                f"{reference_name}:{candidate_name}"
+            )
+        pair_names.add(names)
+        for adapter in (reference, candidate):
+            existing = adapters.get(adapter.name)
+            if existing is not None and existing is not adapter:
+                raise ValidationError(
+                    f"backend name maps to multiple adapters: {adapter.name}"
+                )
+            adapters[adapter.name] = adapter
+
+    backend_runs: dict[str, BackendRun] = {}
+    backend_findings: dict[str, list[ValidationFinding]] = {}
+    all_findings: list[ValidationFinding] = []
+    for name, adapter in adapters.items():
+        backend_run = adapter.execute(context)
+        if backend_run.backend != name:
+            raise ValidationError(
+                f"adapter {name} returned backend run {backend_run.backend}"
+            )
+        findings = list(backend_run.findings)
+        findings.extend(
+            result_domain_findings(
+                backend_run.results, name, backend_run.expected_cases
+            )
+        )
+        audit = adapter.audit(context, backend_run)
+        findings.extend(audit.findings)
+        backend_runs[name] = backend_run
+        backend_findings[name] = findings
+        all_findings.extend(findings)
+
+        for case_id in context.selected:
+            record = backend_run.results.get(case_id)
+            if record is not None:
+                write_artifact(context.out_dir, case_id, name, record)
+
+    pair_results: list[PairValidationResult] = []
+    for reference, candidate in pairs:
+        reference_run = backend_runs[reference.name]
+        candidate_run = backend_runs[candidate.name]
+        comparisons, comparison_findings = compare_backend_results(
+            context.descriptor_by_id,
+            context.selected,
+            reference.name,
+            reference_run.results,
+            candidate.name,
+            candidate_run.results,
+            reference_run.blocked_cases | candidate_run.blocked_cases,
+        )
+        findings = (
+            list(backend_findings[reference.name])
+            + list(backend_findings[candidate.name])
+            + comparison_findings
+        )
+        all_findings.extend(comparison_findings)
+        write_comparison_artifact(
+            context.out_dir,
+            reference.name,
+            candidate.name,
+            comparisons,
+            findings,
+            len(context.selected),
+        )
+        pair_results.append(
+            PairValidationResult(
+                reference.name,
+                candidate.name,
+                comparisons,
+                findings,
+            )
+        )
+    return pair_results, all_findings
+
+
 def validate_pair(
     context: RunContext,
     reference: BackendAdapter,
     candidate: BackendAdapter,
 ) -> tuple[list[dict], list[ValidationFinding]]:
-    """Execute, audit, persist, and compare one reference/candidate pair."""
-    validate_backend_name(reference.name, "reference backend")
-    validate_backend_name(candidate.name, "candidate backend")
-    reference_run = reference.execute(context)
-    candidate_run = candidate.execute(context)
-    findings = list(reference_run.findings) + list(candidate_run.findings)
-    findings.extend(
-        result_domain_findings(
-            reference_run.results, reference.name, reference_run.expected_cases
-        )
-    )
-    findings.extend(
-        result_domain_findings(
-            candidate_run.results, candidate.name, candidate_run.expected_cases
-        )
-    )
-
-    for case_id in context.selected:
-        for backend_run in (reference_run, candidate_run):
-            record = backend_run.results.get(case_id)
-            if record is not None:
-                write_artifact(context.out_dir, case_id, backend_run.backend, record)
-
-    reference_audit = reference.audit(context, reference_run)
-    candidate_audit = candidate.audit(context, candidate_run)
-    findings.extend(reference_audit.findings)
-    findings.extend(candidate_audit.findings)
-
-    comparisons, comparison_findings = compare_backend_results(
-        context.descriptor_by_id,
-        context.selected,
-        reference.name,
-        reference_run.results,
-        candidate.name,
-        candidate_run.results,
-        reference_run.blocked_cases | candidate_run.blocked_cases,
-    )
-    findings.extend(comparison_findings)
-    write_comparison_artifact(
-        context.out_dir,
-        reference.name,
-        candidate.name,
-        comparisons,
-        findings,
-        len(context.selected),
-    )
-    return comparisons, findings
+    """Compatibility wrapper for one edge of the validation matrix."""
+    pair_results, _ = validate_matrix(context, [(reference, candidate)])
+    result = pair_results[0]
+    return result.comparisons, result.findings
