@@ -3,6 +3,7 @@
 .beam/
 .lake/
 .deps/
+.worktrees/
 build/
 *.olean
 *.ilean

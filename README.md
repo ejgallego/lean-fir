@@ -33,6 +33,10 @@ The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
 adapter and executable scalar example with `make talos-check`.
 
+Parallel proof and Wasm work uses dedicated branches and worktrees with an
+integration-only `main`. See `AGENTS.md` for the normative rules and
+`docs/parallel-development.md` for the maintainer workflow.
+
 ## Layout
 
 Public imports are deliberately small: consumers import `Fir`, or the
@@ -69,5 +73,7 @@ baseline are not re-exported.
   to direct C emission.
 - `docs/pass-correctness-plan.md`: phase-aware semantics and compiler-pass
   correctness roadmap.
+- `docs/parallel-development.md`: worktree ownership, synchronization, and
+  integration workflow for concurrent agents.
 - `bugs/`: textual semantic-discrepancy cards, their required format, and
   links to permanent regression tests.
