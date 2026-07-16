@@ -4,10 +4,11 @@ This package turns the initial supported FIR corpus into deterministic WebAssemb
 binary artifacts, then runs those artifacts in Node's standard `WebAssembly` engine with
 a small semantic FIR host.
 
-The corpus covers erased and maximum-width unsigned results, tagged and heap-allocated
-natural literals, heap strings, constructor allocation and projection, exact and default
-constructor cases, and a transitively reachable constructor graph. Each `.wasm` file is
-accompanied by a manifest that derives its entry result ABI and describes its semantic
+The corpus covers erased and maximum-width unsigned results and entry arguments, tagged
+argument handles, tagged and heap-allocated natural literals, heap strings, constructor
+allocation and projection, exact and default constructor cases, and a transitively
+reachable constructor graph. Each `.wasm` file is accompanied by a manifest that derives
+its entry parameter and result ABI, records its semantic inputs, and describes its semantic
 runtime imports. The separate `FirWasmOracleMain.lean` program runs the same named corpus
 through the W3 FIR/Talos differential oracle and writes its comparable observations beside
 the artifacts. The Node runner compares V8 directly with those live W3 results; no expected
@@ -16,6 +17,8 @@ semantic observations are frozen in the emitter.
 World and trace observations remain empty in this corpus because the current
 `lowerSupported` contract deliberately excludes external declarations. Add an
 effect-producing fixture only after that supported-domain change lands through W4.
+Heap-backed entry arguments likewise remain outside the corpus until the manifest and both
+engines share an explicit initial-runtime format.
 
 Run the complete lane-local check with:
 

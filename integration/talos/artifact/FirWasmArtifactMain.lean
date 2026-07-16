@@ -3,6 +3,7 @@ import Fir.Wasm.Emit.Examples
 open Fir.Wasm
 open Fir.Wasm.Emit
 open Fir.Wasm.Emit.Examples
+open Fir.LeanIR.Impure
 open Lean
 
 def fixtures : List CorpusFixture := initialFixtures
@@ -61,23 +62,55 @@ def importJson (import_ : Fir.Wasm.Import) : Except String Json := do
     ("name", import_.itemName),
     ("operation", ← operationJson operation)]
 
-def entryResultKind (module : Fir.Wasm.Module) (entry : Name) : Except String AbiKind := do
+def argumentJson (kind : AbiKind) (value : Value) : Except String Json := do
+  unless kind.acceptsValue value do
+    throw s!"argument {repr value} does not match ABI kind {repr kind}"
+  match value with
+  | .object (.tagged payload) =>
+      return Json.mkObj [("kind", "tagged"), ("payload", s!"{payload}")]
+  | .object (.heap _) => throw "heap-backed arguments require an explicit initial runtime"
+  | .usize value => return Json.mkObj [("kind", "usize"), ("value", s!"{value}")]
+  | .scalar (.uint8 value) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint8"), ("value", s!"{value}")]
+  | .scalar (.uint16 value) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint16"), ("value", s!"{value}")]
+  | .scalar (.uint32 value) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint32"), ("value", s!"{value}")]
+  | .scalar (.uint64 value) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint64"), ("value", s!"{value}")]
+  | .erased => return Json.mkObj [("kind", "erased")]
+  | .reuseToken none =>
+      return Json.mkObj [("kind", "reuseToken"), ("location", Json.null)]
+  | .reuseToken (some _) => throw "heap-backed arguments require an explicit initial runtime"
+
+def entryFunction (module : Fir.Wasm.Module) (entry : Name) : Except String Fir.Wasm.Function := do
   unless module.exports.contains entry do
     throw s!"entry {entry} is not exported"
   let some function := module.functions.toList.find? (·.name == entry) |
     throw s!"entry {entry} is not a lowered function"
+  return function
+
+def entryResultKind (entry : Name) (function : Fir.Wasm.Function) : Except String AbiKind := do
   match function.results.toList with
   | [kind] => pure kind
   | results => throw s!"entry {entry} must return exactly one ABI value, got {results.length}"
 
 def manifestJson (fixture : CorpusFixture) (module : Fir.Wasm.Module) : Except String Json := do
   let entry := `main
-  let result ← entryResultKind module entry
+  let function ← entryFunction module entry
+  let result ← entryResultKind entry function
+  let params := function.params.map (·.snd)
+  unless params.size == fixture.args.size do
+    throw s!"entry {entry} expects {params.size} arguments, got {fixture.args.size}"
+  let arguments ← (params.toList.zip fixture.args.toList).mapM fun (kind, value) =>
+    argumentJson kind value
   let imports ← module.imports.toList.mapM importJson
   return Json.mkObj [
     ("fixture", fixture.name),
     ("entry", entry.toString),
     ("result", abiKindName result),
+    ("params", Json.arr (params.map fun kind => (abiKindName kind : Json))),
+    ("arguments", Json.arr arguments.toArray),
     ("imports", Json.arr imports.toArray)]
 
 def prepareFixture (fixture : CorpusFixture) : Except String (ByteArray × String) := do

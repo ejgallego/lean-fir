@@ -4,6 +4,32 @@ import { basename, dirname, join } from "node:path";
 
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
+const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
+
+function manifestValue(argument) {
+  assert.ok(argument && typeof argument === "object", "manifest argument must be an object");
+  switch (argument.kind) {
+    case "tagged":
+      return { kind: "tagged", payload: BigInt(argument.payload) };
+    case "usize":
+      return { kind: "usize", value: BigInt(argument.value) };
+    case "scalar":
+      assert.ok(SCALAR_KINDS.has(argument.scalarKind),
+        `unsupported manifest scalar kind: ${argument.scalarKind}`);
+      return {
+        kind: "scalar",
+        scalarKind: argument.scalarKind,
+        value: BigInt(argument.value),
+      };
+    case "erased":
+      return { kind: "erased" };
+    case "reuseToken":
+      assert.equal(argument.location, null, "heap-backed reuse tokens require an initial runtime");
+      return { kind: "reuseToken", location: null };
+    default:
+      throw new Error(`unsupported manifest argument kind: ${argument.kind}`);
+  }
+}
 
 class SemanticHost {
   constructor() {
@@ -49,9 +75,33 @@ class SemanticHost {
   }
 
   encode(kind, value) {
-    if (kind === "erased") {
-      assert.equal(value.kind, "erased", "erased result has the wrong semantic kind");
-      return 0;
+    switch (kind) {
+      case "uint8":
+      case "uint16":
+      case "uint32": {
+        assert.equal(value.kind, "scalar", `${kind} requires a scalar value`);
+        assert.equal(value.scalarKind, kind, `${value.scalarKind} does not refine ${kind}`);
+        const maximum = kind === "uint8" ? 0xffn : kind === "uint16" ? 0xffffn : 0xffffffffn;
+        assert.ok(value.value >= 0n && value.value <= maximum,
+          `${kind} argument is out of range: ${value.value}`);
+        return Number(BigInt.asIntN(32, value.value));
+      }
+      case "uint64":
+        assert.equal(value.kind, "scalar", "uint64 requires a scalar value");
+        assert.equal(value.scalarKind, "uint64", `${value.scalarKind} does not refine uint64`);
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
+          `uint64 argument is out of range: ${value.value}`);
+        return BigInt.asIntN(64, value.value);
+      case "usize":
+        assert.equal(value.kind, "usize", "usize requires a usize value");
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
+          `usize argument is out of range: ${value.value}`);
+        return BigInt.asIntN(64, value.value);
+      case "erased":
+        assert.equal(value.kind, "erased", "erased has the wrong semantic kind");
+        return 0;
+      default:
+        break;
     }
     assert.ok(OBJECT_KINDS.has(kind) || kind === "reuseToken", `unsupported handle kind: ${kind}`);
     assert.ok(this.accepts(kind, value), `${value.kind} does not refine ${kind}`);
@@ -320,7 +370,14 @@ async function runArtifact(manifestPath) {
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
-  const physicalResult = entry();
+  assert.ok(Array.isArray(manifest.params), `${manifest.fixture} manifest params must be an array`);
+  assert.ok(Array.isArray(manifest.arguments),
+    `${manifest.fixture} manifest arguments must be an array`);
+  assert.equal(manifest.params.length, manifest.arguments.length,
+    `${manifest.fixture} manifest argument arity mismatch`);
+  const physicalArgs = manifest.params.map((kind, index) =>
+    host.encode(kind, manifestValue(manifest.arguments[index])));
+  const physicalResult = entry(...physicalArgs);
   const actual = host.observation(manifest.result, physicalResult);
   assert.deepStrictEqual(actual, expected, `${manifest.fixture} observation mismatch`);
   console.log(`PASS ${manifest.fixture}`);

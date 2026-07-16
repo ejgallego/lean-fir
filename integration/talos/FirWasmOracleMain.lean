@@ -85,7 +85,7 @@ def comparableObservationJson (observation : Observation) : Json :=
     ("trace", Json.arr (comparable.trace.map externalEventJson))]
 
 def oracleObservation (fixture : CorpusFixture) : Except String Observation :=
-  match runDifferential fixture.program `main #[] with
+  match runDifferential fixture.program `main fixture.args with
   | .related source _ => .ok source
   | result => .error s!"W3 oracle rejected {fixture.name}: {result.describe}"
 

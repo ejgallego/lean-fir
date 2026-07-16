@@ -11,6 +11,7 @@ open Lean.Compiler
 structure CorpusFixture where
   name : String
   program : Fir.LeanIR.ImpureProgram
+  args : Array Value := #[]
 
 def abiDirectLiteralProgram (type : Lean.Expr) (literal : LCNF.LitValue) :
     Fir.LeanIR.ImpureProgram :=
@@ -31,6 +32,13 @@ def abiUInt64MaxProgram : Fir.LeanIR.ImpureProgram :=
 
 def abiUSizeMaxProgram : Fir.LeanIR.ImpureProgram :=
   abiDirectLiteralProgram usizeType (.usize 18446744073709551615)
+
+def abiIdentityProgram (type : Lean.Expr) : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x type] type (.code (.return x))] }
+
+def abiFirstTaggedArgumentProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x tobjectType, param y tobjectType]
+      tobjectType (.code (.return x))] }
 
 def abiStringHeapProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] tobjectType (.code <|
@@ -55,6 +63,19 @@ def initialFixtures : List CorpusFixture := [
   { name := "uint32-max", program := abiUInt32MaxProgram },
   { name := "uint64-max", program := abiUInt64MaxProgram },
   { name := "usize-max", program := abiUSizeMaxProgram },
+  { name := "arg-erased", program := abiIdentityProgram erasedType, args := #[.erased] },
+  { name := "arg-tagged-first", program := abiFirstTaggedArgumentProgram,
+    args := #[.object (.tagged 11), .object (.tagged 22)] },
+  { name := "arg-uint8-max", program := abiIdentityProgram u8Type,
+    args := #[.scalar (.uint8 255)] },
+  { name := "arg-uint16-max", program := abiIdentityProgram LCNF.ImpureType.uint16,
+    args := #[.scalar (.uint16 65535)] },
+  { name := "arg-uint32-max", program := abiIdentityProgram LCNF.ImpureType.uint32,
+    args := #[.scalar (.uint32 4294967295)] },
+  { name := "arg-uint64-max", program := abiIdentityProgram u64Type,
+    args := #[.scalar (.uint64 18446744073709551615)] },
+  { name := "arg-usize-max", program := abiIdentityProgram usizeType,
+    args := #[.usize 18446744073709551615] },
   { name := "ctor-projection", program := abiCtorProjectionProgram },
   { name := "case", program := abiCaseProgram },
   { name := "default-case", program := abiDefaultCaseProgram },
