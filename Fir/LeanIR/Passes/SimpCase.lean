@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.AlphaEqv
+import Fir.LeanIR.Passes.AlphaEqvBind
 
 namespace Fir.LeanIR.Passes.SimpCase
 
