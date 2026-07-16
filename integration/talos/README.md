@@ -31,4 +31,14 @@ source fuel exhaustion while comparing only the observable reachable heap.
 round trips, scalar codec lemmas, adapter signature/local/label/call
 preservation, positional `HostEnv.Satisfies` packaging, and bridges from a
 successful executable witness to fuel-free `TerminatesWith` and
-`PartiallyMeets` observation statements.
+`PartiallyMeets` observation statements. The first layer-4 slice additionally
+proves natural/string literal lowering equations, relates their source and
+semantic-host results, and lifts both operations through Talos's abstract
+host-contract `wp` rule.
+
+Constructor allocation, object projection, and tag lookup have the same local
+source/host simulation relation. The handle invariant is preserved across
+successful encodings, and out-of-range constructor tags are rejected before
+the `Nat`-to-`i32` case comparison can truncate them. A common Talos `wp`
+theorem lifts any exact successful semantic-host step through its abstract
+host contract.

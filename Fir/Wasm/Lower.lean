@@ -220,26 +220,28 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
   let assignments := decl.params.toList.reverse.map fun param => .localSet param.fvarId
   return arguments ++ assignments ++ [.br fvarId]
 
-mutual
-
-partial def compileCaseChain (context : Context) (discr : FVarId)
+def compileCaseChainWith
+    (compile : LCNF.Code .impure → Except CompileError (List Instruction))
+    (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) := do
   match alts with
   | [] => return fallback
-  | .default _ :: rest => compileCaseChain context discr rest fallback
+  | .default _ :: rest => compileCaseChainWith compile discr rest fallback
   | .alt _ _ _ h :: _ => nomatch h
   | .ctorAlt info code :: rest =>
       unless constructorTagFitsI32 info do
         throw (.malformed s!"constructor tag {info.cidx} does not fit the i32 case ABI")
-      let thenBody ← compileCode context code
-      let elseBody ← compileCaseChain context discr rest fallback
+      let thenBody ← compile code
+      let elseBody ← compileCaseChainWith compile discr rest fallback
       return [
         .localGet discr,
         .call (.runtime .getTag),
         .i32Const .uint32 (UInt32.ofNat info.cidx),
         .i32Eq,
         .ifElse thenBody elseBody]
+
+termination_by sizeOf alts
 
 partial def compileCode (context : Context) : LCNF.Code .impure → Except CompileError (List Instruction)
   | .let decl continuation => do
@@ -260,7 +262,7 @@ partial def compileCode (context : Context) : LCNF.Code .impure → Except Compi
         | some (.default code) => compileCode context code
         | some (.alt _ _ _ h) => nomatch h
         | some (.ctorAlt _ _) | none => pure [.unreachable]
-      compileCaseChain context cases.discr cases.alts.toList fallback
+      compileCaseChainWith (compileCode context) cases.discr cases.alts.toList fallback
   | .return fvarId => do
       let (value, _) ← getLocal context fvarId
       return [value, .ret]
@@ -299,7 +301,10 @@ partial def compileCode (context : Context) : LCNF.Code .impure → Except Compi
       let rest ← compileCode context continuation
       return [object, .call (.runtime .delete)] ++ rest
 
-end
+def compileCaseChain (context : Context) (discr : FVarId)
+    (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
+    Except CompileError (List Instruction) :=
+  compileCaseChainWith (compileCode context) discr alts fallback
 
 def addUnique [BEq α] (values : Array α) (value : α) : Array α :=
   if values.contains value then values else values.push value

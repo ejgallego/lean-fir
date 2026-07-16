@@ -85,6 +85,38 @@ def encodeResults (table : HandleTable) (kinds : Array AbiKind) (values : Array 
     throw (.arityMismatch kinds.size values.size)
   encodeValueList table kinds.toList values.toList
 
+@[simp] theorem decodeArgs_empty (table : HandleTable) :
+    decodeArgs table #[] [] = .ok #[] := by
+  rfl
+
+theorem encodeResults_handle_singleton_of_encode
+    {before after : HandleTable} {kind : AbiKind} {value : Value} {handle : Handle}
+    (usesHandle : kind.usesHandle = true)
+    (encoded : before.encode kind value = .ok (after, handle)) :
+    encodeResults before #[kind] #[value] = .ok (after, [.i32 handle]) := by
+  cases kind <;> simp_all [AbiKind.usesHandle, encodeResults, encodeValueList, encodeValue]
+  all_goals rfl
+
+theorem encodeResults_tobject_singleton_of_encode
+    {before after : HandleTable} {value : Value} {handle : Handle}
+    (encoded : before.encode .tobject value = .ok (after, handle)) :
+    encodeResults before #[.tobject] #[value] = .ok (after, [.i32 handle]) := by
+  simp [encodeResults, encodeValueList, encodeValue, encoded]
+  rfl
+
+theorem encodeResults_object_singleton_of_encode
+    {before after : HandleTable} {value : Value} {handle : Handle}
+    (encoded : before.encode .object value = .ok (after, handle)) :
+    encodeResults before #[.object] #[value] = .ok (after, [.i32 handle]) := by
+  simp [encodeResults, encodeValueList, encodeValue, encoded]
+  rfl
+
+@[simp] theorem encodeResults_uint32_singleton (table : HandleTable) (value : UInt32) :
+    encodeResults table #[.uint32] #[.scalar (.uint32 value)] =
+      .ok (table, [.i32 value]) := by
+  simp [encodeResults, encodeValueList, encodeValue]
+  rfl
+
 /-- Proof-side relation for a successful single-value decode. -/
 def DecodesValue (table : HandleTable) (kind : AbiKind) (physical : Wasm.Value)
     (semantic : Value) : Prop :=

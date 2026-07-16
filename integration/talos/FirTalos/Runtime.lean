@@ -97,6 +97,103 @@ def hostStep (operation : HostOperation) (initial : Wasm.Store RuntimeHost)
           | .ok (handles, results) =>
               .Return results { evaluated with host := { evaluated.host with handles } }
 
+theorem hostStep_naturalLiteral_of_encode
+    (initial : Wasm.Store RuntimeHost) (value : Nat) {after : HandleTable}
+    {handle : Handle}
+    (encoded :
+      initial.host.handles.encode .tobject (literal initial.host.runtime (.nat value)).2 =
+        .ok (after, handle)) :
+    hostStep (.naturalLiteral value .tobject) initial [] =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := (literal initial.host.runtime (.nat value)).1
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature,
+    encodeResults_tobject_singleton_of_encode encoded]
+
+theorem hostStep_stringLiteral_of_encode
+    (initial : Wasm.Store RuntimeHost) (value : String) {after : HandleTable}
+    {handle : Handle}
+    (encoded :
+      initial.host.handles.encode .object (literal initial.host.runtime (.str value)).2 =
+        .ok (after, handle)) :
+    hostStep (.stringLiteral value .object) initial [] =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := (literal initial.host.runtime (.str value)).1
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature,
+    encodeResults_object_singleton_of_encode encoded]
+
+theorem hostStep_allocCtor_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (semanticArgs : Array Value)
+    (sourceRuntime : RuntimeState) (sourceValue : Value) {after : HandleTable}
+    {handle : Handle}
+    (decoded : decodeArgs initial.host.handles fieldKinds physicalArgs = .ok semanticArgs)
+    (allocated : allocCtor initial.host.runtime info semanticArgs =
+      .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    hostStep (.allocCtor info fieldKinds resultKind) initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, allocated,
+    encodeResults_handle_singleton_of_encode usesHandle encoded]
+
+theorem hostStep_objectProj_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (index : Nat) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceValue : Value)
+    {after : HandleTable} {handle : Handle}
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (projected : getObjectField initial.host.runtime sourceObject index = .ok sourceValue)
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    hostStep (.objectProj index resultKind) initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, projected,
+    encodeResults_handle_singleton_of_encode usesHandle encoded]
+
+theorem hostStep_getTag_of_decode
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (tag : Nat)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (tagged : getTag initial.host.runtime sourceObject = .ok tag) :
+    hostStep .getTag initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat tag)] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, tagged,
+    encodeResults_uint32_singleton]
+
 /-- Concrete Talos resolver for one supported semantic FIR runtime operation. -/
 def hostFn (operation : HostOperation) : Wasm.HostFn RuntimeHost :=
   { params := operation.signature.params.toList.map abiKind

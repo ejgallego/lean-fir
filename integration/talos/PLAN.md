@@ -58,9 +58,18 @@ production heap layout.
   scalar lane lemmas, adapter signature/local/label/call preservation,
   positional host satisfaction, and fuel-free observation postconditions.
   The adapter recursion is now terminating and transparent to proofs.
+- W4 layer 4 now has local lowering and source/host simulations for natural
+  and string literals, constructor allocation, object projection, and tag
+  lookup. Successful handle encodings preserve a chainable coherence/freshness
+  invariant, and checked `UInt32` tag bounds make case comparisons injective.
+  Exact successful host steps have a common instruction-level Talos `wp`
+  lifting through abstract host contracts, with specialized literal rules.
+  Target handle-space availability is an explicit premise rather than an
+  implicit infinity assumption.
 
-The next W4 slice is the local lowering simulation for the call-free
-literal/constructor/projection/case fragment, followed by lifting that result
+The next W4 slice instantiates the common `wp` rule against the generated
+constructor/projection/tag stack shapes, proves `if` dispatch, and composes the
+local rules over the call-free code fragment. That result can then be lifted
 through `RelatedPost` to whole exported functions. The adapter still rejects
 initializers and closures.
 
@@ -316,9 +325,11 @@ Proof layers:
 5. the local result lifts to exported functions and program observations.
 
 Layers 1--3 and the fuel-free executable-to-observation bridge are checked in
-`FirTalos/Correctness/`. Layer 4 is the active proof obligation; layer 5 can
-then instantiate the bridge without mentioning runner fuel in the public
-theorem.
+`FirTalos/Correctness/`. Layer 4 now covers lowering and host steps for the
+whole initial fragment and provides their common instruction-level host-call
+lifting. Its active proof obligation is composition against generated stack
+shapes and case control flow; layer 5 can then instantiate the bridge without
+mentioning runner fuel in the public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
