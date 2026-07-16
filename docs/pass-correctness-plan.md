@@ -436,6 +436,15 @@ arities, and arguments; call regressions cover renamed call arguments and
 reject target/argument mismatches. Every fixture is checked against the
 upstream Boolean implementation. This slice introduces no new trusted axiom.
 
+The declarative proof relations now distinguish lexical variable scope from
+active join scope. `CodeRelated`, branch selection, controls, and machine
+states carry paired left/right join-scope indices, and every already-proved
+constructor preserves them unchanged. Top-level trusted theorems and
+regressions instantiate both scopes with the empty list. This is a structural
+precondition for the next control-flow slice: `jp` will extend the join scopes
+only around its continuation, while `jmp` will require an alpha-related target
+present in those scopes. No runtime contract or trusted assumption changed.
+
 The remaining bounded work is:
 
 1. lift the proved parameter-body relation through the outer `jp`/`jmp`

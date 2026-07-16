@@ -6,6 +6,8 @@ open Lean
 open Lean.Compiler
 open Fir.LeanIR.ImpureHygiene
 
+set_option linter.unusedVariables false
+
 /--
 Well-formedness and runtime-metadata premises not supplied by executable
 alpha-equivalence. Constructor and instruction metadata equality deliberately
@@ -13,14 +15,17 @@ remain the local checker's responsibility.
 -/
 inductive CodeSideConditions :
     FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
       LCNF.Code .impure → LCNF.Code .impure → Prop where
   | ret
       (leftScoped : leftScope.contains leftId = true)
       (rightScoped : rightScope.contains rightId = true) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.return leftId) (.return rightId)
   | unreachable :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.unreach leftType) (.unreach rightType)
   | letE
       (typeEq : leftDecl.type = rightDecl.type)
@@ -30,10 +35,12 @@ inductive CodeSideConditions :
       (leftFresh : FreshForScope leftDecl.fvarId leftScope)
       (rightFresh : FreshForScope rightDecl.fvarId rightScope)
       (continuation :
-        CodeSideConditions (rho.insert rightDecl.fvarId leftDecl.fvarId)
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          (rho.insert rightDecl.fvarId leftDecl.fvarId)
           (leftDecl.fvarId :: leftScope) (rightDecl.fvarId :: rightScope)
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
   | cases
       (leftDiscrScoped : leftScope.contains leftCases.discr = true)
@@ -43,12 +50,15 @@ inductive CodeSideConditions :
       (ctorBranches : ∀ tag leftCode rightCode,
         HasCtorAlt tag leftCode leftCases.alts.toList →
         HasCtorAlt tag rightCode rightCases.alts.toList →
-        CodeSideConditions rho leftScope rightScope leftCode rightCode)
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftCode rightCode)
       (defaultBranches : ∀ leftCode rightCode,
         HasDefaultAlt leftCode leftCases.alts.toList →
         HasDefaultAlt rightCode rightCases.alts.toList →
-        CodeSideConditions rho leftScope rightScope leftCode rightCode) :
-      CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftCode rightCode) :
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.cases leftCases) (.cases rightCases)
   | oset
       (leftObjectScoped : leftScope.contains leftObject = true)
@@ -56,9 +66,11 @@ inductive CodeSideConditions :
       (leftFieldScoped : argScoped leftScope leftField = true)
       (rightFieldScoped : argScoped rightScope rightField = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.oset leftObject leftIndex leftField leftContinuation)
         (.oset rightObject rightIndex rightField rightContinuation)
   | uset
@@ -67,9 +79,11 @@ inductive CodeSideConditions :
       (leftFieldScoped : leftScope.contains leftField = true)
       (rightFieldScoped : rightScope.contains rightField = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.uset leftObject leftIndex leftField leftContinuation)
         (.uset rightObject rightIndex rightField rightContinuation)
   | sset
@@ -78,45 +92,55 @@ inductive CodeSideConditions :
       (leftFieldScoped : leftScope.contains leftField = true)
       (rightFieldScoped : rightScope.contains rightField = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.sset leftObject leftWidth leftOffset leftField leftType leftContinuation)
         (.sset rightObject rightWidth rightOffset rightField rightType rightContinuation)
   | setTag
       (leftObjectScoped : leftScope.contains leftObject = true)
       (rightObjectScoped : rightScope.contains rightObject = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.setTag leftObject leftTag leftContinuation)
         (.setTag rightObject rightTag rightContinuation)
   | inc
       (leftObjectScoped : leftScope.contains leftObject = true)
       (rightObjectScoped : rightScope.contains rightObject = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.inc leftObject leftAmount leftCheck leftPersistent leftContinuation)
         (.inc rightObject rightAmount rightCheck rightPersistent rightContinuation)
   | dec
       (leftObjectScoped : leftScope.contains leftObject = true)
       (rightObjectScoped : rightScope.contains rightObject = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.dec leftObject leftAmount leftCheck leftPersistent leftObjects leftContinuation)
         (.dec rightObject rightAmount rightCheck rightPersistent rightObjects rightContinuation)
   | del
       (leftObjectScoped : leftScope.contains leftObject = true)
       (rightObjectScoped : rightScope.contains rightObject = true)
       (continuation :
-        CodeSideConditions rho leftScope rightScope
+        CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           leftContinuation rightContinuation) :
-      CodeSideConditions rho leftScope rightScope
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
 
 /--
@@ -126,57 +150,74 @@ binders. The scope and reader map are extended in the same order as
 -/
 inductive ParamBodySideConditions :
     FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
       List (LCNF.Param .impure) → List (LCNF.Param .impure) →
       LCNF.Code .impure → LCNF.Code .impure → Prop where
   | nil
-      (body : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
-      ParamBodySideConditions rho leftScope rightScope [] [] leftCode rightCode
+      (body : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      ParamBodySideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope [] [] leftCode rightCode
   | cons
       (leftFresh : FreshForScope leftParam.fvarId leftScope)
       (rightFresh : FreshForScope rightParam.fvarId rightScope)
       (rest : ParamBodySideConditions
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightParam.fvarId leftParam.fvarId)
         (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
         leftRest rightRest leftCode rightCode) :
-      ParamBodySideConditions rho leftScope rightScope
+      ParamBodySideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
 
 /-- Declarative result of traversing two related parameter lists. -/
 inductive ParamBodyRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
       List (LCNF.Param .impure) → List (LCNF.Param .impure) →
       LCNF.Code .impure → LCNF.Code .impure → Prop where
   | nil
-      (body : CodeRelated rho leftScope rightScope leftCode rightCode) :
-      ParamBodyRelated rho leftScope rightScope [] [] leftCode rightCode
+      (body : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope [] [] leftCode rightCode
   | cons
       (leftFresh : FreshForScope leftParam.fvarId leftScope)
       (rightFresh : FreshForScope rightParam.fvarId rightScope)
       (rest : ParamBodyRelated
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightParam.fvarId leftParam.fvarId)
         (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
         leftRest rightRest leftCode rightCode) :
-      ParamBodyRelated rho leftScope rightScope
+      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
 
 /-- Side conditions for one impure case alternative. -/
 inductive AltSideConditions (rho : FVarIdMap FVarId)
-    (leftScope rightScope : List FVarId) :
+    (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId} :
     LCNF.Alt .impure → LCNF.Alt .impure → Prop where
   | ctor
-      (code : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
-      AltSideConditions rho leftScope rightScope
+      (code : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      AltSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.ctorAlt leftInfo leftCode) (.ctorAlt rightInfo rightCode)
   | default
-      (code : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
-      AltSideConditions rho leftScope rightScope
+      (code : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      AltSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.default leftCode) (.default rightCode)
 
 /-- Pointwise side conditions for an ordered impure alternative table. -/
 abbrev AltsSideConditions (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId}
     (left right : List (LCNF.Alt .impure)) : Prop :=
-  ListRel (AltSideConditions rho leftScope rightScope) left right
+  ListRel (AltSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+    rho leftScope rightScope) left right
 
 /--
 Branch side conditions indexed by the selectors observed by the interpreter.
@@ -185,13 +226,16 @@ are reordered for comparison.
 -/
 structure CaseBranchesSideConditions (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId}
     (left right : List (LCNF.Alt .impure)) : Prop where
   ctor : ∀ tag leftCode rightCode,
     HasCtorAlt tag leftCode left → HasCtorAlt tag rightCode right →
-      CodeSideConditions rho leftScope rightScope leftCode rightCode
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode
   default : ∀ leftCode rightCode,
     HasDefaultAlt leftCode left → HasDefaultAlt rightCode right →
-      CodeSideConditions rho leftScope rightScope leftCode rightCode
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode
 
 private theorem reader_andM_run_eq_true_iff
     (left right : ReaderM ρ Bool) (env : ρ) :
@@ -214,21 +258,25 @@ selected branch bodies. Keeping the callbacks abstract lets the main code
 proof use its structural induction hypotheses when a branch is itself a case.
 -/
 private theorem altsRelated_of_local_check_by_selector_using
+    {leftJoins rightJoins : List FVarId}
     (ctorSound : ∀ tag leftCode rightCode,
       HasCtorAlt tag leftCode originalLeft →
       HasCtorAlt tag rightCode originalRight →
       Local.AcceptsAt rho leftCode rightCode →
-      CodeRelated rho leftScope rightScope leftCode rightCode)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode)
     (defaultSound : ∀ leftCode rightCode,
       HasDefaultAlt leftCode originalLeft →
       HasDefaultAlt rightCode originalRight →
       Local.AcceptsAt rho leftCode rightCode →
-      CodeRelated rho leftScope rightScope leftCode rightCode)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode)
     (leftSubset : ∀ alt, alt ∈ left → alt ∈ originalLeft)
     (rightSubset : ∀ alt, alt ∈ right → alt ∈ originalRight)
     (accepted :
       (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
-    AltsRelated rho leftScope rightScope left right := by
+    AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right := by
   induction left generalizing right with
   | nil =>
       cases right with
@@ -304,9 +352,12 @@ acceptance plus the explicit side conditions constructs the declarative
 relation. This theorem is independent of the upstream correspondence axiom.
 -/
 theorem codeRelated_of_local_accepts
-    (side : CodeSideConditions rho leftScope rightScope left right)
+    {leftJoins rightJoins : List FVarId}
+    (side : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right)
     (accepted : Local.AcceptsAt rho left right) :
-    CodeRelated rho leftScope rightScope left right := by
+    CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right := by
   induction side with
   | ret leftScoped rightScoped =>
       exact .terminal
@@ -335,7 +386,8 @@ theorem codeRelated_of_local_accepts
         · exact continuation_ih ⟨fuel, accepted.2.2⟩
   | cases leftDiscrScoped rightDiscrScoped leftNormalization rightNormalization
       ctorBranches defaultBranches ctorBranches_ih defaultBranches_ih =>
-      rename_i rho' leftScope' rightScope' leftCases rightCases
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftCases rightCases
       rcases accepted with ⟨_ | fuel, accepted⟩
       · simp [Local.checkAt, Local.eqv] at accepted
       · change
@@ -366,7 +418,8 @@ theorem codeRelated_of_local_accepts
   | oset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
       continuation continuation_ih =>
       rename_i leftScope' leftField rightScope' rightField rho'
-        leftContinuation rightContinuation leftObject leftIndex rightObject rightIndex
+        leftJoins' rightJoins' leftContinuation rightContinuation
+        leftObject leftIndex rightObject rightIndex
       rcases accepted with ⟨_ | fuel, accepted⟩
       · simp [Local.checkAt, Local.eqv] at accepted
       · change
@@ -386,7 +439,8 @@ theorem codeRelated_of_local_accepts
         · exact continuation_ih ⟨fuel, accepted.2.2.2⟩
   | uset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
       continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject leftIndex leftField rightObject rightIndex rightField
       rcases accepted with ⟨_ | fuel, accepted⟩
       · simp [Local.checkAt, Local.eqv] at accepted
@@ -407,7 +461,8 @@ theorem codeRelated_of_local_accepts
         · exact continuation_ih ⟨fuel, accepted.2.2.2⟩
   | sset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
       continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject leftWidth leftOffset leftField leftType
         rightObject rightWidth rightOffset rightField rightType
       rcases accepted with ⟨_ | fuel, accepted⟩
@@ -434,7 +489,8 @@ theorem codeRelated_of_local_accepts
         · exact ⟨leftFieldScoped, rightFieldScoped, accepted.2.2.2.1⟩
         · exact continuation_ih ⟨fuel, accepted.2.2.2.2.2⟩
   | setTag leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject leftTag rightObject rightTag
       rcases accepted with ⟨_ | fuel, accepted⟩
       · simp [Local.checkAt, Local.eqv] at accepted
@@ -451,7 +507,8 @@ theorem codeRelated_of_local_accepts
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.1⟩
         · exact continuation_ih ⟨fuel, accepted.2.2⟩
   | inc leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject leftAmount leftCheck leftPersistent
         rightObject rightAmount rightCheck rightPersistent
       rcases accepted with ⟨_ | fuel, accepted⟩
@@ -478,7 +535,8 @@ theorem codeRelated_of_local_accepts
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.2.2.1⟩
         · exact continuation_ih ⟨fuel, accepted.2.2.2.2⟩
   | dec leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject leftAmount leftCheck leftPersistent leftObjects
         rightObject rightAmount rightCheck rightPersistent rightObjects
       rcases accepted with ⟨_ | fuel, accepted⟩
@@ -510,7 +568,8 @@ theorem codeRelated_of_local_accepts
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.2.2.2.1⟩
         · exact continuation_ih ⟨fuel, accepted.2.2.2.2.2⟩
   | del leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftContinuation rightContinuation
+      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
+        leftContinuation rightContinuation
         leftObject rightObject
       rcases accepted with ⟨_ | fuel, accepted⟩
       · simp [Local.checkAt, Local.eqv] at accepted
@@ -530,12 +589,16 @@ Boolean traversal; freshness is the additional phase invariant needed to
 extend runtime environment agreement at each binder.
 -/
 theorem paramBodyRelated_of_local_check
-    (side : ParamBodySideConditions rho leftScope rightScope
+    {leftJoins rightJoins : List FVarId}
+    (side : ParamBodySideConditions
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       leftParams rightParams leftCode rightCode)
     (accepted :
       (Local.withParamListsUsing (Local.eqv fuel leftCode rightCode)
         leftParams rightParams).run rho = true) :
-    ParamBodyRelated rho leftScope rightScope
+    ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       leftParams rightParams leftCode rightCode := by
   induction side with
   | nil body =>
@@ -552,10 +615,13 @@ pointwise semantic relation. Alternative bodies may use the complete fragment
 covered by `CodeSideConditions`.
 -/
 theorem altsRelated_of_local_check
-    (side : AltsSideConditions rho leftScope rightScope left right)
+    {leftJoins rightJoins : List FVarId}
+    (side : AltsSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right)
     (accepted :
       (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
-    AltsRelated rho leftScope rightScope left right := by
+    AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right := by
   induction side with
   | nil => exact .nil
   | cons head tail tail_ih =>
@@ -585,21 +651,25 @@ branch premises are supplied by selector. The subset hypotheses connect each
 ordered traversal back to its original interpreter table.
 -/
 theorem altsRelated_of_local_check_by_selector
+    {leftJoins rightJoins : List FVarId}
     (ctorSound : ∀ tag leftCode rightCode,
       HasCtorAlt tag leftCode originalLeft →
       HasCtorAlt tag rightCode originalRight →
       Local.AcceptsAt rho leftCode rightCode →
-      CodeRelated rho leftScope rightScope leftCode rightCode)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode)
     (defaultSound : ∀ leftCode rightCode,
       HasDefaultAlt leftCode originalLeft →
       HasDefaultAlt rightCode originalRight →
       Local.AcceptsAt rho leftCode rightCode →
-      CodeRelated rho leftScope rightScope leftCode rightCode)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode)
     (leftSubset : ∀ alt, alt ∈ left → alt ∈ originalLeft)
     (rightSubset : ∀ alt, alt ∈ right → alt ∈ originalRight)
     (accepted :
       (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
-    AltsRelated rho leftScope rightScope left right :=
+    AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right :=
   altsRelated_of_local_check_by_selector_using ctorSound defaultSound
     leftSubset rightSubset accepted
 
@@ -610,14 +680,18 @@ makes the checker's sorted traversal interchangeable with interpreter order;
 the recursive branch side conditions may contain further case nodes.
 -/
 theorem codeRelated_cases_of_local_accepts
+    {leftJoins rightJoins : List FVarId}
     (leftDiscrScoped : leftScope.contains leftCases.discr = true)
     (rightDiscrScoped : rightScope.contains rightCases.discr = true)
     (leftNormalization : CaseTableNormalizationInvariant leftCases.alts)
     (rightNormalization : CaseTableNormalizationInvariant rightCases.alts)
-    (side : CaseBranchesSideConditions rho leftScope rightScope
+    (side : CaseBranchesSideConditions
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       leftCases.alts.toList rightCases.alts.toList)
     (accepted : Local.AcceptsAt rho (.cases leftCases) (.cases rightCases)) :
-    CodeRelated rho leftScope rightScope (.cases leftCases) (.cases rightCases) :=
+    CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope (.cases leftCases) (.cases rightCases) :=
   codeRelated_of_local_accepts
     (.cases leftDiscrScoped rightDiscrScoped leftNormalization rightNormalization
       side.ctor side.default)

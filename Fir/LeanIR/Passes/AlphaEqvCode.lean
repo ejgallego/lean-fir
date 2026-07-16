@@ -18,6 +18,7 @@ inductive TerminalCodeRelated (rho : FVarIdMap FVarId)
   | unreachable :
       TerminalCodeRelated rho leftScope rightScope (.unreach leftType) (.unreach rightType)
 
+set_option linter.unusedVariables false in
 mutual
 
 /--
@@ -27,110 +28,141 @@ records the same scope extension performed by Lean's alpha-equivalence checker.
 -/
 inductive CodeRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
       LCNF.Code .impure → LCNF.Code .impure → Prop where
   | terminal
       (related : TerminalCodeRelated rho leftScope rightScope left right) :
-      CodeRelated rho leftScope rightScope left right
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope left right
   | letE
       (declaration : LetDeclValueRelated rho leftScope rightScope leftDecl rightDecl)
       (leftFresh : FreshForScope leftDecl.fvarId leftScope)
       (rightFresh : FreshForScope rightDecl.fvarId rightScope)
       (continuation :
-        CodeRelated (rho.insert rightDecl.fvarId leftDecl.fvarId)
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          (rho.insert rightDecl.fvarId leftDecl.fvarId)
           (leftDecl.fvarId :: leftScope) (rightDecl.fvarId :: rightScope)
           leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
   | cases
       (discr : ScopedFVarRelated rho leftScope rightScope
         leftCases.discr rightCases.discr)
       (selected : ∀ tag,
-        CaseSelectionRelated rho leftScope rightScope
+        CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
           (chooseAlt tag leftCases.alts.toList)
           (chooseAlt tag rightCases.alts.toList)) :
-      CodeRelated rho leftScope rightScope
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.cases leftCases) (.cases rightCases)
   | oset
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (field : ArgRelated rho leftScope rightScope leftField rightField)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.oset leftObject index leftField leftContinuation)
         (.oset rightObject index rightField rightContinuation)
   | uset
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (field : ScopedFVarRelated rho leftScope rightScope leftField rightField)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.uset leftObject index leftField leftContinuation)
         (.uset rightObject index rightField rightContinuation)
   | sset
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (field : ScopedFVarRelated rho leftScope rightScope leftField rightField)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.sset leftObject width offset leftField leftType leftContinuation)
         (.sset rightObject width offset rightField rightType rightContinuation)
   | setTag
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.setTag leftObject tag leftContinuation)
         (.setTag rightObject tag rightContinuation)
   | inc
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.inc leftObject amount check persistent leftContinuation)
         (.inc rightObject amount check persistent rightContinuation)
   | dec
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.dec leftObject amount check persistent objects leftContinuation)
         (.dec rightObject amount check persistent objects rightContinuation)
   | del
       (object : ScopedFVarRelated rho leftScope rightScope leftObject rightObject)
       (continuation :
-        CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
-      CodeRelated rho leftScope rightScope
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
 
 /-- A case-table lookup either fails on both sides or selects related code. -/
 inductive CaseSelectionRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
       Option (LCNF.Code .impure) → Option (LCNF.Code .impure) → Prop where
-  | none : CaseSelectionRelated rho leftScope rightScope none none
+  | none : CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope none none
   | some
-      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
-      CaseSelectionRelated rho leftScope rightScope
+      (code : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (some leftCode) (some rightCode)
 
 end
 
 /-- Impure alternatives agree on their selector and have related bodies. -/
 inductive AltRelated (rho : FVarIdMap FVarId)
-    (leftScope rightScope : List FVarId) :
+    (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId} :
     LCNF.Alt .impure → LCNF.Alt .impure → Prop where
   | ctor
-      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
-      AltRelated rho leftScope rightScope
+      (code : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      AltRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.ctorAlt info leftCode) (.ctorAlt info rightCode)
   | default
-      (code : CodeRelated rho leftScope rightScope leftCode rightCode) :
-      AltRelated rho leftScope rightScope
+      (code : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      AltRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.default leftCode) (.default rightCode)
 
 abbrev AltsRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId}
     (left right : List (LCNF.Alt .impure)) : Prop :=
-  ListRel (AltRelated rho leftScope rightScope) left right
+  ListRel (AltRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+    rho leftScope rightScope) left right
 
 /-- A table contains a constructor alternative selecting `code` for `tag`. -/
 def HasCtorAlt (tag : Nat) (code : LCNF.Code .impure)
@@ -174,12 +206,14 @@ frames carry no alpha-sensitive syntax yet and therefore agree literally.
 -/
 inductive FrameRelated : Frame → Frame → Prop where
   | bind
+      {leftJoins rightJoins : List FVarId}
       (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
       (renamingScoped : RenamingScoped rho leftScope rightScope)
       (leftFresh : FreshForScope leftId leftScope)
       (rightFresh : FreshForScope rightId rightScope)
       (continuation :
-        CodeRelated (rho.insert rightId leftId)
+        CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          (rho.insert rightId leftId)
           (leftId :: leftScope) (rightId :: rightScope)
           leftContinuation rightContinuation) :
       FrameRelated
@@ -195,16 +229,22 @@ abbrev FramesRelated (left right : List Frame) : Prop :=
 
 /-- Machine controls that carry equal runtime data or related residual code. -/
 inductive ControlRelated (rho : FVarIdMap FVarId)
-    (leftScope rightScope : List FVarId) : Control → Control → Prop where
-  | code (related : CodeRelated rho leftScope rightScope left right) :
-      ControlRelated rho leftScope rightScope (.code left) (.code right)
+    (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId} : Control → Control → Prop where
+  | code (related : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+      ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope (.code left) (.code right)
   | yielded (value : Value) :
-      ControlRelated rho leftScope rightScope (.yielded value) (.yielded value)
+      ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope (.yielded value) (.yielded value)
   | invokeName (name : Name) (args : Array Value) :
-      ControlRelated rho leftScope rightScope
+      ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.invokeName name args) (.invokeName name args)
   | invokeValue (function : Value) (args : Array Value) :
-      ControlRelated rho leftScope rightScope
+      ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
         (.invokeValue function args) (.invokeValue function args)
 
 /--
@@ -213,22 +253,31 @@ join-point state are currently shared literally; environments, frames, and
 code are related structurally.
 -/
 structure MachineStateRelated (rho : FVarIdMap FVarId)
-    (leftScope rightScope : List FVarId) (left right : MachineState) : Prop where
+    (leftScope rightScope : List FVarId)
+    {leftJoins rightJoins : List FVarId}
+    (left right : MachineState) : Prop where
   program_eq : left.program = right.program
   runtime_eq : left.runtime = right.runtime
   joins_eq : left.joins = right.joins
   frames : FramesRelated left.frames right.frames
   envs : EnvsAgree rho leftScope rightScope left.env right.env
   renaming_scoped : RenamingScoped rho leftScope rightScope
-  control : ControlRelated rho leftScope rightScope left.control right.control
+  control : ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+    rho leftScope rightScope left.control right.control
 
 /-- Core-step results related by the machine invariant. -/
 inductive CoreResultRelated : CoreResult → CoreResult → Prop where
   | next
-      (related : MachineStateRelated rho leftScope rightScope left right) :
+      {leftJoins rightJoins : List FVarId}
+      (related : MachineStateRelated
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope left right) :
       CoreResultRelated (.next left) (.next right)
   | external (request : ExternalRequest)
-      (related : MachineStateRelated rho leftScope rightScope left right) :
+      {leftJoins rightJoins : List FVarId}
+      (related : MachineStateRelated
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope left right) :
       CoreResultRelated (.external request left) (.external request right)
   | done (observation : Observation) :
       CoreResultRelated (.done observation) (.done observation)
@@ -414,8 +463,11 @@ theorem chooseAlt_sortAlts_eq
 
 /-- Optional selected branches agree structurally. -/
 theorem findCtorAlt_related
-    (related : AltsRelated rho leftScope rightScope left right) :
-    CaseSelectionRelated rho leftScope rightScope
+    {leftJoins rightJoins : List FVarId}
+    (related : AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+    CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       (findCtorAlt tag left) (findCtorAlt tag right) := by
   induction related with
   | nil => exact .none
@@ -429,8 +481,11 @@ theorem findCtorAlt_related
       | default code => simpa [findCtorAlt] using tail_ih
 
 theorem findDefaultAlt_related
-    (related : AltsRelated rho leftScope rightScope left right) :
-    CaseSelectionRelated rho leftScope rightScope
+    {leftJoins rightJoins : List FVarId}
+    (related : AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+    CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       (findDefaultAlt left) (findDefaultAlt right) := by
   induction related with
   | nil => exact .none
@@ -443,10 +498,15 @@ theorem findDefaultAlt_related
 /-- Related optional results remain related when the same fallback is used. -/
 theorem caseSelectionRelated_orElse
     {left right leftFallback rightFallback : Option (LCNF.Code .impure)}
-    (primary : CaseSelectionRelated rho leftScope rightScope left right)
+    {leftJoins rightJoins : List FVarId}
+    (primary : CaseSelectionRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right)
     (fallback :
-      CaseSelectionRelated rho leftScope rightScope leftFallback rightFallback) :
-    CaseSelectionRelated rho leftScope rightScope
+      CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftFallback rightFallback) :
+    CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       (left.orElse fun _ => leftFallback)
       (right.orElse fun _ => rightFallback) := by
   cases primary with
@@ -454,8 +514,11 @@ theorem caseSelectionRelated_orElse
   | some code => exact .some code
 
 theorem chooseAlt_related
-    (related : AltsRelated rho leftScope rightScope left right) :
-    CaseSelectionRelated rho leftScope rightScope
+    {leftJoins rightJoins : List FVarId}
+    (related : AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+    CaseSelectionRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
       (chooseAlt tag left) (chooseAlt tag right) := by
   unfold chooseAlt
   exact caseSelectionRelated_orElse
@@ -499,6 +562,7 @@ theorem observe_eq_of_runtime_eq
 
 /-- Continue with related code without changing either runtime. -/
 theorem continuationResult_related
+    {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
@@ -507,7 +571,8 @@ theorem continuationResult_related
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
     (continuation :
-      CodeRelated rho leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftContinuation rightContinuation) :
     CoreResultRelated
       (.next { leftState with control := .code leftContinuation })
       (.next { rightState with control := .code rightContinuation }) :=
@@ -523,6 +588,7 @@ theorem continuationResult_related
 
 /-- Lift one common runtime effect through related continuation states. -/
 theorem runtimeEffectResult_related
+    {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
@@ -531,7 +597,8 @@ theorem runtimeEffectResult_related
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
     (continuation :
-      CodeRelated rho leftScope rightScope leftContinuation rightContinuation)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftContinuation rightContinuation)
     (effect : Except RuntimeFault RuntimeState) :
     CoreResultRelated
       (match effect with
@@ -570,6 +637,7 @@ invariant in a pair of bind frames. Heap and ownership instructions run the
 same runtime effect on both sides before entering related continuations.
 -/
 theorem coreStep_code_related
+    {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
@@ -577,7 +645,8 @@ theorem coreStep_code_related
     (framesRelated : FramesRelated leftState.frames rightState.frames)
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
-    (related : CodeRelated rho leftScope rightScope leftCode rightCode) :
+    (related : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope leftCode rightCode) :
     CoreResultRelated
       (coreStep { leftState with control := .code leftCode })
       (coreStep { rightState with control := .code rightCode }) := by
@@ -588,7 +657,9 @@ theorem coreStep_code_related
           obtain ⟨value, leftFound, rightFound⟩ :=
             agree _ fvarRelated.1 _ fvarRelated.2.1 fvarRelated.2.2
           have nextRelated :
-              MachineStateRelated rho leftScope rightScope
+              MachineStateRelated
+                (leftJoins := leftJoins) (rightJoins := rightJoins)
+                rho leftScope rightScope
                 { leftState with control := .yielded value }
                 { rightState with control := .yielded value } := {
             program_eq := programEq
@@ -675,7 +746,9 @@ theorem coreStep_code_related
                 rw [joinsEq]
                 exact .bind agree renamingScoped leftFresh rightFresh continuation
               have nextRelated :
-                  MachineStateRelated rho leftScope rightScope
+                  MachineStateRelated
+                    (leftJoins := leftJoins) (rightJoins := rightJoins)
+                    rho leftScope rightScope
                     { leftState with
                       runtime := nextRuntime
                       frames := .bind leftDecl.fvarId leftContinuation
@@ -705,7 +778,9 @@ theorem coreStep_code_related
                 rw [joinsEq]
                 exact .bind agree renamingScoped leftFresh rightFresh continuation
               have nextRelated :
-                  MachineStateRelated rho leftScope rightScope
+                  MachineStateRelated
+                    (leftJoins := leftJoins) (rightJoins := rightJoins)
+                    rho leftScope rightScope
                     { leftState with
                       runtime := nextRuntime
                       frames := .bind leftDecl.fvarId leftContinuation
@@ -772,7 +847,9 @@ theorem coreStep_code_related
                       exact .done _
                   | some rightCode =>
                       have impossible :
-                          CaseSelectionRelated rho leftScope rightScope
+                          CaseSelectionRelated
+                            (leftJoins := leftJoins) (rightJoins := rightJoins)
+                            rho leftScope rightScope
                             none (some rightCode) := by
                         simpa [leftChoice, rightChoice] using selected
                       cases impossible
@@ -780,13 +857,17 @@ theorem coreStep_code_related
                   cases rightChoice : chooseAlt tag rightCases.alts.toList with
                   | none =>
                       have impossible :
-                          CaseSelectionRelated rho leftScope rightScope
+                          CaseSelectionRelated
+                            (leftJoins := leftJoins) (rightJoins := rightJoins)
+                            rho leftScope rightScope
                             (some leftCode) none := by
                         simpa [leftChoice, rightChoice] using selected
                       cases impossible
                   | some rightCode =>
                       have branches :
-                          CaseSelectionRelated rho leftScope rightScope
+                          CaseSelectionRelated
+                            (leftJoins := leftJoins) (rightJoins := rightJoins)
+                            rho leftScope rightScope
                             (some leftCode) (some rightCode) := by
                         simpa [leftChoice, rightChoice] using selected
                       cases branches with
@@ -1029,6 +1110,7 @@ theorem coreStep_code_related
 
 /-- A related pair of saved bind continuations resumes under the new binders. -/
 theorem coreStep_yielded_bind_related
+    {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
@@ -1038,7 +1120,8 @@ theorem coreStep_yielded_bind_related
     (leftFresh : FreshForScope leftId leftScope)
     (rightFresh : FreshForScope rightId rightScope)
     (continuation :
-      CodeRelated (rho.insert rightId leftId)
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        (rho.insert rightId leftId)
         (leftId :: leftScope) (rightId :: rightScope)
         leftContinuation rightContinuation) :
     CoreResultRelated
@@ -1051,7 +1134,8 @@ theorem coreStep_yielded_bind_related
           control := .yielded value
           frames := .bind rightId rightContinuation rightEnv joins :: rightFrames }) := by
   have nextRelated :
-      MachineStateRelated (rho.insert rightId leftId)
+      MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        (rho.insert rightId leftId)
         (leftId :: leftScope) (rightId :: rightScope)
         { leftState with
           control := .code leftContinuation

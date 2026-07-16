@@ -81,7 +81,8 @@ compiler-shape fixtures spanning every impure `Code` constructor.
 #guard localMatchesUpstream alphaLeft selectedBranch
 
 theorem alphaCodeSideConditions :
-    CodeSideConditions ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight := by
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight := by
   apply CodeSideConditions.letE
   · rfl
   · rfl
@@ -97,7 +98,8 @@ theorem alphaCodeSideConditions :
 
 /-- The transparent checker closes the complete alpha-renamed `let` fixture. -/
 theorem alphaLocalCodeRelated :
-    CodeRelated ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight :=
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight :=
   codeRelated_of_local_accepts alphaCodeSideConditions ⟨2, by native_decide⟩
 
 def proofCaseTable : LCNF.Cases .impure :=
@@ -125,7 +127,8 @@ theorem proofCaseNormalizationInvariant :
   ⟨proofCaseDeterministic⟩
 
 theorem proofCaseBranches :
-    CaseBranchesSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+    CaseBranchesSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [c, x] [c, x]
       proofCaseTable.alts.toList proofCaseTable.alts.toList := by
   constructor
   · intro tag left right leftHas rightHas
@@ -137,7 +140,8 @@ theorem proofCaseBranches :
 
 /-- The local checker proves that equal empty case tables fail selection alike. -/
 theorem proofCaseLocalCodeRelated :
-    CodeRelated ({} : FVarIdMap FVarId) [c, x] [c, x]
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [c, x] [c, x]
       proofCaseCode proofCaseCode := by
   apply codeRelated_cases_of_local_accepts
   · native_decide
@@ -252,7 +256,8 @@ theorem nestedOuterRightNormalization :
       (.cases nestedInnerRightCases) (.return x)
 
 theorem nestedInnerCodeSideConditions :
-    CodeSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [c, x] [c, x]
       (.cases nestedInnerLeftCases) (.cases nestedInnerRightCases) := by
   apply CodeSideConditions.cases
   · native_decide
@@ -275,7 +280,8 @@ theorem nestedInnerCodeSideConditions :
     exact .unreachable
 
 theorem nestedCodeSideConditions :
-    CodeSideConditions ({} : FVarIdMap FVarId) [c, x] [c, x]
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [c, x] [c, x]
       nestedLeftCode nestedRightCode := by
   unfold nestedLeftCode nestedRightCode
   apply CodeSideConditions.cases
@@ -300,7 +306,8 @@ theorem nestedCodeSideConditions :
 
 /-- Recursive side conditions close two normalized nested case tables. -/
 theorem nestedLocalCodeRelated :
-    CodeRelated ({} : FVarIdMap FVarId) [c, x] [c, x]
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [c, x] [c, x]
       nestedLeftCode nestedRightCode :=
   codeRelated_of_local_accepts nestedCodeSideConditions
     ⟨8, by native_decide⟩
@@ -405,7 +412,7 @@ theorem joinRightBodyNormalization :
       (.return joinRightParam) (.unreach objType)
 
 theorem joinBodyCodeSideConditions :
-    CodeSideConditions
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
       (({} : FVarIdMap FVarId).insert joinRightParam joinLeftParam)
       [joinLeftParam] [joinRightParam]
       (.cases joinLeftBodyCases) (.cases joinRightBodyCases) := by
@@ -430,7 +437,8 @@ theorem joinBodyCodeSideConditions :
     exact .unreachable
 
 theorem joinParamBodySideConditions :
-    ParamBodySideConditions ({} : FVarIdMap FVarId) [] []
+    ParamBodySideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
       #[param joinLeftParam].toList #[param joinRightParam].toList
       (.cases joinLeftBodyCases) (.cases joinRightBodyCases) := by
   apply ParamBodySideConditions.cons
@@ -445,7 +453,8 @@ The transparent parameter loop constructs the recursively related join body,
 including normalized case selection beneath the alpha-renamed parameters.
 -/
 theorem joinParamBodyRelated :
-    ParamBodyRelated ({} : FVarIdMap FVarId) [] []
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
       #[param joinLeftParam].toList #[param joinRightParam].toList
       (.cases joinLeftBodyCases) (.cases joinRightBodyCases) :=
   paramBodyRelated_of_local_check joinParamBodySideConditions

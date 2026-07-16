@@ -31,10 +31,12 @@ currently modeled fragment. All semantic side conditions remain explicit;
 only correspondence with Lean's opaque Boolean checker is trusted.
 -/
 theorem trustedCodeRelated_of_upstream
-    (side : CodeSideConditions ({} : FVarIdMap Lean.FVarId)
+    (side : CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId)
       scope scope left right)
     (accepted : left.alphaEqv right = true) :
-    CodeRelated ({} : FVarIdMap Lean.FVarId) scope scope left right :=
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId) scope scope left right :=
   codeRelated_of_local_accepts side (localAccepts_of_upstream accepted)
 
 /-- Compiler-facing construction for one deterministic impure case table. -/
@@ -45,11 +47,13 @@ theorem trustedCasesCodeRelated_of_upstream
     (rightDiscrScoped : scope.contains rightCases.discr = true)
     (leftNormalization : CaseTableNormalizationInvariant leftCases.alts)
     (rightNormalization : CaseTableNormalizationInvariant rightCases.alts)
-    (side : CaseBranchesSideConditions ({} : FVarIdMap Lean.FVarId) scope scope
+    (side : CaseBranchesSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId) scope scope
       leftCases.alts.toList rightCases.alts.toList)
     (accepted :
       (LCNF.Code.cases leftCases).alphaEqv (.cases rightCases) = true) :
-    CodeRelated ({} : FVarIdMap Lean.FVarId) scope scope
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId) scope scope
       (.cases leftCases) (.cases rightCases) :=
   codeRelated_cases_of_local_accepts leftDiscrScoped rightDiscrScoped
     leftNormalization rightNormalization side (localAccepts_of_upstream accepted)
