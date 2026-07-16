@@ -65,6 +65,11 @@ The following work is implemented and checked by the default build:
 - `PassCorrectness.lean` defines same-phase equivalence, cross-phase forward
   simulation, and impure observation equivalence modulo address renaming and
   unreachable heap garbage.
+- `Passes/SimpCase.lean` proves internal-step prefix equivalence, selected-arm
+  elimination, singleton default/constructor elimination, and removal of
+  unreachable alternatives when the phase invariant selects a reachable arm.
+  `SimpCaseExamples.lean` checks the corresponding singleton and filtering
+  results against Lean 4.32's actual `simpCase.run` implementation.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
   to symbolic core-Wasm instructions and imports.
 - `integration/talos` pins a Lean-4.32-compatible Talos revision, converts the
@@ -213,17 +218,30 @@ minimized. Classify it as `compiler`, `fir-semantics`, `wasm-adapter`, or
 `upstream-drift`; link the eventual permanent regression before marking it
 fixed. Workarounds belong in the card rather than silently weakening a theorem.
 
-## Concrete next slice
+## Current `simpCase` slice
 
-The next bounded implementation slice is:
+The first proof slice is integrated. It specifies and proves the two rewrites
+that discard control-flow structure:
 
-1. specify the three local `simpCase` rewrites used by Lean 4.32;
-2. prove each rewrite preserves final-impure observations;
-3. extend the existing before/after `simpCase` checkpoint capture with a small
-   case corpus and prove implementation conformance on that kernel;
-4. create a bug card for every differential mismatch;
+1. removing unreachable alternatives, under the explicit invariant that the
+   runtime-selected arm is reachable;
+2. eliminating a singleton default arm, or a singleton constructor arm whose
+   tag invariant holds.
+
+The executable corpus also runs Lean's actual pass on both shapes and checks
+that it produces the specification result. No discrepancy was found.
+
+The remaining bounded work is:
+
+1. specify alpha-equivalent alternative folding into a default arm;
+2. prove the folded default preserves observations modulo alpha-renaming;
+3. lift the local rewrites through recursive code, declarations, and program
+   entry evaluation;
+4. expand implementation conformance from the executable corpus to the pass
+   kernel, creating a bug card for every mismatch;
 5. in parallel, implement the first heap-bearing Talos runtime imports and run
    the constructor/projection examples end to end.
 
-That slice produces the first actual pass theorem and the first non-scalar
-Wasm differential test without forcing either track to wait for the other.
+Completing those items finishes the first whole-pass theorem and the first
+non-scalar Wasm differential test without forcing either track to wait for the
+other.
