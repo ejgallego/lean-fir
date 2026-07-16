@@ -307,17 +307,35 @@ yields the exact new-pair/old-pair split required by `envsAgree_bind`. Thus the
 recursive simulation can extend both the renaming and runtime environments
 without carrying an extra classification hypothesis.
 
+The terminal recursive-code layer is integrated. `TerminalCodeRelated`
+covers `return` and `unreach`; `coreStep_terminal_related` proves matching
+immediate outcomes under related environments, and
+`terminalCodeRelated_empty_sound` discharges both terminal cases at the
+top-level semantic boundary. The proof also isolates the exact remaining
+executable bridge in `alphaEqvSoundAt_of_terminal_bridge`.
+
+Trying to prove that bridge exposed an upstream proof-interface blocker.
+Lean 4.32 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
+exports no safe equation theorem, so a successful `Code.alphaEqv` check cannot
+be unfolded even for two `return` instructions. The environment audit and
+workaround are recorded in `FIR-BUG-impure-alphaEqv-opaque-eqv`; declarative
+semantic work can continue, but the exact compiler Boolean remains an explicit
+boundary until Lean exposes a proof-facing definition or recursion theorem.
+
 The remaining bounded work is:
 
-1. thread `RenamingScoped` and environment agreement through recursive code,
-   discharge or refine the exact runtime-type premises at the impure phase
-   boundary, and prove `Code.alphaEqv` sound;
-2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+1. extend the declarative code relation through `let`, saved bind frames, and
+   the remaining recursive code constructors while threading
+   `RenamingScoped` and environment agreement;
+2. discharge or refine the exact runtime-type premises at the impure phase
+   boundary and resolve or upstream the opaque-checker bridge needed for the
+   exact `Code.alphaEqv` Boolean;
+3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-3. lift the resulting theorem through recursive code, declarations, and program
+4. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-4. expand the compiler-generated conformance corpus around the whole pass;
-5. in parallel, continue the Talos runtime work and run
+5. expand the compiler-generated conformance corpus around the whole pass;
+6. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first
