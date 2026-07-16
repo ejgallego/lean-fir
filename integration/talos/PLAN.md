@@ -50,10 +50,13 @@ production heap layout.
   projection, and constructor tags. The positional host resolver, typed codec,
   structured source/target traps, abstract contracts, and executable Talos
   guards live under `integration/talos/FirTalos/`.
+- W3 is complete: `runDifferential` runs both semantics, encodes entry
+  arguments, classifies all Talos outcomes, and compares outcome, world,
+  trace, and the canonical reachable heap. Its result carries field-level
+  mismatch evidence.
 
-The next stage is W3: compare FIR and Talos observations automatically. The
-adapter still rejects initializers and closures, and no source/target
-observation theorem exists yet.
+The next stage is W4: turn the executable relation into the first checked
+lowering theorem. The adapter still rejects initializers and closures.
 
 ## Architecture decisions
 
@@ -253,6 +256,13 @@ It should:
 6. decode the result and host state; and
 7. compare outcome, world, external trace, and reachable heap.
 
+The W3 semantic host reuses FIR's deterministic allocator from the same empty
+runtime, so the executable comparison intentionally requires equal reachable
+locations. Tagged, scalar, and erased entry arguments are supported;
+heap-backed arguments are rejected until the harness accepts an explicit
+initial runtime. The W4 theorem states the more general address-renaming
+relation.
+
 Define a target observation that distinguishes:
 
 - a decoded return value;
@@ -267,14 +277,21 @@ or harness failures for a terminating supported source execution.
 
 First corpus:
 
-- `literalProgram`;
-- `ctorProjectionProgram`;
-- `caseProgram`; and
-- `defaultCaseProgram`.
+- `abiLiteralProgram`;
+- `abiCtorProjectionProgram`;
+- `abiCaseProgram`; and
+- `abiDefaultCaseProgram`.
+
+These are the final-impure-ABI-correct equivalents of `literalProgram`,
+`ctorProjectionProgram`, `caseProgram`, and `defaultCaseProgram`. The original
+hand-built fixtures bind possibly tagged `Nat` values as heap-only `object`;
+the harness records their rejection under
+`FIR-BUG-wasm-none-object-nat-fixture` instead of weakening the proof
+fragment.
 
 Definition of done:
 
-- all four programs produce related returns and reachable heaps;
+- all four ABI-correct programs produce related returns and reachable heaps;
 - the harness prints enough evidence to reproduce a mismatch; and
 - every possible discrepancy is routed to a Wasm bug card before a workaround.
 

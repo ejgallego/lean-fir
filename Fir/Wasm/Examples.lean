@@ -236,14 +236,25 @@ def abiCaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt trueInfo
           (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
 
+def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl c taggedType (.ctor trueInfo #[])) <|
+      .cases (.mk ``Bool tobjectType c #[
+        .default
+          (.let (letDecl r tobjectType (.lit (.nat 5))) (.return r)),
+        .ctorAlt falseInfo
+          (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u))]))] }
+
 #guard !supportedProgram literalProgram
 #guard !supportedProgram erasedProgram
 #guard !supportedProgram ctorProjectionProgram
 #guard !supportedProgram caseProgram
+#guard !supportedProgram defaultCaseProgram
 #guard supportedProgram abiLiteralProgram
 #guard supportedProgram abiErasedProgram
 #guard supportedProgram abiCtorProjectionProgram
 #guard supportedProgram abiCaseProgram
+#guard supportedProgram abiDefaultCaseProgram
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
 #guard !supportedProgram mutationProgram
@@ -289,7 +300,8 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   abiLiteralProgram,
   abiErasedProgram,
   abiCtorProjectionProgram,
-  abiCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
+  abiCaseProgram,
+  abiDefaultCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
 
 #guard !validates? erasedProgram
 
