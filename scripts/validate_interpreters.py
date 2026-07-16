@@ -34,6 +34,7 @@ from validation_harness import (
     validate_matrix,
     write_comparison_artifact,
     write_corpus_manifest,
+    write_matrix_artifact,
     write_process_artifacts,
 )
 from validation_lcnf import (

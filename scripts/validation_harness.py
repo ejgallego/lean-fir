@@ -699,6 +699,62 @@ class PairValidationResult:
     findings: list[ValidationFinding]
 
 
+def write_matrix_artifact(
+    context: RunContext,
+    backend_names: list[str],
+    pair_results: list[PairValidationResult],
+    findings: list[ValidationFinding],
+) -> None:
+    context.out_dir.mkdir(parents=True, exist_ok=True)
+    pairs = []
+    for result in pair_results:
+        artifact = comparison_artifact_path(
+            context.out_dir, result.reference, result.candidate
+        )
+        pairs.append(
+            {
+                "reference": result.reference,
+                "candidate": result.candidate,
+                "artifact": artifact.relative_to(context.out_dir).as_posix(),
+                "comparedCases": len(result.comparisons),
+                "equalCases": sum(
+                    int(comparison["equal"])
+                    for comparison in result.comparisons
+                ),
+                "findingCount": len(result.findings),
+            }
+        )
+    (context.out_dir / "matrix.json").write_text(
+        json.dumps(
+            {
+                "version": PROTOCOL_VERSION,
+                "selectedCases": list(context.selected),
+                "backends": backend_names,
+                "pairs": pairs,
+                "findings": [finding.to_json() for finding in findings],
+                "summary": {
+                    "selectedCaseCount": len(context.selected),
+                    "backendCount": len(backend_names),
+                    "pairCount": len(pair_results),
+                    "comparisonCount": sum(
+                        len(result.comparisons) for result in pair_results
+                    ),
+                    "equalComparisonCount": sum(
+                        int(comparison["equal"])
+                        for result in pair_results
+                        for comparison in result.comparisons
+                    ),
+                    "findingCount": len(findings),
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def validate_matrix(
     context: RunContext,
     pairs: list[tuple[BackendAdapter, BackendAdapter]],
@@ -792,6 +848,9 @@ def validate_matrix(
                 findings,
             )
         )
+    write_matrix_artifact(
+        context, list(adapters), pair_results, all_findings
+    )
     return pair_results, all_findings
 
 

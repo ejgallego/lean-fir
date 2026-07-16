@@ -652,6 +652,38 @@ class HarnessTests(unittest.TestCase):
                         / f"{reference}--{candidate}.json"
                     ).is_file()
                 )
+            matrix_path = out_dir / "matrix.json"
+            matrix_bytes = matrix_path.read_bytes()
+            matrix = json.loads(matrix_bytes)
+            self.assertEqual(
+                matrix["backends"], ["native", "lcnf", "v8", "talos"]
+            )
+            self.assertEqual(
+                [pair["artifact"] for pair in matrix["pairs"]],
+                [
+                    "comparisons/native--lcnf.json",
+                    "comparisons/native--v8.json",
+                    "comparisons/v8--talos.json",
+                ],
+            )
+            self.assertEqual(
+                matrix["summary"],
+                {
+                    "selectedCaseCount": 1,
+                    "backendCount": 4,
+                    "pairCount": 3,
+                    "comparisonCount": 3,
+                    "equalComparisonCount": 3,
+                    "findingCount": 0,
+                },
+            )
+            harness.write_matrix_artifact(
+                context,
+                ["native", "lcnf", "v8", "talos"],
+                pair_results,
+                findings,
+            )
+            self.assertEqual(matrix_bytes, matrix_path.read_bytes())
 
             with self.assertRaisesRegex(
                 harness.ValidationError, "selected more than once"

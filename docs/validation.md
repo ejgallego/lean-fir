@@ -48,6 +48,11 @@ protocol results.  Backend execution/domain/audit findings appear in each pair
 that uses that backend, while the process exit status counts each backend
 finding only once.  Duplicate pairs, self-comparisons, unsafe names, and two
 different adapter objects claiming the same name are rejected before execution.
+`_build/validation/matrix.json` is the deterministic discovery artifact for the
+run: it lists selected cases, participating backends, directed pair-report
+paths, de-duplicated global findings, and aggregate backend/pair/comparison
+counts.  Automation can start there and open only the detailed pair reports it
+needs.
 
 The driver discovers the corpus from the native executable, then composes two
 named backend adapters.  Each adapter owns its build and execution strategy and
