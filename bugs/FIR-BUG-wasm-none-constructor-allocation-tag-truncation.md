@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-constructor-allocation-tag-truncation
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-16
 reproduction: Fir/Wasm/WellFormed.lean#supportedLetDeclKind?
-regression: none
+regression: Fir/Wasm/Examples.lean#oversizedAllocatedTagProgram
 ---
 
 # Summary
@@ -69,8 +69,8 @@ semantic Wasm `i32` tag boundary.
 
 ## Workaround
 
-None. Record the discrepancy before strengthening the supported-fragment and
-general-lowering constructor-allocation checks.
+The supported fragment and general lowerer now reject allocations whose
+constructor tag does not fit the semantic `i32` tag lane.
 
 ## Upstream tracking
 
@@ -78,5 +78,7 @@ none
 
 ## Resolution and regression
 
-Pending a negative supported-fragment and general-lowering fixture whose
-allocation tag is out of range while every case alternative remains in range.
+`supportedLetDeclKind?` now checks `constructorTagFitsI32` for allocations,
+and `compileLetValue` enforces the same bound outside the proof fragment.
+`oversizedAllocatedTagProgram` keeps the compared alternative in range while
+the allocated discriminator is out of range and guards both rejection paths.

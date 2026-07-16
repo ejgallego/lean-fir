@@ -164,6 +164,8 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       return function :: arguments ++
         [.call (.runtime (.closureApply kinds #[resultKind]))]
   | .ctor info args =>
+      unless constructorTagFitsI32 info do
+        throw (.malformed s!"allocated constructor tag {info.cidx} does not fit the i32 tag ABI")
       let (arguments, kinds) ← compileArgs context args
       return arguments ++ [.call (.runtime (.allocCtor info kinds resultKind))]
   | .oproj index fvarId =>

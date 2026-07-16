@@ -253,9 +253,23 @@ def oversizedTagInfo : LCNF.CtorInfo :=
 def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] tobjectType (.code <|
       .let (letDecl x tobjectType (.lit (.nat 0))) <|
-      .let (letDecl c objType (.ctor oversizedTagInfo #[.fvar x])) <|
+      .let (letDecl c taggedType (.ctor falseInfo #[])) <|
       .cases (.mk `Oversized tobjectType c #[
         .ctorAlt oversizedTagInfo (.return x)]))] }
+
+/--
+The allocated discriminator is out of range while the compared alternative
+is representable. Without the allocation-side check, both tags become zero in
+the semantic i32 ABI and the target selects the wrong branch.
+-/
+def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 7))) <|
+      .let (letDecl c taggedType (.ctor { oversizedTagInfo with size := 0 } #[])) <|
+      .cases (.mk `Oversized tobjectType c #[
+        .ctorAlt falseInfo
+          (.let (letDecl r tobjectType (.lit (.nat 0))) (.return r)),
+        .default (.return x)]))] }
 
 #guard !supportedProgram literalProgram
 #guard !supportedProgram erasedProgram
@@ -268,6 +282,7 @@ def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiCaseProgram
 #guard supportedProgram abiDefaultCaseProgram
 #guard !supportedProgram oversizedTagCaseProgram
+#guard !supportedProgram oversizedAllocatedTagProgram
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
 #guard !supportedProgram mutationProgram
@@ -279,6 +294,11 @@ def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard match lower oversizedTagCaseProgram with
   | .error (.malformed message) => message.contains "does not fit the i32 case ABI"
+  | _ => false
+
+#guard match lower oversizedAllocatedTagProgram with
+  | .error (.malformed message) =>
+      message.contains "allocated constructor tag" && message.contains "does not fit the i32 tag ABI"
   | _ => false
 
 #guard match validateSupported directCallProgram with

@@ -52,7 +52,8 @@ def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
       if declared == .erased then some declared else none
   | .ctor info args =>
       let kinds ← args.mapM (supportedArgKind? locals)
-      if info.size == args.size && kinds.all AbiKind.isObjectField &&
+      if constructorTagFitsI32 info && info.size == args.size &&
+          kinds.all AbiKind.isObjectField &&
           (constructorKind info).refines declared then
         some declared
       else
