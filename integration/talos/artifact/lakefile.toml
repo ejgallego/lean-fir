@@ -1,0 +1,12 @@
+name = "FirWasmArtifact"
+version = "0.1.0"
+defaultTargets = ["fir-wasm-artifact"]
+packagesDir = "../../../.lake/artifact-packages"
+
+[[require]]
+name = "Fir"
+path = "../../.."
+
+[[lean_exe]]
+name = "fir-wasm-artifact"
+root = "FirWasmArtifactMain"

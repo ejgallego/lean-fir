@@ -1,0 +1,13 @@
+{"version": "1.2.0",
+ "packagesDir": "../../../.lake/artifact-packages",
+ "packages":
+ [{"type": "path",
+   "scope": "",
+   "name": "Fir",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "../../..",
+   "configFile": "lakefile.toml"}],
+ "name": "FirWasmArtifact",
+ "lakeDir": ".lake",
+ "fixedToolchain": false}
