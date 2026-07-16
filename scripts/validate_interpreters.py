@@ -13,6 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "_build" / "validation"
 PROTOCOL_VERSION = 1
+MANIFEST_FIELDS = {
+    "version",
+    "id",
+    "entry",
+    "dependencies",
+    "args",
+    "argSchemas",
+    "resultSchema",
+    "tags",
+    "fuel",
+    "provenance",
+    "requiredLcnfForms",
+}
 
 
 class ValidationError(RuntimeError):
@@ -59,6 +72,137 @@ def records_from_output(output: str, command: list[str]) -> list[dict]:
     if not records:
         raise ValidationError(f"backend emitted no protocol records: {' '.join(command)}")
     return records
+
+
+def manifest_from_output(output: str, command: list[str]) -> list[dict]:
+    """Parse and canonicalize case descriptors emitted by the native oracle."""
+    descriptors: list[dict] = []
+    for line_number, line in enumerate(output.splitlines(), start=1):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValidationError(
+                "native oracle emitted malformed manifest JSONL "
+                f"at line {line_number} from {' '.join(command)}: {line}"
+            ) from error
+        if not isinstance(value, dict) or not MANIFEST_FIELDS <= value.keys():
+            missing = sorted(MANIFEST_FIELDS - value.keys()) if isinstance(value, dict) else []
+            detail = f"; missing {', '.join(missing)}" if missing else ""
+            raise ValidationError(
+                "native oracle emitted a non-manifest JSON object "
+                f"at line {line_number} from {' '.join(command)}{detail}"
+            )
+
+        case_id = value["id"]
+        entry = value["entry"]
+        version = value["version"]
+        dependencies = value["dependencies"]
+        args = value["args"]
+        arg_schemas = value["argSchemas"]
+        result_schema = value["resultSchema"]
+        tags = value["tags"]
+        fuel = value["fuel"]
+        provenance = value["provenance"]
+        required_forms = value["requiredLcnfForms"]
+        if version != PROTOCOL_VERSION:
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: protocol version {version} "
+                f"is not {PROTOCOL_VERSION}"
+            )
+        if not isinstance(case_id, str) or not case_id:
+            raise ValidationError(f"native corpus manifest line {line_number}: missing id")
+        if not isinstance(entry, str) or not entry:
+            raise ValidationError(f"native corpus manifest/{case_id}: missing entry")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(dependency, str) and dependency for dependency in dependencies
+        ):
+            raise ValidationError(f"native corpus manifest/{case_id}: malformed dependencies")
+        if len(set(dependencies)) != len(dependencies):
+            raise ValidationError(f"native corpus manifest/{case_id}: duplicate dependencies")
+        if not isinstance(args, list) or not isinstance(arg_schemas, list):
+            raise ValidationError(f"native corpus manifest/{case_id}: malformed arguments")
+        if len(args) != len(arg_schemas):
+            raise ValidationError(f"native corpus manifest/{case_id}: argument arity mismatch")
+        if result_schema is None:
+            raise ValidationError(f"native corpus manifest/{case_id}: missing resultSchema")
+        if not isinstance(tags, list) or not all(isinstance(tag, str) and tag for tag in tags):
+            raise ValidationError(f"native corpus manifest/{case_id}: malformed tags")
+        if len(set(tags)) != len(tags):
+            raise ValidationError(f"native corpus manifest/{case_id}: duplicate tags")
+        if not isinstance(fuel, int) or isinstance(fuel, bool) or fuel <= 0:
+            raise ValidationError(f"native corpus manifest/{case_id}: malformed fuel")
+        if not isinstance(provenance, dict) or not all(
+            isinstance(provenance.get(field), str)
+            for field in ("suite", "path", "revision", "note")
+        ):
+            raise ValidationError(f"native corpus manifest/{case_id}: missing provenance")
+        if not isinstance(required_forms, list) or not all(
+            isinstance(form, str) and form for form in required_forms
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed requiredLcnfForms"
+            )
+        if len(set(required_forms)) != len(required_forms):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: duplicate requiredLcnfForms"
+            )
+
+        descriptor = dict(value)
+        descriptor["tags"] = sorted(tags)
+        descriptor["requiredLcnfForms"] = sorted(required_forms)
+        descriptors.append(descriptor)
+
+    if not descriptors:
+        raise ValidationError(
+            f"native oracle emitted no corpus descriptors: {' '.join(command)}"
+        )
+    descriptors.sort(key=lambda descriptor: descriptor["id"])
+    case_ids = [descriptor["id"] for descriptor in descriptors]
+    duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1})
+    if duplicates:
+        raise ValidationError(
+            f"native corpus manifest contains duplicate case IDs: {', '.join(duplicates)}"
+        )
+    return descriptors
+
+
+def select_cases(
+    descriptors: list[dict], requested: list[str] | None, tag: str | None
+) -> list[str]:
+    all_cases = [descriptor["id"] for descriptor in descriptors]
+    known = set(all_cases)
+    if requested:
+        duplicates = sorted({case_id for case_id in requested if requested.count(case_id) > 1})
+        if duplicates:
+            raise ValidationError(
+                f"validation case selected more than once: {', '.join(duplicates)}"
+            )
+        unknown = sorted(set(requested) - known)
+        if unknown:
+            raise ValidationError(f"unknown validation case(s): {', '.join(unknown)}")
+        return requested
+    if tag:
+        selected = [descriptor["id"] for descriptor in descriptors if tag in descriptor["tags"]]
+        if not selected:
+            raise ValidationError(f"corpus tag selected no cases: {tag}")
+        return selected
+    return all_cases
+
+
+def write_corpus_manifest(out_dir: Path, descriptors: list[dict]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "corpus.json").write_text(
+        json.dumps(
+            {"version": PROTOCOL_VERSION, "cases": descriptors},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def checked_record(record: dict, backend: str) -> tuple[str, dict]:
@@ -134,25 +278,15 @@ def main() -> int:
             sys.stderr.write(built.stdout + built.stderr)
             raise ValidationError("failed to build validation backends")
 
-    list_command = ["lake", "exe", "fir-native-oracle", "--list"]
-    listed = run(list_command)
-    if listed.returncode != 0:
-        raise ValidationError(f"failed to list corpus cases:\n{listed.stderr}")
-    all_cases = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
-    if len(set(all_cases)) != len(all_cases):
-        raise ValidationError("native corpus contains duplicate case IDs")
-    tagged_cases = all_cases
-    if args.tag:
-        tagged = run(list_command + ["--tag", args.tag])
-        if tagged.returncode != 0:
-            raise ValidationError(f"failed to select corpus tag {args.tag}:\n{tagged.stderr}")
-        tagged_cases = [line.strip() for line in tagged.stdout.splitlines() if line.strip()]
-        if not tagged_cases:
-            raise ValidationError(f"corpus tag selected no cases: {args.tag}")
-    selected = args.cases or tagged_cases
-    unknown = sorted(set(selected) - set(all_cases))
-    if unknown:
-        raise ValidationError(f"unknown validation case(s): {', '.join(unknown)}")
+    manifest_command = ["lake", "exe", "fir-native-oracle", "--manifest"]
+    manifested = run(manifest_command)
+    if manifested.returncode != 0:
+        raise ValidationError(f"failed to read corpus manifest:\n{manifested.stderr}")
+    descriptors = manifest_from_output(manifested.stdout, manifest_command)
+    descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
+    all_cases = [descriptor["id"] for descriptor in descriptors]
+    selected = select_cases(descriptors, args.cases, args.tag)
+    write_corpus_manifest(args.out_dir, descriptors)
 
     lcnf_command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
     lcnf_run = run(lcnf_command)
@@ -203,7 +337,13 @@ def main() -> int:
             )
             continue
         comparisons.append(
-            {"caseId": case_id, "oracle": "native", "candidate": "lcnf", "equal": True}
+            {
+                "caseId": case_id,
+                "oracle": "native",
+                "candidate": "lcnf",
+                "equal": True,
+                "case": descriptor_by_id[case_id],
+            }
         )
         forms = diagnostics(candidate).get("lcnf-forms", "-")
         print(f"PASS {case_id:<22} lcnf=[{forms}]")

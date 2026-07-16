@@ -47,21 +47,33 @@ FIR heap; returned values are decoded using the declared result schema.
 
 Artifacts are written under `_build/validation/`.  Each case retains protocol
 results, backend logs, generated impure LCNF, declaration names, instruction
-forms, and the comparison summary.
+forms, and the comparison summary.  The native oracle's `--manifest` JSONL is
+the single discovery surface for the harness: case and tag selection no longer
+depend on a second ad-hoc listing command.  The harness validates and
+canonicalizes those descriptors into `_build/validation/corpus.json`, ordered
+by case ID with deterministic tag and required-form lists.  Each successful
+comparison embeds the corresponding descriptor, so entry name, provenance,
+arguments, schemas, fuel, tags, and intended LCNF coverage remain attached to
+later differential runs.  This manifest is the backend-neutral input boundary
+for future adapters, including a real Wasm engine once the compiler track can
+provide modules; adapters do not need to import FIR's Lean corpus definitions.
 
 ## Current corpus
 
-The first compiler-generated corpus covers literals and returns, borrowed
-values and `inc`, constructor cases, object projection, direct calls, partial
-application and closure calls, `dec`, recursive calls, and list traversal.  It
-contains no hand-written LCNF: the native and FIR paths consume the same Lean
-source declarations.
+The compiler-generated corpus currently has 18 cases.  Beyond literals,
+branches, calls, closures, recursion, and ownership instructions, it covers a
+heap-allocated natural above the tagged range, recursive structured-value
+round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
+polymorphic box/unbox, packed USize/scalar structure updates, and nested tuple
+projection/reallocation.  Several fixtures carry exact provenance into Lean's
+`tests/compile` suite at `v4.32.0-rc1`.  The corpus contains no hand-written
+LCNF: the native and FIR paths consume the same Lean source declarations.
 
-The protocol already has recursive data, scalar-bit, output, and controlled
-effect fields.  The first LCNF codec intentionally supports only the shapes
-needed by the checked corpus.  Integers, byte arrays, packed constructor fields,
-and external effects must be added as vertical slices with matching native
-cases.
+The protocol already has recursive data, scalar-bit, `USize`, output, and
+controlled effect fields.  The LCNF codec intentionally supports only the
+shapes needed by the checked corpus.  Signed integers, byte arrays, externally
+supplied packed constructors, and external effects must be added as vertical
+slices with matching native cases.
 
 ## Deferred WebAssembly integration
 

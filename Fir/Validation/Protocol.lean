@@ -20,6 +20,7 @@ inductive ValidationDatum where
   | bool (value : Bool)
   | nat (value : Nat)
   | int (value : Int)
+  | usize (value : UInt64)
   | bits (width : Nat) (value : UInt64)
   | string (value : String)
   | bytes (value : Array Nat)
@@ -33,6 +34,7 @@ inductive ValidationSchema where
   | bool
   | nat
   | int
+  | usize
   | bits (width : Nat)
   | string
   | bytes
@@ -46,6 +48,7 @@ partial def ValidationSchema.accepts : ValidationSchema → ValidationDatum → 
   | .bool, .bool _ => true
   | .nat, .nat _ => true
   | .int, .int _ => true
+  | .usize, .usize _ => true
   | .bits expected, .bits actual _ => expected == actual
   | .string, .string _ => true
   | .bytes, .bytes values => values.all (· < 256)
@@ -193,9 +196,10 @@ private def protocolRoundTripRequest : CaseRequest := {
   entry := "Fir.Validation.protocolRoundTrip"
   args := #[
     .nat 42,
+    .usize 18446744073709551615,
     .bits 64 18446744073709551615,
     .ctor "Prod.mk" 0 #[.bool true, .bytes #[0, 127, 255]]]
-  resultSchema := .seq (.bits 64)
+  resultSchema := .seq .usize
   fuel := some 1000
   timeoutMs := some 250 }
 
@@ -207,7 +211,7 @@ private def protocolRoundTripResult : BackendResult := {
   caseId := protocolRoundTripRequest.caseId
   backend := "protocol-test"
   outcome := .success {
-    termination := .returned (.seq #[.bits 64 0, .bits 64 18446744073709551615])
+    termination := .returned (.seq #[.usize 0, .usize 18446744073709551615])
     stdout := "out\n"
     stderr := "err\n"
     effects := #[{

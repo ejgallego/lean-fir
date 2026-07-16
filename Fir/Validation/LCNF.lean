@@ -111,6 +111,7 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   | .unit, .unit => return (runtime, .object (.tagged 0))
   | .bool, .bool value => return (runtime, .object (.tagged (if value then 1 else 0)))
   | .nat, .nat value => return literal runtime (.nat value)
+  | .usize, .usize value => return (runtime, .usize value)
   | .bits 8, .bits _ value => return (runtime, .scalar (.uint8 value.toUInt8))
   | .bits 16, .bits _ value => return (runtime, .scalar (.uint16 value.toUInt16))
   | .bits 32, .bits _ value => return (runtime, .scalar (.uint32 value.toUInt32))
@@ -154,6 +155,7 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .natural value := cell.object | throw "expected a natural heap object"
       return .nat value
+  | .usize, .usize value => return .usize value
   | .bits 8, .scalar (.uint8 value) => return .bits 8 (UInt64.ofNat value.toNat)
   | .bits 16, .scalar (.uint16 value) => return .bits 16 (UInt64.ofNat value.toNat)
   | .bits 32, .scalar (.uint32 value) => return .bits 32 (UInt64.ofNat value.toNat)

@@ -6,7 +6,8 @@ namespace FirValidationNative
 
 def usage : String :=
   "usage: fir-validation-native --case ID\n" ++
-    "       fir-validation-native --list [--tag TAG]"
+    "       fir-validation-native --list [--tag TAG]\n" ++
+    "       fir-validation-native --manifest"
 
 def emitFailure (caseId message : String) : IO Unit :=
   Jsonl.emit ({
@@ -44,6 +45,10 @@ def main (args : List String) : IO UInt32 := do
       for validationCase in Corpus.cases do
         if validationCase.tags.contains tag then
           IO.println validationCase.id
+      return 0
+  | ["--manifest"] =>
+      for descriptor in Corpus.descriptors do
+        Jsonl.emit descriptor
       return 0
   | _ =>
       IO.eprintln usage
