@@ -20,6 +20,32 @@ def filterUnreachableCode : LCNF.Code .impure :=
     .ctorAlt falseInfo (.unreach objType),
     .ctorAlt trueInfo selectedBranch])
 
+def alphaLeftId : FVarId := ⟨`alphaLeft⟩
+
+def alphaRightId : FVarId := ⟨`alphaRight⟩
+
+def alphaLeft : LCNF.Code .impure :=
+  .let (letDecl alphaLeftId objType (.lit (.nat 5))) (.return alphaLeftId)
+
+def alphaRight : LCNF.Code .impure :=
+  .let (letDecl alphaRightId objType (.lit (.nat 5))) (.return alphaRightId)
+
+#guard alphaLeft.alphaEqv alphaRight
+
+def thirdInfo : LCNF.CtorInfo :=
+  { name := `Third, cidx := 2, size := 0, usize := 0, ssize := 0 }
+
+def alphaFoldCode : LCNF.Code .impure :=
+  .cases (.mk `Three objType c #[
+    .ctorAlt falseInfo alphaLeft,
+    .ctorAlt trueInfo alphaRight,
+    .ctorAlt thirdInfo selectedBranch])
+
+def alphaFoldExpected : LCNF.Code .impure :=
+  .cases (.mk `Three objType c #[
+    .ctorAlt thirdInfo selectedBranch,
+    .default alphaLeft])
+
 def fixtureDecl (name : Name) (code : LCNF.Code .impure) : LCNF.Decl .impure :=
   decl name #[param c, param x] objType (.code code)
 
@@ -34,6 +60,7 @@ def checkActualSimpCase (name : Name) (before expected : LCNF.Code .impure) : Co
 def checkFixtures : CoreM Unit := do
   checkActualSimpCase `singletonDefault singletonDefaultCode selectedBranch
   checkActualSimpCase `filterUnreachable filterUnreachableCode selectedBranch
+  checkActualSimpCase `foldAlphaEquivalent alphaFoldCode alphaFoldExpected
 
 elab "#check_simp_case_fixtures" : command =>
   liftCoreM checkFixtures

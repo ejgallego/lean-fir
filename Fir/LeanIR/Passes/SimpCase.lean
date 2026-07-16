@@ -1,4 +1,5 @@
 import Fir.LeanIR.PassCorrectness
+import Lean.Compiler.LCNF.AlphaEqv
 
 namespace Fir.LeanIR.Passes.SimpCase
 
@@ -173,6 +174,76 @@ theorem selected_case_elimination_correct
         { state with control := .code branch } observation := by
   apply evaluatesState_internal_iff
   simp [coreStep, lookupDiscr, readTag, selected]
+
+/-- Semantic equivalence of two code bodies in one surrounding machine state. -/
+def CodeEquivalentAt (externals : ExternalSpec) (state : MachineState)
+    (left right : LCNF.Code .impure) : Prop :=
+  ∀ observation,
+    EvaluatesState externals { state with control := .code left } observation ↔
+      EvaluatesState externals { state with control := .code right } observation
+
+@[refl] theorem codeEquivalentAt_refl :
+    CodeEquivalentAt externals state code code := by
+  intro observation
+  rfl
+
+/--
+Any case-table rewrite is correct at a runtime tag when its selected source
+and target branches are semantically equivalent.
+-/
+theorem case_rewrite_correct_of_selected_equivalent
+    {state : MachineState} {before after : LCNF.Cases .impure}
+    {discr : Value} {tag : Nat} {beforeBranch afterBranch : LCNF.Code .impure}
+    {externals : ExternalSpec} {observation : Observation}
+    (lookupBefore : lookupValue state.env before.discr = .ok discr)
+    (lookupAfter : lookupValue state.env after.discr = .ok discr)
+    (readTag : getTag state.runtime discr = .ok tag)
+    (selectedBefore : chooseAlt tag before.alts.toList = some beforeBranch)
+    (selectedAfter : chooseAlt tag after.alts.toList = some afterBranch)
+    (branches : CodeEquivalentAt externals state beforeBranch afterBranch) :
+    EvaluatesState externals
+        { state with control := .code (.cases before) } observation ↔
+      EvaluatesState externals
+        { state with control := .code (.cases after) } observation := by
+  calc
+    EvaluatesState externals
+        { state with control := .code (.cases before) } observation ↔
+      EvaluatesState externals
+        { state with control := .code beforeBranch } observation :=
+          selected_case_elimination_correct lookupBefore readTag selectedBefore
+    _ ↔ EvaluatesState externals
+        { state with control := .code afterBranch } observation := branches observation
+    _ ↔ EvaluatesState externals
+        { state with control := .code (.cases after) } observation :=
+          (selected_case_elimination_correct lookupAfter readTag selectedAfter).symm
+
+/-- The exact semantic obligation needed to trust Lean's alpha-equivalence test. -/
+def AlphaEqvSoundAt (externals : ExternalSpec) (state : MachineState)
+    (left right : LCNF.Code .impure) : Prop :=
+  left.alphaEqv right = true → CodeEquivalentAt externals state left right
+
+/--
+The default-folding rewrite is correct once the alpha-equivalence result used
+by the compiler has been connected to the machine semantics.
+-/
+theorem fold_to_default_correct_of_alpha_sound
+    {state : MachineState} {before after : LCNF.Cases .impure}
+    {discr : Value} {tag : Nat} {beforeBranch representative : LCNF.Code .impure}
+    {externals : ExternalSpec} {observation : Observation}
+    (lookupBefore : lookupValue state.env before.discr = .ok discr)
+    (lookupAfter : lookupValue state.env after.discr = .ok discr)
+    (readTag : getTag state.runtime discr = .ok tag)
+    (selectedBefore : chooseAlt tag before.alts.toList = some beforeBranch)
+    (selectedAfter : chooseAlt tag after.alts.toList = some representative)
+    (alphaEqv : beforeBranch.alphaEqv representative = true)
+    (alphaSound : AlphaEqvSoundAt externals state beforeBranch representative) :
+    EvaluatesState externals
+        { state with control := .code (.cases before) } observation ↔
+      EvaluatesState externals
+        { state with control := .code (.cases after) } observation := by
+  apply case_rewrite_correct_of_selected_equivalent lookupBefore lookupAfter readTag
+      selectedBefore selectedAfter
+  exact alphaSound alphaEqv
 
 /--
 Removing syntactically unreachable arms preserves an execution whenever the
