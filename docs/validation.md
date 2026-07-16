@@ -78,7 +78,7 @@ claim.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 22 cases.  Beyond literals,
+The compiler-generated corpus currently has 29 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -89,13 +89,23 @@ allocate/project a 70-object-field constructor, and match a nullary enum that
 Lean lowers to a scalar discriminant.  Several fixtures carry exact provenance
 into Lean's `tests/compile` suite at `v4.32.0-rc1`.  The corpus contains no
 hand-written LCNF: the native and FIR paths consume the same Lean source
-declarations.
+declarations.  Signed-`Int` fixtures cover both signs and the immediate
+32-bit ABI boundaries.  Controlled `Nat.add` cases execute a real imported
+runtime primitive with tagged inputs, a tagged-to-heap result transition, and
+a heap-natural input/result.
 
-The protocol already has recursive data, scalar-bit, `USize`, output, and
-controlled effect fields.  The LCNF codec intentionally supports only the
-shapes needed by the checked corpus.  Signed integers, byte arrays, externally
-supplied packed constructors, and external effects must be added as vertical
-slices with matching native cases.
+The protocol already has recursive data, signed integers, scalar-bit, `USize`,
+output, and controlled effect fields.  The LCNF codec intentionally supports
+only the shapes needed by the checked corpus.  Immediate signed integers use
+Lean's signed-32-bit payload ABI; larger values still require an mpz heap
+object.  Byte arrays, externally supplied packed constructors, and observable
+external effects remain vertical slices with matching native cases.
+
+The validation backend's external implementation is reject-by-default.
+`Nat.add` is currently the only allowlisted primitive; it decodes tagged or
+heap natural operands, computes with Lean `Nat`, and re-encodes through the
+same tagged/heap boundary as the interpreter.  `extern` must be present both
+statically and in executed-form coverage for every arithmetic fixture.
 
 ## Deferred WebAssembly integration
 

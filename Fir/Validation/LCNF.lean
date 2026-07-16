@@ -133,6 +133,38 @@ private def runProgramInstrumented (fuel : Nat) (externals : ExternalImpl)
     (runtime : RuntimeState := {}) : InstrumentedRun :=
   runInstrumented fuel externals (initialState program entry args runtime)
 
+private def externalNat (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault Nat := do
+  match value with
+  | .object (.tagged value) => return value.toNat
+  | .object (.heap location) =>
+      let cell ← getLiveCell runtime location
+      let .natural value := cell.object
+        | throw (.externalFailure request.name "expected a natural number")
+      return value
+  | _ => throw (.externalFailure request.name "expected a natural number")
+
+private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalNat request runtime left
+  let right ← externalNat request runtime right
+  let (runtime, value) := literal runtime (.nat (left + right))
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+/-- Pure runtime primitives explicitly modeled by the validation backend. -/
+private def validationExternals : ExternalImpl where
+  call request runtime :=
+    if request.name == ``Nat.add then
+      natAddExternal request runtime
+    else
+      .error (.externalFailure request.name "external is not in the validation allowlist")
+
 /-- Stable human-readable compiler artifact retained beside the machine result. -/
 def Artifact.format (artifact : Artifact) : CoreM String := do
   let declarations ← artifact.program.decls.mapM fun decl => do
@@ -168,6 +200,33 @@ def compileEntry (entry : Name) (dependencies : Array Name := #[]) : CoreM Artif
 private def mismatch (expected : ValidationSchema) (actual : ValidationDatum) : Except String α :=
   .error s!"datum does not match schema: expected {repr expected}, got {repr actual}"
 
+private def int32SignBit : Nat := 2147483648
+
+private def int32Mask : Nat := 4294967295
+
+/-- Encode Lean's immediate signed-32-bit `Int` payload used by final impure LCNF. -/
+private def encodeImmediateInt (runtime : RuntimeState) (value : Int) :
+    Except String (RuntimeState × Value) :=
+  match value with
+  | .ofNat value =>
+      if value < int32SignBit then
+        .ok (runtime, .object (.tagged (UInt64.ofNat value)))
+      else
+        .error s!"Int value {value} requires an mpz heap object"
+  | .negSucc value =>
+      if value < int32SignBit then
+        .ok (runtime, .object (.tagged (UInt64.ofNat (int32Mask - value))))
+      else
+        .error s!"negative Int payload {value} requires an mpz heap object"
+
+private def decodeImmediateInt (payload : UInt64) : Except String Int := do
+  let payload := payload.toNat
+  if payload > int32Mask then
+    throw s!"invalid immediate Int payload {payload}"
+  if payload < int32SignBit then
+    return .ofNat payload
+  return .negSucc (int32Mask - payload)
+
 private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSchema)
     (datum : ValidationDatum) : Except String (RuntimeState × Value) := do
   if !schema.accepts datum then mismatch schema datum
@@ -175,6 +234,7 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   | .unit, .unit => return (runtime, .object (.tagged 0))
   | .bool, .bool value => return (runtime, .object (.tagged (if value then 1 else 0)))
   | .nat, .nat value => return literal runtime (.nat value)
+  | .int, .int value => encodeImmediateInt runtime value
   | .usize, .usize value => return (runtime, .usize value)
   | .bits 8, .bits _ value => return (runtime, .scalar (.uint8 value.toUInt8))
   | .bits 16, .bits _ value => return (runtime, .scalar (.uint16 value.toUInt16))
@@ -219,6 +279,7 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .natural value := cell.object | throw "expected a natural heap object"
       return .nat value
+  | .int, .object (.tagged payload) => return .int (← decodeImmediateInt payload)
   | .usize, .usize value => return .usize value
   | .bits 8, .scalar (.uint8 value) => return .bits 8 (UInt64.ofNat value.toNat)
   | .bits 16, .scalar (.uint16 value) => return .bits 16 (UInt64.ofNat value.toNat)
@@ -285,7 +346,7 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
         diagnostics := staticDiagnostics }
   | .ok (runtime, args) =>
       let execution :=
-        runProgramInstrumented case.fuel rejectExternals artifact.program case.entry args runtime
+        runProgramInstrumented case.fuel validationExternals artifact.program case.entry args runtime
       let missingExecuted := case.requiredExecutedLcnfForms.filter
         (!execution.executedForms.contains ·)
       let diagnostics := staticDiagnostics ++ #[

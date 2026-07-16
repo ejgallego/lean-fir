@@ -213,6 +213,14 @@ def selectScalarChoice : ScalarChoice → Nat
 def scalarCasesInternal : Nat :=
   selectScalarChoice .third
 
+@[noinline]
+def idInt (value : Int) : Int :=
+  value
+
+@[noinline]
+def addNat (left right : Nat) : Nat :=
+  left + right
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -519,7 +527,77 @@ def cases : Array Case := #[
     tags := #["quick", "scalar", "control-flow", "enum", "regression"]
     requiredLcnfForms := #["fap", "inc", "return", "lit", "cases"]
     requiredExecutedLcnfForms := #["fap", "lit", "cases", "return", "inc"]
-    provenance := firProvenance "Nullary enum lowered to UInt8 and matched internally" }
+    provenance := firProvenance "Nullary enum lowered to UInt8 and matched internally" },
+  { id := "int-positive-roundtrip"
+    entry := ``Source.idInt
+    args := #[.int 42]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt 42)
+    tags := #["quick", "int", "signed", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "Positive immediate Int ABI round-trip" },
+  { id := "int-negative-roundtrip"
+    entry := ``Source.idInt
+    args := #[.int (-42)]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt (-42))
+    tags := #["quick", "int", "signed", "negative", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "Negative immediate Int ABI round-trip" },
+  { id := "int-immediate-max"
+    entry := ``Source.idInt
+    args := #[.int 2147483647]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt 2147483647)
+    tags := #["stress", "int", "signed", "boundary", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "Largest Lean immediate Int payload" },
+  { id := "int-immediate-min"
+    entry := ``Source.idInt
+    args := #[.int (-2147483648)]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt (-2147483648))
+    tags := #["stress", "int", "signed", "negative", "boundary", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "Smallest Lean immediate Int payload" },
+  { id := "nat-add-small"
+    entry := ``Source.addNat
+    args := #[.nat 20, .nat 22]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.addNat 20 22)
+    tags := #["quick", "external", "pure", "nat", "arithmetic"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    provenance := firProvenance "Controlled Nat.add external on tagged operands" },
+  { id := "nat-add-tagged-to-heap"
+    entry := ``Source.addNat
+    args := #[.nat 9223372036854775807, .nat 1]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.addNat 9223372036854775807 1)
+    tags := #["stress", "external", "pure", "nat", "arithmetic", "boundary", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    provenance := firProvenance "Nat.add crossing the tagged-to-heap result boundary" },
+  { id := "nat-add-heap-input"
+    entry := ``Source.addNat
+    args := #[.nat Source.largeNat, .nat 7]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.addNat Source.largeNat 7)
+    tags := #["stress", "external", "pure", "nat", "arithmetic", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    provenance := firProvenance "Nat.add decoding and returning heap natural values" }
 ]
 
 def findCase? (id : String) : Option Case :=

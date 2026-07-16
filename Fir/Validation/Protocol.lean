@@ -196,6 +196,7 @@ private def protocolRoundTripRequest : CaseRequest := {
   entry := "Fir.Validation.protocolRoundTrip"
   args := #[
     .nat 42,
+    .int (-2147483648),
     .usize 18446744073709551615,
     .bits 64 18446744073709551615,
     .ctor "Prod.mk" 0 #[.bool true, .bytes #[0, 127, 255]]]
