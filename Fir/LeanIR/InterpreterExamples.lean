@@ -142,6 +142,23 @@ def byteArrayIdentity? : Bool :=
 
 #guard byteArrayIdentity?
 
+def bigIntIdentity? : Bool :=
+  let value : Int := 9223372036854775808
+  let (runtime, reference) := alloc {} (.integer value)
+  match runProgram 100 rejectExternals byteArrayIdentityProgram `main
+      #[.object reference] runtime with
+  | .done observation =>
+      match observation.outcome, reference with
+      | .returned (.object returned), .heap location =>
+          returned == reference &&
+            match getLiveCell { heap := observation.heap } location with
+            | .ok cell => cell.object == .integer value
+            | .error _ => false
+      | _, _ => false
+  | .outOfFuel _ => false
+
+#guard bigIntIdentity?
+
 def idDecl : LCNF.Decl .impure :=
   decl `id #[param x] objType (.code (.return x))
 

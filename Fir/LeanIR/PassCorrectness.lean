@@ -92,6 +92,7 @@ inductive HeapObjectRel (rho : AddressRenaming) : HeapObject → HeapObject → 
       HeapObjectRel rho (.boxed type left) (.boxed type right)
   | string (value : String) : HeapObjectRel rho (.string value) (.string value)
   | natural (value : Nat) : HeapObjectRel rho (.natural value) (.natural value)
+  | integer (value : Int) : HeapObjectRel rho (.integer value) (.integer value)
   | byteArray (value : Array UInt8) :
       HeapObjectRel rho (.byteArray value) (.byteArray value)
   | opaque (typeName : Name) : HeapObjectRel rho (.opaque typeName) (.opaque typeName)

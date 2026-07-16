@@ -49,6 +49,7 @@ inductive HeapObject where
   | boxed (type : Expr) (value : Value)
   | string (value : String)
   | natural (value : Nat)
+  | integer (value : Int)
   | byteArray (value : Array UInt8)
   | opaque (typeName : Name)
   deriving Inhabited, BEq
@@ -195,7 +196,7 @@ def HeapObject.ownedValues : HeapObject → Array Value
   | .ctor object => object.objectFields
   | .closure _ _ fixed => fixed
   | .boxed _ value => #[value]
-  | .string _ | .natural _ | .byteArray _ | .opaque _ => #[]
+  | .string _ | .natural _ | .integer _ | .byteArray _ | .opaque _ => #[]
 
 def incLocation (runtime : RuntimeState) (location amount : Nat) :
     Except RuntimeFault RuntimeState := do
