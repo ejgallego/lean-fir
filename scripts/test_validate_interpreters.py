@@ -1608,6 +1608,46 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(plan.adapter_configs, ())
         self.assertEqual(plan.pairs, (("native", "lcnf"),))
 
+    def test_checked_native_v8_plan_uses_real_engine_adapter(self) -> None:
+        adapter_path = (
+            harness.ROOT / "validation-adapters" / "v8-uint64.json"
+        )
+        plan = harness.validation_plan_from_config(
+            harness.ROOT
+            / "validation-plans"
+            / "native-v8-uint64.json"
+        )
+        self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
+        self.assertEqual(plan.pairs, (("native", "v8"),))
+        adapter = harness.external_adapter_from_config(adapter_path)
+        self.assertEqual(adapter.name, "v8")
+        self.assertEqual(
+            adapter.build_command,
+            ["lake", "lean", "FirValidationWasm.lean"],
+        )
+        self.assertEqual(
+            adapter.run_command,
+            ["node", "scripts/run_validation_v8.mjs"],
+        )
+        self.assertEqual(
+            adapter.product_declarations,
+            (
+                harness.ProductDeclaration(
+                    "wasm-manifest", "modules/uint64-max.wasm.json"
+                ),
+                harness.ProductDeclaration(
+                    "wasm-module", "modules/uint64-max.wasm"
+                ),
+            ),
+        )
+        self.assertEqual(
+            [(tool.kind, tool.name) for tool in adapter.tool_declarations],
+            [
+                ("engine", "node"),
+                ("runner", "scripts/run_validation_v8.mjs"),
+            ],
+        )
+
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
         class FakeNativeAdapter:
             name = "native"

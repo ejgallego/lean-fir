@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "adapterConfigs": [
+    "../validation-adapters/v8-uint64.json"
+  ],
+  "pairs": [
+    {
+      "reference": "native",
+      "candidate": "v8"
+    }
+  ]
+}

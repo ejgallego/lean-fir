@@ -9,12 +9,19 @@ the same declarations.
 Lean source case
   +-- native Lean/C executable -- oracle observation
   +-- LCNF.main -- final impure program -- FIR observation
+  +-- LCNF.main -- Wasm compiler -- Node/V8 observation
 ```
 
 Run the quick corpus with:
 
 ```sh
 make validate
+```
+
+Run the initial source-to-real-V8 case with:
+
+```sh
+make validate-v8
 ```
 
 Individual cases and tagged groups can be selected directly:
@@ -79,9 +86,9 @@ before and after execution.  External adapters likewise bind the exact
 PATH-resolved engine and every config-relative runner argument.  The current
 LCNF module hash relies on Lean's
 embedded import fingerprints for its transitive closure; inventorying every
-loaded olean and host dynamic library remains future hardening.  A V8 adapter
-will analogously register the engine and runner as tools while keeping the
-compiler-produced `.wasm` as a product.
+loaded olean and host dynamic library remains future hardening.  The V8 adapter
+registers Node and its runner as tools while keeping the compiler-produced
+`.wasm` and ABI manifest as products.
 
 Every input, backend tool, backend product, backend result/process artifact,
 and pair comparison is copied into
@@ -147,7 +154,8 @@ immutable manifest preserves multiple executions with the same run identity.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
-`validation-plans/native-lcnf.json`; a future Wasm plan can add adapter configs
+`validation-plans/native-lcnf.json`, while `make validate-v8` uses
+`validation-plans/native-v8-uint64.json`.  A later combined plan can add Talos
 without changing the harness:
 
 ```json
@@ -482,19 +490,24 @@ the effect ordering explicit even though the source-facing functions are pure.
 runtime primitive fixture, while the matching name must independently satisfy
 both external-name obligations.
 
-## Deferred WebAssembly integration
+## WebAssembly integration
 
-Validation does not currently implement, modify, or constrain the Wasm
-compiler.  When that track has an executable supported fragment, it hands the
-validation track a stable compilation command or API, exported-entry mapping,
-argument/result ABI, initialization semantics, runtime/import strategy, and a
-deterministic Wasm artifact.
+The initial Wasm validation slice consumes the compiler track exclusively
+through its public `lowerSupported` and binary `encode` APIs.  The
+integration-owned `FirValidationWasm.lean` driver asks `compileClosed` to
+compile the corpus entry `uint64-max` through `LCNF.main`, emits deterministic
+`.wasm` and ABI-manifest products, and checks that this deliberately host-free
+case has no imports and exactly exports the source entry.  It does not modify
+or add policy to `Fir/Wasm`.
 
-The first Wasm validation adapter will assemble compiler-produced WAT with a
-pinned `wasm-tools`, execute the resulting module in Node/V8, and emit the same
-backend record as the LCNF candidate.  Native Lean remains the source oracle.
-Talos can subsequently consume the exact same module and inputs, with V8 as the
-reference Wasm engine:
+The external adapter then loads those exact retained bytes in Node's real
+`WebAssembly` engine, verifies the compiler manifest against the corpus ABI,
+invokes the corpus-named export, converts V8's signed `i64` result back to
+unsigned `UInt64` bits, and emits the shared backend protocol.  The runner
+receipts both products and rejects any selection other than `uint64-max`, so broader
+coverage cannot silently collapse to this seed case.  Native Lean remains the
+source oracle.  Talos can subsequently consume the exact same module and
+inputs, with V8 as the reference Wasm engine:
 
 ```text
 native Lean <-> V8          compiler/runtime validation
@@ -502,7 +515,7 @@ native Lean <-> FIR LCNF    LCNF semantics validation
 V8          <-> Talos       Wasm interpreter validation
 ```
 
-Successful lowering or assembly is preparation, not semantic validation.
+Successful lowering or encoding is preparation, not semantic validation.
 Adding either backend is a registry extension implementing the existing
 build/execute/audit adapter contract; it does not change comparison semantics
 or the native-owned corpus.  Wasm-specific compilation and engine telemetry
