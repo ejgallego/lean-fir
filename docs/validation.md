@@ -99,7 +99,10 @@ This distinction prevents code merely present in an unvisited branch from
 satisfying an execution-coverage claim.  The checked corpus currently activates
 at least one executed-form obligation for every case, and the Lean case type
 has no default for that field: a new fixture must explicitly state its intended
-path instead of silently inheriting telemetry-only coverage.
+path instead of silently inheriting telemetry-only coverage.  A second
+compile-time guard requires the union to retain all 23 source-reachable forms
+currently exercised in final impure LCNF, so removing a fixture cannot silently
+lower corpus-wide instruction coverage.
 
 ## Current corpus
 
@@ -131,24 +134,24 @@ The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports
 only the shapes needed by the checked corpus.  Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
-signed-integer heap object.  Externally supplied packed constructors, boxed-object arrays, and
-observable external effects remain vertical slices with matching native
-cases.  Packed byte-array identity, size, and in-bounds indexing are supported;
-out-of-bounds behavior and mutation remain controlled external-primitive
-follow-ups.
+signed-integer heap object.  Externally supplied packed constructors,
+boxed-object arrays, and observable external effects remain vertical slices
+with matching native cases.  Packed byte-array identity, size, and in-bounds
+indexing are supported; out-of-bounds behavior and mutation remain controlled
+external-primitive follow-ups.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`, and
 `ByteArray.get!` are currently allowlisted.  Natural addition decodes tagged or
 heap operands, computes with Lean `Nat`, and re-encodes through the same
-tagged/heap boundary as the interpreter.  The integer primitives decode and re-encode both the
-signed immediate and heap representations; `Int.decLt` returns the scalar
-`UInt8` discriminant consumed by lowered pattern matching.  Byte-array size
-reads the packed heap object and returns a tagged natural; byte-array indexing
-returns the selected packed byte as a scalar `UInt8`.  `extern` must be
-present both statically and in executed-form coverage for every runtime
-primitive fixture, while the matching name must independently satisfy both
-external-name obligations.
+tagged/heap boundary as the interpreter.  The integer primitives decode and
+re-encode both the signed immediate and heap representations; `Int.decLt`
+returns the scalar `UInt8` discriminant consumed by lowered pattern matching.
+Byte-array size reads the packed heap object and returns a tagged natural;
+byte-array indexing returns the selected packed byte as a scalar `UInt8`.
+`extern` must be present both statically and in executed-form coverage for every
+runtime primitive fixture, while the matching name must independently satisfy
+both external-name obligations.
 
 ## Deferred WebAssembly integration
 

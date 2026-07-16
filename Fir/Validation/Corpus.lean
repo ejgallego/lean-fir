@@ -906,6 +906,17 @@ def cases : Array Case := #[
     provenance := firProvenance "Read the maximum byte through ByteArray.get!" }
 ]
 
+/-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
+def requiredFinalExecutedForms : Array String :=
+  #["box", "cases", "ctor", "dec", "del", "extern", "fap", "fvar", "inc", "isShared",
+    "join", "jump", "lit", "oproj", "oset", "pap", "return", "setTag", "sproj", "sset",
+    "unbox", "uproj", "uset"]
+
+#guard cases.all fun validationCase => !validationCase.requiredExecutedLcnfForms.isEmpty
+
+#guard requiredFinalExecutedForms.all fun form =>
+  cases.any fun validationCase => validationCase.requiredExecutedLcnfForms.contains form
+
 def findCase? (id : String) : Option Case :=
   cases.find? (·.id == id)
 
