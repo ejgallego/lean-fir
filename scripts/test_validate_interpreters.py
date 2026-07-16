@@ -110,6 +110,18 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertFalse(equal)
 
+    def test_effect_mismatch_is_semantic(self) -> None:
+        native = success("case", "native")
+        native["outcome"]["success"]["observation"]["effects"] = [
+            {
+                "operation": "validation.record",
+                "args": [{"nat": {"value": 7}}],
+                "result": {"nat": {"value": 8}},
+            }
+        ]
+        equal, _, _ = harness.compare_success(native, success("case", "lcnf"))
+        self.assertFalse(equal)
+
     def test_duplicate_result_rejected(self) -> None:
         record = success("case", "native")
         with self.assertRaises(harness.ValidationError):

@@ -11,6 +11,27 @@ intended to exercise.  The native oracle calls these exact declarations; expecte
 answers are not stored in the corpus.
 -/
 
+namespace NativeEffects
+
+private initialize effectLog : IO.Ref (Array EffectEvent) ← IO.mkRef #[]
+
+def reset : IO Unit :=
+  effectLog.set #[]
+
+def take : IO (Array EffectEvent) :=
+  effectLog.modifyGet fun effects => (effects, #[])
+
+unsafe def recordImpl (value : Nat) : Nat :=
+  unsafeBaseIO do
+    let result := value + 1
+    effectLog.modify (·.push {
+      operation := "validation.record"
+      args := #[.nat value]
+      result := some (.nat result) })
+    return result
+
+end NativeEffects
+
 namespace Source
 
 def litNat : Nat :=
@@ -265,6 +286,14 @@ def classifyInt : Int → Nat
 def addNat (left right : Nat) : Nat :=
   left + right
 
+@[implemented_by NativeEffects.recordImpl]
+def record (value : Nat) : Nat :=
+  value + 1
+
+@[noinline]
+def recordOnce (value : Nat) : Nat :=
+  record value
+
 @[noinline]
 def idByteArray (value : ByteArray) : ByteArray :=
   value
@@ -339,6 +368,10 @@ structure Case where
   argSchemas : Array ValidationSchema := #[]
   resultSchema : ValidationSchema
   native : Unit → ValidationDatum
+  /-- Reset native observation state immediately before running the source case. -/
+  nativeBefore : IO Unit := pure ()
+  /-- Drain semantic effects after, and data-dependent on, the native execution. -/
+  nativeEffects : ValidationDatum → IO (Array EffectEvent) := fun _ => pure #[]
   tags : Array String := #[]
   fuel : Nat := 10000
   requiredLcnfForms : Array String := #[]
@@ -878,6 +911,26 @@ def cases : Array Case := #[
     requiredExternals := #[``Nat.add]
     requiredExecutedExternals := #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
+  { id := "effect-record-nat"
+    entry := ``Source.recordOnce
+    args := #[.nat 7]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.recordOnce 7)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags := #["quick", "effect", "external", "nat"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``NativeEffects.recordImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordImpl
+      operation := "validation.record"
+      argSchemas := #[.nat]
+      resultSchema := some .nat }]
+    provenance := firProvenance
+      "Native-recorded effect projected from the matching final-impure external" },
   { id := "byte-array-roundtrip"
     entry := ``Source.idByteArray
     args := #[.bytes #[0, 127, 128, 255]]

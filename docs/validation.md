@@ -43,9 +43,10 @@ Result schemas are explicit because final impure LCNF represents `Nat`, `Bool`,
 
 The LCNF candidate asks Lean's own dependency collector for the declarations
 reachable from the case's compilation roots.  Imported extern signatures are
-retained instead of being fabricated, and initial cases deliberately avoid
-extern-dependent behavior.  Structured arguments are encoded into an initial
-FIR heap; returned values are decoded using the declared result schema.
+retained instead of being fabricated, then dispatched through an explicit
+reject-by-default validation allowlist.  Structured arguments are encoded into
+an initial FIR heap; returned values are decoded using the declared result
+schema.
 
 Artifacts are written under `_build/validation/`.  Each case retains protocol
 results, backend logs, generated impure LCNF, declaration names, instruction
@@ -63,10 +64,11 @@ Both fields are required, even when empty, and are canonicalized as sorted
 sets.  Each case also carries an `effectProjections` array describing which
 external events become semantic effects, with external name, stable operation
 name, argument schemas, and optional result schema.  The field is required and
-canonicalized even when empty, so future backends consume the same effect ABI
-without importing FIR's Lean definitions.  This manifest is the backend-neutral
-input boundary for future adapters, including a real Wasm engine once the
-compiler track can provide modules.
+canonicalized even when empty.  A projected external must also be required both
+statically and dynamically.  Future backends can therefore consume the same
+effect ABI without importing FIR's Lean definitions.  This manifest is the
+backend-neutral input boundary for future adapters, including a real Wasm
+engine once the compiler track can provide modules.
 
 `_build/validation/coverage.json` is the deterministic aggregate coverage
 report for the selected cases.  It keeps two kinds of evidence separate:
@@ -110,7 +112,7 @@ lower corpus-wide instruction coverage.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 49 cases.  Beyond literals,
+The compiler-generated corpus currently has 50 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -134,32 +136,42 @@ heap-natural input/result.  Runner-supplied `ByteArray` identity, size,
 indexing, and mutation fixtures validate the packed scalar-array heap ABI,
 including scalar reads of zero, high-bit, and maximum byte values.  Mutation
 separately covers a unique in-place update and a shared copy-on-write update
-that preserves the original alias.
+that preserves the original alias.  The first controlled-effect case calls a
+validation-owned `implemented_by` primitive: native Lean records the event it
+actually executes, while the LCNF backend projects the matching external trace.
+Both observations contain the ordered `validation.record` event with its
+natural argument and result; no expected effect is stored as the oracle.
 
 The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports
 only the shapes needed by the checked corpus.  Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
 signed-integer heap object.  Externally supplied packed constructors,
-boxed-object arrays, and observable external effects remain vertical slices
-with matching native cases.  Packed byte-array identity, size, in-bounds
-indexing, and unique/shared mutation are supported; out-of-bounds behavior
-remains a controlled external-primitive follow-up.
+boxed-object arrays, and heap-valued effect snapshots remain vertical slices
+with matching native cases.  Tagged-natural effect arguments and results,
+packed byte-array identity, size, in-bounds indexing, and unique/shared mutation
+are supported; out-of-bounds behavior remains a controlled external-primitive
+follow-up.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`,
-`ByteArray.get!`, and `ByteArray.set!` are currently allowlisted.  Natural
-addition decodes tagged or heap operands, computes with Lean `Nat`, and
-re-encodes through the same tagged/heap boundary as the interpreter.  The
-integer primitives decode and re-encode both the signed immediate and heap
-representations; `Int.decLt` returns the scalar `UInt8` discriminant consumed
-by lowered pattern matching.  Byte-array size reads the packed heap object and
-returns a tagged natural; byte-array indexing returns the selected packed byte
-as a scalar `UInt8`.  Byte-array mutation consumes its array argument: unique
-cells update in place, while shared cells decrement the consumed reference and
-return a newly allocated copy.  Validation-only guards check both paths'
-locations, allocation counts, contents, and reference counts in addition to
-the native observation comparison.
+`ByteArray.get!`, `ByteArray.set!`, and the validation-owned effect recorder are
+currently allowlisted.  Natural addition decodes tagged or heap operands,
+computes with Lean `Nat`, and re-encodes through the same tagged/heap boundary as
+the interpreter.  The integer primitives decode and re-encode both the signed
+immediate and heap representations; `Int.decLt` returns the scalar `UInt8`
+discriminant consumed by lowered pattern matching.  Byte-array size reads the
+packed heap object and returns a tagged natural; byte-array indexing returns
+the selected packed byte as a scalar `UInt8`.  Byte-array mutation consumes its
+array argument: unique cells update in place, while shared cells decrement the
+consumed reference and return a newly allocated copy.  Validation-only guards
+check both paths' locations, allocation counts, contents, and reference counts
+in addition to the native observation comparison.  The effect recorder
+increments its natural argument and advances the interpreter world; its trace
+entry is decoded only when selected by that case's projection metadata.  The
+native runner resets the recorder before execution and drains it through a
+result-dependent hook, making the effect ordering explicit even though the
+source-facing function is pure.
 `extern` must be present both statically and in executed-form coverage for every
 runtime primitive fixture, while the matching name must independently satisfy
 both external-name obligations.

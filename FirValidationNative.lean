@@ -20,12 +20,15 @@ def runCase (caseId : String) : IO UInt32 := do
   let some validationCase := Corpus.findCase? caseId
     | emitFailure caseId s!"unknown validation case: {caseId}"
       return 2
+  validationCase.nativeBefore
   let value := validationCase.native ()
+  let effects ← validationCase.nativeEffects value
   if !validationCase.resultSchema.accepts value then
     emitFailure caseId "native result did not match the case result schema"
     return 1
   let observation : ValidationObservation := {
     termination := .returned value
+    effects
   }
   Jsonl.emit ({
     caseId

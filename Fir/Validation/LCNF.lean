@@ -237,6 +237,18 @@ private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) 
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalNat request runtime value
+  let (runtime, result) := literal runtime (.nat (value + 1))
+  return {
+    value := result
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world + 1 }
+
 private def byteArraySizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [value] := request.args.toList
@@ -395,6 +407,8 @@ private def validationExternals : ExternalImpl where
   call request runtime :=
     if request.name == ``Nat.add then
       natAddExternal request runtime
+    else if request.name == ``Corpus.NativeEffects.recordImpl then
+      recordEffectExternal request runtime
     else if request.name == ``ByteArray.size then
       byteArraySizeExternal request runtime
     else if request.name == ``ByteArray.get! then
@@ -541,6 +555,26 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       return .ctor name tag fields
   | _, _ => throw s!"cannot decode {repr value} as {repr schema}"
 
+private def decodeEffect (runtime : RuntimeState) (projection : Corpus.EffectProjection)
+    (event : ExternalEvent) : Except String EffectEvent := do
+  if projection.argSchemas.size != event.args.size then
+    throw (s!"effect projection {projection.operation} expected {projection.argSchemas.size} " ++
+      s!"arguments, got {event.args.size}")
+  let args ← projection.argSchemas.zip event.args |>.mapM fun (schema, value) =>
+    decodeValue runtime schema value
+  let result ← match projection.resultSchema with
+    | none => pure none
+    | some schema => some <$> decodeValue runtime schema event.result
+  return { operation := projection.operation, args, result }
+
+private def decodeEffects (runtime : RuntimeState)
+    (projections : Array Corpus.EffectProjection) (trace : Array ExternalEvent) :
+    Except String (Array EffectEvent) :=
+  trace.foldlM (init := #[]) fun effects event => do
+    let some projection := projections.find? (·.external == event.name)
+      | return effects
+    return effects.push (← decodeEffect runtime projection event)
+
 private def faultKind : RuntimeFault -> String
   | .unknownVar .. => "unknown-var"
   | .unknownDecl .. => "unknown-decl"
@@ -598,24 +632,30 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
       | .outOfFuel _ =>
           { caseId := case.id, backend := "lcnf", outcome := .outOfFuel case.fuel, diagnostics }
       | .done observation =>
-          match observation.outcome with
-          | .fault fault =>
-              { caseId := case.id, backend := "lcnf",
-                outcome := .success {
-                  termination := .runtimeFault (faultKind fault) (toString (repr fault)) },
-                diagnostics }
-          | .returned value =>
-              let finalRuntime : RuntimeState := {
-                runtime with
-                heap := observation.heap
-                world := observation.world
-                trace := observation.trace }
-              match decodeValue finalRuntime case.resultSchema value with
-              | .error message =>
-                  { caseId := case.id, backend := "lcnf", outcome := .failure message, diagnostics }
-              | .ok datum =>
+          let finalRuntime : RuntimeState := {
+            runtime with
+            heap := observation.heap
+            world := observation.world
+            trace := observation.trace }
+          match decodeEffects finalRuntime case.effectProjections observation.trace with
+          | .error message =>
+              { caseId := case.id, backend := "lcnf", outcome := .failure message, diagnostics }
+          | .ok effects =>
+              match observation.outcome with
+              | .fault fault =>
                   { caseId := case.id, backend := "lcnf",
-                    outcome := .success { termination := .returned datum }, diagnostics }
+                    outcome := .success {
+                      termination := .runtimeFault (faultKind fault) (toString (repr fault))
+                      effects },
+                    diagnostics }
+              | .returned value =>
+                  match decodeValue finalRuntime case.resultSchema value with
+                  | .error message =>
+                      { caseId := case.id, backend := "lcnf", outcome := .failure message,
+                        diagnostics }
+                  | .ok datum =>
+                      { caseId := case.id, backend := "lcnf",
+                        outcome := .success { termination := .returned datum, effects }, diagnostics }
 
 def runCase (case : Corpus.Case) : CoreM (BackendResult × Artifact) := do
   let artifact ← compileEntry case.entry case.dependencies
