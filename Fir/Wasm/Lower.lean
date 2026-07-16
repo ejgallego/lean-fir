@@ -222,20 +222,19 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
   let assignments := decl.params.toList.reverse.map fun param => .localSet param.fvarId
   return arguments ++ assignments ++ [.br fvarId]
 
-def compileCaseChainWith
-    (compile : LCNF.Code .impure → Except CompileError (List Instruction))
+def compileCaseChainWithM [Monad m] [MonadExceptOf CompileError m]
+    (compile : LCNF.Code .impure → m (List Instruction))
     (discr : FVarId)
-    (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
-    Except CompileError (List Instruction) := do
+    (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) : m (List Instruction) := do
   match alts with
   | [] => return fallback
-  | .default _ :: rest => compileCaseChainWith compile discr rest fallback
+  | .default _ :: rest => compileCaseChainWithM compile discr rest fallback
   | .alt _ _ _ h :: _ => nomatch h
   | .ctorAlt info code :: rest =>
       unless constructorTagFitsI32 info do
         throw (.malformed s!"constructor tag {info.cidx} does not fit the i32 case ABI")
       let thenBody ← compile code
-      let elseBody ← compileCaseChainWith compile discr rest fallback
+      let elseBody ← compileCaseChainWithM compile discr rest fallback
       return [
         .localGet discr,
         .call (.runtime .getTag),
@@ -245,63 +244,164 @@ def compileCaseChainWith
 
 termination_by sizeOf alts
 
-partial def compileCode (context : Context) : LCNF.Code .impure → Except CompileError (List Instruction)
+def compileCaseChainWith
+    (compile : LCNF.Code .impure → Except CompileError (List Instruction))
+    (discr : FVarId)
+    (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
+    Except CompileError (List Instruction) :=
+  compileCaseChainWithM compile discr alts fallback
+
+/--
+Proof-transparent partiality for the recursive compiler. `Option.none` is the
+least element used by `partial_fixpoint`; every finite compiler result observed
+through `compileCode` is an `Except` value inside `some`.
+-/
+abbrev CompileM (α : Type) := ExceptT CompileError Option α
+
+def liftCompileResult {α : Type} (result : Except CompileError α) : CompileM α :=
+  some result
+
+open Lean.Order in
+@[partial_fixpoint_monotone]
+theorem monotone_compileCaseChainWithM
+    {γ : Type} [PartialOrder γ]
+    (compile : γ → LCNF.Code .impure → CompileM (List Instruction))
+    (discr : FVarId) (alts : List (LCNF.Alt .impure)) (fallback : List Instruction)
+    (hmono : monotone compile) :
+    monotone (fun x => compileCaseChainWithM (compile x) discr alts fallback) := by
+  induction alts with
+  | nil =>
+      simp only [compileCaseChainWithM]
+      apply monotone_const
+  | cons alt alts ih =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | default code =>
+          simp only [compileCaseChainWithM]
+          exact ih
+      | ctorAlt info code =>
+          simp only [compileCaseChainWithM]
+          by_cases fits : constructorTagFitsI32 info = true
+          · simp only [fits, ↓reduceIte]
+            apply monotone_bind
+            · apply monotone_apply
+              exact hmono
+            · apply monotone_of_monotone_apply
+              intro thenBody
+              apply monotone_bind
+              · exact ih
+              · apply monotone_const
+          · simp [fits]
+            apply monotone_const
+
+def compileCodeCore (context : Context) : LCNF.Code .impure → CompileM (List Instruction)
   | .let decl continuation => do
-      let value ← compileLetValue context decl
-      let rest ← compileCode context continuation
+      let value ← liftCompileResult (compileLetValue context decl)
+      let rest ← compileCodeCore context continuation
       return value ++ [.localSet decl.fvarId] ++ rest
   | .fun _ _ h => nomatch h
   | .jp decl continuation => do
       let context := { context with joins := (decl.fvarId, decl) :: context.joins }
-      let entry ← compileCode context continuation
-      let body ← compileCode context decl.value
+      let entry ← compileCodeCore context continuation
+      let body ← compileCodeCore context decl.value
       return [.block decl.fvarId entry] ++ body
-  | .jmp fvarId args => compileJump context fvarId args
+  | .jmp fvarId args => liftCompileResult (compileJump context fvarId args)
   | .cases cases => do
       let fallback ←
         match cases.alts.toList.find? fun alt =>
           match alt with | .default _ => true | _ => false with
-        | some (.default code) => compileCode context code
+        | some (.default code) => compileCodeCore context code
         | some (.alt _ _ _ h) => nomatch h
         | some (.ctorAlt _ _) | none => pure [.unreachable]
-      compileCaseChainWith (compileCode context) cases.discr cases.alts.toList fallback
+      compileCaseChainWithM (compileCodeCore context) cases.discr cases.alts.toList fallback
   | .return fvarId => do
-      let (value, _) ← getLocal context fvarId
+      let (value, _) ← liftCompileResult (getLocal context fvarId)
       return [value, .ret]
   | .unreach _ => return [.unreachable]
   | .oset fvarId index arg continuation => do
-      let (object, _) ← getLocal context fvarId
-      let (field, fieldType) ← compileArg context arg
-      let rest ← compileCode context continuation
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
+      let (field, fieldType) ← liftCompileResult (compileArg context arg)
+      let rest ← compileCodeCore context continuation
       return object :: field ++ [.call (.runtime (.objectSet index fieldType))] ++ rest
   | .uset fvarId index fieldId continuation => do
-      let (object, _) ← getLocal context fvarId
-      let (field, _) ← getLocal context fieldId
-      let rest ← compileCode context continuation
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
+      let (field, _) ← liftCompileResult (getLocal context fieldId)
+      let rest ← compileCodeCore context continuation
       return [object, field, .call (.runtime (.usizeSet index))] ++ rest
   | .sset fvarId width offset fieldId _ continuation => do
-      let (object, _) ← getLocal context fvarId
-      let (field, fieldType) ← getLocal context fieldId
-      let rest ← compileCode context continuation
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
+      let (field, fieldType) ← liftCompileResult (getLocal context fieldId)
+      let rest ← compileCodeCore context continuation
       return [object, field, .call (.runtime (.scalarSet width offset fieldType))] ++ rest
   | .setTag fvarId tag continuation => do
-      let (object, _) ← getLocal context fvarId
-      let rest ← compileCode context continuation
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
+      let rest ← compileCodeCore context continuation
       return [object, .call (.runtime (.setTag tag))] ++ rest
   | .inc fvarId amount check persistent continuation => do
-      let rest ← compileCode context continuation
+      let rest ← compileCodeCore context continuation
       if persistent then return rest
-      let (object, _) ← getLocal context fvarId
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
       return [object, .call (.runtime (.inc amount check))] ++ rest
   | .dec fvarId amount check persistent objectFields? continuation => do
-      let rest ← compileCode context continuation
+      let rest ← compileCodeCore context continuation
       if persistent then return rest
-      let (object, _) ← getLocal context fvarId
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
       return [object, .call (.runtime (.dec amount check objectFields?))] ++ rest
   | .del fvarId continuation => do
-      let (object, _) ← getLocal context fvarId
-      let rest ← compileCode context continuation
+      let (object, _) ← liftCompileResult (getLocal context fvarId)
+      let rest ← compileCodeCore context continuation
       return [object, .call (.runtime .delete)] ++ rest
+partial_fixpoint
+
+def finishCompileResult {α : Type} (result : CompileM α) : Except CompileError α :=
+  result.getD (.error (.malformed "recursive compiler produced no result"))
+
+def compileCode (context : Context) (code : LCNF.Code .impure) :
+    Except CompileError (List Instruction) :=
+  finishCompileResult (compileCodeCore context code)
+
+theorem finishCompileResult_eq_ok_iff {α : Type} {result : CompileM α} {value : α} :
+    finishCompileResult result = .ok value ↔ result = some (.ok value) := by
+  cases result with
+  | none => simp [finishCompileResult]
+  | some result =>
+      change result = .ok value ↔ some result = some (.ok value)
+      exact ⟨congrArg some, Option.some.inj⟩
+
+/-- Transparent one-layer equation for a successfully compiled `let`. -/
+theorem compileCode_let
+    {context : Context} {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure} {valueCode restCode : List Instruction}
+    (valueCompiled : compileLetValue context decl = .ok valueCode)
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.let decl continuation) =
+      .ok (valueCode ++ [.localSet decl.fvarId] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [valueCompiled, restCore]
+  rfl
+
+/-- Transparent successful equation for a source return. -/
+theorem compileCode_return
+    {context : Context} {fvarId : FVarId} {value : Instruction} {kind : AbiKind}
+    (localCompiled : getLocal context fvarId = .ok (value, kind)) :
+    compileCode context (.return fvarId) = .ok [value, .ret] := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [localCompiled]
+  rfl
+
+/-- Transparent successful equation for source unreachability. -/
+@[simp] theorem compileCode_unreach (context : Context) (type : Expr) :
+    compileCode context (.unreach type) = .ok [.unreachable] := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  rw [compileCodeCore.eq_def]
+  rfl
 
 def compileCaseChain (context : Context) (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :

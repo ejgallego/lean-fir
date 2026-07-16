@@ -83,15 +83,19 @@ production heap layout.
   Successful opaque-handle encoding supplies both the table-extension proof
   and the decoded destination value, so existing aliases remain valid after a
   constructor, projection, or literal result is bound.
+- The executable lowerer's recursion is now proof-transparent without a
+  duplicate compiler. `compileCode` is a stable `Except` wrapper around an
+  `ExceptT CompileError Option` `partial_fixpoint` core, whose generated
+  equation exposes one structural layer while retaining the same runtime
+  implementation. Successful equations are proved for `let`, `return`, and
+  `unreach`; `CodeAdapted` composes the actual symbolic compiler output with
+  the numeric Talos adapter and already has base and recursive `let` rules.
 
-The next W4 slice must expose a transparent structural proof interface for the
-call-free portion of `compileCode`: the general compiler is deliberately an
-opaque `partial def`, so recursive proof equations must be obtained by a
-non-duplicating refactor or an explicit lowering derivation rather than an
-unrelated proof-only compiler. With that interface, the local rules and the
-new environment/local relation compose over `let` chains and the recursive
-case chain, then lift through `RelatedPost` to whole exported functions. The
-adapter still rejects initializers and closures.
+The next W4 slice extends `CodeAdapted` over the recursive constructor-case
+chain, including default fallback selection. With that structural rule, the
+local WP rules and the environment/local relation can compose over complete
+`let` chains and cases, then lift through `RelatedPost` to whole exported
+functions. The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -389,8 +393,9 @@ lifting, instantiates constructor/projection stack shapes, and proves one
 complete source-related constructor-case test. A separate composition module
 now packages local loads, destination stores, complete initial-fragment let
 sequences, and adapter concatenation. Its active proof obligation is the
-transparent structural interface for recursive `compileCode` composition;
-`FirTalos/Correctness/Locals.lean` now provides the source-environment/local
+recursive constructor-case rule for `CodeAdapted`. The compiler now exposes
+proof equations through its `partial_fixpoint` core, while
+`FirTalos/Correctness/Locals.lean` provides the source-environment/local
 relation, checked-write preservation, and handle-allocation chaining needed at
 each recursive boundary. Layer 5 can then instantiate the bridge without
 mentioning runner fuel in the public theorem.

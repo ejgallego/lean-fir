@@ -378,4 +378,79 @@ theorem instructions_let_sequence
   simp [instructions, instruction, resultFound, restAdapted]
   rfl
 
+/--
+Proof-facing compilation relation that retains both stages of the executable
+pipeline: LCNF compiles to FIR's symbolic instructions, which then adapt to a
+numeric Talos program. Its witness is the actual compiler output, not a
+proof-only reimplementation.
+-/
+def CodeAdapted (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (code : Lean.Compiler.LCNF.Code .impure)
+    (target : Wasm.Program) : Prop :=
+  ∃ symbolic,
+    Fir.Wasm.compileCode context code = .ok symbolic ∧
+    instructions sourceModule sourceFunction labels symbolic = .ok target
+
+/-- Base structural rule for a compiled return through the numeric adapter. -/
+theorem codeAdapted_return
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {result : Lean.FVarId} {kind : Fir.Wasm.AbiKind}
+    {resultIndex : Nat}
+    (localCompiled :
+      Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
+    (resultFound :
+      findFVar?
+        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        result = some resultIndex) :
+    CodeAdapted context sourceModule sourceFunction labels (.return result)
+      [.localGet resultIndex, .ret] := by
+  refine ⟨[.localGet result, .ret], ?_, ?_⟩
+  · exact Fir.Wasm.compileCode_return localCompiled
+  · simp [instructions, instruction, resultFound]
+    rfl
+
+/-- Base structural rule for a compiled unreachable terminator. -/
+@[simp] theorem codeAdapted_unreach
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (type : Lean.Expr) :
+    CodeAdapted context sourceModule sourceFunction labels (.unreach type)
+      [.unreachable] := by
+  refine ⟨[.unreachable], Fir.Wasm.compileCode_unreach context type, ?_⟩
+  simp [instructions, instruction]
+  rfl
+
+/--
+The first recursive compiler equation: separately compiled and adapted `let`
+value and continuation stages compose through the generated destination
+`local.set`. This is the structural rule used by the forthcoming semantic
+induction over straight-line `let` chains.
+-/
+theorem codeAdapted_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {valueCode : List Fir.Wasm.Instruction} {targetValue targetRest : Wasm.Program}
+    {resultIndex : Nat}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar?
+        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        decl.fvarId = some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨valueCode ++ [.localSet decl.fvarId] ++ restCode, ?_, ?_⟩
+  · exact Fir.Wasm.compileCode_let valueCompiled restCompiled
+  · simpa [List.append_assoc] using
+      instructions_let_sequence valueAdapted resultFound restAdapted
+
 end FirTalos.Correctness

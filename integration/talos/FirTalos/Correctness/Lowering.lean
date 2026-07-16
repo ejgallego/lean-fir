@@ -66,11 +66,11 @@ theorem compileCaseChain_constructor
       .i32Const .uint32 (UInt32.ofNat info.cidx),
       .i32Eq,
       .ifElse thenBody elseBody] := by
-  change compileCaseChainWith (compileCode context) discr alts fallback =
+  change compileCaseChainWithM (compileCode context) discr alts fallback =
     .ok elseBody at elseEq
-  change compileCaseChainWith (compileCode context) discr (.ctorAlt info code :: alts)
+  change compileCaseChainWithM (compileCode context) discr (.ctorAlt info code :: alts)
     fallback = _
-  rw [compileCaseChainWith.eq_def]
+  rw [compileCaseChainWithM.eq_def]
   simp only [fits, ↓reduceIte]
   rw [thenEq, elseEq]
   rfl

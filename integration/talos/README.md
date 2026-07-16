@@ -56,9 +56,11 @@ constructor/projection `let` sequences, and adapter equations for concatenated
 instruction lists. `FirTalos/Correctness/Locals.lean` relates live source
 environment bindings to compiler-resolved target slots, proves that checked
 local writes preserve the frame, and keeps existing decoded values valid when
-opaque-handle allocations extend the table. The remaining recursive step is a
-transparent structural proof interface for the general lowerer's opaque
-`compileCode` recursion.
+opaque-handle allocations extend the table. The executable `compileCode` now
+uses a proof-transparent `partial_fixpoint` core instead of an opaque
+`partial def`; successful `let`, `return`, and `unreach` equations feed a
+`CodeAdapted` relation over the real compiler and adapter outputs. The next
+recursive step is the constructor-case chain and its default fallback.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
