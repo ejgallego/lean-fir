@@ -114,6 +114,8 @@ class HarnessTests(unittest.TestCase):
     def test_generic_core_does_not_own_lcnf_execution_or_coverage(self) -> None:
         self.assertFalse(hasattr(core, "LcnfAdapter"))
         self.assertFalse(hasattr(core, "coverage_report"))
+        self.assertFalse(hasattr(core, "NativeAdapter"))
+        self.assertFalse(hasattr(core, "ROOT"))
         self.assertIs(harness.LcnfAdapter, lcnf.LcnfAdapter)
         self.assertIs(harness.coverage_report, lcnf.coverage_report)
 
@@ -602,6 +604,7 @@ class HarnessTests(unittest.TestCase):
                 "assert json.loads(os.environ['FIR_VALIDATION_CASES']) == ['case'];"
                 "assert os.path.isfile(os.environ['FIR_VALIDATION_CORPUS']);"
                 "assert os.environ['FIR_VALIDATION_BACKEND'] == 'v8';"
+                f"assert os.getcwd() == {json.dumps(str(harness.ROOT))};"
                 f"print({json.dumps(json.dumps(record))})"
             )
             adapter = harness.ExternalCommandAdapter(

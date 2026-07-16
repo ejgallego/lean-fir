@@ -380,14 +380,14 @@ class LcnfAdapter:
     def build(self, context: BuildContext) -> None:
         if context.no_build:
             return
-        built = run(["lake", "build", "Fir.Validation"])
+        built = run(["lake", "build", "Fir.Validation"], context.root)
         if built.returncode != 0:
             sys.stderr.write(built.stdout + built.stderr)
             raise ValidationError("failed to build LCNF validation backend")
 
     def execute(self, context: RunContext) -> BackendRun:
         command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
-        completed = run(command)
+        completed = run(command, context.root)
         write_process_artifacts(context.out_dir / self.name, completed)
         backend_run = BackendRun(self.name, context.all_cases)
         if completed.returncode != 0:

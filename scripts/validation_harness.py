@@ -6,14 +6,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = ROOT / "_build" / "validation"
 PROTOCOL_VERSION = 1
 MANIFEST_FIELDS = {
     "version",
@@ -58,6 +55,7 @@ class ValidationFinding:
 
 def run(
     command: list[str],
+    cwd: Path,
     timeout: int = 120,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -68,7 +66,7 @@ def run(
     try:
         return subprocess.run(
             command,
-            cwd=ROOT,
+            cwd=cwd,
             env=environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -523,60 +521,6 @@ class BackendAdapter(Protocol):
         ...
 
 
-class NativeAdapter:
-    name = "native"
-
-    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
-        return descriptors
-
-    def build(self, context: BuildContext) -> None:
-        if context.no_build:
-            return
-        built = run(["lake", "build", "fir-native-oracle"])
-        if built.returncode != 0:
-            sys.stderr.write(built.stdout + built.stderr)
-            raise ValidationError("failed to build native validation backend")
-
-    def execute(self, context: RunContext) -> BackendRun:
-        backend_run = BackendRun(self.name, list(context.selected))
-        for case_id in context.selected:
-            command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
-            completed = run(command)
-            write_process_artifacts(
-                context.out_dir / case_id / self.name, completed
-            )
-            if completed.returncode != 0:
-                backend_run.findings.append(
-                    ValidationFinding(
-                        "execution",
-                        f"process exited {completed.returncode}",
-                        self.name,
-                        case_id,
-                    )
-                )
-                backend_run.blocked_cases.add(case_id)
-                continue
-            case_results = result_map(
-                records_from_output(completed.stdout, command), self.name
-            )
-            if set(case_results) != {case_id}:
-                backend_run.findings.append(
-                    ValidationFinding(
-                        "execution",
-                        f"backend returned {sorted(case_results)}",
-                        self.name,
-                        case_id,
-                    )
-                )
-                backend_run.blocked_cases.add(case_id)
-                continue
-            backend_run.results[case_id] = case_results[case_id]
-        return backend_run
-
-    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
-        return BackendAudit()
-
-
 @dataclass(frozen=True)
 class ExternalCommandAdapter:
     """Protocol adapter driven by shell-free commands from a JSON config."""
@@ -604,6 +548,7 @@ class ExternalCommandAdapter:
         destination.mkdir(parents=True, exist_ok=True)
         completed = run(
             self.build_command,
+            context.root,
             self.timeout_seconds,
             self.environment(context.out_dir),
         )
@@ -628,7 +573,12 @@ class ExternalCommandAdapter:
                 ),
             }
         )
-        completed = run(self.run_command, self.timeout_seconds, environment)
+        completed = run(
+            self.run_command,
+            context.root,
+            self.timeout_seconds,
+            environment,
+        )
         write_process_artifacts(destination, completed)
         expected_cases = (
             context.selected
@@ -725,17 +675,6 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
         build_command,
         timeout_seconds,
     )
-
-
-
-def corpus_manifest() -> list[dict]:
-    command = ["lake", "exe", "fir-native-oracle", "--manifest"]
-    completed = run(command)
-    if completed.returncode != 0:
-        raise ValidationError(f"failed to read corpus manifest:\n{completed.stderr}")
-    return manifest_from_output(completed.stdout, command)
-
-
 def validate_pair(
     context: RunContext,
     reference: BackendAdapter,

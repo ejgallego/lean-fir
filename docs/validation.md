@@ -41,15 +41,18 @@ execution strategy.
 The implementation preserves that boundary at the module level:
 
 - `scripts/validation_harness.py` owns backend-neutral protocol results,
-  observations, findings, artifacts, adapter interfaces, native execution, and
-  declarative external commands;
+  observations, findings, artifacts, adapter interfaces, and declarative
+  external commands;
 - `scripts/validation_lcnf.py` imports the generic layer and owns LCNF execution,
   diagnostics, and form/external coverage policy;
-- `scripts/validate_interpreters.py` is the thin CLI and built-in adapter
-  registry.
+- `scripts/validate_interpreters.py` is the thin FIR CLI, native corpus/execution
+  adapter, and built-in adapter registry.
 
 The generic module never imports the LCNF module.  A V8 or Talos integration can
-therefore reuse it without loading LCNF coverage assumptions.
+therefore reuse it without loading LCNF coverage assumptions.  It also has no
+checkout-global root: every command receives the owning build/run context's
+explicit root, allowing the same machinery to validate another controlled Lean
+project without silently executing in FIR's directory.
 
 Manifest validation follows the same direction.  The generic parser owns the
 neutral execution fields and effect-projection shape, canonicalizes them, and

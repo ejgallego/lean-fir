@@ -8,31 +8,29 @@ import sys
 from pathlib import Path
 
 from validation_harness import (
-    DEFAULT_OUT,
-    ROOT,
     BackendAdapter,
     BackendAudit,
     BackendRun,
     BuildContext,
     ExternalCommandAdapter,
-    NativeAdapter,
     RunContext,
     ValidationError,
     ValidationFinding,
     checked_record,
     compare_backend_results,
     compare_success,
-    corpus_manifest as parse_corpus_manifest,
     external_adapter_from_config,
     manifest_from_output as parse_manifest_from_output,
     records_from_output,
     result_domain_findings,
     result_map,
+    run,
     select_cases,
     success_observation,
     validate_pair,
     write_comparison_artifact,
     write_corpus_manifest,
+    write_process_artifacts,
 )
 from validation_lcnf import (
     LcnfAdapter,
@@ -41,6 +39,64 @@ from validation_lcnf import (
     prepare_manifest as prepare_lcnf_manifest,
     write_coverage_artifact,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUT = ROOT / "_build" / "validation"
+
+
+class NativeAdapter:
+    name = "native"
+
+    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+        return descriptors
+
+    def build(self, context: BuildContext) -> None:
+        if context.no_build:
+            return
+        built = run(["lake", "build", "fir-native-oracle"], context.root)
+        if built.returncode != 0:
+            sys.stderr.write(built.stdout + built.stderr)
+            raise ValidationError("failed to build native validation backend")
+
+    def execute(self, context: RunContext) -> BackendRun:
+        backend_run = BackendRun(self.name, list(context.selected))
+        for case_id in context.selected:
+            command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
+            completed = run(command, context.root)
+            write_process_artifacts(
+                context.out_dir / case_id / self.name, completed
+            )
+            if completed.returncode != 0:
+                backend_run.findings.append(
+                    ValidationFinding(
+                        "execution",
+                        f"process exited {completed.returncode}",
+                        self.name,
+                        case_id,
+                    )
+                )
+                backend_run.blocked_cases.add(case_id)
+                continue
+            case_results = result_map(
+                records_from_output(completed.stdout, command), self.name
+            )
+            if set(case_results) != {case_id}:
+                backend_run.findings.append(
+                    ValidationFinding(
+                        "execution",
+                        f"backend returned {sorted(case_results)}",
+                        self.name,
+                        case_id,
+                    )
+                )
+                backend_run.blocked_cases.add(case_id)
+                continue
+            backend_run.results[case_id] = case_results[case_id]
+        return backend_run
+
+    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        return BackendAudit()
 
 
 BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
@@ -52,6 +108,14 @@ BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
 def manifest_from_output(output: str, command: list[str]) -> list[dict]:
     """Parse the current FIR corpus including its LCNF-owned extension."""
     return prepare_lcnf_manifest(parse_manifest_from_output(output, command))
+
+
+def corpus_manifest() -> list[dict]:
+    command = ["lake", "exe", "fir-native-oracle", "--manifest"]
+    completed = run(command, ROOT)
+    if completed.returncode != 0:
+        raise ValidationError(f"failed to read corpus manifest:\n{completed.stderr}")
+    return parse_manifest_from_output(completed.stdout, command)
 
 
 def main() -> int:
@@ -114,7 +178,7 @@ def main() -> int:
     for adapter in adapters_to_build.values():
         adapter.build(build_context)
 
-    descriptors = parse_corpus_manifest()
+    descriptors = corpus_manifest()
     for adapter in (reference, candidate):
         descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
