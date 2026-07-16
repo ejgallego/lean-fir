@@ -62,9 +62,15 @@ uses a proof-transparent `partial_fixpoint` core instead of an opaque
 `CodeAdapted` relation over the real compiler and adapter outputs. Successful
 case equations now use the same executable compiler, and the structural
 relations cover selected or generated fallbacks, skipped defaults, recursive
-constructor alternatives, and their adapted Talos `if` programs. The next W4
-step is the semantic induction that threads the local relation and `wp`
-postcondition through complete `let` chains and cases.
+constructor alternatives, and their adapted Talos `if` programs.
+
+`FirTalos/Correctness/Semantics.lean` begins the semantic induction with a
+common related-state invariant, a `CodeWP` judgment over the actual compiler
+and adapter witnesses, and a continuation-polymorphic direct-`let` rule. Its
+first closed theorem covers a natural-literal `let; return` program from source
+evaluation through handle encoding and checked local storage to a Talos return
+whose result decodes to the exact source value. String literals, constructors,
+projections, and cases are the next instances of the same boundary.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

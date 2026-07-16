@@ -93,12 +93,21 @@ production heap layout.
   selection, the generated unreachable fallback, skipped defaults, recursive
   constructor alternatives, and the final Talos `if` explicitly through
   `CaseFallbackAdapted`, `CaseChainAdapted`, and `CasesAdapted`.
+- W4 semantic composition has started in
+  `FirTalos/Correctness/Semantics.lean`. `StateRelated` joins the retained
+  source runtime, clear target-failure channels, the handle invariant, and
+  compiler-resolved related locals. `CodeWP` combines that invariant with the
+  real compiler/adapter witness and Talos total-correctness `wp`.
+  `LetStepSimulates` is the reusable recursive boundary for direct `let`
+  operations. Its first closed theorem proves a complete natural-literal
+  `let; return` chain, including source evaluation, handle encoding, checked
+  local binding, target return, and decoding of the exact source result.
 
-The next W4 slice is the semantic composition theorem over that structural
-fragment. It combines the `CodeAdapted` recursion with the local `wp` rules and
-the source-environment/target-local relation to cover complete `let` chains and
-cases, then lifts the result through `RelatedPost` to whole exported functions.
-The adapter still rejects initializers and closures.
+The next W4 slice instantiates the same semantic boundary for string literals,
+constructor allocation, and object projection, then threads it through the
+structural case relation. The completed fragment can then lift through
+`RelatedPost` to whole exported functions. The adapter still rejects
+initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -402,10 +411,11 @@ proof equations through its `partial_fixpoint` core, while
 relation, checked-write preservation, and handle-allocation chaining needed at
 each recursive boundary. The structural relation now also follows the actual
 compiler through default selection and recursive constructor-case chains. Its
-active proof obligation is the semantic induction that threads the local
-relation and `wp` postcondition through those structural rules. Layer 5 can
-then instantiate the bridge without mentioning runner fuel in the public
-theorem.
+semantic induction now has a common related-state/`CodeWP` judgment, a generic
+direct-`let` rule, and a closed natural-literal-to-return instance. Its active
+proof obligation is to instantiate the same boundary for the remaining
+constructor/projection operations and thread it through cases. Layer 5 can then
+instantiate the bridge without mentioning runner fuel in the public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
