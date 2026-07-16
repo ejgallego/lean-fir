@@ -7,7 +7,9 @@ import argparse
 import json
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -619,12 +621,12 @@ def success_observation(record: dict) -> dict:
     return success["observation"]
 
 
-def compare_success(oracle: dict, candidate: dict) -> tuple[bool, dict, dict]:
-    oracle_observation = success_observation(oracle)
+def compare_success(reference: dict, candidate: dict) -> tuple[bool, dict, dict]:
+    reference_observation = success_observation(reference)
     candidate_observation = success_observation(candidate)
     return (
-        oracle_observation == candidate_observation,
-        oracle_observation,
+        reference_observation == candidate_observation,
+        reference_observation,
         candidate_observation,
     )
 
@@ -650,8 +652,8 @@ def result_domain_failures(
 def compare_backend_results(
     descriptor_by_id: dict[str, dict],
     selected: list[str],
-    oracle_backend: str,
-    oracle_results: dict[str, dict],
+    reference_backend: str,
+    reference_results: dict[str, dict],
     candidate_backend: str,
     candidate_results: dict[str, dict],
     blocked_cases: set[str] | None = None,
@@ -663,17 +665,17 @@ def compare_backend_results(
     for case_id in selected:
         if case_id in blocked:
             continue
-        oracle = oracle_results.get(case_id)
-        if oracle is None:
-            failures.append(f"{case_id}: {oracle_backend} backend returned no result")
+        reference = reference_results.get(case_id)
+        if reference is None:
+            failures.append(f"{case_id}: {reference_backend} backend returned no result")
             continue
         candidate = candidate_results.get(case_id)
         if candidate is None:
             failures.append(f"{case_id}: {candidate_backend} backend returned no result")
             continue
         try:
-            equal, oracle_observation, candidate_observation = compare_success(
-                oracle, candidate
+            equal, reference_observation, candidate_observation = compare_success(
+                reference, candidate
             )
         except ValidationError as error:
             failures.append(str(error))
@@ -681,7 +683,7 @@ def compare_backend_results(
         comparisons.append(
             {
                 "caseId": case_id,
-                "oracle": oracle_backend,
+                "reference": reference_backend,
                 "candidate": candidate_backend,
                 "equal": equal,
                 "case": descriptor_by_id[case_id],
@@ -690,7 +692,8 @@ def compare_backend_results(
         if not equal:
             failures.append(
                 f"{case_id}: semantic mismatch\n"
-                f"  {oracle_backend}={json.dumps(oracle_observation, sort_keys=True)}\n"
+                f"  {reference_backend}="
+                f"{json.dumps(reference_observation, sort_keys=True)}\n"
                 f"  {candidate_backend}="
                 f"{json.dumps(candidate_observation, sort_keys=True)}"
             )
@@ -715,7 +718,7 @@ def write_process_artifacts(
 
 def write_comparison_artifact(
     out_dir: Path,
-    oracle_backend: str,
+    reference_backend: str,
     candidate_backend: str,
     comparisons: list[dict],
 ) -> None:
@@ -724,7 +727,7 @@ def write_comparison_artifact(
         json.dumps(
             {
                 "version": PROTOCOL_VERSION,
-                "oracle": oracle_backend,
+                "reference": reference_backend,
                 "candidate": candidate_backend,
                 "comparisons": comparisons,
             },
@@ -736,89 +739,250 @@ def write_comparison_artifact(
     )
 
 
+@dataclass(frozen=True)
+class BuildContext:
+    root: Path
+    out_dir: Path
+    no_build: bool
+
+
+@dataclass(frozen=True)
+class RunContext:
+    root: Path
+    out_dir: Path
+    descriptors: list[dict]
+    selected: list[str]
+
+    @property
+    def all_cases(self) -> list[str]:
+        return [descriptor["id"] for descriptor in self.descriptors]
+
+    @property
+    def descriptor_by_id(self) -> dict[str, dict]:
+        return {descriptor["id"]: descriptor for descriptor in self.descriptors}
+
+
+@dataclass
+class BackendRun:
+    backend: str
+    expected_cases: list[str]
+    results: dict[str, dict] = field(default_factory=dict)
+    failures: list[str] = field(default_factory=list)
+    blocked_cases: set[str] = field(default_factory=set)
+
+
+@dataclass
+class BackendAudit:
+    report: dict | None = None
+    failures: list[str] = field(default_factory=list)
+
+
+class BackendAdapter(Protocol):
+    name: str
+
+    def build(self, context: BuildContext) -> None:
+        ...
+
+    def execute(self, context: RunContext) -> BackendRun:
+        ...
+
+    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        ...
+
+
+class NativeAdapter:
+    name = "native"
+
+    def build(self, context: BuildContext) -> None:
+        if context.no_build:
+            return
+        built = run(["lake", "build", "fir-native-oracle"])
+        if built.returncode != 0:
+            sys.stderr.write(built.stdout + built.stderr)
+            raise ValidationError("failed to build native validation backend")
+
+    def execute(self, context: RunContext) -> BackendRun:
+        backend_run = BackendRun(self.name, list(context.selected))
+        for case_id in context.selected:
+            command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
+            completed = run(command)
+            write_process_artifacts(
+                context.out_dir / case_id / self.name, completed
+            )
+            if completed.returncode != 0:
+                backend_run.failures.append(
+                    f"{case_id}: {self.name} process exited {completed.returncode}"
+                )
+                backend_run.blocked_cases.add(case_id)
+                continue
+            case_results = result_map(
+                records_from_output(completed.stdout, command), self.name
+            )
+            if set(case_results) != {case_id}:
+                backend_run.failures.append(
+                    f"{case_id}: {self.name} backend returned {sorted(case_results)}"
+                )
+                backend_run.blocked_cases.add(case_id)
+                continue
+            backend_run.results[case_id] = case_results[case_id]
+        return backend_run
+
+    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        return BackendAudit()
+
+
+class LcnfAdapter:
+    name = "lcnf"
+
+    def build(self, context: BuildContext) -> None:
+        if context.no_build:
+            return
+        built = run(["lake", "build", "Fir.Validation"])
+        if built.returncode != 0:
+            sys.stderr.write(built.stdout + built.stderr)
+            raise ValidationError("failed to build LCNF validation backend")
+
+    def execute(self, context: RunContext) -> BackendRun:
+        command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
+        completed = run(command)
+        write_process_artifacts(context.out_dir / self.name, completed)
+        backend_run = BackendRun(self.name, context.all_cases)
+        if completed.returncode != 0:
+            backend_run.failures.append(
+                f"{self.name} process exited {completed.returncode}"
+            )
+            backend_run.blocked_cases.update(context.selected)
+            return backend_run
+        backend_run.results = result_map(
+            records_from_output(completed.stdout, command), self.name
+        )
+        return backend_run
+
+    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        report, failures = coverage_report(
+            context.descriptors, backend_run.results, context.selected
+        )
+        write_coverage_artifact(context.out_dir / self.name, report)
+        return BackendAudit(report, failures)
+
+
+BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
+    "native": NativeAdapter(),
+    "lcnf": LcnfAdapter(),
+}
+
+
+def corpus_manifest() -> list[dict]:
+    command = ["lake", "exe", "fir-native-oracle", "--manifest"]
+    completed = run(command)
+    if completed.returncode != 0:
+        raise ValidationError(f"failed to read corpus manifest:\n{completed.stderr}")
+    return manifest_from_output(completed.stdout, command)
+
+
+def validate_pair(
+    context: RunContext,
+    reference: BackendAdapter,
+    candidate: BackendAdapter,
+) -> tuple[list[dict], list[str]]:
+    """Execute, audit, persist, and compare one reference/candidate pair."""
+    reference_run = reference.execute(context)
+    candidate_run = candidate.execute(context)
+    failures = list(reference_run.failures) + list(candidate_run.failures)
+    failures.extend(
+        result_domain_failures(
+            reference_run.results, reference.name, reference_run.expected_cases
+        )
+    )
+    failures.extend(
+        result_domain_failures(
+            candidate_run.results, candidate.name, candidate_run.expected_cases
+        )
+    )
+
+    for case_id in context.selected:
+        for backend_run in (reference_run, candidate_run):
+            record = backend_run.results.get(case_id)
+            if record is not None:
+                write_artifact(context.out_dir, case_id, backend_run.backend, record)
+
+    reference_audit = reference.audit(context, reference_run)
+    candidate_audit = candidate.audit(context, candidate_run)
+    failures.extend(reference_audit.failures)
+    failures.extend(candidate_audit.failures)
+
+    comparisons, comparison_failures = compare_backend_results(
+        context.descriptor_by_id,
+        context.selected,
+        reference.name,
+        reference_run.results,
+        candidate.name,
+        candidate_run.results,
+        reference_run.blocked_cases | candidate_run.blocked_cases,
+    )
+    failures.extend(comparison_failures)
+    write_comparison_artifact(
+        context.out_dir, reference.name, candidate.name, comparisons
+    )
+    return comparisons, failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="compare Lean native execution with FIR's final-impure interpreter"
+        description="compare protocol observations from two validation backends"
     )
     parser.add_argument("--case", action="append", dest="cases", help="run only this case ID")
     parser.add_argument("--tag", help="run cases carrying this corpus tag")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--no-build", action="store_true", help="reuse the existing native executable")
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="reuse existing backend builds",
+    )
+    parser.add_argument(
+        "--reference",
+        choices=sorted(BACKEND_ADAPTERS),
+        default="native",
+        help="backend supplying the reference observation",
+    )
+    parser.add_argument(
+        "--candidate",
+        choices=sorted(BACKEND_ADAPTERS),
+        default="lcnf",
+        help="backend whose observation is checked",
+    )
     args = parser.parse_args()
 
-    if not args.no_build:
-        built = run(["lake", "build", "fir-native-oracle", "Fir.Validation"])
-        if built.returncode != 0:
-            sys.stderr.write(built.stdout + built.stderr)
-            raise ValidationError("failed to build validation backends")
+    if args.reference == args.candidate:
+        raise ValidationError("reference and candidate backends must differ")
+    reference = BACKEND_ADAPTERS[args.reference]
+    candidate = BACKEND_ADAPTERS[args.candidate]
+    build_context = BuildContext(ROOT, args.out_dir, args.no_build)
+    adapters_to_build = {
+        adapter.name: adapter
+        for adapter in (BACKEND_ADAPTERS["native"], reference, candidate)
+    }
+    for adapter in adapters_to_build.values():
+        adapter.build(build_context)
 
-    manifest_command = ["lake", "exe", "fir-native-oracle", "--manifest"]
-    manifested = run(manifest_command)
-    if manifested.returncode != 0:
-        raise ValidationError(f"failed to read corpus manifest:\n{manifested.stderr}")
-    descriptors = manifest_from_output(manifested.stdout, manifest_command)
-    descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
-    all_cases = [descriptor["id"] for descriptor in descriptors]
+    descriptors = corpus_manifest()
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
-
-    lcnf_command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
-    lcnf_run = run(lcnf_command)
-    write_process_artifacts(args.out_dir / "lcnf", lcnf_run)
-    if lcnf_run.returncode != 0:
-        raise ValidationError(f"LCNF backend failed:\n{lcnf_run.stdout}{lcnf_run.stderr}")
-    lcnf_results = result_map(records_from_output(lcnf_run.stdout, lcnf_command), "lcnf")
-
-    coverage, coverage_failures = coverage_report(descriptors, lcnf_results, selected)
-    write_coverage_artifact(args.out_dir, coverage)
-    failures: list[str] = list(coverage_failures)
-    blocked_cases: set[str] = set()
-    native_results: dict[str, dict] = {}
-    for case_id in selected:
-        native_command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
-        native_run = run(native_command)
-        native_dir = args.out_dir / case_id / "native"
-        write_process_artifacts(native_dir, native_run)
-        if native_run.returncode != 0:
-            failures.append(f"{case_id}: native process exited {native_run.returncode}")
-            blocked_cases.add(case_id)
-            continue
-        native_records = records_from_output(native_run.stdout, native_command)
-        case_results = result_map(native_records, "native")
-        if set(case_results) != {case_id}:
-            failures.append(f"{case_id}: native backend returned {sorted(case_results)}")
-            blocked_cases.add(case_id)
-            continue
-        native = case_results[case_id]
-        native_results[case_id] = native
-        candidate = lcnf_results.get(case_id)
-        write_artifact(args.out_dir, case_id, "native", native)
-        if candidate is not None:
-            write_artifact(args.out_dir, case_id, "lcnf", candidate)
-
-    failures.extend(result_domain_failures(lcnf_results, "lcnf", all_cases))
-    comparisons, comparison_failures = compare_backend_results(
-        descriptor_by_id,
-        selected,
-        "native",
-        native_results,
-        "lcnf",
-        lcnf_results,
-        blocked_cases,
-    )
-    failures.extend(comparison_failures)
-    write_comparison_artifact(args.out_dir, "native", "lcnf", comparisons)
+    context = RunContext(ROOT, args.out_dir, descriptors, selected)
+    comparisons, failures = validate_pair(context, reference, candidate)
     for comparison in comparisons:
         if comparison["equal"]:
             case_id = comparison["caseId"]
-            forms = diagnostics(lcnf_results[case_id]).get("lcnf-forms", "-")
-            print(f"PASS {case_id:<22} lcnf=[{forms}]")
+            print(f"PASS {case_id:<22} {reference.name} == {candidate.name}")
 
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
         return 1
-    print(f"validated {len(selected)} case(s): native == final-impure LCNF")
+    print(
+        f"validated {len(selected)} case(s): "
+        f"{reference.name} == {candidate.name}"
+    )
     return 0
 
 

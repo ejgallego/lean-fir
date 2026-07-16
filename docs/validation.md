@@ -24,6 +24,20 @@ python3 scripts/validate_interpreters.py --case captured-partial
 python3 scripts/validate_interpreters.py --tag quick
 ```
 
+The backend pair is explicit and defaults to the current validation path:
+
+```sh
+python3 scripts/validate_interpreters.py --reference native --candidate lcnf
+```
+
+The driver discovers the corpus from the native executable, then composes two
+named backend adapters.  Each adapter owns its build and execution strategy and
+an optional backend-specific audit; the shared driver owns protocol result
+domains, result artifacts, semantic comparison, and the comparison artifact.
+Native therefore remains the corpus and source-semantics provider without
+forcing a future V8 or Talos adapter to imitate native's one-process-per-case
+execution strategy.
+
 ## Case and observation contract
 
 `Fir.Validation.Corpus` defines each case once.  A case names its source entry,
@@ -52,7 +66,7 @@ Artifacts are written under `_build/validation/`.  Each case retains protocol
 results, backend logs, generated impure LCNF, declaration names, instruction
 forms, and the comparison summary.  Process logging, per-case result writing,
 result-domain checks, and semantic comparison use actual backend names rather
-than assuming LCNF.  `_build/validation/comparison.json` identifies its oracle
+than assuming LCNF.  `_build/validation/comparison.json` identifies its reference
 and candidate explicitly; this is the backend-neutral artifact boundary used
 by later V8 and Talos adapters.  The native oracle's `--manifest` JSONL is
 the single discovery surface for the harness: case and tag selection no longer
@@ -75,7 +89,7 @@ effect ABI without importing FIR's Lean definitions.  This manifest is the
 backend-neutral input boundary for future adapters, including a real Wasm
 engine once the compiler track can provide modules.
 
-`_build/validation/coverage.json` is the deterministic aggregate coverage
+`_build/validation/lcnf/coverage.json` is the deterministic aggregate coverage
 report for the selected cases.  It keeps two kinds of evidence separate:
 
 - **static coverage** is the set of forms present in each compiler-produced
@@ -221,3 +235,8 @@ V8          <-> Talos       Wasm interpreter validation
 ```
 
 Successful lowering or assembly is preparation, not semantic validation.
+Adding either backend is a registry extension implementing the existing
+build/execute/audit adapter contract; it does not change comparison semantics
+or the native-owned corpus.  Wasm-specific compilation and engine telemetry
+belong in that adapter's optional audit, just as instruction/external coverage
+belongs to the LCNF adapter today.

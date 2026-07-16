@@ -120,7 +120,7 @@ class HarnessTests(unittest.TestCase):
             "v8",
             {"case": success("case", "v8", 42)},
         )
-        self.assertEqual(comparisons[0]["oracle"], "native")
+        self.assertEqual(comparisons[0]["reference"], "native")
         self.assertEqual(comparisons[0]["candidate"], "v8")
         self.assertFalse(comparisons[0]["equal"])
         self.assertEqual(len(failures), 1)
@@ -407,7 +407,7 @@ class HarnessTests(unittest.TestCase):
         comparisons = [
             {
                 "caseId": "case",
-                "oracle": "native",
+                "reference": "native",
                 "candidate": "v8",
                 "equal": True,
                 "case": descriptor("case"),
@@ -424,9 +424,64 @@ class HarnessTests(unittest.TestCase):
             )
             self.assertEqual(first, (out_dir / "comparison.json").read_bytes())
             artifact = json.loads(first)
-            self.assertEqual(artifact["oracle"], "native")
+            self.assertEqual(artifact["reference"], "native")
             self.assertEqual(artifact["candidate"], "v8")
             self.assertEqual(artifact["comparisons"], comparisons)
+
+    def test_adapter_audit_and_semantic_mismatch_are_both_reported(self) -> None:
+        class FakeAdapter:
+            def __init__(
+                self, name: str, record: dict, audit_failures: list[str] | None = None
+            ) -> None:
+                self.name = name
+                self.record = record
+                self.audit_failures = audit_failures or []
+
+            def build(self, context: harness.BuildContext) -> None:
+                pass
+
+            def execute(self, context: harness.RunContext) -> harness.BackendRun:
+                return harness.BackendRun(
+                    self.name,
+                    list(context.selected),
+                    {self.record["caseId"]: self.record},
+                )
+
+            def audit(
+                self,
+                context: harness.RunContext,
+                backend_run: harness.BackendRun,
+            ) -> harness.BackendAudit:
+                return harness.BackendAudit(
+                    {"backend": self.name}, list(self.audit_failures)
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            context = harness.RunContext(
+                harness.ROOT,
+                Path(directory),
+                [descriptor("case")],
+                ["case"],
+            )
+            reference = FakeAdapter("native", success("case", "native", 41))
+            candidate = FakeAdapter(
+                "v8",
+                success("case", "v8", 42),
+                ["case: candidate audit failed"],
+            )
+            comparisons, failures = harness.validate_pair(
+                context, reference, candidate
+            )
+            self.assertFalse(comparisons[0]["equal"])
+            self.assertEqual(len(failures), 2)
+            self.assertIn("candidate audit failed", failures[0])
+            self.assertIn("semantic mismatch", failures[1])
+            self.assertTrue(
+                (Path(directory) / "case" / "native" / "result.json").is_file()
+            )
+            self.assertTrue(
+                (Path(directory) / "case" / "v8" / "result.json").is_file()
+            )
 
     def test_coverage_separates_static_and_executed_forms(self) -> None:
         manifest = [
