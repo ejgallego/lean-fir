@@ -297,12 +297,21 @@ semantics observes those types during boxing and unboxing. This isolates the
 remaining type-level obligation instead of folding it into the recursive code
 proof.
 
+Binder extension is no longer an assumed classification boundary.
+`AlphaEqvBind` proves the comparison laws needed to reason about Lean 4.32's
+`Name.quickCmp`-backed `FVarIdMap`, then proves the concrete lookup law for
+insertion and identifies `withFVar` with that right-to-left update.
+`RenamingScoped` records that every mapped right-hand variable points into the
+left scope; it holds for the empty map, is preserved by a fresh binder, and
+yields the exact new-pair/old-pair split required by `envsAgree_bind`. Thus the
+recursive simulation can extend both the renaming and runtime environments
+without carrying an extra classification hypothesis.
+
 The remaining bounded work is:
 
-1. derive binder classification from `withFVar` and hygiene, discharge or
-   refine the exact runtime-type premises at the impure phase boundary, and
-   extend the simulation through recursive code to prove `Code.alphaEqv`
-   sound;
+1. thread `RenamingScoped` and environment agreement through recursive code,
+   discharge or refine the exact runtime-type premises at the impure phase
+   boundary, and prove `Code.alphaEqv` sound;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 3. lift the resulting theorem through recursive code, declarations, and program
