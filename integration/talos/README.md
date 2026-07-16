@@ -20,9 +20,15 @@ make talos-check
 The adapter resolves FIR locals, symbolic branch labels, declaration calls,
 runtime imports, function indices, and exports into Talos syntax. Host
 implementations of the generated `fir.*` imports and the LCNF/Wasm simulation
-proof remain in this optional package rather than in FIR's core.
+proof live in this optional package rather than in FIR's core.
 
 `FirTalos.runDifferential program entry args` runs the FIR interpreter and the
 adapted Talos module together. It reports related observations, field-level
 semantic mismatches, structured target failures, preparation failures, and
 source fuel exhaustion while comparing only the observable reachable heap.
+
+`FirTalos/Correctness/` now contains the W4 proof foundation: coherent handle
+round trips, scalar codec lemmas, adapter signature/local/label/call
+preservation, positional `HostEnv.Satisfies` packaging, and bridges from a
+successful executable witness to fuel-free `TerminatesWith` and
+`PartiallyMeets` observation statements.

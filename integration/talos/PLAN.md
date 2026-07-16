@@ -54,9 +54,15 @@ production heap layout.
   arguments, classifies all Talos outcomes, and compares outcome, world,
   trace, and the canonical reachable heap. Its result carries field-level
   mismatch evidence.
+- W4 proof infrastructure is in place: coherent handle-codec round trips,
+  scalar lane lemmas, adapter signature/local/label/call preservation,
+  positional host satisfaction, and fuel-free observation postconditions.
+  The adapter recursion is now terminating and transparent to proofs.
 
-The next stage is W4: turn the executable relation into the first checked
-lowering theorem. The adapter still rejects initializers and closures.
+The next W4 slice is the local lowering simulation for the call-free
+literal/constructor/projection/case fragment, followed by lifting that result
+through `RelatedPost` to whole exported functions. The adapter still rejects
+initializers and closures.
 
 ## Architecture decisions
 
@@ -308,6 +314,11 @@ Proof layers:
 4. lowering preserves the call-free literal/constructor/projection/case
    fragment; and
 5. the local result lifts to exported functions and program observations.
+
+Layers 1--3 and the fuel-free executable-to-observation bridge are checked in
+`FirTalos/Correctness/`. Layer 4 is the active proof obligation; layer 5 can
+then instantiate the bridge without mentioning runner fuel in the public
+theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an

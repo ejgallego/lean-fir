@@ -64,7 +64,7 @@ def callIndex? (module : Fir.Wasm.Module) : Fir.Wasm.CallTarget → Option Nat
 
 mutual
 
-partial def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
+def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
     (labels : List FVarId) : Fir.Wasm.Instruction → Except AdapterError Wasm.Instruction
   | .i32Const _ value => return .const value
   | .i64Const _ value => return .constI64 value
@@ -92,10 +92,18 @@ partial def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function
   | .ret => return .ret
   | .unreachable => return .unreachable
 
-partial def instructions (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
+termination_by source => sizeOf source
+
+def instructions (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
     (labels : List FVarId) (body : List Fir.Wasm.Instruction) :
-    Except AdapterError (List Wasm.Instruction) :=
-  body.mapM (instruction module function labels)
+    Except AdapterError (List Wasm.Instruction) := do
+  match body with
+  | [] => return []
+  | source :: rest =>
+      return (← instruction module function labels source) ::
+        (← instructions module function labels rest)
+
+termination_by sizeOf body
 
 end
 
