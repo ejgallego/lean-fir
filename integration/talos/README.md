@@ -1,5 +1,8 @@
 # Optional Talos bridge
 
+The detailed implementation, proof, and parallel-work plan is in
+[`PLAN.md`](PLAN.md).
+
 This package translates FIR's symbolic semantic-Wasm module into Talos's
 `Wasm.Module`. It is intentionally separate from FIR's default build: Talos
 is a fast-moving AGPL-3.0 project, while FIR's semantic core should not force

@@ -1,0 +1,385 @@
+# FIR WebAssembly and Talos plan
+
+This document is the source of truth for the WebAssembly track on branch
+`wasm/talos-runtime`. Work takes place in `.worktrees/wasm-talos` under the
+parallel-development rules in `AGENTS.md`.
+
+The track owns `Fir/Wasm/`, `integration/talos/`, and Wasm-specific bug cards.
+Changes to the semantic Wasm ABI are shared-contract changes: isolate them in
+their own commit, describe their effect on both tracks, and coordinate landing
+them through the integration owner before dependent work continues.
+
+## Goal
+
+Relate executions of final impure LCNF to executions of generated WebAssembly
+in Talos. The first target is a semantic backend with an abstract host runtime;
+a later refinement will replace that host model with a concrete linear-memory
+runtime.
+
+```text
+final impure LCNF
+        |
+        | Fir.Wasm.lower
+        v
+FIR symbolic Wasm -- static checker --> Talos Wasm.Module
+                                              |
+                         +--------------------+--------------------+
+                         |                                         |
+                  semantic host runtime                later linear-memory runtime
+                         |                                         |
+                         +------------ refinement proof -----------+
+```
+
+This layering separates three claims:
+
+1. LCNF is lowered to the intended Wasm control and data flow.
+2. Runtime imports implement their abstract FIR operations.
+3. A concrete memory layout refines the abstract runtime.
+
+The first proof should establish claims 1 and 2 without prematurely fixing a
+production heap layout.
+
+## Current baseline
+
+The repository already has:
+
+- a symbolic `i32`/`i64` ABI and typed runtime-operation imports;
+- exhaustive syntactic lowering of final impure LCNF instruction forms;
+- symbolic locals, calls, blocks, branches, returns, and case chains;
+- conversion to Talos functions, imports, calls, labels, and exports;
+- lowering guards for the impure interpreter examples; and
+- a hostless scalar identity program that executes in Talos.
+
+This establishes structural reachability, not semantic backend correctness.
+The generated heap-bearing imports have no host implementation, the adapter
+does not yet represent initializers, and no source/target observation theorem
+exists.
+
+## Architecture decisions
+
+### Two-level type information
+
+Do not use a physical Wasm type as the only description of an LCNF value.
+Several semantically different values share the same stack representation.
+Introduce an ABI kind along these lines:
+
+```lean
+inductive AbiKind
+  | object | tagged | tobject
+  | erased | reuseToken
+  | uint8 | uint16 | uint32 | uint64 | usize
+  | float32 | float
+```
+
+The physical representation is derived afterward:
+
+| ABI kind | Semantic Wasm representation |
+|---|---|
+| object, tagged, tobject, erased, reuse token | `i32` handle or sentinel |
+| `UInt8`, `UInt16`, `UInt32` | `i32` |
+| `UInt64`, semantic `USize` | `i64` |
+| `Float32` | `f32` |
+| `Float` | `f64` |
+| void | no stack value |
+
+Keeping semantic `USize` as `i64` matches FIR's current abstract runtime. This
+is the semantic ABI, not yet a claim about a production wasm32 pointer ABI.
+A later target-specific refinement can map `USize` to wasm32 `i32` with the
+appropriate source-side word-size semantics.
+
+Function parameters, locals, results, runtime operations, and imports must
+retain `AbiKind`. Physical Talos signatures are projections of that metadata.
+Unknown impure types must be rejected instead of silently defaulting to `i32`.
+
+### Opaque handles
+
+Use `i32` as an opaque handle into host-managed values, rather than encoding
+FIR heap locations or tagged payloads directly. A first host state should be:
+
+```lean
+structure RuntimeHost where
+  runtime : Fir.LeanIR.Impure.RuntimeState
+  handles : HandleTable
+  fault? : Option Fir.LeanIR.Impure.RuntimeFault
+```
+
+The handle table should reserve a sentinel, intern equal object-like values,
+preserve aliases, allocate deterministically, and report exhaustion as a
+target resource failure. Host operations decode handles, reuse the FIR runtime
+operations, and encode results back to Wasm values.
+
+Keeping the structured fault in host state allows a Talos trap to be related
+to `RuntimeFault` without making theorem statements depend on trap strings.
+
+### Closures are a separate gate
+
+Talos host functions cannot call back into a Wasm-defined function. Therefore
+the current `closureApply` import cannot be the final implementation of LCNF
+closures: delegating it to the FIR interpreter would make the backend theorem
+circular.
+
+The first correctness fragment excludes `pap` and closure-valued `fvar`
+applications. Before enabling them, choose and document one real dispatch
+design:
+
+- a function table plus `call_indirect` and typed wrappers;
+- a uniform boxed calling convention and dispatcher; or
+- a Wasm-level trampoline protocol.
+
+The choice must specify heterogeneous captured values, oversaturated calls,
+recursive targets, and the representation of fixed arguments.
+
+### Initializers are explicit work
+
+`Fir.Wasm.Module.initializers` is currently ignored by the Talos adapter. Do
+not silently map every zero-parameter declaration to a Talos start function.
+First decide whether the semantic backend uses:
+
+- explicit initialization invoked by the harness;
+- a generated aggregate start function; or
+- source-compatible lazy global evaluation.
+
+Until then, the proved fragment excludes programs whose behavior depends on
+global initialization or lazy caching.
+
+### Validation belongs to FIR
+
+Talos's current `Module.validate` is deliberately partial and accepts control
+flow or instructions its stack checker does not model. Add a complete checker
+for FIR's generated symbolic subset. It must cover:
+
+- unique parameters, locals, join labels, declarations, and exports;
+- local and label resolution;
+- operand-stack ABI kinds through every symbolic instruction;
+- call arguments and results;
+- block, branch, case, and return stack shapes;
+- import ordering and runtime-operation signatures; and
+- initializer and entrypoint restrictions for the current fragment.
+
+A successful Talos validation remains a useful additional test, but is not the
+well-formedness premise of the correctness theorem.
+
+## Work breakdown
+
+### W0: freeze the semantic ABI
+
+This is the serial gate for all later work.
+
+Deliverables:
+
+- add `f32` and `f64` physical types;
+- introduce `AbiKind` and total checked conversion from impure `Expr` types;
+- retain ABI kinds in locals, signatures, imports, and runtime operations;
+- specify erased, void, tagged, tobject, and reuse-token encodings;
+- define deterministic runtime-import identities and ordering;
+- define handle encoding and decoding relations;
+- define target resource failures and structured traps;
+- introduce an explicit `WasmSupported` or `AbiWellFormed` predicate; and
+- add guards for every impure type and runtime-operation signature.
+
+Cross-track dependency: FIR's abstract scalar runtime does not yet model
+`Float` or `Float32`. Record the gap and coordinate any shared runtime change
+through the integration owner; do not create a private Wasm-only source value.
+
+Definition of done:
+
+- no known impure type silently maps to the wrong physical type;
+- encode/decode round trips are tested for every supported ABI kind;
+- aliases retain stable handles;
+- every runtime operation has a checked semantic signature; and
+- `make check` passes in the worktree.
+
+### W1: harden the adapter and checker
+
+This can proceed in parallel with W2 after W0 is frozen.
+
+Deliverables:
+
+- implement the complete symbolic checker;
+- preserve a source map from Talos indices to FIR imports/functions;
+- check import and function index resolution;
+- check local and label depth conversion;
+- reject unsupported initializer and closure cases explicitly;
+- run Talos's validator as an additional smoke check; and
+- add negative fixtures for unknown locals, labels, calls, and bad stack
+  shapes.
+
+Definition of done:
+
+- every module accepted by the adapter first passes FIR validation;
+- malformed symbolic fixtures fail with specific errors; and
+- adapter tests cover imports, direct calls, nested blocks, cases, and jumps.
+
+### W2: implement the first semantic host runtime
+
+Start with the operations required by constructor control flow:
+
+1. natural and string literals;
+2. constructor allocation;
+3. object projection; and
+4. constructor tag lookup.
+
+Deliverables:
+
+- `Codec.lean` for typed value/handle conversion;
+- `Runtime.lean` for `RuntimeHost`, structured traps, and host functions;
+- a `HostEnv` builder aligned positionally with module imports;
+- explicit arity and ABI-kind checks at every host boundary; and
+- abstract `HostContract`s for the first runtime operations.
+
+Definition of done:
+
+- every generated import has exactly one matching host resolver;
+- bad handles and arguments trap with a structured source or target fault;
+- concrete hosts satisfy their abstract contracts; and
+- literal, constructor, projection, and tag operations execute independently.
+
+### W3: build the differential harness
+
+Provide one entrypoint that runs both semantics:
+
+```lean
+runDifferential :
+  ImpureProgram -> Name -> Array Impure.Value -> DifferentialResult
+```
+
+It should:
+
+1. run the FIR interpreter;
+2. lower and validate the program;
+3. adapt it to Talos;
+4. encode entry arguments and construct the host environment;
+5. execute the Talos function;
+6. decode the result and host state; and
+7. compare outcome, world, external trace, and reachable heap.
+
+Define a target observation that distinguishes:
+
+- a decoded return value;
+- a structured source runtime fault;
+- an unexpected target trap;
+- invalid Wasm; and
+- runner fuel exhaustion.
+
+Only the first two correspond to source observations. Invalid Wasm,
+unresolved imports, unexpected traps, and target fuel exhaustion are backend
+or harness failures for a terminating supported source execution.
+
+First corpus:
+
+- `literalProgram`;
+- `ctorProjectionProgram`;
+- `caseProgram`; and
+- `defaultCaseProgram`.
+
+Definition of done:
+
+- all four programs produce related returns and reachable heaps;
+- the harness prints enough evidence to reproduce a mismatch; and
+- every possible discrepancy is routed to a Wasm bug card before a workaround.
+
+### W4: prove the first lowering theorem
+
+Use Talos's existing `HostSpec`, `HostEnv.Satisfies`, `wp`,
+`TerminatesWith`, and `PartiallyMeets` interfaces.
+
+Proof layers:
+
+1. ABI encode/decode lemmas;
+2. concrete runtime hosts satisfy relational contracts;
+3. adapter conversion preserves locals, labels, calls, and signatures;
+4. lowering preserves the call-free literal/constructor/projection/case
+   fragment; and
+5. the local result lifts to exported functions and program observations.
+
+The initial theorem excludes closures, external declarations, recursion,
+ownership operations, and initialization. These exclusions must appear in an
+executable supported-fragment predicate, not remain comments.
+
+A suitable theorem shape is:
+
+```text
+source evaluation terminates with observation O
+  -> generated Talos execution TerminatesWith observation W
+  -> source/target observations are related
+```
+
+For programs whose termination is not yet proved, use `PartiallyMeets` rather
+than exposing raw fuel in public statements.
+
+### W5: expand the semantic backend
+
+Add vertical slices in this order:
+
+1. `usize` and scalar projections;
+2. boxing, unboxing, and `isShared`;
+3. object, scalar, and `usize` mutation plus `setTag`;
+4. `inc`, `dec`, and deletion;
+5. reset and reuse;
+6. external calls with world and trace;
+7. initialization and global caching; and
+8. closures, indirect dispatch, and recursion.
+
+Each slice includes runtime functions, contracts, differential examples, and
+an extension of the supported-fragment theorem. Do not mark ownership or
+reuse complete using an observational no-op runtime.
+
+### W6: refine to a concrete runtime
+
+Once the semantic backend is stable, introduce a separate concrete target:
+
+- choose wasm32 or wasm64 and fix pointer-width semantics;
+- specify tagged values and heap layout in linear memory;
+- implement allocation, fields, closures, and reference counts;
+- relate concrete addresses to FIR locations and semantic handles;
+- prove each concrete runtime operation refines its W2 contract; and
+- compose that refinement with the lowering theorem.
+
+Binary encoding and production ABI compatibility begin here, not in W0.
+
+## Parallel agent packages
+
+After W0 lands, use file-level ownership to minimize conflicts:
+
+| Package | Primary files | Dependencies |
+|---|---|---|
+| ABI and validation | `Fir/Wasm/ABI.lean`, `Fir/Wasm/WellFormed.lean` | W0 gate |
+| Symbolic lowering | `Fir/Wasm/Lower.lean`, lowering fixtures | frozen ABI |
+| Talos adapter | `FirTalos/Adapter.lean`, adapter fixtures | frozen ABI |
+| Host codec/runtime | new `FirTalos/Codec.lean`, `Runtime.lean` | frozen ABI |
+| Contracts/proofs | new `FirTalos/Contracts.lean`, `Correctness/` | codec and adapter APIs |
+| Differential tests | new `FirTalos/Differential.lean` | adapter and runtime |
+
+Only one package owns an existing shared file at a time. Prefer new modules
+for contracts, fixtures, and proofs. If an agent discovers that the frozen ABI
+must change, stop dependent work and route a standalone contract commit
+through integration rather than letting branches drift.
+
+## First milestone
+
+The first milestone is complete when:
+
+- W0 ABI kinds and encoding rules are frozen;
+- the symbolic module passes FIR validation;
+- the four constructor/case programs execute in Talos;
+- returned values, runtime world/trace, and reachable heaps match FIR;
+- the concrete host functions satisfy abstract Talos host contracts;
+- a checked theorem covers the restricted call-free fragment;
+- `git diff --check`, `make check`, and `make talos-check` pass; and
+- all discovered discrepancies have bug-card IDs.
+
+## Integration and handoff
+
+Commit small green vertical slices. Rebase on local `main` after every shared
+contract lands and before handoff; never merge `main` into this branch.
+
+Each handoff reports:
+
+- base and head commits;
+- completed W-stage slice;
+- files and shared contracts changed;
+- exact checks and results;
+- Wasm bug-card IDs, or `none`; and
+- known follow-ups.
+
+The worktree must be clean at handoff.
