@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -73,6 +74,7 @@ class ValidationInput:
     kind: str
     name: str
     sha256: str
+    content: bytes | None = field(default=None, compare=False, repr=False)
 
     def to_json(self) -> dict[str, str]:
         return {"kind": self.kind, "name": self.name, "sha256": self.sha256}
@@ -156,11 +158,12 @@ def validation_input_from_file(
     except OSError as error:
         raise ValidationError(f"cannot hash validation input {path}: {error}") from error
     resolved = path.resolve()
+    digest = sha256_bytes(content)
     try:
         name = resolved.relative_to(root.resolve()).as_posix()
     except ValueError:
-        name = resolved.name
-    return ValidationInput(kind, name, sha256_bytes(content))
+        name = f"external/{digest}/{resolved.name}"
+    return ValidationInput(kind, name, digest, content)
 
 
 def checked_relative_posix_path(value: object, context: str) -> str:
@@ -179,6 +182,16 @@ def checked_relative_posix_path(value: object, context: str) -> str:
         raise ValidationError(
             f"{context}: path must be a normalized relative POSIX path"
         )
+    return value
+
+
+def checked_sha256(value: object, context: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValidationError(f"{context}: malformed SHA-256")
     return value
 
 
@@ -428,6 +441,149 @@ def corpus_artifact_bytes(descriptors: list[dict]) -> bytes:
 def write_corpus_manifest(out_dir: Path, descriptors: list[dict]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "corpus.json").write_bytes(corpus_artifact_bytes(descriptors))
+
+
+def retain_evidence_blob(
+    out_dir: Path, category: str, digest: str, content: bytes
+) -> str:
+    checked_relative_posix_path(category, "evidence category")
+    checked_sha256(digest, "evidence blob")
+    if sha256_bytes(content) != digest:
+        raise ValidationError(f"evidence content disagrees with SHA-256: {digest}")
+    root = out_dir.resolve()
+    directory = root
+    for part in ("evidence", *PurePosixPath(category).parts):
+        directory = directory / part
+        if directory.is_symlink():
+            raise ValidationError(
+                f"evidence directory contains a symlink: {directory}"
+            )
+        try:
+            directory.mkdir(exist_ok=True)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot create evidence directory {directory}: {error}"
+            ) from error
+        if not directory.is_dir():
+            raise ValidationError(f"evidence path is not a directory: {directory}")
+    artifact = directory / digest
+    if artifact.is_symlink() or (artifact.exists() and not artifact.is_file()):
+        raise ValidationError(f"evidence blob is not a regular file: {artifact}")
+    if artifact.exists():
+        try:
+            existing = artifact.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read retained evidence blob {artifact}: {error}"
+            ) from error
+        if existing != content:
+            raise ValidationError(
+                f"retained evidence blob disagrees with SHA-256: {digest}"
+            )
+    else:
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=directory,
+                prefix=".validation-evidence-",
+                delete=False,
+            ) as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary_path = Path(temporary.name)
+            os.link(temporary_path, artifact)
+        except FileExistsError:
+            try:
+                existing = artifact.read_bytes()
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot read concurrently retained evidence blob "
+                    f"{artifact}: {error}"
+                ) from error
+            if existing != content:
+                raise ValidationError(
+                    f"retained evidence blob disagrees with SHA-256: {digest}"
+                )
+        except OSError as error:
+            raise ValidationError(
+                f"cannot retain evidence blob {artifact}: {error}"
+            ) from error
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError as error:
+                    raise ValidationError(
+                        f"cannot remove temporary evidence blob "
+                        f"{temporary_path}: {error}"
+                    ) from error
+    return artifact.relative_to(root).as_posix()
+
+
+def retain_validation_inputs(
+    context: RunContext,
+    inputs: tuple[ValidationInput, ...],
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for index, item in enumerate(inputs):
+        validate_backend_name(item.kind, "validation input kind")
+        checked_relative_posix_path(item.name, "validation input name")
+        digest = checked_sha256(item.sha256, "validation input")
+        if index == 0:
+            if item.kind != "corpus" or item.name != "corpus.json":
+                raise ValidationError("first validation input must be corpus.json")
+            content = corpus_artifact_bytes(context.descriptors)
+        else:
+            if item.content is None:
+                raise ValidationError(
+                    f"validation input has no retainable source: "
+                    f"{item.kind}:{item.name}"
+                )
+            content = item.content
+        retained.append(
+            {
+                **item.to_json(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir, "inputs", digest, content
+                ),
+            }
+        )
+    return retained
+
+
+def retain_validation_products(
+    context: RunContext,
+    products: list[ValidationProduct],
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for product in products:
+        captured = validation_product_from_file(
+            product.backend,
+            ProductDeclaration(product.kind, product.name),
+            context.out_dir,
+        )
+        if captured != product:
+            raise ValidationError(
+                f"validation product changed before evidence retention: "
+                f"{product.backend}:{product.kind}:{product.name}"
+            )
+        source = context.out_dir / product.backend / product.name
+        try:
+            content = source.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot retain validation product {source}: {error}"
+            ) from error
+        retained.append(
+            {
+                **product.to_json(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir, "products", product.sha256, content
+                ),
+            }
+        )
+    return retained
 
 
 def checked_record(record: dict, backend: str) -> tuple[str, dict]:
@@ -947,11 +1103,14 @@ class ExternalCommandAdapter:
         return BackendAudit(findings=product_receipt_findings(backend_run))
 
 
-def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
+def external_adapter_from_config(
+    path: Path, content: bytes | None = None
+) -> ExternalCommandAdapter:
     """Load a declarative external adapter while rejecting shell commands."""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        source = path.read_bytes() if content is None else content
+        value = json.loads(source.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValidationError(f"cannot read adapter config {path}: {error}") from error
     if not isinstance(value, dict):
         raise ValidationError(f"adapter config {path}: expected a JSON object")
@@ -1047,11 +1206,14 @@ class ValidationPlan:
     pairs: tuple[tuple[str, str], ...]
 
 
-def validation_plan_from_config(path: Path) -> ValidationPlan:
+def validation_plan_from_config(
+    path: Path, content: bytes | None = None
+) -> ValidationPlan:
     """Load a strict matrix plan, resolving adapter paths beside the plan."""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        source = path.read_bytes() if content is None else content
+        value = json.loads(source.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValidationError(f"cannot read validation plan {path}: {error}") from error
     if not isinstance(value, dict):
         raise ValidationError(f"validation plan {path}: expected a JSON object")
@@ -1150,6 +1312,7 @@ def write_matrix_artifact(
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
         raise ValidationError("validation matrix contains duplicate provenance inputs")
+    retained_inputs = retain_validation_inputs(context, inputs)
     sorted_products = sorted(
         products,
         key=lambda product: (product.backend, product.kind, product.name),
@@ -1162,27 +1325,37 @@ def write_matrix_artifact(
             raise ValidationError(
                 f"validation product names inactive backend: {product.backend}"
             )
-        if len(product.sha256) != 64 or any(
-            character not in "0123456789abcdef"
-            for character in product.sha256
-        ):
-            raise ValidationError("validation product has malformed SHA-256")
+        checked_sha256(product.sha256, "validation product")
     product_keys = [
         (product.backend, product.kind, product.name)
         for product in sorted_products
     ]
     if len(set(product_keys)) != len(product_keys):
         raise ValidationError("validation matrix contains duplicate backend products")
+    retained_products = retain_validation_products(context, sorted_products)
     pairs = []
     for result in pair_results:
         artifact = comparison_artifact_path(
             context.out_dir, result.reference, result.candidate
         )
+        try:
+            comparison_content = artifact.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot retain validation comparison {artifact}: {error}"
+            ) from error
+        comparison_sha256 = sha256_bytes(comparison_content)
         pairs.append(
             {
                 "reference": result.reference,
                 "candidate": result.candidate,
-                "artifact": artifact.relative_to(context.out_dir).as_posix(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir,
+                    "comparisons",
+                    comparison_sha256,
+                    comparison_content,
+                ),
+                "sha256": comparison_sha256,
                 "comparedCases": len(result.comparisons),
                 "equalCases": sum(
                     int(comparison["equal"])
@@ -1215,8 +1388,8 @@ def write_matrix_artifact(
                 },
                 "selectedCases": list(context.selected),
                 "backends": backend_names,
-                "inputs": [item.to_json() for item in inputs],
-                "products": [product.to_json() for product in sorted_products],
+                "inputs": retained_inputs,
+                "products": retained_products,
                 "pairs": pairs,
                 "findings": [finding.to_json() for finding in findings],
                 "summary": {
@@ -1242,6 +1415,321 @@ def write_matrix_artifact(
         + "\n",
         encoding="utf-8",
     )
+
+
+def verify_evidence_file(
+    report_root: Path,
+    artifact_name: object,
+    expected_sha256: str,
+    context: str,
+) -> bytes:
+    relative = checked_relative_posix_path(artifact_name, context)
+    root = report_root.resolve()
+    path = root
+    for part in PurePosixPath(relative).parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValidationError(f"{context}: evidence path contains a symlink")
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise ValidationError(f"{context}: evidence path escapes report root") from error
+    if not path.is_file():
+        raise ValidationError(f"{context}: evidence is not a regular file")
+    try:
+        content = path.read_bytes()
+        actual_sha256 = sha256_bytes(content)
+    except OSError as error:
+        raise ValidationError(f"{context}: cannot read evidence: {error}") from error
+    if actual_sha256 != expected_sha256:
+        raise ValidationError(
+            f"{context}: SHA-256 mismatch "
+            f"(expected {expected_sha256}, got {actual_sha256})"
+        )
+    return content
+
+
+def verify_matrix_artifact(path: Path) -> dict:
+    """Verify retained inputs, products, comparisons, counts, and identities."""
+    if path.is_symlink() or not path.is_file():
+        raise ValidationError(f"validation matrix is not a regular file: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(f"cannot read validation matrix {path}: {error}") from error
+    expected_fields = {
+        "version",
+        "identity",
+        "selectedCases",
+        "backends",
+        "inputs",
+        "products",
+        "pairs",
+        "findings",
+        "summary",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValidationError("validation matrix has malformed top-level fields")
+    if (
+        not isinstance(value["version"], int)
+        or isinstance(value["version"], bool)
+        or value["version"] != PROTOCOL_VERSION
+    ):
+        raise ValidationError("validation matrix has unsupported version")
+    report_root = path.parent
+
+    selected_cases = value["selectedCases"]
+    if (
+        not isinstance(selected_cases, list)
+        or not selected_cases
+        or not all(
+            isinstance(case_id, str) and case_id for case_id in selected_cases
+        )
+        or len(set(selected_cases)) != len(selected_cases)
+    ):
+        raise ValidationError("validation matrix has malformed selectedCases")
+
+    backend_names = value["backends"]
+    if not isinstance(backend_names, list) or not backend_names:
+        raise ValidationError("validation matrix has malformed backends")
+    checked_backends = [
+        validate_backend_name(backend, "validation matrix backend")
+        for backend in backend_names
+    ]
+    if len(set(checked_backends)) != len(checked_backends):
+        raise ValidationError("validation matrix has duplicate backends")
+
+    raw_inputs = value["inputs"]
+    if not isinstance(raw_inputs, list) or not raw_inputs:
+        raise ValidationError("validation matrix has malformed inputs")
+    inputs: list[ValidationInput] = []
+    for index, item in enumerate(raw_inputs):
+        if not isinstance(item, dict) or set(item) != {
+            "kind", "name", "sha256", "artifact"
+        }:
+            raise ValidationError("validation matrix has malformed input")
+        kind = validate_backend_name(item["kind"], "validation input kind")
+        name = checked_relative_posix_path(item["name"], "validation input name")
+        digest = checked_sha256(item["sha256"], "validation input")
+        expected_artifact = f"evidence/inputs/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError("validation input has noncanonical artifact path")
+        verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation input {kind}:{name}",
+        )
+        if index == 0 and (kind != "corpus" or name != "corpus.json"):
+            raise ValidationError("first validation input must be corpus.json")
+        inputs.append(ValidationInput(kind, name, digest))
+    input_keys = [(item.kind, item.name) for item in inputs]
+    if len(set(input_keys)) != len(input_keys):
+        raise ValidationError("validation matrix has duplicate inputs")
+
+    raw_products = value["products"]
+    if not isinstance(raw_products, list):
+        raise ValidationError("validation matrix has malformed products")
+    products: list[ValidationProduct] = []
+    for item in raw_products:
+        if not isinstance(item, dict) or set(item) != {
+            "backend", "kind", "name", "sha256", "artifact"
+        }:
+            raise ValidationError("validation matrix has malformed product")
+        backend = validate_backend_name(item["backend"], "validation product backend")
+        kind = validate_backend_name(item["kind"], "validation product kind")
+        name = checked_relative_posix_path(item["name"], "validation product name")
+        digest = checked_sha256(item["sha256"], "validation product")
+        if backend not in checked_backends:
+            raise ValidationError("validation product names inactive backend")
+        expected_artifact = f"evidence/products/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError("validation product has noncanonical artifact path")
+        verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation product {backend}:{kind}:{name}",
+        )
+        products.append(ValidationProduct(backend, kind, name, digest))
+    product_keys = [
+        (product.backend, product.kind, product.name) for product in products
+    ]
+    if len(set(product_keys)) != len(product_keys):
+        raise ValidationError("validation matrix has duplicate products")
+    if product_keys != sorted(product_keys):
+        raise ValidationError("validation matrix products are not sorted")
+
+    raw_pairs = value["pairs"]
+    if not isinstance(raw_pairs, list) or not raw_pairs:
+        raise ValidationError("validation matrix has malformed pairs")
+    pair_names: list[tuple[str, str]] = []
+    comparison_count = 0
+    equal_comparison_count = 0
+    for item in raw_pairs:
+        if not isinstance(item, dict) or set(item) != {
+            "reference",
+            "candidate",
+            "artifact",
+            "sha256",
+            "comparedCases",
+            "equalCases",
+            "findingCount",
+        }:
+            raise ValidationError("validation matrix has malformed pair")
+        reference = validate_backend_name(item["reference"], "pair reference")
+        candidate = validate_backend_name(item["candidate"], "pair candidate")
+        if reference not in checked_backends or candidate not in checked_backends:
+            raise ValidationError("validation pair names inactive backend")
+        if reference == candidate:
+            raise ValidationError("validation pair compares a backend with itself")
+        digest = checked_sha256(item["sha256"], "validation comparison")
+        expected_artifact = f"evidence/comparisons/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError("validation comparison has noncanonical artifact path")
+        comparison_content = verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation comparison {reference}:{candidate}",
+        )
+
+        counts = []
+        for field_name in ("comparedCases", "equalCases", "findingCount"):
+            count = item[field_name]
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                raise ValidationError(
+                    f"validation pair has malformed {field_name}"
+                )
+            counts.append(count)
+        compared_cases, equal_cases, _ = counts
+        if equal_cases > compared_cases:
+            raise ValidationError("validation pair has too many equal cases")
+        try:
+            comparison = json.loads(comparison_content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValidationError(
+                "validation comparison artifact is not JSON"
+            ) from error
+        if not isinstance(comparison, dict) or set(comparison) != {
+            "version",
+            "reference",
+            "candidate",
+            "comparisons",
+            "findings",
+            "summary",
+        }:
+            raise ValidationError("validation comparison artifact is malformed")
+        if (
+            not isinstance(comparison["version"], int)
+            or isinstance(comparison["version"], bool)
+            or comparison["version"] != PROTOCOL_VERSION
+            or comparison["reference"] != reference
+            or comparison["candidate"] != candidate
+        ):
+            raise ValidationError(
+                "validation comparison artifact disagrees with matrix pair"
+            )
+        comparison_summary = comparison["summary"]
+        if (
+            not isinstance(comparison["comparisons"], list)
+            or not isinstance(comparison["findings"], list)
+            or not isinstance(comparison_summary, dict)
+            or any(
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                for count in comparison_summary.values()
+            )
+            or len(comparison["comparisons"]) != compared_cases
+            or len(comparison["findings"]) != item["findingCount"]
+        ):
+            raise ValidationError("validation comparison artifact is malformed")
+        expected_comparison_summary = {
+            "selectedCases": len(selected_cases),
+            "comparedCases": compared_cases,
+            "equalCases": equal_cases,
+            "findingCount": item["findingCount"],
+        }
+        if comparison_summary != expected_comparison_summary:
+            raise ValidationError(
+                "validation comparison summary disagrees with matrix pair"
+            )
+        pair_names.append((reference, candidate))
+        comparison_count += compared_cases
+        equal_comparison_count += equal_cases
+    if len(set(pair_names)) != len(pair_names):
+        raise ValidationError("validation matrix has duplicate pairs")
+
+    findings = value["findings"]
+    if not isinstance(findings, list):
+        raise ValidationError("validation matrix has malformed findings")
+    for finding in findings:
+        if (
+            not isinstance(finding, dict)
+            or not {"phase", "message"} <= set(finding)
+            or set(finding) - {"phase", "message", "backend", "caseId"}
+            or not all(isinstance(item, str) for item in finding.values())
+        ):
+            raise ValidationError("validation matrix has malformed finding")
+    summary = value["summary"]
+    expected_summary_fields = {
+        "selectedCaseCount",
+        "backendCount",
+        "pairCount",
+        "comparisonCount",
+        "equalComparisonCount",
+        "findingCount",
+        "inputCount",
+        "productCount",
+    }
+    if not isinstance(summary, dict) or set(summary) != expected_summary_fields:
+        raise ValidationError("validation matrix has malformed summary")
+    if any(
+        not isinstance(count, int) or isinstance(count, bool) or count < 0
+        for count in summary.values()
+    ):
+        raise ValidationError("validation matrix summary has malformed count")
+    expected_summary = {
+        "selectedCaseCount": len(selected_cases),
+        "backendCount": len(checked_backends),
+        "pairCount": len(pair_names),
+        "comparisonCount": comparison_count,
+        "equalComparisonCount": equal_comparison_count,
+        "findingCount": len(findings),
+        "inputCount": len(inputs),
+        "productCount": len(products),
+    }
+    if summary != expected_summary:
+        raise ValidationError("validation matrix summary disagrees with contents")
+
+    identity = value["identity"]
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"algorithm", "selection", "run"}
+        or identity["algorithm"] != "sha256"
+    ):
+        raise ValidationError("validation matrix has malformed identity")
+    selection_sha256 = checked_sha256(
+        identity["selection"], "validation selection identity"
+    )
+    run_sha256 = checked_sha256(identity["run"], "validation run identity")
+    expected_selection_sha256 = validation_selection_sha256(
+        inputs[0].sha256, selected_cases
+    )
+    if selection_sha256 != expected_selection_sha256:
+        raise ValidationError("validation selection identity mismatch")
+    expected_run_sha256 = validation_run_sha256(
+        selection_sha256,
+        checked_backends,
+        pair_names,
+        tuple(inputs),
+        products,
+    )
+    if run_sha256 != expected_run_sha256:
+        raise ValidationError("validation run identity mismatch")
+    return value
 
 
 def validate_matrix(

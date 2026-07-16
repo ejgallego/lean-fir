@@ -14,6 +14,7 @@ inspect:
 validate:
 	python3 scripts/test_validate_interpreters.py
 	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
+	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
 
 no-placeholders:
 	@if rg -n "sorry|admit" Fir docs Inspect FirValidation*.lean; then \

@@ -32,6 +32,7 @@ from validation_harness import (
     product_receipt_findings,
     product_receipt_value,
     records_from_output,
+    retain_evidence_blob,
     result_domain_findings,
     result_map,
     run,
@@ -41,6 +42,7 @@ from validation_harness import (
     validate_pair,
     validate_backend_name,
     validate_matrix,
+    verify_matrix_artifact,
     validation_plan_from_config,
     validation_run_sha256,
     validation_selection_sha256,
@@ -160,7 +162,7 @@ def main() -> int:
         "--case", action="append", dest="cases", help="run only this case ID"
     )
     parser.add_argument("--tag", help="run cases carrying this corpus tag")
-    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--out-dir", type=Path)
     parser.add_argument(
         "--no-build",
         action="store_true",
@@ -195,15 +197,49 @@ def main() -> int:
         type=Path,
         help="load adapter configs and directed pairs from this JSON plan",
     )
+    parser.add_argument(
+        "--verify-matrix",
+        type=Path,
+        help="verify retained evidence and identities without running backends",
+    )
     args = parser.parse_args()
 
+    if args.verify_matrix is not None:
+        if (
+            args.cases
+            or args.tag
+            or args.out_dir is not None
+            or args.no_build
+            or args.reference
+            or args.candidate
+            or args.pair
+            or args.adapter_config
+            or args.plan
+        ):
+            raise ValidationError(
+                "--verify-matrix cannot be combined with validation run options"
+            )
+        matrix = verify_matrix_artifact(args.verify_matrix)
+        print(
+            f"verified validation matrix {args.verify_matrix}: "
+            f"run {matrix['identity']['run']}"
+        )
+        return 0
+
+    args.out_dir = args.out_dir or DEFAULT_OUT
+
+    provenance_inputs = []
     if args.plan is not None:
         if args.pair or args.adapter_config or args.reference or args.candidate:
             raise ValidationError(
                 "--plan cannot be combined with --pair, --adapter-config, "
                 "--reference, or --candidate"
             )
-        plan = validation_plan_from_config(args.plan)
+        plan_input = validation_input_from_file(
+            "validation-plan", args.plan, ROOT
+        )
+        provenance_inputs.append(plan_input)
+        plan = validation_plan_from_config(args.plan, plan_input.content)
         pair_names = list(plan.pairs)
         adapter_config_paths = list(plan.adapter_configs)
     else:
@@ -219,23 +255,19 @@ def main() -> int:
         adapter_config_paths = args.adapter_config
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("comparison pair selected more than once")
+    adapter_inputs = [
+        validation_input_from_file("adapter-config", path, ROOT)
+        for path in adapter_config_paths
+    ]
+    provenance_inputs.extend(adapter_inputs)
     adapters = dict(BACKEND_ADAPTERS)
-    for path in adapter_config_paths:
-        adapter = external_adapter_from_config(path)
+    for path, adapter_input in zip(adapter_config_paths, adapter_inputs):
+        adapter = external_adapter_from_config(path, adapter_input.content)
         if adapter.name in adapters:
             raise ValidationError(
                 f"backend registered more than once: {adapter.name}"
             )
         adapters[adapter.name] = adapter
-    provenance_inputs = []
-    if args.plan is not None:
-        provenance_inputs.append(
-            validation_input_from_file("validation-plan", args.plan, ROOT)
-        )
-    provenance_inputs.extend(
-        validation_input_from_file("adapter-config", path, ROOT)
-        for path in adapter_config_paths
-    )
     requested_backends = {
         backend for pair_name in pair_names for backend in pair_name
     }

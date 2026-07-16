@@ -54,9 +54,11 @@ paths, de-duplicated global findings, and aggregate backend/pair/comparison
 counts.  Automation can start there and open only the detailed pair reports it
 needs.  Its `inputs` array content-addresses the exact canonical `corpus.json`,
 the validation plan when present, and every external adapter config with
-SHA-256.  Paths inside the checkout use stable root-relative names; inputs from
-outside it use only their basename, while the digest remains authoritative.
-The corpus hash is computed from the same canonical bytes written to disk.
+SHA-256.  Paths inside the checkout use stable root-relative names.  Inputs
+outside it use `external/<sha256>/<basename>`, avoiding both machine paths and
+same-basename collisions.  The corpus hash is computed from the same canonical
+bytes written to disk.  Plan and adapter JSON are read once: those exact parsed
+bytes are hashed and retained, closing a parse/provenance race.
 Compiler-produced files are kept separately in the matrix's `products` array,
 so configuration inputs and executable semantic products cannot be confused.
 The matrix also derives two full SHA-256 identities from compact canonical JSON.
@@ -66,6 +68,32 @@ order, every input digest, and every sorted backend product.  Observations and
 findings are deliberately excluded, so repeated executions of the same
 evidence contract share an identity even when they expose nondeterminism or a
 regression.
+
+Every input, backend product, and pair comparison is copied into an append-only
+content-addressed location beneath `evidence/inputs`, `evidence/products`, or
+`evidence/comparisons`.  Matrix entries carry the canonical report-relative
+artifact path and raw-byte SHA-256.  Existing blobs are reused only when their
+bytes agree; symlinks, non-regular files, and digest collisions fail closed.
+The mutable original config, product, or comparison path is therefore not
+needed to verify the completed report.
+
+Verification is read-only and does not execute any backend:
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --verify-matrix _build/validation/matrix.json
+```
+
+`make validate` performs this verification immediately after the normal
+native–LCNF matrix run.
+
+The verifier strictly checks schema, names and paths, retained input/product/
+comparison bytes, ordering and uniqueness, summary counts, and both identities.
+Findings or unequal comparisons are valid evidence and do not make structural
+verification fail.  `--verify-matrix` is exclusive with run options.  This
+stage verifies the comparison reports referenced by the matrix; retaining and
+inventorying every diagnostic log and per-case result is a later evidence-
+bundle layer.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
