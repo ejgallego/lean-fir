@@ -26,10 +26,6 @@ MANIFEST_FIELDS = {
     "tags",
     "fuel",
     "provenance",
-    "requiredLcnfForms",
-    "requiredExecutedLcnfForms",
-    "requiredExternals",
-    "requiredExecutedExternals",
     "effectProjections",
 }
 EFFECT_PROJECTION_FIELDS = {"external", "operation", "argSchemas", "resultSchema"}
@@ -112,7 +108,7 @@ def records_from_output(output: str, command: list[str]) -> list[dict]:
 
 
 def manifest_from_output(output: str, command: list[str]) -> list[dict]:
-    """Parse and canonicalize case descriptors emitted by the native oracle."""
+    """Parse neutral descriptors while preserving backend extension fields."""
     descriptors: list[dict] = []
     for line_number, line in enumerate(output.splitlines(), start=1):
         line = line.strip()
@@ -126,7 +122,11 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
                 f"at line {line_number} from {' '.join(command)}: {line}"
             ) from error
         if not isinstance(value, dict) or not MANIFEST_FIELDS <= value.keys():
-            missing = sorted(MANIFEST_FIELDS - value.keys()) if isinstance(value, dict) else []
+            missing = (
+                sorted(MANIFEST_FIELDS - value.keys())
+                if isinstance(value, dict)
+                else []
+            )
             detail = f"; missing {', '.join(missing)}" if missing else ""
             raise ValidationError(
                 "native oracle emitted a non-manifest JSON object "
@@ -143,10 +143,6 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         tags = value["tags"]
         fuel = value["fuel"]
         provenance = value["provenance"]
-        required_forms = value["requiredLcnfForms"]
-        required_executed_forms = value["requiredExecutedLcnfForms"]
-        required_externals = value["requiredExternals"]
-        required_executed_externals = value["requiredExecutedExternals"]
         effect_projections = value["effectProjections"]
         if version != PROTOCOL_VERSION:
             raise ValidationError(
@@ -180,46 +176,6 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             for field in ("suite", "path", "revision", "note")
         ):
             raise ValidationError(f"native corpus manifest/{case_id}: missing provenance")
-        if not isinstance(required_forms, list) or not all(
-            isinstance(form, str) and form for form in required_forms
-        ):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed requiredLcnfForms"
-            )
-        if len(set(required_forms)) != len(required_forms):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: duplicate requiredLcnfForms"
-            )
-        if not isinstance(required_executed_forms, list) or not all(
-            isinstance(form, str) and form for form in required_executed_forms
-        ):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed requiredExecutedLcnfForms"
-            )
-        if len(set(required_executed_forms)) != len(required_executed_forms):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: duplicate requiredExecutedLcnfForms"
-            )
-        if not isinstance(required_externals, list) or not all(
-            isinstance(name, str) and name for name in required_externals
-        ):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed requiredExternals"
-            )
-        if len(set(required_externals)) != len(required_externals):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: duplicate requiredExternals"
-            )
-        if not isinstance(required_executed_externals, list) or not all(
-            isinstance(name, str) and name for name in required_executed_externals
-        ):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed requiredExecutedExternals"
-            )
-        if len(set(required_executed_externals)) != len(required_executed_externals):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: duplicate requiredExecutedExternals"
-            )
         if not isinstance(effect_projections, list):
             raise ValidationError(
                 f"native corpus manifest/{case_id}: malformed effectProjections"
@@ -248,20 +204,8 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: duplicate effectProjections"
             )
-        if not set(effect_externals) <= (
-            set(required_externals) & set(required_executed_externals)
-        ):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: effect projection externals "
-                "must be required and executed"
-            )
-
         descriptor = dict(value)
         descriptor["tags"] = sorted(tags)
-        descriptor["requiredLcnfForms"] = sorted(required_forms)
-        descriptor["requiredExecutedLcnfForms"] = sorted(required_executed_forms)
-        descriptor["requiredExternals"] = sorted(required_externals)
-        descriptor["requiredExecutedExternals"] = sorted(required_executed_externals)
         descriptor["effectProjections"] = sorted(
             (dict(projection) for projection in effect_projections),
             key=lambda projection: (projection["external"], projection["operation"]),
@@ -566,6 +510,9 @@ class BackendAudit:
 class BackendAdapter(Protocol):
     name: str
 
+    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+        ...
+
     def build(self, context: BuildContext) -> None:
         ...
 
@@ -578,6 +525,9 @@ class BackendAdapter(Protocol):
 
 class NativeAdapter:
     name = "native"
+
+    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+        return descriptors
 
     def build(self, context: BuildContext) -> None:
         if context.no_build:
@@ -636,6 +586,9 @@ class ExternalCommandAdapter:
     result_domain: str
     build_command: list[str] = field(default_factory=list)
     timeout_seconds: int = 120
+
+    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+        return descriptors
 
     def environment(self, out_dir: Path) -> dict[str, str]:
         return {

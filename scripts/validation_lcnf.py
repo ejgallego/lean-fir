@@ -22,6 +22,63 @@ from validation_harness import (
 )
 
 
+LCNF_MANIFEST_FIELDS = {
+    "requiredLcnfForms",
+    "requiredExecutedLcnfForms",
+    "requiredExternals",
+    "requiredExecutedExternals",
+}
+
+
+def prepare_manifest(descriptors: list[dict]) -> list[dict]:
+    """Validate and canonicalize the LCNF-owned manifest extension."""
+    prepared: list[dict] = []
+    for descriptor in descriptors:
+        case_id = descriptor["id"]
+        missing = sorted(LCNF_MANIFEST_FIELDS - descriptor.keys())
+        if missing:
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: missing {', '.join(missing)}"
+            )
+
+        def checked_names(field_name: str) -> list[str]:
+            values = descriptor[field_name]
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) and value for value in values
+            ):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed {field_name}"
+                )
+            if len(set(values)) != len(values):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: duplicate {field_name}"
+                )
+            return sorted(values)
+
+        required_forms = checked_names("requiredLcnfForms")
+        required_executed_forms = checked_names("requiredExecutedLcnfForms")
+        required_externals = checked_names("requiredExternals")
+        required_executed_externals = checked_names("requiredExecutedExternals")
+        effect_externals = {
+            projection["external"] for projection in descriptor["effectProjections"]
+        }
+        if not effect_externals <= (
+            set(required_externals) & set(required_executed_externals)
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: effect projection externals "
+                "must be required and executed"
+            )
+
+        item = dict(descriptor)
+        item["requiredLcnfForms"] = required_forms
+        item["requiredExecutedLcnfForms"] = required_executed_forms
+        item["requiredExternals"] = required_externals
+        item["requiredExecutedExternals"] = required_executed_externals
+        prepared.append(item)
+    return prepared
+
+
 def diagnostics(record: dict) -> dict[str, str]:
     result: dict[str, str] = {}
     items = record.get("diagnostics", [])
@@ -316,6 +373,9 @@ def write_coverage_artifact(out_dir: Path, report: dict) -> None:
 
 class LcnfAdapter:
     name = "lcnf"
+
+    def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+        return prepare_manifest(descriptors)
 
     def build(self, context: BuildContext) -> None:
         if context.no_build:

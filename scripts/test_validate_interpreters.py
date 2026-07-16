@@ -117,6 +117,31 @@ class HarnessTests(unittest.TestCase):
         self.assertIs(harness.LcnfAdapter, lcnf.LcnfAdapter)
         self.assertIs(harness.coverage_report, lcnf.coverage_report)
 
+    def test_generic_manifest_preserves_but_does_not_require_lcnf_extension(self) -> None:
+        item = descriptor(
+            "case",
+            effect_projections=[
+                {
+                    "external": "Effect.record",
+                    "operation": "validation.record",
+                    "argSchemas": ["nat"],
+                    "resultSchema": "nat",
+                }
+            ],
+        )
+        for field in lcnf.LCNF_MANIFEST_FIELDS:
+            del item[field]
+        item["futureBackendPolicy"] = {"engine": "v8"}
+        parsed = core.manifest_from_output(
+            json.dumps(item), ["native", "--manifest"]
+        )
+        self.assertEqual(parsed[0]["futureBackendPolicy"], {"engine": "v8"})
+        self.assertEqual(parsed[0]["effectProjections"], item["effectProjections"])
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredExecutedExternals"
+        ):
+            lcnf.prepare_manifest(parsed)
+
     def test_equal_successes(self) -> None:
         equal, _, _ = harness.compare_success(success("case", "native"), success("case", "lcnf"))
         self.assertTrue(equal)

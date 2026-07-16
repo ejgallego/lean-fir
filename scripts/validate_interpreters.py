@@ -22,9 +22,9 @@ from validation_harness import (
     checked_record,
     compare_backend_results,
     compare_success,
-    corpus_manifest,
+    corpus_manifest as parse_corpus_manifest,
     external_adapter_from_config,
-    manifest_from_output,
+    manifest_from_output as parse_manifest_from_output,
     records_from_output,
     result_domain_findings,
     result_map,
@@ -38,6 +38,7 @@ from validation_lcnf import (
     LcnfAdapter,
     coverage_report,
     diagnostics,
+    prepare_manifest as prepare_lcnf_manifest,
     write_coverage_artifact,
 )
 
@@ -46,6 +47,11 @@ BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
     "native": NativeAdapter(),
     "lcnf": LcnfAdapter(),
 }
+
+
+def manifest_from_output(output: str, command: list[str]) -> list[dict]:
+    """Parse the current FIR corpus including its LCNF-owned extension."""
+    return prepare_lcnf_manifest(parse_manifest_from_output(output, command))
 
 
 def main() -> int:
@@ -108,7 +114,9 @@ def main() -> int:
     for adapter in adapters_to_build.values():
         adapter.build(build_context)
 
-    descriptors = corpus_manifest()
+    descriptors = parse_corpus_manifest()
+    for adapter in (reference, candidate):
+        descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
     context = RunContext(ROOT, args.out_dir, descriptors, selected)

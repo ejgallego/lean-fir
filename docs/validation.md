@@ -51,6 +51,16 @@ The implementation preserves that boundary at the module level:
 The generic module never imports the LCNF module.  A V8 or Talos integration can
 therefore reuse it without loading LCNF coverage assumptions.
 
+Manifest validation follows the same direction.  The generic parser owns the
+neutral execution fields and effect-projection shape, canonicalizes them, and
+preserves unknown extension keys.  Before selection and artifact writing, each
+participating adapter gets one `prepare_manifest` pass.  The LCNF adapter alone
+requires and canonicalizes `requiredLcnfForms`, `requiredExecutedLcnfForms`,
+`requiredExternals`, and `requiredExecutedExternals`, including the invariant
+that every projected effect external is both present and executed.  Thus a
+`native`–`v8` or `v8`–`talos` run does not acquire LCNF obligations merely
+because the current native corpus happens to emit them.
+
 An adapter can also be registered without changing the harness.  The config is
 JSON, and commands are argv arrays executed directly rather than shell text:
 
