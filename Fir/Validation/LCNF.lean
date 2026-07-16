@@ -21,6 +21,9 @@ structure Artifact where
 private def pushUnique (forms : Array String) (form : String) : Array String :=
   if forms.contains form then forms else forms.push form
 
+private def pushUniqueName (names : Array Name) (name : Name) : Array Name :=
+  if names.contains name then names else names.push name
+
 private def addForms (forms : Array String) (more : Array String) : Array String :=
   more.foldl (init := forms) pushUnique
 
@@ -82,51 +85,69 @@ def collectForms (program : ImpureProgram) : Array String :=
 def Artifact.missingForms (artifact : Artifact) (required : Array String) : Array String :=
   required.filter (!artifact.forms.contains ·)
 
+def Artifact.missingExternals (artifact : Artifact) (required : Array Name) : Array Name :=
+  required.filter (!artifact.externalNames.contains ·)
+
+private def externalRequest? (state : MachineState) : Option ExternalRequest :=
+  match state.control with
+  | .invokeName .. | .invokeValue .. =>
+      match coreStep state with
+      | .external request _ => some request
+      | _ => none
+  | _ => none
+
 private def executedForm? (state : MachineState) : Option String :=
   match state.control with
   | .code code => some (codeHeadForm code)
   | .yielded .. => none
   | .invokeName .. | .invokeValue .. =>
-      match coreStep state with
-      | .external .. => some "extern"
-      | _ => none
+      if (externalRequest? state).isSome then some "extern" else none
 
 private structure InstrumentedRun where
   result : RunResult
   executedForms : Array String
+  executedExternals : Array Name
   steps : Nat
 
 /-- Validation-only telemetry layered over the canonical interpreter transition function. -/
 private def runInstrumentedGo (externals : ExternalImpl) :
-    Nat → MachineState → Array String → Nat → InstrumentedRun
-  | 0, state, forms, steps => { result := .outOfFuel state, executedForms := forms, steps }
-  | fuel + 1, state, forms, steps =>
+    Nat → MachineState → Array String → Array Name → Nat → InstrumentedRun
+  | 0, state, forms, externalNames, steps =>
+      { result := .outOfFuel state, executedForms := forms,
+        executedExternals := externalNames, steps }
+  | fuel + 1, state, forms, externalNames, steps =>
       let forms := match executedForm? state with
         | some form => pushUnique forms form
         | none => forms
+      let externalNames := match externalRequest? state with
+        | some request => pushUniqueName externalNames request.name
+        | none => externalNames
       match executeStep externals state with
-      | .done observation => { result := .done observation, executedForms := forms, steps := steps + 1 }
-      | .next state => runInstrumentedGo externals fuel state forms (steps + 1)
+      | .done observation =>
+          { result := .done observation, executedForms := forms,
+            executedExternals := externalNames, steps := steps + 1 }
+      | .next state => runInstrumentedGo externals fuel state forms externalNames (steps + 1)
 
 private def runInstrumented (fuel : Nat) (externals : ExternalImpl) (state : MachineState) :
     InstrumentedRun :=
-  runInstrumentedGo externals fuel state #[] 0
+  runInstrumentedGo externals fuel state #[] #[] 0
 
 private theorem runInstrumentedGo_result (externals : ExternalImpl) :
-    ∀ fuel state forms steps,
-      (runInstrumentedGo externals fuel state forms steps).result = run fuel externals state
-  | 0, state, forms, steps => by simp [runInstrumentedGo, run]
-  | fuel + 1, state, forms, steps => by
+    ∀ fuel state forms externalNames steps,
+      (runInstrumentedGo externals fuel state forms externalNames steps).result =
+        run fuel externals state
+  | 0, state, forms, externalNames, steps => by simp [runInstrumentedGo, run]
+  | fuel + 1, state, forms, externalNames, steps => by
       simp only [runInstrumentedGo, run]
       split <;> rename_i transition
       · simp [transition]
       · simpa [transition] using
-          runInstrumentedGo_result externals fuel _ _ (steps + 1)
+          runInstrumentedGo_result externals fuel _ _ _ (steps + 1)
 
 private theorem runInstrumented_result (fuel : Nat) (externals : ExternalImpl)
     (state : MachineState) :
     (runInstrumented fuel externals state).result = run fuel externals state := by
-  exact runInstrumentedGo_result externals fuel state #[] 0
+  exact runInstrumentedGo_result externals fuel state #[] #[] 0
 
 private def runProgramInstrumented (fuel : Nat) (externals : ExternalImpl)
     (program : ImpureProgram) (entry : Name) (args : Array Value)
@@ -365,7 +386,10 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
     { key := "externals", value := String.intercalate "," (artifact.externalNames.toList.map toString) },
     { key := "lcnf-forms", value := String.intercalate "," artifact.forms.toList },
     { key := "missing-lcnf-forms",
-      value := String.intercalate "," (artifact.missingForms case.requiredLcnfForms).toList }]
+      value := String.intercalate "," (artifact.missingForms case.requiredLcnfForms).toList },
+    { key := "missing-externals",
+      value := String.intercalate ","
+        ((artifact.missingExternals case.requiredExternals).toList.map toString) }]
   match encodeArgs case.argSchemas case.args with
   | .error message =>
       { caseId := case.id, backend := "lcnf", outcome := .failure message,
@@ -375,11 +399,17 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
         runProgramInstrumented case.fuel validationExternals artifact.program case.entry args runtime
       let missingExecuted := case.requiredExecutedLcnfForms.filter
         (!execution.executedForms.contains ·)
+      let missingExecutedExternals := case.requiredExecutedExternals.filter
+        (!execution.executedExternals.contains ·)
       let diagnostics := staticDiagnostics ++ #[
         { key := "executed-lcnf-forms",
           value := String.intercalate "," execution.executedForms.toList },
         { key := "missing-executed-lcnf-forms",
           value := String.intercalate "," missingExecuted.toList },
+        { key := "executed-externals",
+          value := String.intercalate "," (execution.executedExternals.toList.map toString) },
+        { key := "missing-executed-externals",
+          value := String.intercalate "," (missingExecutedExternals.toList.map toString) },
         { key := "interpreter-steps", value := toString execution.steps }]
       match execution.result with
       | .outOfFuel _ =>

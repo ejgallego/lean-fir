@@ -26,6 +26,8 @@ MANIFEST_FIELDS = {
     "provenance",
     "requiredLcnfForms",
     "requiredExecutedLcnfForms",
+    "requiredExternals",
+    "requiredExecutedExternals",
 }
 
 
@@ -109,6 +111,8 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         provenance = value["provenance"]
         required_forms = value["requiredLcnfForms"]
         required_executed_forms = value["requiredExecutedLcnfForms"]
+        required_externals = value["requiredExternals"]
+        required_executed_externals = value["requiredExecutedExternals"]
         if version != PROTOCOL_VERSION:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: protocol version {version} "
@@ -161,11 +165,33 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: duplicate requiredExecutedLcnfForms"
             )
+        if not isinstance(required_externals, list) or not all(
+            isinstance(name, str) and name for name in required_externals
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed requiredExternals"
+            )
+        if len(set(required_externals)) != len(required_externals):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: duplicate requiredExternals"
+            )
+        if not isinstance(required_executed_externals, list) or not all(
+            isinstance(name, str) and name for name in required_executed_externals
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed requiredExecutedExternals"
+            )
+        if len(set(required_executed_externals)) != len(required_executed_externals):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: duplicate requiredExecutedExternals"
+            )
 
         descriptor = dict(value)
         descriptor["tags"] = sorted(tags)
         descriptor["requiredLcnfForms"] = sorted(required_forms)
         descriptor["requiredExecutedLcnfForms"] = sorted(required_executed_forms)
+        descriptor["requiredExternals"] = sorted(required_externals)
+        descriptor["requiredExecutedExternals"] = sorted(required_executed_externals)
         descriptors.append(descriptor)
 
     if not descriptors:
@@ -300,12 +326,15 @@ def positive_int_diagnostic(record: dict | None, key: str) -> tuple[bool, int | 
 def coverage_report(
     descriptors: list[dict], results: dict[str, dict], selected: list[str]
 ) -> tuple[dict, list[str]]:
-    """Build deterministic static and executed LCNF coverage.
+    """Build deterministic static and executed LCNF and external coverage.
 
     `lcnf-forms` describes the forms in the compiled artifact;
     `executed-lcnf-forms` describes the forms reached by the interpreter.
-    Execution telemetry is required for every result, while path obligations
-    are active only when `requiredExecutedLcnfForms` is nonempty.
+    `externals` and `executed-externals` make the analogous distinction for
+    runtime primitives.  The backend's `missing-*` diagnostics are checked
+    against the independently computed missing sets.  Execution telemetry is
+    required for every result, while path obligations are active only when
+    the corresponding executed requirement list is nonempty.
     """
     descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
     cases: list[dict] = []
@@ -318,6 +347,18 @@ def coverage_report(
     executed_missing_count = 0
     executed_diagnostic_count = 0
     executed_requirement_count = 0
+    static_external_required: set[str] = set()
+    static_external_observed: set[str] = set()
+    executed_external_required: set[str] = set()
+    executed_external_observed: set[str] = set()
+    static_external_missing_count = 0
+    executed_external_missing_count = 0
+    static_external_diagnostic_count = 0
+    executed_external_diagnostic_count = 0
+    static_external_missing_diagnostic_count = 0
+    executed_external_missing_diagnostic_count = 0
+    static_external_requirement_count = 0
+    executed_external_requirement_count = 0
     interpreter_steps: list[int] = []
 
     for case_id in sorted(selected):
@@ -328,11 +369,33 @@ def coverage_report(
             record, "executed-lcnf-forms"
         )
         steps_present, steps = positive_int_diagnostic(record, "interpreter-steps")
+        static_external_present, observed_static_externals = diagnostic_forms(
+            record, "externals"
+        )
+        static_external_missing_present, reported_missing_static_externals = (
+            diagnostic_forms(record, "missing-externals")
+        )
+        executed_external_present, observed_executed_externals = diagnostic_forms(
+            record, "executed-externals"
+        )
+        executed_external_missing_present, reported_missing_executed_externals = (
+            diagnostic_forms(record, "missing-executed-externals")
+        )
         required_static = descriptor["requiredLcnfForms"]
         required_executed = descriptor["requiredExecutedLcnfForms"]
+        required_static_externals = descriptor["requiredExternals"]
+        required_executed_externals = descriptor["requiredExecutedExternals"]
         executed_obligations_active = bool(required_executed)
+        static_external_obligations_active = bool(required_static_externals)
+        executed_external_obligations_active = bool(required_executed_externals)
         missing_static = sorted(set(required_static) - set(observed_static))
         missing_executed = sorted(set(required_executed) - set(observed_executed))
+        missing_static_externals = sorted(
+            set(required_static_externals) - set(observed_static_externals)
+        )
+        missing_executed_externals = sorted(
+            set(required_executed_externals) - set(observed_executed_externals)
+        )
 
         static_required.update(required_static)
         static_observed.update(observed_static)
@@ -342,6 +405,24 @@ def coverage_report(
         executed_missing_count += len(missing_executed)
         executed_diagnostic_count += int(executed_present)
         executed_requirement_count += int(executed_obligations_active)
+        static_external_required.update(required_static_externals)
+        static_external_observed.update(observed_static_externals)
+        executed_external_required.update(required_executed_externals)
+        executed_external_observed.update(observed_executed_externals)
+        static_external_missing_count += len(missing_static_externals)
+        executed_external_missing_count += len(missing_executed_externals)
+        static_external_diagnostic_count += int(static_external_present)
+        executed_external_diagnostic_count += int(executed_external_present)
+        static_external_missing_diagnostic_count += int(
+            static_external_missing_present
+        )
+        executed_external_missing_diagnostic_count += int(
+            executed_external_missing_present
+        )
+        static_external_requirement_count += int(static_external_obligations_active)
+        executed_external_requirement_count += int(
+            executed_external_obligations_active
+        )
         if steps is not None:
             interpreter_steps.append(steps)
 
@@ -355,12 +436,42 @@ def coverage_report(
                 f"{case_id}: missing required executed LCNF forms: "
                 f"{','.join(missing_executed)}"
             )
+        if missing_static_externals:
+            failures.append(
+                f"{case_id}: missing required static externals: "
+                f"{','.join(missing_static_externals)}"
+            )
+        if missing_executed_externals:
+            failures.append(
+                f"{case_id}: missing required executed externals: "
+                f"{','.join(missing_executed_externals)}"
+            )
         if record is not None and not executed_present:
             failures.append(f"{case_id}: missing executed-lcnf-forms diagnostic")
         if record is not None and not steps_present:
             failures.append(f"{case_id}: missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
             failures.append(f"{case_id}: interpreter-steps must be a positive integer")
+        if record is not None and not static_external_present:
+            failures.append(f"{case_id}: missing externals diagnostic")
+        if record is not None and not static_external_missing_present:
+            failures.append(f"{case_id}: missing missing-externals diagnostic")
+        elif reported_missing_static_externals != missing_static_externals:
+            failures.append(
+                f"{case_id}: missing-externals diagnostic disagrees with obligations "
+                f"(reported={','.join(reported_missing_static_externals)}; "
+                f"computed={','.join(missing_static_externals)})"
+            )
+        if record is not None and not executed_external_present:
+            failures.append(f"{case_id}: missing executed-externals diagnostic")
+        if record is not None and not executed_external_missing_present:
+            failures.append(f"{case_id}: missing missing-executed-externals diagnostic")
+        elif reported_missing_executed_externals != missing_executed_externals:
+            failures.append(
+                f"{case_id}: missing-executed-externals diagnostic disagrees with "
+                f"obligations (reported={','.join(reported_missing_executed_externals)}; "
+                f"computed={','.join(missing_executed_externals)})"
+            )
 
         cases.append(
             {
@@ -378,6 +489,26 @@ def coverage_report(
                     "observedForms": observed_executed,
                     "missingRequiredForms": missing_executed,
                     "interpreterSteps": steps,
+                },
+                "externals": {
+                    "static": {
+                        "diagnosticPresent": static_external_present,
+                        "missingDiagnosticPresent": static_external_missing_present,
+                        "obligationsActive": static_external_obligations_active,
+                        "requiredNames": required_static_externals,
+                        "observedNames": observed_static_externals,
+                        "missingRequiredNames": missing_static_externals,
+                        "reportedMissingNames": reported_missing_static_externals,
+                    },
+                    "executed": {
+                        "diagnosticPresent": executed_external_present,
+                        "missingDiagnosticPresent": executed_external_missing_present,
+                        "obligationsActive": executed_external_obligations_active,
+                        "requiredNames": required_executed_externals,
+                        "observedNames": observed_executed_externals,
+                        "missingRequiredNames": missing_executed_externals,
+                        "reportedMissingNames": reported_missing_executed_externals,
+                    },
                 },
             }
         )
@@ -401,6 +532,28 @@ def coverage_report(
                 "totalInterpreterSteps": sum(interpreter_steps),
                 "minimumInterpreterSteps": min(interpreter_steps, default=None),
                 "maximumInterpreterSteps": max(interpreter_steps, default=None),
+            },
+            "externals": {
+                "static": {
+                    "casesWithRequirements": static_external_requirement_count,
+                    "casesWithDiagnostics": static_external_diagnostic_count,
+                    "casesWithMissingDiagnostics": (
+                        static_external_missing_diagnostic_count
+                    ),
+                    "requiredNames": sorted(static_external_required),
+                    "observedNames": sorted(static_external_observed),
+                    "missingObligationCount": static_external_missing_count,
+                },
+                "executed": {
+                    "casesWithRequirements": executed_external_requirement_count,
+                    "casesWithDiagnostics": executed_external_diagnostic_count,
+                    "casesWithMissingDiagnostics": (
+                        executed_external_missing_diagnostic_count
+                    ),
+                    "requiredNames": sorted(executed_external_required),
+                    "observedNames": sorted(executed_external_observed),
+                    "missingObligationCount": executed_external_missing_count,
+                },
             },
         },
         "cases": cases,

@@ -28,9 +28,11 @@ python3 scripts/validate_interpreters.py --tag quick
 
 `Fir.Validation.Corpus` defines each case once.  A case names its source entry,
 additional source helpers that must be compiled into the same impure program,
-typed arguments and result schema, native invocation, fuel, tags, and the LCNF
-forms it intends to exercise.  Required-form checks prevent optimization or
-compiler drift from silently turning a targeted case into a weaker test.
+typed arguments and result schema, native invocation, fuel, tags, the LCNF
+forms it intends to exercise, and the external names that must be present or
+called.  Required-form and required-external checks prevent optimization,
+dependency-closure, or compiler drift from silently turning a targeted case
+into a weaker test.
 
 Backends exchange versioned JSONL records from `Fir.Validation.Protocol`.
 The semantic observation contains termination, stdout, stderr, and controlled
@@ -53,10 +55,14 @@ depend on a second ad-hoc listing command.  The harness validates and
 canonicalizes those descriptors into `_build/validation/corpus.json`, ordered
 by case ID with deterministic tag and required-form lists.  Each successful
 comparison embeds the corresponding descriptor, so entry name, provenance,
-arguments, schemas, fuel, tags, and intended LCNF coverage remain attached to
-later differential runs.  This manifest is the backend-neutral input boundary
-for future adapters, including a real Wasm engine once the compiler track can
-provide modules; adapters do not need to import FIR's Lean corpus definitions.
+arguments, schemas, fuel, tags, and intended LCNF/external coverage remain
+attached to later differential runs.  `requiredExternals` records names that
+must occur in the compiled artifact; `requiredExecutedExternals` records the
+stronger path obligation that the interpreter must actually dispatch them.
+Both fields are required, even when empty, and are canonicalized as sorted
+sets.  This manifest is the backend-neutral input boundary for future adapters,
+including a real Wasm engine once the compiler track can provide modules;
+adapters do not need to import FIR's Lean corpus definitions.
 
 `_build/validation/coverage.json` is the deterministic aggregate coverage
 report for the selected cases.  It keeps two kinds of evidence separate:
@@ -66,15 +72,31 @@ report for the selected cases.  It keeps two kinds of evidence separate:
 - **executed coverage** is the set of forms the interpreter actually reached
   (`executed-lcnf-forms`), checked against `requiredExecutedLcnfForms`.
 
-The report records per-case required, observed, and missing sets as well as
-their corpus-wide unions and interpreter step counts.  Every LCNF result must
-emit `executed-lcnf-forms` and a positive `interpreter-steps` value, including
-cases whose executed requirement list is empty.  An empty list means “collect
-telemetry without a path-specific obligation”; it does not make the telemetry
-optional.  Once a case lists an executed form, failing to reach it fails
-validation just like a missing static form.  This distinction prevents a form
-merely present in an unvisited branch from satisfying an execution-coverage
-claim.
+The same static/executed split applies to external identity, independently of
+the generic `extern` instruction form:
+
+- `externals` is the set of imported external names retained in the compiled
+  artifact, checked against `requiredExternals`;
+- `executed-externals` is the set of external names actually dispatched,
+  checked against `requiredExecutedExternals`.
+
+The LCNF backend also emits `missing-externals` and
+`missing-executed-externals`.  The harness computes both missing sets itself,
+requires all four diagnostics for every result, and rejects disagreement with
+the backend.  Empty requirements therefore still collect explicit telemetry;
+they do not make diagnostics optional.  This catches a fixture that still
+contains some `extern` instruction but no longer retains or reaches the runtime
+primitive it was meant to validate.
+
+The report records per-case required, observed, and missing form and external
+sets as well as their corpus-wide unions and interpreter step counts.  Every
+LCNF result must emit `executed-lcnf-forms` and a positive `interpreter-steps`
+value, including cases whose executed requirement list is empty.  An empty
+list means “collect telemetry without a path-specific obligation”; it does not
+make the telemetry optional.  Once a case lists an executed form or external,
+failing to reach it fails validation just like a missing static obligation.
+This distinction prevents code merely present in an unvisited branch from
+satisfying an execution-coverage claim.
 
 ## Current corpus
 
@@ -111,7 +133,8 @@ decodes tagged or heap operands, computes with Lean `Nat`, and re-encodes
 through the same tagged/heap boundary as the interpreter.  Byte-array size
 reads the packed heap object and returns a tagged natural.  `extern` must be
 present both statically and in executed-form coverage for every runtime
-primitive fixture.
+primitive fixture, while the matching name must independently satisfy both
+external-name obligations.
 
 ## Deferred WebAssembly integration
 

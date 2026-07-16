@@ -33,6 +33,8 @@ def descriptor(
     tags: list[str] | None = None,
     forms: list[str] | None = None,
     executed_forms: list[str] | None = None,
+    externals: list[str] | None = None,
+    executed_externals: list[str] | None = None,
 ) -> dict:
     item = {
         "version": 1,
@@ -52,6 +54,8 @@ def descriptor(
         },
         "requiredLcnfForms": forms or ["return"],
         "requiredExecutedLcnfForms": executed_forms or [],
+        "requiredExternals": externals or [],
+        "requiredExecutedExternals": executed_externals or [],
     }
     return item
 
@@ -62,6 +66,10 @@ def with_form_diagnostics(
     static: str | None = None,
     executed: str | None = None,
     steps: str | None = "1",
+    static_externals: str | None = "",
+    missing_static_externals: str | None = "",
+    executed_externals: str | None = "",
+    missing_executed_externals: str | None = "",
 ) -> dict:
     diagnostics = []
     if static is not None:
@@ -70,6 +78,21 @@ def with_form_diagnostics(
         diagnostics.append({"key": "executed-lcnf-forms", "value": executed})
     if steps is not None:
         diagnostics.append({"key": "interpreter-steps", "value": steps})
+    if static_externals is not None:
+        diagnostics.append({"key": "externals", "value": static_externals})
+    if missing_static_externals is not None:
+        diagnostics.append(
+            {"key": "missing-externals", "value": missing_static_externals}
+        )
+    if executed_externals is not None:
+        diagnostics.append({"key": "executed-externals", "value": executed_externals})
+    if missing_executed_externals is not None:
+        diagnostics.append(
+            {
+                "key": "missing-executed-externals",
+                "value": missing_executed_externals,
+            }
+        )
     record["diagnostics"] = diagnostics
     return record
 
@@ -112,6 +135,8 @@ class HarnessTests(unittest.TestCase):
             tags=["slow", "quick"],
             forms=["return", "inc"],
             executed_forms=["return", "fap"],
+            externals=["Nat.add", "ByteArray.size"],
+            executed_externals=["Nat.add"],
         )
         first = descriptor("a-case")
         output = "compiler noise\n" + json.dumps(second) + "\n" + json.dumps(first) + "\n"
@@ -122,6 +147,10 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(
             manifest[1]["requiredExecutedLcnfForms"], ["fap", "return"]
         )
+        self.assertEqual(
+            manifest[1]["requiredExternals"], ["ByteArray.size", "Nat.add"]
+        )
+        self.assertEqual(manifest[1]["requiredExecutedExternals"], ["Nat.add"])
 
     def test_executed_manifest_obligations_are_required_and_validated(self) -> None:
         malformed = descriptor("case")
@@ -148,6 +177,36 @@ class HarnessTests(unittest.TestCase):
         line = json.dumps(descriptor("case"))
         with self.assertRaisesRegex(harness.ValidationError, "duplicate case IDs"):
             harness.manifest_from_output(f"{line}\n{line}\n", ["native", "--manifest"])
+
+    def test_external_manifest_obligations_are_required_and_validated(self) -> None:
+        for field in ("requiredExternals", "requiredExecutedExternals"):
+            with self.subTest(field=field, problem="missing"):
+                item = descriptor("case")
+                del item[field]
+                with self.assertRaisesRegex(harness.ValidationError, f"missing {field}"):
+                    harness.manifest_from_output(
+                        json.dumps(item), ["native", "--manifest"]
+                    )
+
+            with self.subTest(field=field, problem="malformed"):
+                item = descriptor("case")
+                item[field] = "Nat.add"
+                with self.assertRaisesRegex(
+                    harness.ValidationError, f"malformed {field}"
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(item), ["native", "--manifest"]
+                    )
+
+            with self.subTest(field=field, problem="duplicate"):
+                item = descriptor("case")
+                item[field] = ["Nat.add", "Nat.add"]
+                with self.assertRaisesRegex(
+                    harness.ValidationError, f"duplicate {field}"
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(item), ["native", "--manifest"]
+                    )
 
     def test_malformed_manifest_descriptor_rejected(self) -> None:
         item = descriptor("case")
@@ -321,6 +380,138 @@ class HarnessTests(unittest.TestCase):
             harness.write_coverage_artifact(out_dir, report)
             self.assertEqual(first, (out_dir / "coverage.json").read_bytes())
             self.assertEqual(json.loads(first), report)
+
+    def test_coverage_separates_static_and_executed_externals(self) -> None:
+        manifest = [
+            descriptor(
+                "b-case",
+                externals=["Nat.add"],
+                executed_externals=["Nat.add"],
+            ),
+            descriptor("a-case"),
+        ]
+        results = {
+            "a-case": with_form_diagnostics(
+                success("a-case", "lcnf"),
+                static="return",
+                executed="return",
+                static_externals="ByteArray.size",
+            ),
+            "b-case": with_form_diagnostics(
+                success("b-case", "lcnf"),
+                static="return,extern",
+                executed="return,extern",
+                static_externals="Nat.add,ByteArray.size,Nat.add",
+                executed_externals="Nat.add",
+            ),
+        }
+        report, failures = harness.coverage_report(
+            manifest, results, ["b-case", "a-case"]
+        )
+        self.assertEqual(failures, [])
+        self.assertEqual([case["caseId"] for case in report["cases"]], ["a-case", "b-case"])
+        self.assertEqual(
+            report["summary"]["externals"],
+            {
+                "static": {
+                    "casesWithRequirements": 1,
+                    "casesWithDiagnostics": 2,
+                    "casesWithMissingDiagnostics": 2,
+                    "requiredNames": ["Nat.add"],
+                    "observedNames": ["ByteArray.size", "Nat.add"],
+                    "missingObligationCount": 0,
+                },
+                "executed": {
+                    "casesWithRequirements": 1,
+                    "casesWithDiagnostics": 2,
+                    "casesWithMissingDiagnostics": 2,
+                    "requiredNames": ["Nat.add"],
+                    "observedNames": ["Nat.add"],
+                    "missingObligationCount": 0,
+                },
+            },
+        )
+        external = report["cases"][1]["externals"]
+        self.assertEqual(
+            external["static"]["observedNames"], ["ByteArray.size", "Nat.add"]
+        )
+        self.assertTrue(external["executed"]["obligationsActive"])
+
+    def test_external_obligations_and_backend_missing_diagnostics_are_enforced(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                externals=["ByteArray.size", "Nat.add"],
+                executed_externals=["Nat.add"],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return,extern",
+                executed="return",
+                static_externals="ByteArray.size",
+                missing_static_externals="Nat.add",
+                executed_externals="",
+                missing_executed_externals="Nat.add",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            failures,
+            [
+                "case: missing required static externals: Nat.add",
+                "case: missing required executed externals: Nat.add",
+            ],
+        )
+        self.assertEqual(
+            report["cases"][0]["externals"]["static"]["reportedMissingNames"],
+            ["Nat.add"],
+        )
+
+        results["case"] = with_form_diagnostics(
+            success("case", "lcnf"),
+            static="return,extern",
+            executed="return,extern",
+            static_externals="ByteArray.size,Nat.add",
+            missing_static_externals="Ghost.external",
+            executed_externals="Nat.add",
+        )
+        _, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            failures,
+            [
+                "case: missing-externals diagnostic disagrees with obligations "
+                "(reported=Ghost.external; computed=)"
+            ],
+        )
+
+    def test_external_telemetry_is_required_without_obligations(self) -> None:
+        manifest = [descriptor("case")]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                static_externals=None,
+                missing_static_externals=None,
+                executed_externals=None,
+                missing_executed_externals=None,
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            failures,
+            [
+                "case: missing externals diagnostic",
+                "case: missing missing-externals diagnostic",
+                "case: missing executed-externals diagnostic",
+                "case: missing missing-executed-externals diagnostic",
+            ],
+        )
+        self.assertFalse(
+            report["cases"][0]["externals"]["executed"]["obligationsActive"]
+        )
 
     def test_malformed_and_duplicate_diagnostics_are_rejected(self) -> None:
         malformed = success("case", "lcnf")

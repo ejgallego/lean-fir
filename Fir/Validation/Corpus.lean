@@ -265,6 +265,10 @@ structure Case where
   requiredLcnfForms : Array String := #[]
   /-- Forms that this fixture must actually step through, not merely retain in the artifact. -/
   requiredExecutedLcnfForms : Array String := #[]
+  /-- Imported declarations that must remain in the compiled dependency closure. -/
+  requiredExternals : Array Lean.Name := #[]
+  /-- Imported declarations that this fixture must actually call. -/
+  requiredExecutedExternals : Array Lean.Name := #[]
   provenance : Provenance := firProvenance "FIR validation fixture"
 
 /-- Closure-free case metadata consumed by runners and future backend adapters. -/
@@ -280,6 +284,8 @@ structure CaseDescriptor where
   fuel : Nat
   requiredLcnfForms : Array String
   requiredExecutedLcnfForms : Array String
+  requiredExternals : Array String
+  requiredExecutedExternals : Array String
   provenance : Provenance
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -294,6 +300,8 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   fuel := validationCase.fuel
   requiredLcnfForms := validationCase.requiredLcnfForms
   requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
+  requiredExternals := validationCase.requiredExternals.map toString
+  requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
   provenance := validationCase.provenance }
 
 private def natListDatum (xs : List Nat) : ValidationDatum :=
@@ -588,6 +596,8 @@ def cases : Array Case := #[
     tags := #["quick", "external", "pure", "nat", "arithmetic"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
     provenance := firProvenance "Controlled Nat.add external on tagged operands" },
   { id := "nat-add-tagged-to-heap"
     entry := ``Source.addNat
@@ -598,6 +608,8 @@ def cases : Array Case := #[
     tags := #["stress", "external", "pure", "nat", "arithmetic", "boundary", "heap"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
     provenance := firProvenance "Nat.add crossing the tagged-to-heap result boundary" },
   { id := "nat-add-heap-input"
     entry := ``Source.addNat
@@ -608,6 +620,8 @@ def cases : Array Case := #[
     tags := #["stress", "external", "pure", "nat", "arithmetic", "heap"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
   { id := "byte-array-roundtrip"
     entry := ``Source.idByteArray
@@ -629,6 +643,8 @@ def cases : Array Case := #[
     tags := #["quick", "bytes", "packed-layout", "external", "pure", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.size]
+    requiredExecutedExternals := #[``ByteArray.size]
     provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" }
 ]
 
