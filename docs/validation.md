@@ -96,7 +96,10 @@ list means “collect telemetry without a path-specific obligation”; it does n
 make the telemetry optional.  Once a case lists an executed form or external,
 failing to reach it fails validation just like a missing static obligation.
 This distinction prevents code merely present in an unvisited branch from
-satisfying an execution-coverage claim.
+satisfying an execution-coverage claim.  The checked corpus currently activates
+at least one executed-form obligation for every case, and the Lean case type
+has no default for that field: a new fixture must explicitly state its intended
+path instead of silently inheriting telemetry-only coverage.
 
 ## Current corpus
 

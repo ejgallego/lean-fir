@@ -289,7 +289,7 @@ structure Case where
   fuel : Nat := 10000
   requiredLcnfForms : Array String := #[]
   /-- Forms that this fixture must actually step through, not merely retain in the artifact. -/
-  requiredExecutedLcnfForms : Array String := #[]
+  requiredExecutedLcnfForms : Array String
   /-- Imported declarations that must remain in the compiled dependency closure. -/
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
@@ -355,7 +355,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat Source.litNat
     tags := #["quick", "literal"]
-    requiredLcnfForms := #["lit", "return"] },
+    requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"] },
   { id := "id-nat"
     entry := ``Source.idNat
     args := #[.nat 42]
@@ -363,7 +364,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.idNat 42)
     tags := #["quick", "borrowed"]
-    requiredLcnfForms := #["inc", "return"] },
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"] },
   { id := "branch-nat"
     entry := ``Source.branchNat
     args := #[.bool true]
@@ -389,7 +391,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.pairFirst (41, 42))
     tags := #["quick", "constructor", "projection"]
-    requiredLcnfForms := #["oproj", "inc", "return"] },
+    requiredLcnfForms := #["oproj", "inc", "return"]
+    requiredExecutedLcnfForms := #["oproj", "inc", "return"] },
   { id := "direct-call"
     entry := ``Source.directCall
     dependencies := #[``Source.directTarget]
@@ -398,7 +401,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.directCall 41)
     tags := #["quick", "call"]
-    requiredLcnfForms := #["fap", "return"] },
+    requiredLcnfForms := #["fap", "return"]
+    requiredExecutedLcnfForms := #["fap", "return"] },
   { id := "captured-partial"
     entry := ``Source.capturedPartial
     dependencies := #[``Source.firstNat, ``Source.applyNat]
@@ -407,7 +411,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.capturedPartial 40 2)
     tags := #["quick", "closure", "partial-application"]
-    requiredLcnfForms := #["pap", "fap", "return"] },
+    requiredLcnfForms := #["pap", "fap", "return"]
+    requiredExecutedLcnfForms := #["pap", "fap", "return"] },
   { id := "recursive-traversal"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -436,13 +441,15 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.localTailControl [10, 20, 42])
     tags := #["quick", "tail-control"]
-    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
+    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
   { id := "large-nat"
     entry := ``Source.largeNat
     resultSchema := .nat
     native := fun _ => .nat Source.largeNat
     tags := #["quick", "literal", "boundary", "heap"]
     requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
     provenance := firProvenance "Natural larger than the tagged immediate range" },
   { id := "nat-list-roundtrip"
     entry := ``Source.idNatList
@@ -452,6 +459,7 @@ def cases : Array Case := #[
     native := fun _ => natListDatum (Source.idNatList [0, Source.largeNat, 42])
     tags := #["quick", "constructor", "boundary", "heap", "roundtrip"]
     requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "Recursive value round-trip containing a heap natural" },
   { id := "unicode-string-roundtrip"
     entry := ``Source.idString
@@ -461,6 +469,7 @@ def cases : Array Case := #[
     native := fun _ => .string (Source.idString "hello α_world_β")
     tags := #["quick", "string", "unicode", "roundtrip"]
     requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
     provenance := leanCompileProvenance "tests/compile/str.lean"
       "Unicode fixture adapted to a pure source-level identity" },
   { id := "uint64-max"
@@ -469,6 +478,7 @@ def cases : Array Case := #[
     native := fun _ => .bits 64 Source.maxUInt64
     tags := #["quick", "scalar", "boundary"]
     requiredLcnfForms := #["lit", "return"]
+    requiredExecutedLcnfForms := #["lit", "return"]
     provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
       "Maximum-width UInt64 literal" },
   { id := "boxed-uint32"
@@ -480,6 +490,7 @@ def cases : Array Case := #[
     native := fun _ => .bits 32 (UInt64.ofNat (Source.boxedUInt32 4294967295).toNat)
     tags := #["quick", "scalar", "boxing", "polymorphism", "boundary"]
     requiredLcnfForms := #["box", "unbox", "fap", "return"]
+    requiredExecutedLcnfForms := #["box", "unbox", "fap", "return"]
     provenance := leanCompileProvenance "tests/compile/typeFormerPolymorphism.lean"
       "Unboxed scalar passed through a noinline polymorphic identity" },
   { id := "packed-preserve"
@@ -516,6 +527,7 @@ def cases : Array Case := #[
     native := fun _ => .usize (UInt64.ofNat (Source.idUSize 42).toNat)
     tags := #["quick", "usize", "roundtrip"]
     requiredLcnfForms := #["return"]
+    requiredExecutedLcnfForms := #["return"]
     provenance := firProvenance "Portable USize fixture below the Wasm32 boundary" },
   { id := "reuse-assoc"
     entry := ``Source.Assoc.reassoc
