@@ -157,11 +157,29 @@ private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) 
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def byteArraySizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let .object (.heap location) := value
+    | throw (.externalFailure request.name "expected a byte array")
+  let cell ← getLiveCell runtime location
+  let .byteArray value := cell.object
+    | throw (.externalFailure request.name "expected a byte array")
+  let (runtime, value) := literal runtime (.nat value.size)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
     if request.name == ``Nat.add then
       natAddExternal request runtime
+    else if request.name == ``ByteArray.size then
+      byteArraySizeExternal request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 

@@ -225,6 +225,10 @@ def addNat (left right : Nat) : Nat :=
 def idByteArray (value : ByteArray) : ByteArray :=
   value
 
+@[noinline]
+def byteArraySize (value : ByteArray) : Nat :=
+  value.size
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -615,7 +619,17 @@ def cases : Array Case := #[
     tags := #["quick", "bytes", "packed-layout", "roundtrip", "boundary"]
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
-    provenance := firProvenance "Runner-supplied packed ByteArray ABI round-trip" }
+    provenance := firProvenance "Runner-supplied packed ByteArray ABI round-trip" },
+  { id := "byte-array-size"
+    entry := ``Source.byteArraySize
+    args := #[.bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.byteArraySize ⟨#[0, 127, 128, 255]⟩)
+    tags := #["quick", "bytes", "packed-layout", "external", "pure", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" }
 ]
 
 def findCase? (id : String) : Option Case :=
