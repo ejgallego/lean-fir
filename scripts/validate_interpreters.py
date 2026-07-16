@@ -17,11 +17,13 @@ from validation_harness import (
     RunContext,
     ValidationError,
     ValidationFinding,
+    ValidationInput,
     ValidationPlan,
     checked_record,
     comparison_artifact_path,
     compare_backend_results,
     compare_success,
+    corpus_artifact_bytes,
     external_adapter_from_config,
     manifest_from_output as parse_manifest_from_output,
     records_from_output,
@@ -29,11 +31,13 @@ from validation_harness import (
     result_map,
     run,
     select_cases,
+    sha256_bytes,
     success_observation,
     validate_pair,
     validate_backend_name,
     validate_matrix,
     validation_plan_from_config,
+    validation_input_from_file,
     write_comparison_artifact,
     write_corpus_manifest,
     write_matrix_artifact,
@@ -215,6 +219,15 @@ def main() -> int:
                 f"backend registered more than once: {adapter.name}"
             )
         adapters[adapter.name] = adapter
+    provenance_inputs = []
+    if args.plan is not None:
+        provenance_inputs.append(
+            validation_input_from_file("validation-plan", args.plan, ROOT)
+        )
+    provenance_inputs.extend(
+        validation_input_from_file("adapter-config", path, ROOT)
+        for path in adapter_config_paths
+    )
     requested_backends = {
         backend for pair_name in pair_names for backend in pair_name
     }
@@ -245,7 +258,13 @@ def main() -> int:
         descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
-    context = RunContext(ROOT, args.out_dir, descriptors, selected)
+    context = RunContext(
+        ROOT,
+        args.out_dir,
+        descriptors,
+        selected,
+        tuple(provenance_inputs),
+    )
     pair_results, findings = validate_matrix(context, pairs)
     for pair_result in pair_results:
         for comparison in pair_result.comparisons:

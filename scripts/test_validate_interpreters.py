@@ -678,7 +678,20 @@ class HarnessTests(unittest.TestCase):
                     "comparisonCount": 3,
                     "equalComparisonCount": 3,
                     "findingCount": 0,
+                    "inputCount": 1,
                 },
+            )
+            self.assertEqual(
+                matrix["inputs"],
+                [
+                    {
+                        "kind": "corpus",
+                        "name": "corpus.json",
+                        "sha256": harness.sha256_bytes(
+                            harness.corpus_artifact_bytes(context.descriptors)
+                        ),
+                    }
+                ],
             )
             harness.write_matrix_artifact(
                 context,
@@ -687,6 +700,26 @@ class HarnessTests(unittest.TestCase):
                 findings,
             )
             self.assertEqual(matrix_bytes, matrix_path.read_bytes())
+
+            duplicate_input_context = harness.RunContext(
+                context.root,
+                context.out_dir,
+                context.descriptors,
+                context.selected,
+                (
+                    harness.ValidationInput("adapter-config", "v8.json", "0" * 64),
+                    harness.ValidationInput("adapter-config", "v8.json", "1" * 64),
+                ),
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate provenance inputs"
+            ):
+                harness.write_matrix_artifact(
+                    duplicate_input_context,
+                    ["native", "lcnf", "v8", "talos"],
+                    pair_results,
+                    findings,
+                )
 
             with self.assertRaisesRegex(
                 harness.ValidationError, "selected more than once"
@@ -732,6 +765,39 @@ class HarnessTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(harness.ValidationError, "argv array"):
                 harness.external_adapter_from_config(path)
+
+    def test_validation_input_hashes_bytes_with_stable_path_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "checkout"
+            inside = root / "plans" / "matrix.json"
+            inside.parent.mkdir(parents=True)
+            inside.write_bytes(b"inside\n")
+            outside = parent / "v8.json"
+            outside.write_bytes(b"outside\n")
+
+            self.assertEqual(
+                harness.validation_input_from_file("validation-plan", inside, root),
+                harness.ValidationInput(
+                    "validation-plan",
+                    "plans/matrix.json",
+                    harness.sha256_bytes(b"inside\n"),
+                ),
+            )
+            self.assertEqual(
+                harness.validation_input_from_file("adapter-config", outside, root),
+                harness.ValidationInput(
+                    "adapter-config",
+                    "v8.json",
+                    harness.sha256_bytes(b"outside\n"),
+                ),
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "cannot hash validation input"
+            ):
+                harness.validation_input_from_file(
+                    "adapter-config", parent / "missing.json", root
+                )
 
     def test_validation_plan_resolves_configs_and_preserves_pair_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -865,6 +931,22 @@ class HarnessTests(unittest.TestCase):
             )
             self.assertEqual(matrix["backends"], ["native", "v8"])
             self.assertEqual(matrix["summary"]["equalComparisonCount"], 1)
+            self.assertEqual(
+                [item["kind"] for item in matrix["inputs"]],
+                ["corpus", "validation-plan", "adapter-config"],
+            )
+            self.assertEqual(
+                [item["name"] for item in matrix["inputs"]],
+                ["corpus.json", "matrix.json", "v8.json"],
+            )
+            self.assertEqual(
+                [item["sha256"] for item in matrix["inputs"]],
+                [
+                    harness.sha256_bytes((out_dir / "corpus.json").read_bytes()),
+                    harness.sha256_bytes(plan_path.read_bytes()),
+                    harness.sha256_bytes(adapter_path.read_bytes()),
+                ],
+            )
             self.assertTrue(
                 (out_dir / "comparisons" / "native--v8.json").is_file()
             )

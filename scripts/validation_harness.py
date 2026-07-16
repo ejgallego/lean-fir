@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -65,6 +66,35 @@ class ValidationFinding:
         if self.case_id is not None:
             result["caseId"] = self.case_id
         return result
+
+
+@dataclass(frozen=True)
+class ValidationInput:
+    kind: str
+    name: str
+    sha256: str
+
+    def to_json(self) -> dict[str, str]:
+        return {"kind": self.kind, "name": self.name, "sha256": self.sha256}
+
+
+def sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def validation_input_from_file(
+    kind: str, path: Path, root: Path
+) -> ValidationInput:
+    try:
+        content = path.read_bytes()
+    except OSError as error:
+        raise ValidationError(f"cannot hash validation input {path}: {error}") from error
+    resolved = path.resolve()
+    try:
+        name = resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        name = resolved.name
+    return ValidationInput(kind, name, sha256_bytes(content))
 
 
 def run(
@@ -261,17 +291,20 @@ def select_cases(
     return all_cases
 
 
-def write_corpus_manifest(out_dir: Path, descriptors: list[dict]) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "corpus.json").write_text(
+def corpus_artifact_bytes(descriptors: list[dict]) -> bytes:
+    return (
         json.dumps(
             {"version": PROTOCOL_VERSION, "cases": descriptors},
             indent=2,
             sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        + "\n"
+    ).encode("utf-8")
+
+
+def write_corpus_manifest(out_dir: Path, descriptors: list[dict]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "corpus.json").write_bytes(corpus_artifact_bytes(descriptors))
 
 
 def checked_record(record: dict, backend: str) -> tuple[str, dict]:
@@ -505,6 +538,7 @@ class RunContext:
     out_dir: Path
     descriptors: list[dict]
     selected: list[str]
+    inputs: tuple[ValidationInput, ...] = ()
 
     @property
     def all_cases(self) -> list[str]:
@@ -788,6 +822,17 @@ def write_matrix_artifact(
     findings: list[ValidationFinding],
 ) -> None:
     context.out_dir.mkdir(parents=True, exist_ok=True)
+    inputs = (
+        ValidationInput(
+            "corpus",
+            "corpus.json",
+            sha256_bytes(corpus_artifact_bytes(context.descriptors)),
+        ),
+        *context.inputs,
+    )
+    input_keys = [(item.kind, item.name) for item in inputs]
+    if len(set(input_keys)) != len(input_keys):
+        raise ValidationError("validation matrix contains duplicate provenance inputs")
     pairs = []
     for result in pair_results:
         artifact = comparison_artifact_path(
@@ -812,6 +857,7 @@ def write_matrix_artifact(
                 "version": PROTOCOL_VERSION,
                 "selectedCases": list(context.selected),
                 "backends": backend_names,
+                "inputs": [item.to_json() for item in inputs],
                 "pairs": pairs,
                 "findings": [finding.to_json() for finding in findings],
                 "summary": {
@@ -827,6 +873,7 @@ def write_matrix_artifact(
                         for comparison in result.comparisons
                     ),
                     "findingCount": len(findings),
+                    "inputCount": len(inputs),
                 },
             },
             indent=2,

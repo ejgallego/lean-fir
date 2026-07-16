@@ -52,7 +52,13 @@ different adapter objects claiming the same name are rejected before execution.
 run: it lists selected cases, participating backends, directed pair-report
 paths, de-duplicated global findings, and aggregate backend/pair/comparison
 counts.  Automation can start there and open only the detailed pair reports it
-needs.
+needs.  Its `inputs` array content-addresses the exact canonical `corpus.json`,
+the validation plan when present, and every external adapter config with
+SHA-256.  Paths inside the checkout use stable root-relative names; inputs from
+outside it use only their basename, while the digest remains authoritative.
+The corpus hash is computed from the same canonical bytes written to disk.
+This establishes the provenance shape that compiler-produced Wasm modules can
+join once the compiler adapter is ready.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
