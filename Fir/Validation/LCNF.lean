@@ -243,6 +243,10 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   | .string, .string value =>
       let (runtime, reference) := alloc runtime (.string value)
       return (runtime, .object reference)
+  | .bytes, .bytes values =>
+      let bytes := values.map (UInt8.ofNat ·)
+      let (runtime, reference) := alloc runtime (.byteArray bytes)
+      return (runtime, .object reference)
   | .seq element, .seq values =>
       values.foldrM (init := (runtime, .object (.tagged 0))) fun datum (runtime, tail) => do
         let (runtime, head) ← encodeDatum runtime element datum
@@ -289,6 +293,10 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .string value := cell.object | throw "expected a string heap object"
       return .string value
+  | .bytes, .object (.heap location) =>
+      let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
+      let .byteArray value := cell.object | throw "expected a byte-array heap object"
+      return .bytes (value.map (UInt8.toNat ·))
   | .seq _, .object (.tagged 0) => return .seq #[]
   | .seq element, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))

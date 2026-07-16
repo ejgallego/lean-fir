@@ -221,6 +221,10 @@ def idInt (value : Int) : Int :=
 def addNat (left right : Nat) : Nat :=
   left + right
 
+@[noinline]
+def idByteArray (value : ByteArray) : ByteArray :=
+  value
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -290,6 +294,9 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
 
 private def natListDatum (xs : List Nat) : ValidationDatum :=
   .seq (xs.toArray.map .nat)
+
+private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
+  .bytes (value.data.map (UInt8.toNat ·))
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -597,7 +604,18 @@ def cases : Array Case := #[
     tags := #["stress", "external", "pure", "nat", "arithmetic", "heap"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    provenance := firProvenance "Nat.add decoding and returning heap natural values" }
+    provenance := firProvenance "Nat.add decoding and returning heap natural values" },
+  { id := "byte-array-roundtrip"
+    entry := ``Source.idByteArray
+    args := #[.bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.idByteArray ⟨#[0, 127, 128, 255]⟩)
+    tags := #["quick", "bytes", "packed-layout", "roundtrip", "boundary"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "Runner-supplied packed ByteArray ABI round-trip" }
 ]
 
 def findCase? (id : String) : Option Case :=

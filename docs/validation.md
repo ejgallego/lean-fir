@@ -78,7 +78,7 @@ claim.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 29 cases.  Beyond literals,
+The compiler-generated corpus currently has 30 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -92,14 +92,17 @@ hand-written LCNF: the native and FIR paths consume the same Lean source
 declarations.  Signed-`Int` fixtures cover both signs and the immediate
 32-bit ABI boundaries.  Controlled `Nat.add` cases execute a real imported
 runtime primitive with tagged inputs, a tagged-to-heap result transition, and
-a heap-natural input/result.
+a heap-natural input/result.  A runner-supplied `ByteArray` identity fixture
+validates the packed scalar-array heap ABI without requiring byte operations.
 
 The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports
 only the shapes needed by the checked corpus.  Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values still require an mpz heap
-object.  Byte arrays, externally supplied packed constructors, and observable
-external effects remain vertical slices with matching native cases.
+object.  Externally supplied packed constructors, boxed-object arrays, and
+observable external effects remain vertical slices with matching native
+cases.  Packed byte-array identity is supported; size, indexing, and mutation
+remain controlled external-primitive follow-ups.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add` is currently the only allowlisted primitive; it decodes tagged or
