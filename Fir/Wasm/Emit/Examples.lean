@@ -5,11 +5,18 @@ namespace Fir.Wasm.Emit.Examples
 
 open Fir.Wasm
 
-def initialCorpus : Array Fir.LeanIR.ImpureProgram := #[
-  abiLiteralProgram,
-  abiCtorProjectionProgram,
-  abiCaseProgram,
-  abiDefaultCaseProgram]
+structure CorpusFixture where
+  name : String
+  program : Fir.LeanIR.ImpureProgram
+
+def initialFixtures : List CorpusFixture := [
+  { name := "literal", program := abiLiteralProgram },
+  { name := "ctor-projection", program := abiCtorProjectionProgram },
+  { name := "case", program := abiCaseProgram },
+  { name := "default-case", program := abiDefaultCaseProgram }]
+
+def initialCorpus : Array Fir.LeanIR.ImpureProgram :=
+  initialFixtures.toArray.map (·.program)
 
 def encodeProgram (program : Fir.LeanIR.ImpureProgram) : Except String ByteArray := do
   let module ←

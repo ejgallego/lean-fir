@@ -6,10 +6,10 @@ a small semantic FIR host.
 
 The first corpus covers natural literals, constructor allocation and projection, exact
 constructor cases, and default cases. Each `.wasm` file is accompanied by a manifest that
-describes its semantic runtime imports and its expected observable result. The expected
-observations are checked snapshots of the W3 differential results at this lane's base;
-generating or checking them directly from W3 is the next integration step once this
-worktree has its own complete Talos dependency cone.
+describes its semantic runtime imports. The separate `FirWasmOracleMain.lean` program runs
+the same named corpus through the W3 FIR/Talos differential oracle and writes its
+comparable observations beside the artifacts. The Node runner compares V8 directly with
+those live W3 results; no expected semantic observations are frozen in the emitter.
 
 Run the complete lane-local check with:
 
@@ -17,14 +17,17 @@ Run the complete lane-local check with:
 ./check.sh
 ```
 
-This builds the Lean emitter, emits the corpus twice, byte-compares both WebAssembly and
-manifest outputs, validates and instantiates every module in Node, executes `main`, and
-compares the semantic observation with its manifest. It requires Lean 4.32 and Node; no
-external WAT or WebAssembly CLI is required.
+This builds the Lean emitter, runs the W3 oracle through Lean, emits the corpus and oracle
+results twice, byte-compares all outputs, validates and instantiates every module in Node,
+executes `main`, and compares the V8 observation with W3. It requires Lean 4.32, the
+worktree-local Talos setup, and Node; no external WAT or WebAssembly CLI is required. The
+oracle uses `lean --run` so a fresh worktree does not native-compile the full upstream Wasm
+semantics just to check this corpus.
 
 To emit one fixture manually:
 
 ```text
 lake exe fir-wasm-artifact literal /tmp/fir-wasm-corpus/literal.wasm
+lake -d .. env lean --run ../FirWasmOracleMain.lean all /tmp/fir-wasm-corpus
 node run-artifacts.mjs /tmp/fir-wasm-corpus
 ```

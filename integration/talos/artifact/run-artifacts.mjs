@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
@@ -276,6 +276,8 @@ class SemanticHost {
 
 async function runArtifact(manifestPath) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const expectedPath = join(dirname(manifestPath), `${manifest.fixture}.expected.json`);
+  const expected = JSON.parse(await readFile(expectedPath, "utf8"));
   const wasmPath = manifestPath.slice(0, -".json".length);
   const bytes = await readFile(wasmPath);
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed standard WebAssembly validation`);
@@ -286,7 +288,7 @@ async function runArtifact(manifestPath) {
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
   const physicalResult = entry();
   const actual = host.observation(manifest.result, physicalResult);
-  assert.deepStrictEqual(actual, manifest.expected, `${manifest.fixture} observation mismatch`);
+  assert.deepStrictEqual(actual, expected, `${manifest.fixture} observation mismatch`);
   console.log(`PASS ${manifest.fixture}`);
 }
 

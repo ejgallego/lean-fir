@@ -2,36 +2,12 @@ import Fir.Wasm.Emit.Examples
 
 open Fir.Wasm
 open Fir.Wasm.Emit
+open Fir.Wasm.Emit.Examples
 open Lean
 
-structure ArtifactFixture where
-  name : String
-  program : Fir.LeanIR.ImpureProgram
-  expected : Json
+def fixtures : List CorpusFixture := initialFixtures
 
--- These observations are the checked W3 results for this initial corpus. Once
--- the artifact lane has its own Talos dependency cone, generate and compare
--- them against the W3 oracle instead of keeping the snapshots here.
-def taggedExpected (payload : String) : Json :=
-  Json.mkObj [
-    ("outcome", Json.mkObj [
-      ("kind", "returned"),
-      ("value", Json.mkObj [
-        ("kind", "object"),
-        ("reference", Json.mkObj [
-          ("kind", "tagged"),
-          ("payload", payload)])])]),
-    ("reachableHeap", Json.arr #[]),
-    ("world", 0),
-    ("trace", Json.arr #[])]
-
-def fixtures : List ArtifactFixture := [
-  { name := "literal", program := abiLiteralProgram, expected := taggedExpected "42" },
-  { name := "ctor-projection", program := abiCtorProjectionProgram, expected := taggedExpected "7" },
-  { name := "case", program := abiCaseProgram, expected := taggedExpected "1" },
-  { name := "default-case", program := abiDefaultCaseProgram, expected := taggedExpected "5" }]
-
-def findFixture? (name : String) : Option ArtifactFixture :=
+def findFixture? (name : String) : Option CorpusFixture :=
   fixtures.find? (·.name == name)
 
 def abiKindName : AbiKind → String
@@ -85,16 +61,15 @@ def importJson (import_ : Fir.Wasm.Import) : Except String Json := do
     ("name", import_.itemName),
     ("operation", ← operationJson operation)]
 
-def manifestJson (fixture : ArtifactFixture) (module : Fir.Wasm.Module) : Except String Json := do
+def manifestJson (fixture : CorpusFixture) (module : Fir.Wasm.Module) : Except String Json := do
   let imports ← module.imports.toList.mapM importJson
   return Json.mkObj [
     ("fixture", fixture.name),
     ("entry", "main"),
     ("result", "tobject"),
-    ("imports", Json.arr imports.toArray),
-    ("expected", fixture.expected)]
+    ("imports", Json.arr imports.toArray)]
 
-def prepareFixture (fixture : ArtifactFixture) : Except String (ByteArray × String) := do
+def prepareFixture (fixture : CorpusFixture) : Except String (ByteArray × String) := do
   let module ←
     match lowerSupported fixture.program with
     | .ok module => pure module
@@ -105,7 +80,7 @@ def prepareFixture (fixture : ArtifactFixture) : Except String (ByteArray × Str
     | .error error => throw s!"encoding failed for {fixture.name}: {repr error}"
   return (bytes, (← manifestJson fixture module).compress)
 
-def emitFixture (fixture : ArtifactFixture) (path : System.FilePath) : IO Unit := do
+def emitFixture (fixture : CorpusFixture) (path : System.FilePath) : IO Unit := do
   let (bytes, manifest) ← IO.ofExcept (prepareFixture fixture)
   if let some parent := path.parent then
     IO.FS.createDirAll parent
