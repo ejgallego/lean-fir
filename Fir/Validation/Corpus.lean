@@ -218,6 +218,27 @@ def idInt (value : Int) : Int :=
   value
 
 @[noinline]
+def intPosImmediate : Int :=
+  2147483647
+
+@[noinline]
+def intPosHeap : Int :=
+  2147483648
+
+@[noinline]
+def intNegImmediate : Int :=
+  -2147483648
+
+@[noinline]
+def intNegHeap : Int :=
+  -2147483649
+
+@[noinline]
+def classifyInt : Int → Nat
+  | .ofNat _ => 10
+  | .negSucc _ => 20
+
+@[noinline]
 def addNat (left right : Nat) : Nat :=
   left + right
 
@@ -587,6 +608,114 @@ def cases : Array Case := #[
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "Smallest Lean immediate Int payload" },
+  { id := "int-heap-positive-boundary"
+    entry := ``Source.idInt
+    args := #[.int 2147483648]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt 2147483648)
+    tags := #["stress", "int", "signed", "boundary", "heap", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "First positive Int requiring a heap object" },
+  { id := "int-heap-negative-boundary"
+    entry := ``Source.idInt
+    args := #[.int (-2147483649)]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ => .int (Source.idInt (-2147483649))
+    tags := #["stress", "int", "signed", "negative", "boundary", "heap", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance "First negative Int requiring a heap object" },
+  { id := "int-literal-immediate-positive"
+    entry := ``Source.intPosImmediate
+    resultSchema := .int
+    native := fun _ => .int Source.intPosImmediate
+    tags := #["stress", "int", "signed", "literal", "external", "boundary"]
+    requiredLcnfForms := #["fap", "inc", "return", "lit", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
+    requiredExternals := #[``Int.ofNat]
+    requiredExecutedExternals := #[``Int.ofNat]
+    provenance := firProvenance "Compiler-built largest positive immediate Int" },
+  { id := "int-literal-heap-positive"
+    entry := ``Source.intPosHeap
+    resultSchema := .int
+    native := fun _ => .int Source.intPosHeap
+    tags := #["stress", "int", "signed", "literal", "external", "boundary", "heap"]
+    requiredLcnfForms := #["fap", "inc", "return", "lit", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
+    requiredExternals := #[``Int.ofNat]
+    requiredExecutedExternals := #[``Int.ofNat]
+    provenance := firProvenance "Compiler-built first positive heap Int" },
+  { id := "int-literal-immediate-negative"
+    entry := ``Source.intNegImmediate
+    resultSchema := .int
+    native := fun _ => .int Source.intNegImmediate
+    tags := #["stress", "int", "signed", "negative", "literal", "external", "boundary"]
+    requiredLcnfForms := #["fap", "inc", "return", "lit", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
+    requiredExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
+    provenance := firProvenance "Compiler-built smallest negative immediate Int" },
+  { id := "int-literal-heap-negative"
+    entry := ``Source.intNegHeap
+    resultSchema := .int
+    native := fun _ => .int Source.intNegHeap
+    tags := #["stress", "int", "signed", "negative", "literal", "external", "boundary", "heap"]
+    requiredLcnfForms := #["fap", "inc", "return", "lit", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
+    requiredExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
+    provenance := firProvenance "Compiler-built first negative heap Int" },
+  { id := "int-classify-immediate-positive"
+    entry := ``Source.classifyInt
+    args := #[.int 2147483647]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.classifyInt 2147483647)
+    tags := #["stress", "int", "signed", "cases", "external", "boundary"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify the largest positive immediate Int" },
+  { id := "int-classify-heap-positive"
+    entry := ``Source.classifyInt
+    args := #[.int 2147483648]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.classifyInt 2147483648)
+    tags := #["stress", "int", "signed", "cases", "external", "boundary", "heap"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify the first positive heap Int" },
+  { id := "int-classify-immediate-negative"
+    entry := ``Source.classifyInt
+    args := #[.int (-2147483648)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.classifyInt (-2147483648))
+    tags := #["stress", "int", "signed", "negative", "cases", "external", "boundary"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify the smallest negative immediate Int" },
+  { id := "int-classify-heap-negative"
+    entry := ``Source.classifyInt
+    args := #[.int (-2147483649)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.classifyInt (-2147483649))
+    tags := #["stress", "int", "signed", "negative", "cases", "external", "boundary", "heap"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify the first negative heap Int" },
   { id := "nat-add-small"
     entry := ``Source.addNat
     args := #[.nat 20, .nat 22]

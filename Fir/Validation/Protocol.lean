@@ -197,6 +197,7 @@ private def protocolRoundTripRequest : CaseRequest := {
   args := #[
     .nat 42,
     .int (-2147483648),
+    .int (-2147483649),
     .usize 18446744073709551615,
     .bits 64 18446744073709551615,
     .ctor "Prod.mk" 0 #[.bool true, .bytes #[0, 127, 255]]]

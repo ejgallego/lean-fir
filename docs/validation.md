@@ -100,7 +100,7 @@ satisfying an execution-coverage claim.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 31 cases.  Beyond literals,
+The compiler-generated corpus currently has 41 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -111,26 +111,33 @@ allocate/project a 70-object-field constructor, and match a nullary enum that
 Lean lowers to a scalar discriminant.  Several fixtures carry exact provenance
 into Lean's `tests/compile` suite at `v4.32.0-rc1`.  The corpus contains no
 hand-written LCNF: the native and FIR paths consume the same Lean source
-declarations.  Signed-`Int` fixtures cover both signs and the immediate
-32-bit ABI boundaries.  Controlled `Nat.add` cases execute a real imported
-runtime primitive with tagged inputs, a tagged-to-heap result transition, and
-a heap-natural input/result.  Runner-supplied `ByteArray` identity and size
+declarations.  Signed-`Int` fixtures cover both signs on either side of the
+immediate 32-bit ABI boundary.  The boundary matrix independently validates
+runner-supplied identity, compiler-built literals through `Int.ofNat` and
+`Int.neg`, and constructor classification through `Int.decLt`, so tagged/heap
+codec behavior, external results, and scalar-driven control flow cannot mask
+one another.  Controlled `Nat.add` cases execute a real imported runtime
+primitive with tagged inputs, a tagged-to-heap result transition, and a
+heap-natural input/result.  Runner-supplied `ByteArray` identity and size
 fixtures validate the packed scalar-array heap ABI and its first real runtime
 operation.
 
 The protocol already has recursive data, signed integers, scalar-bit, `USize`,
 output, and controlled effect fields.  The LCNF codec intentionally supports
 only the shapes needed by the checked corpus.  Immediate signed integers use
-Lean's signed-32-bit payload ABI; larger values still require an mpz heap
-object.  Externally supplied packed constructors, boxed-object arrays, and
+Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
+signed-integer heap object.  Externally supplied packed constructors, boxed-object arrays, and
 observable external effects remain vertical slices with matching native
 cases.  Packed byte-array identity and size are supported; indexing and
 mutation remain controlled external-primitive follow-ups.
 
 The validation backend's external implementation is reject-by-default.
-`Nat.add` and `ByteArray.size` are currently allowlisted.  Natural addition
-decodes tagged or heap operands, computes with Lean `Nat`, and re-encodes
-through the same tagged/heap boundary as the interpreter.  Byte-array size
+`Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, and `ByteArray.size` are
+currently allowlisted.  Natural addition decodes tagged or heap operands,
+computes with Lean `Nat`, and re-encodes through the same tagged/heap boundary
+as the interpreter.  The integer primitives decode and re-encode both the
+signed immediate and heap representations; `Int.decLt` returns the scalar
+`UInt8` discriminant consumed by lowered pattern matching.  Byte-array size
 reads the packed heap object and returns a tagged natural.  `extern` must be
 present both statically and in executed-form coverage for every runtime
 primitive fixture, while the matching name must independently satisfy both

@@ -165,6 +165,46 @@ private def externalNat (request : ExternalRequest) (runtime : RuntimeState)
       return value
   | _ => throw (.externalFailure request.name "expected a natural number")
 
+private def int32SignBit : Nat := 2147483648
+
+private def int32Mask : Nat := 4294967295
+
+private def immediateIntPayload? : Int → Option UInt64
+  | .ofNat value =>
+      if value < int32SignBit then some (UInt64.ofNat value) else none
+  | .negSucc value =>
+      if value < int32SignBit then some (UInt64.ofNat (int32Mask - value)) else none
+
+/-- Encode Lean's signed-32-bit immediate `Int` ABI, falling back to an mpz-like heap object. -/
+private def encodeIntValue (runtime : RuntimeState) (value : Int) : RuntimeState × Value :=
+  match immediateIntPayload? value with
+  | some payload => (runtime, .object (.tagged payload))
+  | none =>
+      let (runtime, reference) := alloc runtime (.integer value)
+      (runtime, .object reference)
+
+private def decodeImmediateInt (payload : UInt64) : Except String Int := do
+  let payload := payload.toNat
+  if payload > int32Mask then
+    throw s!"invalid immediate Int payload {payload}"
+  if payload < int32SignBit then
+    return .ofNat payload
+  return .negSucc (int32Mask - payload)
+
+private def externalInt (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault Int := do
+  match value with
+  | .object (.tagged payload) =>
+      match decodeImmediateInt payload with
+      | .ok value => return value
+      | .error message => throw (.externalFailure request.name message)
+  | .object (.heap location) =>
+      let cell ← getLiveCell runtime location
+      let .integer value := cell.object
+        | throw (.externalFailure request.name "expected a signed integer")
+      return value
+  | _ => throw (.externalFailure request.name "expected a signed integer")
+
 private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
@@ -194,6 +234,42 @@ private def byteArraySizeExternal (request : ExternalRequest) (runtime : Runtime
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def intOfNatExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalNat request runtime value
+  let (runtime, value) := encodeIntValue runtime (.ofNat value)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def intNegExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalInt request runtime value
+  let (runtime, value) := encodeIntValue runtime (-value)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalInt request runtime left
+  let right ← externalInt request runtime right
+  return {
+    value := .scalar (.uint8 (if left < right then 1 else 0))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
@@ -201,6 +277,12 @@ private def validationExternals : ExternalImpl where
       natAddExternal request runtime
     else if request.name == ``ByteArray.size then
       byteArraySizeExternal request runtime
+    else if request.name == ``Int.ofNat then
+      intOfNatExternal request runtime
+    else if request.name == ``Int.neg then
+      intNegExternal request runtime
+    else if request.name == ``Int.decLt then
+      intDecLtExternal request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 
@@ -239,33 +321,6 @@ def compileEntry (entry : Name) (dependencies : Array Name := #[]) : CoreM Artif
 private def mismatch (expected : ValidationSchema) (actual : ValidationDatum) : Except String α :=
   .error s!"datum does not match schema: expected {repr expected}, got {repr actual}"
 
-private def int32SignBit : Nat := 2147483648
-
-private def int32Mask : Nat := 4294967295
-
-/-- Encode Lean's immediate signed-32-bit `Int` payload used by final impure LCNF. -/
-private def encodeImmediateInt (runtime : RuntimeState) (value : Int) :
-    Except String (RuntimeState × Value) :=
-  match value with
-  | .ofNat value =>
-      if value < int32SignBit then
-        .ok (runtime, .object (.tagged (UInt64.ofNat value)))
-      else
-        .error s!"Int value {value} requires an mpz heap object"
-  | .negSucc value =>
-      if value < int32SignBit then
-        .ok (runtime, .object (.tagged (UInt64.ofNat (int32Mask - value))))
-      else
-        .error s!"negative Int payload {value} requires an mpz heap object"
-
-private def decodeImmediateInt (payload : UInt64) : Except String Int := do
-  let payload := payload.toNat
-  if payload > int32Mask then
-    throw s!"invalid immediate Int payload {payload}"
-  if payload < int32SignBit then
-    return .ofNat payload
-  return .negSucc (int32Mask - payload)
-
 private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSchema)
     (datum : ValidationDatum) : Except String (RuntimeState × Value) := do
   if !schema.accepts datum then mismatch schema datum
@@ -273,7 +328,7 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   | .unit, .unit => return (runtime, .object (.tagged 0))
   | .bool, .bool value => return (runtime, .object (.tagged (if value then 1 else 0)))
   | .nat, .nat value => return literal runtime (.nat value)
-  | .int, .int value => encodeImmediateInt runtime value
+  | .int, .int value => return encodeIntValue runtime value
   | .usize, .usize value => return (runtime, .usize value)
   | .bits 8, .bits _ value => return (runtime, .scalar (.uint8 value.toUInt8))
   | .bits 16, .bits _ value => return (runtime, .scalar (.uint16 value.toUInt16))
@@ -323,6 +378,10 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       let .natural value := cell.object | throw "expected a natural heap object"
       return .nat value
   | .int, .object (.tagged payload) => return .int (← decodeImmediateInt payload)
+  | .int, .object (.heap location) =>
+      let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
+      let .integer value := cell.object | throw "expected a signed-integer heap object"
+      return .int value
   | .usize, .usize value => return .usize value
   | .bits 8, .scalar (.uint8 value) => return .bits 8 (UInt64.ofNat value.toNat)
   | .bits 16, .scalar (.uint16 value) => return .bits 16 (UInt64.ofNat value.toNat)
