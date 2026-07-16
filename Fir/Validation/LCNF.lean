@@ -24,41 +24,54 @@ private def pushUnique (forms : Array String) (form : String) : Array String :=
 private def addForms (forms : Array String) (more : Array String) : Array String :=
   more.foldl (init := forms) pushUnique
 
-private def letValueForms : LCNF.LetValue .impure -> Array String
-  | .lit _ => #["lit"]
-  | .erased => #["erased"]
-  | .proj .. => #["proj"]
-  | .const .. => #["const"]
-  | .fvar .. => #["fvar"]
-  | .ctor .. => #["ctor"]
-  | .oproj .. => #["oproj"]
-  | .uproj .. => #["uproj"]
-  | .sproj .. => #["sproj"]
-  | .fap .. => #["fap"]
-  | .pap .. => #["pap"]
-  | .reset .. => #["reset"]
-  | .reuse .. => #["reuse"]
-  | .box .. => #["box"]
-  | .unbox .. => #["unbox"]
-  | .isShared .. => #["isShared"]
+private def letValueForm : LCNF.LetValue .impure -> String
+  | .lit _ => "lit"
+  | .erased => "erased"
+  | .proj .. => "proj"
+  | .const .. => "const"
+  | .fvar .. => "fvar"
+  | .ctor .. => "ctor"
+  | .oproj .. => "oproj"
+  | .uproj .. => "uproj"
+  | .sproj .. => "sproj"
+  | .fap .. => "fap"
+  | .pap .. => "pap"
+  | .reset .. => "reset"
+  | .reuse .. => "reuse"
+  | .box .. => "box"
+  | .unbox .. => "unbox"
+  | .isShared .. => "isShared"
 
-private partial def codeForms : LCNF.Code .impure -> Array String
-  | .let decl k => addForms (letValueForms decl.value) (codeForms k)
-  | .fun decl k _ => addForms #["fun"] (addForms (codeForms decl.value) (codeForms k))
-  | .jp decl k => addForms #["join"] (addForms (codeForms decl.value) (codeForms k))
-  | .jmp .. => #["jump"]
+private def codeHeadForm : LCNF.Code .impure → String
+  | .let decl _ => letValueForm decl.value
+  | .fun .. => "fun"
+  | .jp .. => "join"
+  | .jmp .. => "jump"
+  | .cases .. => "cases"
+  | .return .. => "return"
+  | .unreach .. => "unreach"
+  | .oset .. => "oset"
+  | .uset .. => "uset"
+  | .sset .. => "sset"
+  | .setTag .. => "setTag"
+  | .inc .. => "inc"
+  | .dec .. => "dec"
+  | .del .. => "del"
+
+private partial def codeForms (code : LCNF.Code .impure) : Array String :=
+  let own := #[codeHeadForm code]
+  match code with
+  | .let _ k => addForms own (codeForms k)
+  | .fun decl k _ => addForms own (addForms (codeForms decl.value) (codeForms k))
+  | .jp decl k => addForms own (addForms (codeForms decl.value) (codeForms k))
+  | .jmp .. => own
   | .cases cases =>
-      cases.alts.foldl (init := #["cases"]) fun forms alt =>
+      cases.alts.foldl (init := own) fun forms alt =>
         addForms forms (codeForms alt.getCode)
-  | .return _ => #["return"]
-  | .unreach _ => #["unreach"]
-  | .oset (k := k) .. => addForms #["oset"] (codeForms k)
-  | .uset (k := k) .. => addForms #["uset"] (codeForms k)
-  | .sset (k := k) .. => addForms #["sset"] (codeForms k)
-  | .setTag (k := k) .. => addForms #["setTag"] (codeForms k)
-  | .inc (k := k) .. => addForms #["inc"] (codeForms k)
-  | .dec (k := k) .. => addForms #["dec"] (codeForms k)
-  | .del (k := k) .. => addForms #["del"] (codeForms k)
+  | .return _ | .unreach _ => own
+  | .oset (k := k) .. | .uset (k := k) .. | .sset (k := k) .. |
+      .setTag (k := k) .. | .inc (k := k) .. | .dec (k := k) .. | .del (k := k) .. =>
+      addForms own (codeForms k)
 
 def collectForms (program : ImpureProgram) : Array String :=
   program.decls.foldl (init := #[]) fun forms decl =>
@@ -68,6 +81,57 @@ def collectForms (program : ImpureProgram) : Array String :=
 
 def Artifact.missingForms (artifact : Artifact) (required : Array String) : Array String :=
   required.filter (!artifact.forms.contains ·)
+
+private def executedForm? (state : MachineState) : Option String :=
+  match state.control with
+  | .code code => some (codeHeadForm code)
+  | .yielded .. => none
+  | .invokeName .. | .invokeValue .. =>
+      match coreStep state with
+      | .external .. => some "extern"
+      | _ => none
+
+private structure InstrumentedRun where
+  result : RunResult
+  executedForms : Array String
+  steps : Nat
+
+/-- Validation-only telemetry layered over the canonical interpreter transition function. -/
+private def runInstrumentedGo (externals : ExternalImpl) :
+    Nat → MachineState → Array String → Nat → InstrumentedRun
+  | 0, state, forms, steps => { result := .outOfFuel state, executedForms := forms, steps }
+  | fuel + 1, state, forms, steps =>
+      let forms := match executedForm? state with
+        | some form => pushUnique forms form
+        | none => forms
+      match executeStep externals state with
+      | .done observation => { result := .done observation, executedForms := forms, steps := steps + 1 }
+      | .next state => runInstrumentedGo externals fuel state forms (steps + 1)
+
+private def runInstrumented (fuel : Nat) (externals : ExternalImpl) (state : MachineState) :
+    InstrumentedRun :=
+  runInstrumentedGo externals fuel state #[] 0
+
+private theorem runInstrumentedGo_result (externals : ExternalImpl) :
+    ∀ fuel state forms steps,
+      (runInstrumentedGo externals fuel state forms steps).result = run fuel externals state
+  | 0, state, forms, steps => by simp [runInstrumentedGo, run]
+  | fuel + 1, state, forms, steps => by
+      simp only [runInstrumentedGo, run]
+      split <;> rename_i transition
+      · simp [transition]
+      · simpa [transition] using
+          runInstrumentedGo_result externals fuel _ _ (steps + 1)
+
+private theorem runInstrumented_result (fuel : Nat) (externals : ExternalImpl)
+    (state : MachineState) :
+    (runInstrumented fuel externals state).result = run fuel externals state := by
+  exact runInstrumentedGo_result externals fuel state #[] 0
+
+private def runProgramInstrumented (fuel : Nat) (externals : ExternalImpl)
+    (program : ImpureProgram) (entry : Name) (args : Array Value)
+    (runtime : RuntimeState := {}) : InstrumentedRun :=
+  runInstrumented fuel externals (initialState program entry args runtime)
 
 /-- Stable human-readable compiler artifact retained beside the machine result. -/
 def Artifact.format (artifact : Artifact) : CoreM String := do
@@ -209,16 +273,28 @@ private def faultKind : RuntimeFault -> String
   | .malformed .. => "malformed"
 
 def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
-  let diagnostics := #[
+  let staticDiagnostics := #[
     { key := "declarations", value := toString artifact.program.decls.size },
     { key := "externals", value := String.intercalate "," (artifact.externalNames.toList.map toString) },
     { key := "lcnf-forms", value := String.intercalate "," artifact.forms.toList },
     { key := "missing-lcnf-forms",
       value := String.intercalate "," (artifact.missingForms case.requiredLcnfForms).toList }]
   match encodeArgs case.argSchemas case.args with
-  | .error message => { caseId := case.id, backend := "lcnf", outcome := .failure message, diagnostics }
+  | .error message =>
+      { caseId := case.id, backend := "lcnf", outcome := .failure message,
+        diagnostics := staticDiagnostics }
   | .ok (runtime, args) =>
-      match runProgram case.fuel rejectExternals artifact.program case.entry args runtime with
+      let execution :=
+        runProgramInstrumented case.fuel rejectExternals artifact.program case.entry args runtime
+      let missingExecuted := case.requiredExecutedLcnfForms.filter
+        (!execution.executedForms.contains ·)
+      let diagnostics := staticDiagnostics ++ #[
+        { key := "executed-lcnf-forms",
+          value := String.intercalate "," execution.executedForms.toList },
+        { key := "missing-executed-lcnf-forms",
+          value := String.intercalate "," missingExecuted.toList },
+        { key := "interpreter-steps", value := toString execution.steps }]
+      match execution.result with
       | .outOfFuel _ =>
           { caseId := case.id, backend := "lcnf", outcome := .outOfFuel case.fuel, diagnostics }
       | .done observation =>

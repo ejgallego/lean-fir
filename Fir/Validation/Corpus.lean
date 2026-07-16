@@ -93,6 +93,112 @@ def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
 def idUSize (value : USize) : USize :=
   value
 
+inductive Assoc where
+  | atom (value : Nat)
+  | node (left right : Assoc)
+
+namespace Assoc
+
+@[noinline] partial def reassoc : Assoc → Assoc
+  | .node (.node a b) c => reassoc (.node a (.node b c))
+  | value => value
+
+end Assoc
+
+@[noinline]
+def applyCaptureList (f : Nat → List Nat) (y : Nat) : List Nat :=
+  f y
+
+def capture17List
+    (x01 x02 x03 x04 x05 x06 x07 x08 x09 : Nat)
+    (x10 x11 x12 x13 x14 x15 x16 x17 : Nat)
+    (y : Nat) : List Nat :=
+  applyCaptureList
+    (fun z =>
+      [x01, x02, x03, x04, x05, x06, x07, x08, x09,
+       x10, x11, x12, x13, x14, x15, x16, x17, z])
+    y
+
+set_option genInjectivity false in
+structure BigCtor where
+  f01 : Nat := 0
+  f02 : Nat := 0
+  f03 : Nat := 0
+  f04 : Nat := 0
+  f05 : Nat := 0
+  f06 : Nat := 0
+  f07 : Nat := 0
+  f08 : Nat := 0
+  f09 : Nat := 0
+  f10 : Nat := 0
+  f11 : Nat := 0
+  f12 : Nat := 0
+  f13 : Nat := 0
+  f14 : Nat := 0
+  f15 : Nat := 0
+  f16 : Nat := 0
+  f17 : Nat := 0
+  f18 : Nat := 0
+  f19 : Nat := 0
+  f20 : Nat := 0
+  f21 : Nat := 0
+  f22 : Nat := 0
+  f23 : Nat := 0
+  f24 : Nat := 0
+  f25 : Nat := 0
+  f26 : Nat := 0
+  f27 : Nat := 0
+  f28 : Nat := 0
+  f29 : Nat := 0
+  f30 : Nat := 0
+  f31 : Nat := 0
+  f32 : Nat := 0
+  f33 : Nat := 0
+  f34 : Nat := 0
+  f35 : Nat := 0
+  f36 : Nat := 0
+  f37 : Nat := 0
+  f38 : Nat := 0
+  f39 : Nat := 0
+  f40 : Nat := 0
+  f41 : Nat := 0
+  f42 : Nat := 0
+  f43 : Nat := 0
+  f44 : Nat := 0
+  f45 : Nat := 0
+  f46 : Nat := 0
+  f47 : Nat := 0
+  f48 : Nat := 0
+  f49 : Nat := 0
+  f50 : Nat := 0
+  f51 : Nat := 0
+  f52 : Nat := 0
+  f53 : Nat := 0
+  f54 : Nat := 0
+  f55 : Nat := 0
+  f56 : Nat := 0
+  f57 : Nat := 0
+  f58 : Nat := 0
+  f59 : Nat := 0
+  f60 : Nat := 0
+  f61 : Nat := 0
+  f62 : Nat := 0
+  f63 : Nat := 0
+  f64 : Nat := 0
+  f65 : Nat := 0
+  f66 : Nat := 0
+  f67 : Nat := 0
+  f68 : Nat := 0
+  f69 : Nat := 0
+  f70 : Nat := 0
+
+@[noinline]
+def mkBigCtor (x : Nat) : BigCtor :=
+  { f70 := x }
+
+def bigCtorField (x : Nat) : Nat :=
+  (mkBigCtor x).f70
+
 end Source
 
 /-- Stable provenance for a fixture, suitable for carrying into backend reports. -/
@@ -127,6 +233,8 @@ structure Case where
   tags : Array String := #[]
   fuel : Nat := 10000
   requiredLcnfForms : Array String := #[]
+  /-- Forms that this fixture must actually step through, not merely retain in the artifact. -/
+  requiredExecutedLcnfForms : Array String := #[]
   provenance : Provenance := firProvenance "FIR validation fixture"
 
 /-- Closure-free case metadata consumed by runners and future backend adapters. -/
@@ -141,6 +249,7 @@ structure CaseDescriptor where
   tags : Array String
   fuel : Nat
   requiredLcnfForms : Array String
+  requiredExecutedLcnfForms : Array String
   provenance : Provenance
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -154,10 +263,25 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   tags := validationCase.tags
   fuel := validationCase.fuel
   requiredLcnfForms := validationCase.requiredLcnfForms
+  requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
   provenance := validationCase.provenance }
 
 private def natListDatum (xs : List Nat) : ValidationDatum :=
   .seq (xs.toArray.map .nat)
+
+private partial def assocDatum : Source.Assoc → ValidationDatum
+  | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
+  | .node left right => .ctor "Assoc.node" 1 #[assocDatum left, assocDatum right]
+
+private partial def assocSchema : Source.Assoc → ValidationSchema
+  | .atom _ => .ctor "Assoc.atom" 0 #[.nat]
+  | .node left right => .ctor "Assoc.node" 1 #[assocSchema left, assocSchema right]
+
+private def assocInput : Source.Assoc :=
+  .node (.node (.atom 1) (.atom 2)) (.node (.atom 3) (.atom 4))
+
+private def assocExpected : Source.Assoc :=
+  .node (.atom 1) (.node (.atom 2) (.node (.atom 3) (.atom 4)))
 
 def cases : Array Case := #[
   { id := "lit-nat"
@@ -181,7 +305,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.branchNat true)
     tags := #["quick", "control-flow"]
-    requiredLcnfForms := #["cases", "lit", "return"] },
+    requiredLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"] },
   { id := "branch-nat-false"
     entry := ``Source.branchNat
     args := #[.bool false]
@@ -189,7 +314,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.branchNat false)
     tags := #["quick", "control-flow", "boundary"]
-    requiredLcnfForms := #["cases", "lit", "return"] },
+    requiredLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"] },
   { id := "pair-first"
     entry := ``Source.pairFirst
     args := #[.ctor "Prod.mk" 0 #[.nat 41, .nat 42]]
@@ -224,7 +350,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.recursiveTraversal [10, 20, 12])
     tags := #["quick", "constructor", "recursion"]
-    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
+    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
+    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
   { id := "recursive-empty"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -233,7 +360,8 @@ def cases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.recursiveTraversal [])
     tags := #["quick", "constructor", "recursion", "boundary"]
-    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
+    requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
+    requiredExecutedLcnfForms := #["cases", "inc", "fap", "return"] },
   { id := "local-tail"
     entry := ``Source.localTailControl
     dependencies := #[`Fir.Validation.Corpus.Source.localTailControl.loop]
@@ -297,6 +425,8 @@ def cases : Array Case := #[
     native := fun _ => .bits 32 (UInt64.ofNat (Source.packedPreserve 4294967295).toNat)
     tags := #["quick", "scalar", "packed-layout", "update", "boundary"]
     requiredLcnfForms := #["ctor", "uset", "sset", "sproj", "fap", "return"]
+    requiredExecutedLcnfForms :=
+      #["ctor", "uset", "sset", "sproj", "fap", "isShared", "cases", "jump", "return"]
     provenance := leanCompileProvenance "tests/compile/uset.lean"
       "Packed USize/UInt32 structure update preserving the scalar field" },
   { id := "tuple-rotate"
@@ -309,6 +439,7 @@ def cases : Array Case := #[
       .ctor "Prod.mk" 0 #[.nat result.1, .ctor "Prod.mk" 0 #[.nat result.2.1, .nat result.2.2]]
     tags := #["quick", "constructor", "projection", "allocation"]
     requiredLcnfForms := #["oproj", "ctor", "return"]
+    requiredExecutedLcnfForms := #["oproj", "isShared", "cases", "oset", "jump", "return"]
     provenance := leanCompileProvenance "tests/compile/tuple.lean"
       "Tuple projection/allocation without IO" },
   { id := "usize-roundtrip"
@@ -319,7 +450,53 @@ def cases : Array Case := #[
     native := fun _ => .usize (UInt64.ofNat (Source.idUSize 42).toNat)
     tags := #["quick", "usize", "roundtrip"]
     requiredLcnfForms := #["return"]
-    provenance := firProvenance "Portable USize fixture below the Wasm32 boundary" }
+    provenance := firProvenance "Portable USize fixture below the Wasm32 boundary" },
+  { id := "reuse-assoc"
+    entry := ``Source.Assoc.reassoc
+    args := #[assocDatum assocInput]
+    argSchemas := #[assocSchema assocInput]
+    resultSchema := assocSchema assocExpected
+    native := fun _ => assocDatum (Source.Assoc.reassoc assocInput)
+    tags := #["stress", "ownership", "reuse", "recursion", "constructor"]
+    fuel := 100000
+    requiredLcnfForms :=
+      #["cases", "oproj", "inc", "join", "fap", "oset", "jump", "ctor", "isShared",
+        "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["cases", "oproj", "inc", "join", "isShared", "dec", "jump", "oset", "fap",
+        "return"]
+    provenance := leanCompileProvenance "tests/compile/reusebug.lean"
+      "Pure terminating reassociation adapted to execute the ownership/reuse path" },
+  { id := "capture-17-list"
+    entry := ``Source.capture17List
+    dependencies := #[``Source.applyCaptureList]
+    args := #[
+      .nat 1, .nat 2, .nat 3, .nat 4, .nat 5, .nat 6, .nat 7, .nat 8, .nat 9,
+      .nat 10, .nat 11, .nat 12, .nat 13, .nat 14, .nat 15, .nat 16, .nat 17,
+      .nat 18]
+    argSchemas := #[
+      .nat, .nat, .nat, .nat, .nat, .nat, .nat, .nat, .nat,
+      .nat, .nat, .nat, .nat, .nat, .nat, .nat, .nat, .nat]
+    resultSchema := .seq .nat
+    native := fun _ => natListDatum
+      (Source.capture17List 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18)
+    tags := #["stress", "closure", "capture", "boundary", "constructor"]
+    requiredLcnfForms := #["pap", "fap", "fvar", "ctor", "return"]
+    requiredExecutedLcnfForms := #["pap", "fap", "fvar", "ctor", "return"]
+    provenance := leanCompileProvenance "tests/compile/closure_bug1.lean"
+      "Pure list-valued adaptation retaining 17 captured values" },
+  { id := "big-ctor-70"
+    entry := ``Source.bigCtorField
+    dependencies := #[``Source.mkBigCtor]
+    args := #[.nat 70]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.bigCtorField 70)
+    tags := #["stress", "constructor", "large-object", "boundary", "projection"]
+    requiredLcnfForms := #["fap", "oproj", "inc", "dec", "lit", "ctor", "return"]
+    requiredExecutedLcnfForms := #["fap", "oproj", "inc", "dec", "lit", "ctor", "return"]
+    provenance := leanCompileProvenance "tests/compile/bigctor.lean"
+      "70-object-field constructor preserving the original stress size" }
 ]
 
 def findCase? (id : String) : Option Case :=

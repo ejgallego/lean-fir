@@ -58,14 +58,34 @@ later differential runs.  This manifest is the backend-neutral input boundary
 for future adapters, including a real Wasm engine once the compiler track can
 provide modules; adapters do not need to import FIR's Lean corpus definitions.
 
+`_build/validation/coverage.json` is the deterministic aggregate coverage
+report for the selected cases.  It keeps two kinds of evidence separate:
+
+- **static coverage** is the set of forms present in each compiler-produced
+  LCNF artifact (`lcnf-forms`), checked against `requiredLcnfForms`;
+- **executed coverage** is the set of forms the interpreter actually reached
+  (`executed-lcnf-forms`), checked against `requiredExecutedLcnfForms`.
+
+The report records per-case required, observed, and missing sets as well as
+their corpus-wide unions and interpreter step counts.  Every LCNF result must
+emit `executed-lcnf-forms` and a positive `interpreter-steps` value, including
+cases whose executed requirement list is empty.  An empty list means “collect
+telemetry without a path-specific obligation”; it does not make the telemetry
+optional.  Once a case lists an executed form, failing to reach it fails
+validation just like a missing static form.  This distinction prevents a form
+merely present in an unvisited branch from satisfying an execution-coverage
+claim.
+
 ## Current corpus
 
-The compiler-generated corpus currently has 18 cases.  Beyond literals,
+The compiler-generated corpus currently has 21 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
 polymorphic box/unbox, packed USize/scalar structure updates, and nested tuple
-projection/reallocation.  Several fixtures carry exact provenance into Lean's
+projection/reallocation.  Stress fixtures additionally execute compiler-lowered
+ownership/reuse during recursive reassociation, retain 17 closure captures,
+and allocate/project a 70-object-field constructor.  Several fixtures carry exact provenance into Lean's
 `tests/compile` suite at `v4.32.0-rc1`.  The corpus contains no hand-written
 LCNF: the native and FIR paths consume the same Lean source declarations.
 

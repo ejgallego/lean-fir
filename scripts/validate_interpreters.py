@@ -25,6 +25,7 @@ MANIFEST_FIELDS = {
     "fuel",
     "provenance",
     "requiredLcnfForms",
+    "requiredExecutedLcnfForms",
 }
 
 
@@ -107,6 +108,7 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         fuel = value["fuel"]
         provenance = value["provenance"]
         required_forms = value["requiredLcnfForms"]
+        required_executed_forms = value["requiredExecutedLcnfForms"]
         if version != PROTOCOL_VERSION:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: protocol version {version} "
@@ -149,10 +151,21 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: duplicate requiredLcnfForms"
             )
+        if not isinstance(required_executed_forms, list) or not all(
+            isinstance(form, str) and form for form in required_executed_forms
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed requiredExecutedLcnfForms"
+            )
+        if len(set(required_executed_forms)) != len(required_executed_forms):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: duplicate requiredExecutedLcnfForms"
+            )
 
         descriptor = dict(value)
         descriptor["tags"] = sorted(tags)
         descriptor["requiredLcnfForms"] = sorted(required_forms)
+        descriptor["requiredExecutedLcnfForms"] = sorted(required_executed_forms)
         descriptors.append(descriptor)
 
     if not descriptors:
@@ -233,10 +246,173 @@ def result_map(records: list[dict], backend: str) -> dict[str, dict]:
 
 def diagnostics(record: dict) -> dict[str, str]:
     result: dict[str, str] = {}
-    for item in record.get("diagnostics", []):
-        if isinstance(item, dict) and isinstance(item.get("key"), str):
-            result[item["key"]] = str(item.get("value", ""))
+    items = record.get("diagnostics", [])
+    if not isinstance(items, list):
+        raise ValidationError(
+            f"{record.get('backend', 'backend')}/{record.get('caseId', '?')}: "
+            "malformed diagnostics"
+        )
+    for item in items:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("key"), str)
+            or not item["key"]
+            or not isinstance(item.get("value"), str)
+        ):
+            raise ValidationError(
+                f"{record.get('backend', 'backend')}/{record.get('caseId', '?')}: "
+                "malformed diagnostic"
+            )
+        if item["key"] in result:
+            raise ValidationError(
+                f"{record.get('backend', 'backend')}/{record.get('caseId', '?')}: "
+                f"duplicate diagnostic {item['key']}"
+            )
+        result[item["key"]] = item["value"]
     return result
+
+
+def diagnostic_forms(record: dict | None, key: str) -> tuple[bool, list[str]]:
+    """Return whether a comma-separated form diagnostic exists and its canonical set."""
+    if record is None:
+        return False, []
+    values = diagnostics(record)
+    if key not in values:
+        return False, []
+    forms = [form.strip() for form in values[key].split(",") if form.strip()]
+    return True, sorted(set(forms))
+
+
+def positive_int_diagnostic(record: dict | None, key: str) -> tuple[bool, int | None]:
+    """Return a positive decimal diagnostic, preserving absence vs invalidity."""
+    if record is None:
+        return False, None
+    values = diagnostics(record)
+    if key not in values:
+        return False, None
+    raw_value = values[key]
+    if not raw_value.isdecimal():
+        return True, None
+    value = int(raw_value)
+    return True, value if value > 0 else None
+
+
+def coverage_report(
+    descriptors: list[dict], results: dict[str, dict], selected: list[str]
+) -> tuple[dict, list[str]]:
+    """Build deterministic static and executed LCNF coverage.
+
+    `lcnf-forms` describes the forms in the compiled artifact;
+    `executed-lcnf-forms` describes the forms reached by the interpreter.
+    Execution telemetry is required for every result, while path obligations
+    are active only when `requiredExecutedLcnfForms` is nonempty.
+    """
+    descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
+    cases: list[dict] = []
+    failures: list[str] = []
+    static_required: set[str] = set()
+    static_observed: set[str] = set()
+    executed_required: set[str] = set()
+    executed_observed: set[str] = set()
+    static_missing_count = 0
+    executed_missing_count = 0
+    executed_diagnostic_count = 0
+    executed_requirement_count = 0
+    interpreter_steps: list[int] = []
+
+    for case_id in sorted(selected):
+        descriptor = descriptor_by_id[case_id]
+        record = results.get(case_id)
+        static_present, observed_static = diagnostic_forms(record, "lcnf-forms")
+        executed_present, observed_executed = diagnostic_forms(
+            record, "executed-lcnf-forms"
+        )
+        steps_present, steps = positive_int_diagnostic(record, "interpreter-steps")
+        required_static = descriptor["requiredLcnfForms"]
+        required_executed = descriptor["requiredExecutedLcnfForms"]
+        executed_obligations_active = bool(required_executed)
+        missing_static = sorted(set(required_static) - set(observed_static))
+        missing_executed = sorted(set(required_executed) - set(observed_executed))
+
+        static_required.update(required_static)
+        static_observed.update(observed_static)
+        executed_required.update(required_executed)
+        executed_observed.update(observed_executed)
+        static_missing_count += len(missing_static)
+        executed_missing_count += len(missing_executed)
+        executed_diagnostic_count += int(executed_present)
+        executed_requirement_count += int(executed_obligations_active)
+        if steps is not None:
+            interpreter_steps.append(steps)
+
+        if missing_static:
+            failures.append(
+                f"{case_id}: missing required static LCNF forms: "
+                f"{','.join(missing_static)}"
+            )
+        if missing_executed:
+            failures.append(
+                f"{case_id}: missing required executed LCNF forms: "
+                f"{','.join(missing_executed)}"
+            )
+        if record is not None and not executed_present:
+            failures.append(f"{case_id}: missing executed-lcnf-forms diagnostic")
+        if record is not None and not steps_present:
+            failures.append(f"{case_id}: missing interpreter-steps diagnostic")
+        elif record is not None and steps is None:
+            failures.append(f"{case_id}: interpreter-steps must be a positive integer")
+
+        cases.append(
+            {
+                "caseId": case_id,
+                "static": {
+                    "diagnosticPresent": static_present,
+                    "requiredForms": required_static,
+                    "observedForms": observed_static,
+                    "missingRequiredForms": missing_static,
+                },
+                "executed": {
+                    "diagnosticPresent": executed_present,
+                    "obligationsActive": executed_obligations_active,
+                    "requiredForms": required_executed,
+                    "observedForms": observed_executed,
+                    "missingRequiredForms": missing_executed,
+                    "interpreterSteps": steps,
+                },
+            }
+        )
+
+    report = {
+        "version": PROTOCOL_VERSION,
+        "backend": "lcnf",
+        "caseCount": len(cases),
+        "summary": {
+            "static": {
+                "requiredForms": sorted(static_required),
+                "observedForms": sorted(static_observed),
+                "missingObligationCount": static_missing_count,
+            },
+            "executed": {
+                "casesWithRequirements": executed_requirement_count,
+                "casesWithDiagnostics": executed_diagnostic_count,
+                "requiredForms": sorted(executed_required),
+                "observedForms": sorted(executed_observed),
+                "missingObligationCount": executed_missing_count,
+                "totalInterpreterSteps": sum(interpreter_steps),
+                "minimumInterpreterSteps": min(interpreter_steps, default=None),
+                "maximumInterpreterSteps": max(interpreter_steps, default=None),
+            },
+        },
+        "cases": cases,
+    }
+    return report, failures
+
+
+def write_coverage_artifact(out_dir: Path, report: dict) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "coverage.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def success_observation(record: dict) -> dict:
@@ -297,7 +473,12 @@ def main() -> int:
         raise ValidationError(f"LCNF backend failed:\n{lcnf_run.stdout}{lcnf_run.stderr}")
     lcnf_results = result_map(records_from_output(lcnf_run.stdout, lcnf_command), "lcnf")
 
-    failures: list[str] = []
+    coverage, coverage_failures = coverage_report(descriptors, lcnf_results, selected)
+    write_coverage_artifact(args.out_dir, coverage)
+    failures: list[str] = list(coverage_failures)
+    coverage_failed_cases = {
+        failure.split(":", maxsplit=1)[0] for failure in coverage_failures
+    }
     comparisons: list[dict] = []
     for case_id in selected:
         native_command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
@@ -320,9 +501,7 @@ def main() -> int:
         native_dir = args.out_dir / case_id / "native"
         (native_dir / "stdout.jsonl").write_text(native_run.stdout, encoding="utf-8")
         (native_dir / "stderr.log").write_text(native_run.stderr, encoding="utf-8")
-        missing_forms = diagnostics(candidate).get("missing-lcnf-forms", "")
-        if missing_forms:
-            failures.append(f"{case_id}: missing required LCNF forms: {missing_forms}")
+        if case_id in coverage_failed_cases:
             continue
         try:
             equal, native_observation, lcnf_observation = compare_success(native, candidate)
