@@ -50,6 +50,25 @@ def eqvAltsUsing
     pure false
 
 /--
+Compare parameter lists while exposing the reader-map extension at every
+binder. This is the transparent counterpart of Lean 4.32's indexed loop in
+`LCNF.AlphaEqv.withParams`.
+-/
+def withParamListsUsing (recurse : EqvM Bool) :
+    List (LCNF.Param pu) → List (LCNF.Param pu) → EqvM Bool
+  | [], [] => recurse
+  | left :: leftRest, right :: rightRest =>
+      LCNF.AlphaEqv.eqvType left.type right.type <&&>
+        LCNF.AlphaEqv.withFVar left.fvarId right.fvarId
+          (withParamListsUsing recurse leftRest rightRest)
+  | _, _ => pure false
+
+/-- Transparent parameter-array traversal used by the local code checker. -/
+def withParamsUsing (left right : Array (LCNF.Param pu))
+    (recurse : EqvM Bool) : EqvM Bool :=
+  withParamListsUsing recurse left.toList right.toList
+
+/--
 A total, transparent copy of Lean 4.32's recursive LCNF alpha-equivalence
 checker. Fuel is consumed only when descending through code or an alternative
 table; exhaustion rejects instead of introducing another opaque `partial def`.
@@ -65,7 +84,7 @@ def eqv : Nat → LCNF.Code pu → LCNF.Code pu → EqvM Bool
       | .fun decl₁ k₁ _, .fun decl₂ k₂ _
       | .jp decl₁ k₁, .jp decl₂ k₂ =>
           LCNF.AlphaEqv.eqvType decl₁.type decl₂.type <&&>
-          LCNF.AlphaEqv.withParams decl₁.params decl₂.params
+          withParamsUsing decl₁.params decl₂.params
             (eqv fuel decl₁.value decl₂.value) <&&>
           LCNF.AlphaEqv.withFVar decl₁.fvarId decl₂.fvarId (eqv fuel k₁ k₂)
       | .return fvarId₁, .return fvarId₂ =>

@@ -419,21 +419,41 @@ replacing that axiom with an upstream theorem remains the desired final
 resolution. Details are recorded in
 `FIR-BUG-impure-alphaEqv-opaque-eqv`.
 
+The control-flow audit is now underway. Lean 4.32's pure checker establishes
+that a jump target is an in-scope join point and that its argument count equals
+the target arity, but `Decl.check` remains a no-op at the impure phase. FIR's
+`ImpureHygienic` boundary preserves join/variable scope and global binder
+uniqueness; its current `codeScoped` predicate does not separately record jump
+arity. The transparent alpha checker nevertheless rejects unequal parameter
+and argument counts. `Local.withParamsUsing` now exposes the parameter loop
+and every reader-map extension instead of delegating to Lean's indexed loop.
+`paramBodyRelated_of_local_check` proves that an accepted traversal constructs
+a recursively related body under the accumulated parameter renaming, with
+freshness supplied by the phase boundary. The first regression closes an
+alpha-renamed one-parameter join body containing reordered constructor/default
+cases. Named negative regressions reject mismatched join bodies, targets,
+arities, and arguments; call regressions cover renamed call arguments and
+reject target/argument mismatches. Every fixture is checked against the
+upstream Boolean implementation. This slice introduces no new trusted axiom.
+
 The remaining bounded work is:
 
-1. extend the declarative state simulation through join points, jumps, calls,
-   and the remaining frame forms, reusing the now-proved `let`, case,
-   bind-frame, and sequential-effect invariants;
-2. prove the transparent local checker sound for each newly added declarative
+1. lift the proved parameter-body relation through the outer `jp`/`jmp`
+   constructors, relate active join environments, and extend the declarative
+   state simulation through join installation and invocation;
+2. extend whole-state simulation through named/closure calls and the remaining
+   yielded/apply/cache frame paths, reusing the existing related `fap`, `pap`,
+   and free-variable call actions;
+3. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-4. lift the resulting theorem through recursive code, declarations, and program
+5. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-5. expand the compiler-generated conformance corpus around the whole pass;
-6. in parallel, continue the Talos runtime work and run
+6. expand the compiler-generated conformance corpus around the whole pass;
+7. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first

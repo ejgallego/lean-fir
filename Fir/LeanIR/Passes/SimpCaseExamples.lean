@@ -320,6 +320,191 @@ theorem nestedCtorMismatchRejected :
 #guard localMatchesUpstream nestedLeftCode nestedDefaultMismatchCode
 #guard localMatchesUpstream nestedLeftCode nestedCtorMismatchCode
 
+def joinLeftId : FVarId := ⟨`joinLeft⟩
+def joinRightId : FVarId := ⟨`joinRight⟩
+def joinWrongId : FVarId := ⟨`joinWrong⟩
+def joinLeftParam : FVarId := ⟨`joinLeftParam⟩
+def joinRightParam : FVarId := ⟨`joinRightParam⟩
+def joinLeftArg : FVarId := ⟨`joinLeftArg⟩
+def joinRightArg : FVarId := ⟨`joinRightArg⟩
+
+def joinLeftBodyCases : LCNF.Cases .impure :=
+  .mk ``Bool objType joinLeftParam #[
+    .ctorAlt falseInfo (.return joinLeftParam),
+    .default (.unreach objType)]
+
+def joinRightBodyCases : LCNF.Cases .impure :=
+  .mk ``Bool objType joinRightParam #[
+    .default (.unreach objType),
+    .ctorAlt falseInfo (.return joinRightParam)]
+
+def joinAlphaLeft : LCNF.Code .impure :=
+  .jp (.mk joinLeftId `joinLeft #[param joinLeftParam] objType
+      (.cases joinLeftBodyCases)) <|
+    .let (letDecl joinLeftArg objType (.lit (.nat 41))) <|
+      .jmp joinLeftId #[.fvar joinLeftArg]
+
+def joinAlphaRight : LCNF.Code .impure :=
+  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
+      (.cases joinRightBodyCases)) <|
+    .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
+      .jmp joinRightId #[.fvar joinRightArg]
+
+def joinBodyMismatch : LCNF.Code .impure :=
+  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
+      (.return joinRightParam)) <|
+    .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
+      .jmp joinRightId #[.fvar joinRightArg]
+
+def joinTargetMismatch : LCNF.Code .impure :=
+  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
+      (.cases joinRightBodyCases)) <|
+    .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
+      .jmp joinWrongId #[.fvar joinRightArg]
+
+def joinArityMismatch : LCNF.Code .impure :=
+  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
+      (.cases joinRightBodyCases)) <|
+    .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
+      .jmp joinRightId #[]
+
+def joinArgumentMismatch : LCNF.Code .impure :=
+  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
+      (.cases joinRightBodyCases)) <|
+    .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
+      .jmp joinRightId #[.erased]
+
+theorem joinBodyMismatchRejected :
+    Local.check 8 joinAlphaLeft joinBodyMismatch = false := by
+  native_decide
+
+theorem joinTargetMismatchRejected :
+    Local.check 8 joinAlphaLeft joinTargetMismatch = false := by
+  native_decide
+
+theorem joinArityMismatchRejected :
+    Local.check 8 joinAlphaLeft joinArityMismatch = false := by
+  native_decide
+
+theorem joinArgumentMismatchRejected :
+    Local.check 8 joinAlphaLeft joinArgumentMismatch = false := by
+  native_decide
+
+theorem joinLeftBodyNormalization :
+    CaseTableNormalizationInvariant joinLeftBodyCases.alts := by
+  constructor
+  simpa [joinLeftBodyCases, LCNF.Cases.alts] using
+    ctorDefaultCaseTableDeterministic falseInfo
+      (.return joinLeftParam) (.unreach objType)
+
+theorem joinRightBodyNormalization :
+    CaseTableNormalizationInvariant joinRightBodyCases.alts := by
+  constructor
+  simpa [joinRightBodyCases, LCNF.Cases.alts] using
+    defaultCtorCaseTableDeterministic falseInfo
+      (.return joinRightParam) (.unreach objType)
+
+theorem joinBodyCodeSideConditions :
+    CodeSideConditions
+      (({} : FVarIdMap FVarId).insert joinRightParam joinLeftParam)
+      [joinLeftParam] [joinRightParam]
+      (.cases joinLeftBodyCases) (.cases joinRightBodyCases) := by
+  apply CodeSideConditions.cases
+  · native_decide
+  · native_decide
+  · exact joinLeftBodyNormalization
+  · exact joinRightBodyNormalization
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    simp [joinLeftBodyCases, LCNF.Cases.alts] at leftMember
+    simp [joinRightBodyCases, LCNF.Cases.alts] at rightMember
+    rcases leftMember with ⟨rfl, rfl⟩
+    rcases rightMember with ⟨rfl, rfl⟩
+    exact .ret (by native_decide) (by native_decide)
+  · intro left right leftHas rightHas
+    simp [HasDefaultAlt, joinLeftBodyCases, joinRightBodyCases,
+      LCNF.Cases.alts] at leftHas rightHas
+    subst left
+    subst right
+    exact .unreachable
+
+theorem joinParamBodySideConditions :
+    ParamBodySideConditions ({} : FVarIdMap FVarId) [] []
+      #[param joinLeftParam].toList #[param joinRightParam].toList
+      (.cases joinLeftBodyCases) (.cases joinRightBodyCases) := by
+  apply ParamBodySideConditions.cons
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · exact .nil joinBodyCodeSideConditions
+
+/--
+The transparent parameter loop constructs the recursively related join body,
+including normalized case selection beneath the alpha-renamed parameters.
+-/
+theorem joinParamBodyRelated :
+    ParamBodyRelated ({} : FVarIdMap FVarId) [] []
+      #[param joinLeftParam].toList #[param joinRightParam].toList
+      (.cases joinLeftBodyCases) (.cases joinRightBodyCases) :=
+  paramBodyRelated_of_local_check joinParamBodySideConditions
+    (fuel := 4) (by
+      change Id.run ((Local.withParamListsUsing
+        (Local.eqv 4 (.cases joinLeftBodyCases) (.cases joinRightBodyCases))
+        #[param joinLeftParam].toList #[param joinRightParam].toList).run
+          ({} : FVarIdMap FVarId)) = true
+      native_decide)
+
+#guard Local.check 8 joinAlphaLeft joinAlphaRight
+#guard !Local.check 8 joinAlphaLeft joinBodyMismatch
+#guard !Local.check 8 joinAlphaLeft joinTargetMismatch
+#guard !Local.check 8 joinAlphaLeft joinArityMismatch
+#guard !Local.check 8 joinAlphaLeft joinArgumentMismatch
+#guard localMatchesUpstream joinAlphaLeft joinAlphaRight
+#guard localMatchesUpstream joinAlphaLeft joinBodyMismatch
+#guard localMatchesUpstream joinAlphaLeft joinTargetMismatch
+#guard localMatchesUpstream joinAlphaLeft joinArityMismatch
+#guard localMatchesUpstream joinAlphaLeft joinArgumentMismatch
+
+def callLeftResult : FVarId := ⟨`callLeftResult⟩
+def callRightResult : FVarId := ⟨`callRightResult⟩
+
+def callAlphaLeft : LCNF.Code .impure :=
+  .let (letDecl joinLeftArg objType (.lit (.nat 43))) <|
+    .let (letDecl callLeftResult objType (.fap `id #[.fvar joinLeftArg])) <|
+      .return callLeftResult
+
+def callAlphaRight : LCNF.Code .impure :=
+  .let (letDecl joinRightArg objType (.lit (.nat 43))) <|
+    .let (letDecl callRightResult objType (.fap `id #[.fvar joinRightArg])) <|
+      .return callRightResult
+
+def callTargetMismatch : LCNF.Code .impure :=
+  .let (letDecl joinRightArg objType (.lit (.nat 43))) <|
+    .let (letDecl callRightResult objType (.fap `first #[.fvar joinRightArg])) <|
+      .return callRightResult
+
+def callArgumentMismatch : LCNF.Code .impure :=
+  .let (letDecl joinRightArg objType (.lit (.nat 43))) <|
+    .let (letDecl callRightResult objType (.fap `id #[.erased])) <|
+      .return callRightResult
+
+theorem callTargetMismatchRejected :
+    Local.check 8 callAlphaLeft callTargetMismatch = false := by
+  native_decide
+
+theorem callArgumentMismatchRejected :
+    Local.check 8 callAlphaLeft callArgumentMismatch = false := by
+  native_decide
+
+#guard Local.check 8 callAlphaLeft callAlphaRight
+#guard !Local.check 8 callAlphaLeft callTargetMismatch
+#guard !Local.check 8 callAlphaLeft callArgumentMismatch
+#guard localMatchesUpstream callAlphaLeft callAlphaRight
+#guard localMatchesUpstream callAlphaLeft callTargetMismatch
+#guard localMatchesUpstream callAlphaLeft callArgumentMismatch
+
 def populatedCaseAlts : List (LCNF.Alt .impure) := [
   .ctorAlt falseInfo (.return x),
   .default (.unreach objType)]

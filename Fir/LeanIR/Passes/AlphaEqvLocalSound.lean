@@ -119,6 +119,46 @@ inductive CodeSideConditions :
       CodeSideConditions rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
 
+/--
+Recursive side conditions for a join/function body under its parameter
+binders. The scope and reader map are extended in the same order as
+`Local.withParamListsUsing`.
+-/
+inductive ParamBodySideConditions :
+    FVarIdMap FVarId → List FVarId → List FVarId →
+      List (LCNF.Param .impure) → List (LCNF.Param .impure) →
+      LCNF.Code .impure → LCNF.Code .impure → Prop where
+  | nil
+      (body : CodeSideConditions rho leftScope rightScope leftCode rightCode) :
+      ParamBodySideConditions rho leftScope rightScope [] [] leftCode rightCode
+  | cons
+      (leftFresh : FreshForScope leftParam.fvarId leftScope)
+      (rightFresh : FreshForScope rightParam.fvarId rightScope)
+      (rest : ParamBodySideConditions
+        (rho.insert rightParam.fvarId leftParam.fvarId)
+        (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
+        leftRest rightRest leftCode rightCode) :
+      ParamBodySideConditions rho leftScope rightScope
+        (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
+
+/-- Declarative result of traversing two related parameter lists. -/
+inductive ParamBodyRelated :
+    FVarIdMap FVarId → List FVarId → List FVarId →
+      List (LCNF.Param .impure) → List (LCNF.Param .impure) →
+      LCNF.Code .impure → LCNF.Code .impure → Prop where
+  | nil
+      (body : CodeRelated rho leftScope rightScope leftCode rightCode) :
+      ParamBodyRelated rho leftScope rightScope [] [] leftCode rightCode
+  | cons
+      (leftFresh : FreshForScope leftParam.fvarId leftScope)
+      (rightFresh : FreshForScope rightParam.fvarId rightScope)
+      (rest : ParamBodyRelated
+        (rho.insert rightParam.fvarId leftParam.fvarId)
+        (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
+        leftRest rightRest leftCode rightCode) :
+      ParamBodyRelated rho leftScope rightScope
+        (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
+
 /-- Side conditions for one impure case alternative. -/
 inductive AltSideConditions (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId) :
@@ -482,6 +522,29 @@ theorem codeRelated_of_local_accepts
         apply CodeRelated.del
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.1⟩
         · exact continuation_ih ⟨fuel, accepted.2⟩
+
+/--
+The transparent parameter traversal exposes exactly the reader map under
+which a join/function body was accepted. Parameter types are checked by the
+Boolean traversal; freshness is the additional phase invariant needed to
+extend runtime environment agreement at each binder.
+-/
+theorem paramBodyRelated_of_local_check
+    (side : ParamBodySideConditions rho leftScope rightScope
+      leftParams rightParams leftCode rightCode)
+    (accepted :
+      (Local.withParamListsUsing (Local.eqv fuel leftCode rightCode)
+        leftParams rightParams).run rho = true) :
+    ParamBodyRelated rho leftScope rightScope
+      leftParams rightParams leftCode rightCode := by
+  induction side with
+  | nil body =>
+      exact .nil (codeRelated_of_local_accepts body ⟨fuel, accepted⟩)
+  | cons leftFresh rightFresh rest rest_ih =>
+      simp only [Local.withParamListsUsing] at accepted
+      rw [reader_andM_run_eq_true_iff] at accepted
+      rw [withFVar_run] at accepted
+      exact .cons leftFresh rightFresh (rest_ih accepted.2)
 
 /--
 An accepting transparent comparison of ordered alternatives constructs the
