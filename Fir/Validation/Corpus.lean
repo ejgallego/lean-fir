@@ -307,6 +307,28 @@ def leanCompileProvenance (path note : String) : Provenance := {
   revision := "b4812ae53eea93439ad5dce5a5c26591c31cb697"
   note }
 
+/-- Select and decode one runtime external as a backend-neutral semantic effect. -/
+structure EffectProjection where
+  external : Lean.Name
+  operation : String
+  argSchemas : Array ValidationSchema := #[]
+  resultSchema : Option ValidationSchema := none
+  deriving Inhabited, BEq, Repr
+
+/-- Closure-free form of `EffectProjection` carried by the corpus manifest. -/
+structure EffectProjectionDescriptor where
+  external : String
+  operation : String
+  argSchemas : Array ValidationSchema
+  resultSchema : Option ValidationSchema
+  deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
+
+def EffectProjection.descriptor (projection : EffectProjection) : EffectProjectionDescriptor := {
+  external := toString projection.external
+  operation := projection.operation
+  argSchemas := projection.argSchemas
+  resultSchema := projection.resultSchema }
+
 /-- A source case and the backend-neutral metadata needed to run it. -/
 structure Case where
   id : String
@@ -326,6 +348,8 @@ structure Case where
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
   requiredExecutedExternals : Array Lean.Name := #[]
+  /-- External events promoted from backend telemetry into the semantic observation. -/
+  effectProjections : Array EffectProjection := #[]
   provenance : Provenance := firProvenance "FIR validation fixture"
 
 /-- Closure-free case metadata consumed by runners and future backend adapters. -/
@@ -343,6 +367,7 @@ structure CaseDescriptor where
   requiredExecutedLcnfForms : Array String
   requiredExternals : Array String
   requiredExecutedExternals : Array String
+  effectProjections : Array EffectProjectionDescriptor
   provenance : Provenance
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -359,6 +384,7 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
   requiredExternals := validationCase.requiredExternals.map toString
   requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
+  effectProjections := validationCase.effectProjections.map EffectProjection.descriptor
   provenance := validationCase.provenance }
 
 private def natListDatum (xs : List Nat) : ValidationDatum :=
@@ -956,6 +982,11 @@ def requiredFinalExecutedForms : Array String :=
     "unbox", "uproj", "uset"]
 
 #guard cases.all fun validationCase => !validationCase.requiredExecutedLcnfForms.isEmpty
+
+#guard cases.all fun validationCase =>
+  validationCase.effectProjections.all fun projection =>
+    validationCase.requiredExternals.contains projection.external &&
+    validationCase.requiredExecutedExternals.contains projection.external
 
 #guard requiredFinalExecutedForms.all fun form =>
   cases.any fun validationCase => validationCase.requiredExecutedLcnfForms.contains form

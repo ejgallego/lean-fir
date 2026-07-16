@@ -28,7 +28,9 @@ MANIFEST_FIELDS = {
     "requiredExecutedLcnfForms",
     "requiredExternals",
     "requiredExecutedExternals",
+    "effectProjections",
 }
+EFFECT_PROJECTION_FIELDS = {"external", "operation", "argSchemas", "resultSchema"}
 
 
 class ValidationError(RuntimeError):
@@ -113,6 +115,7 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         required_executed_forms = value["requiredExecutedLcnfForms"]
         required_externals = value["requiredExternals"]
         required_executed_externals = value["requiredExecutedExternals"]
+        effect_projections = value["effectProjections"]
         if version != PROTOCOL_VERSION:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: protocol version {version} "
@@ -185,6 +188,41 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"native corpus manifest/{case_id}: duplicate requiredExecutedExternals"
             )
+        if not isinstance(effect_projections, list):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed effectProjections"
+            )
+        effect_externals: list[str] = []
+        for projection in effect_projections:
+            if not isinstance(projection, dict) or not EFFECT_PROJECTION_FIELDS <= projection.keys():
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed effectProjections"
+                )
+            external = projection["external"]
+            operation = projection["operation"]
+            projection_arg_schemas = projection["argSchemas"]
+            if (
+                not isinstance(external, str)
+                or not external
+                or not isinstance(operation, str)
+                or not operation
+                or not isinstance(projection_arg_schemas, list)
+            ):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed effectProjections"
+                )
+            effect_externals.append(external)
+        if len(set(effect_externals)) != len(effect_externals):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: duplicate effectProjections"
+            )
+        if not set(effect_externals) <= (
+            set(required_externals) & set(required_executed_externals)
+        ):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: effect projection externals "
+                "must be required and executed"
+            )
 
         descriptor = dict(value)
         descriptor["tags"] = sorted(tags)
@@ -192,6 +230,10 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         descriptor["requiredExecutedLcnfForms"] = sorted(required_executed_forms)
         descriptor["requiredExternals"] = sorted(required_externals)
         descriptor["requiredExecutedExternals"] = sorted(required_executed_externals)
+        descriptor["effectProjections"] = sorted(
+            (dict(projection) for projection in effect_projections),
+            key=lambda projection: (projection["external"], projection["operation"]),
+        )
         descriptors.append(descriptor)
 
     if not descriptors:

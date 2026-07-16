@@ -35,6 +35,7 @@ def descriptor(
     executed_forms: list[str] | None = None,
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
+    effect_projections: list[dict] | None = None,
 ) -> dict:
     item = {
         "version": 1,
@@ -56,6 +57,7 @@ def descriptor(
         "requiredExecutedLcnfForms": executed_forms or [],
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
+        "effectProjections": effect_projections or [],
     }
     return item
 
@@ -136,7 +138,21 @@ class HarnessTests(unittest.TestCase):
             forms=["return", "inc"],
             executed_forms=["return", "fap"],
             externals=["Nat.add", "ByteArray.size"],
-            executed_externals=["Nat.add"],
+            executed_externals=["Nat.add", "ByteArray.size"],
+            effect_projections=[
+                {
+                    "external": "Nat.add",
+                    "operation": "validation.z",
+                    "argSchemas": ["nat"],
+                    "resultSchema": "nat",
+                },
+                {
+                    "external": "ByteArray.size",
+                    "operation": "validation.a",
+                    "argSchemas": [],
+                    "resultSchema": None,
+                },
+            ],
         )
         first = descriptor("a-case")
         output = "compiler noise\n" + json.dumps(second) + "\n" + json.dumps(first) + "\n"
@@ -150,7 +166,13 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(
             manifest[1]["requiredExternals"], ["ByteArray.size", "Nat.add"]
         )
-        self.assertEqual(manifest[1]["requiredExecutedExternals"], ["Nat.add"])
+        self.assertEqual(
+            manifest[1]["requiredExecutedExternals"], ["ByteArray.size", "Nat.add"]
+        )
+        self.assertEqual(
+            [projection["external"] for projection in manifest[1]["effectProjections"]],
+            ["ByteArray.size", "Nat.add"],
+        )
 
     def test_executed_manifest_obligations_are_required_and_validated(self) -> None:
         malformed = descriptor("case")
@@ -207,6 +229,66 @@ class HarnessTests(unittest.TestCase):
                     harness.manifest_from_output(
                         json.dumps(item), ["native", "--manifest"]
                     )
+
+    def test_effect_projections_are_required_and_validated(self) -> None:
+        missing = descriptor("case")
+        del missing["effectProjections"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing effectProjections"
+        ):
+            harness.manifest_from_output(json.dumps(missing), ["native", "--manifest"])
+
+        malformed = descriptor("case")
+        malformed["effectProjections"] = "Effect.record"
+        with self.assertRaisesRegex(
+            harness.ValidationError, "malformed effectProjections"
+        ):
+            harness.manifest_from_output(json.dumps(malformed), ["native", "--manifest"])
+
+        incomplete = descriptor("case")
+        incomplete["effectProjections"] = [
+            {
+                "external": "Effect.record",
+                "operation": "validation.record",
+                "argSchemas": ["nat"],
+            }
+        ]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "malformed effectProjections"
+        ):
+            harness.manifest_from_output(json.dumps(incomplete), ["native", "--manifest"])
+
+        duplicate = descriptor("case")
+        duplicate["effectProjections"] = [
+            {
+                "external": "Effect.record",
+                "operation": operation,
+                "argSchemas": ["nat"],
+                "resultSchema": "nat",
+            }
+            for operation in ("validation.first", "validation.second")
+        ]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "duplicate effectProjections"
+        ):
+            harness.manifest_from_output(json.dumps(duplicate), ["native", "--manifest"])
+
+        unexecuted = descriptor(
+            "case",
+            externals=["Effect.record"],
+            effect_projections=[
+                {
+                    "external": "Effect.record",
+                    "operation": "validation.record",
+                    "argSchemas": ["nat"],
+                    "resultSchema": "nat",
+                }
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "must be required and executed"
+        ):
+            harness.manifest_from_output(json.dumps(unexecuted), ["native", "--manifest"])
 
     def test_malformed_manifest_descriptor_rejected(self) -> None:
         item = descriptor("case")

@@ -60,9 +60,13 @@ attached to later differential runs.  `requiredExternals` records names that
 must occur in the compiled artifact; `requiredExecutedExternals` records the
 stronger path obligation that the interpreter must actually dispatch them.
 Both fields are required, even when empty, and are canonicalized as sorted
-sets.  This manifest is the backend-neutral input boundary for future adapters,
-including a real Wasm engine once the compiler track can provide modules;
-adapters do not need to import FIR's Lean corpus definitions.
+sets.  Each case also carries an `effectProjections` array describing which
+external events become semantic effects, with external name, stable operation
+name, argument schemas, and optional result schema.  The field is required and
+canonicalized even when empty, so future backends consume the same effect ABI
+without importing FIR's Lean definitions.  This manifest is the backend-neutral
+input boundary for future adapters, including a real Wasm engine once the
+compiler track can provide modules.
 
 `_build/validation/coverage.json` is the deterministic aggregate coverage
 report for the selected cases.  It keeps two kinds of evidence separate:
