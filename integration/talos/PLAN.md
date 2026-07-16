@@ -124,11 +124,18 @@ production heap layout.
   result decoding feeds directly into target observations, and a closed
   `ReturnPost` can be weakened to `RelatedPost` and lifted to total correctness
   for a resolved single-result export.
+- `FirTalos/Correctness/FunctionExamples.lean` instantiates that stack on W3's
+  real `abiLiteralProgram`. It extracts the checked symbolic module, adapted
+  Talos module, resolved host environment, exported `main`, and concrete
+  initial store; proves the local natural-literal `CodeWP`; and packages it as
+  the premise-free `abiLiteralMain_export_correct` total-correctness theorem.
+  The conclusion uses the same `compareObservations` policy as the executable
+  differential harness, rather than a proof-only observation relation.
 
-The next W4 slice instantiates that path on representative W3 programs, then
-extends the exported theorem from the closed literal case across the supported
-constructor/projection/case fragment. The adapter still rejects initializers
-and closures.
+The next W4 slice extends the exported theorem from the now-closed literal
+case across the supported constructor/projection/case fixtures, then factors
+their repeated module/export packaging into the supported-fragment induction.
+The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

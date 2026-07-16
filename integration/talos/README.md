@@ -75,14 +75,18 @@ same recursive rule for arbitrary continuations. Semantic constructor cases
 now use `CaseChainWP`: an adapted fallback seeds the chain, defaults are
 skipped, and constructor hit/miss rules follow only the arm selected by the
 source tag while retaining compiler evidence for both target arms. A complete
-chain lifts directly to `CodeWP (.cases ...)`. The next proof slice lifts this
-local fragment through the exported-function observation bridge.
+chain lifts directly to `CodeWP (.cases ...)`.
 `FirTalos/Correctness/Function.lean` now supplies that store-specific bridge:
 verified bodies yield `TerminatesWith` or `PartiallyMeets` under `RelatedPost`,
 and exported wrappers preserve the concrete `findExport` resolution witness.
 The adapter correctness layer now exposes its exact function/export layout,
 and singleton `ReturnPost` proofs weaken to the observation postcondition used
-by those wrappers. Representative W3 instantiations remain next.
+by those wrappers. `FirTalos/Correctness/FunctionExamples.lean` closes the
+first representative W3 instance: it follows the actual `abiLiteralProgram`
+through lowering, adaptation, host resolution, local `CodeWP`, exported-name
+resolution, and observation comparison to prove the premise-free
+`abiLiteralMain_export_correct` total-correctness theorem. Constructor,
+projection, and case fixtures are the next exported instances.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

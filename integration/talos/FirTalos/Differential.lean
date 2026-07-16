@@ -227,6 +227,24 @@ def compareObservations (source : Observation) (target : TargetObservation) :
       else
         .mismatch source target differences
 
+/-- Observation-policy computation for W3's empty-runtime literal result. -/
+theorem compareObservations_returned_empty_tagged_42 :
+    compareObservations
+        ({ outcome := .returned (.object (.tagged (UInt64.ofNat 42))), heap := [], world := 0, trace := #[] } : Observation)
+        (.returned (.object (.tagged (UInt64.ofNat 42))) {}) =
+      .related
+        ({ outcome := .returned (.object (.tagged (UInt64.ofNat 42))), heap := [], world := 0, trace := #[] } : Observation)
+        (.returned (.object (.tagged (UInt64.ofNat 42))) {}) := by
+  unfold compareObservations
+  simp only [TargetObservation.toSource?]
+  have noDifferences :
+      observationDifferences
+          ({ outcome := .returned (.object (.tagged (UInt64.ofNat 42))), heap := [], world := 0, trace := #[] } : Observation)
+          ({ outcome := .returned (.object (.tagged (UInt64.ofNat 42))), heap := [], world := 0, trace := #[] } : Observation) = #[] := by
+    native_decide
+  rw [noDifferences]
+  rfl
+
 def sourceFuel : Nat := 1000
 def targetFuel : Nat := 1000
 
