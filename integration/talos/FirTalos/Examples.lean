@@ -1,4 +1,4 @@
-import FirTalos.Adapter
+import FirTalos.Runtime
 import Fir.Wasm.Examples
 import Interpreter.Wasm.Examples.Harness
 

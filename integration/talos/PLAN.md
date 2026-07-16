@@ -39,21 +39,21 @@ This layering separates three claims:
 The first proof should establish claims 1 and 2 without prematurely fixing a
 production heap layout.
 
-## Current baseline
+## Current status
 
-The repository already has:
+- W0 is complete: the semantic ABI, checked kinds, stable imports, opaque
+  handles, target failures, and supported-fragment guards are in place.
+- W1 is complete: FIR validates the generated symbolic subset before
+  adaptation, Talos validation is an additional guard, and function origins
+  survive conversion.
+- W2 is complete for natural/string literals, constructor allocation, object
+  projection, and constructor tags. The positional host resolver, typed codec,
+  structured source/target traps, abstract contracts, and executable Talos
+  guards live under `integration/talos/FirTalos/`.
 
-- a symbolic `i32`/`i64` ABI and typed runtime-operation imports;
-- exhaustive syntactic lowering of final impure LCNF instruction forms;
-- symbolic locals, calls, blocks, branches, returns, and case chains;
-- conversion to Talos functions, imports, calls, labels, and exports;
-- lowering guards for the impure interpreter examples; and
-- a hostless scalar identity program that executes in Talos.
-
-This establishes structural reachability, not semantic backend correctness.
-The generated heap-bearing imports have no host implementation, the adapter
-does not yet represent initializers, and no source/target observation theorem
-exists.
+The next stage is W3: compare FIR and Talos observations automatically. The
+adapter still rejects initializers and closures, and no source/target
+observation theorem exists yet.
 
 ## Architecture decisions
 
