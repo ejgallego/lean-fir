@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import validate_interpreters as harness
 import validation_harness as core
@@ -784,6 +787,87 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(plan.adapter_configs, ())
         self.assertEqual(plan.pairs, (("native", "lcnf"),))
+
+    def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
+        class FakeNativeAdapter:
+            name = "native"
+
+            def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+                return descriptors
+
+            def build(self, context: harness.BuildContext) -> None:
+                pass
+
+            def execute(self, context: harness.RunContext) -> harness.BackendRun:
+                return harness.BackendRun(
+                    self.name,
+                    list(context.selected),
+                    {"case": success("case", self.name)},
+                )
+
+            def audit(
+                self,
+                context: harness.RunContext,
+                backend_run: harness.BackendRun,
+            ) -> harness.BackendAudit:
+                return harness.BackendAudit()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            adapter_path = root / "v8.json"
+            program = f"print({json.dumps(json.dumps(success('case', 'v8')))})"
+            adapter_path.write_text(
+                json.dumps(
+                    {
+                        "name": "v8",
+                        "runCommand": [sys.executable, "-c", program],
+                        "resultDomain": "selected",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan_path = root / "matrix.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "adapterConfigs": ["v8.json"],
+                        "pairs": [
+                            {"reference": "native", "candidate": "v8"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            argv = [
+                "validate_interpreters.py",
+                "--plan",
+                str(plan_path),
+                "--out-dir",
+                str(out_dir),
+                "--no-build",
+            ]
+            with (
+                mock.patch.object(
+                    harness, "BACKEND_ADAPTERS", {"native": FakeNativeAdapter()}
+                ),
+                mock.patch.object(
+                    harness, "corpus_manifest", return_value=[descriptor("case")]
+                ),
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(harness.main(), 0)
+            self.assertIn("native == v8", stdout.getvalue())
+            matrix = json.loads(
+                (out_dir / "matrix.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(matrix["backends"], ["native", "v8"])
+            self.assertEqual(matrix["summary"]["equalComparisonCount"], 1)
+            self.assertTrue(
+                (out_dir / "comparisons" / "native--v8.json").is_file()
+            )
 
     def test_external_adapter_receives_corpus_and_selection_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
