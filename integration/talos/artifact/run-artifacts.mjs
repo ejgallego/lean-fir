@@ -6,6 +6,13 @@ const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
 
+class SemanticFault extends Error {
+  constructor(fault) {
+    super(`FIR semantic fault: ${fault.kind}`);
+    this.fault = fault;
+  }
+}
+
 function manifestValue(argument) {
   assert.ok(argument && typeof argument === "object", "manifest argument must be an object");
   switch (argument.kind) {
@@ -216,7 +223,13 @@ class SemanticHost {
     const cell = this.liveCell(source.location);
     assert.equal(cell.object.kind, "ctor", "object projection expected a constructor");
     const value = cell.object.objectFields[operation.index];
-    assert.ok(value, `object field ${operation.index} is out of bounds`);
+    if (value === undefined) {
+      throw new SemanticFault({
+        kind: "objectFieldOutOfBounds",
+        index: operation.index,
+        size: cell.object.objectFields.length,
+      });
+    }
     return this.encode(operation.result, value);
   }
 
@@ -356,6 +369,15 @@ class SemanticHost {
       trace: this.trace,
     };
   }
+
+  faultObservation(fault) {
+    return {
+      outcome: { kind: "fault", fault },
+      reachableHeap: [],
+      world: this.world,
+      trace: this.trace,
+    };
+  }
 }
 
 async function runArtifact(manifestPath) {
@@ -377,8 +399,16 @@ async function runArtifact(manifestPath) {
     `${manifest.fixture} manifest argument arity mismatch`);
   const physicalArgs = manifest.params.map((kind, index) =>
     host.encode(kind, manifestValue(manifest.arguments[index])));
-  const physicalResult = entry(...physicalArgs);
-  const actual = host.observation(manifest.result, physicalResult);
+  let actual;
+  try {
+    const physicalResult = entry(...physicalArgs);
+    actual = host.observation(manifest.result, physicalResult);
+  } catch (error) {
+    if (!(error instanceof SemanticFault)) {
+      throw error;
+    }
+    actual = host.faultObservation(error.fault);
+  }
   assert.deepStrictEqual(actual, expected, `${manifest.fixture} observation mismatch`);
   console.log(`PASS ${manifest.fixture}`);
 }

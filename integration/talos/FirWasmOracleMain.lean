@@ -66,9 +66,42 @@ def heapCellJson (entry : Location × HeapCell) : Json :=
     ("live", entry.snd.live),
     ("object", heapObjectJson entry.snd.object)]
 
+def runtimeFaultJson : RuntimeFault → Json
+  | .unknownVar fvarId =>
+      Json.mkObj [("kind", "unknownVar"), ("fvarId", fvarId.name.toString)]
+  | .unknownDecl name =>
+      Json.mkObj [("kind", "unknownDecl"), ("name", name.toString)]
+  | .unknownJoinPoint fvarId =>
+      Json.mkObj [("kind", "unknownJoinPoint"), ("fvarId", fvarId.name.toString)]
+  | .arityMismatch expected actual =>
+      Json.mkObj [("kind", "arityMismatch"), ("expected", expected), ("actual", actual)]
+  | .deadObject location =>
+      Json.mkObj [("kind", "deadObject"), ("location", location)]
+  | .expectedObject => Json.mkObj [("kind", "expectedObject")]
+  | .expectedConstructor => Json.mkObj [("kind", "expectedConstructor")]
+  | .expectedClosure => Json.mkObj [("kind", "expectedClosure")]
+  | .expectedScalar => Json.mkObj [("kind", "expectedScalar")]
+  | .expectedUSize => Json.mkObj [("kind", "expectedUSize")]
+  | .expectedReuseToken => Json.mkObj [("kind", "expectedReuseToken")]
+  | .objectFieldOutOfBounds index size =>
+      Json.mkObj [("kind", "objectFieldOutOfBounds"), ("index", index), ("size", size)]
+  | .usizeFieldOutOfBounds index size =>
+      Json.mkObj [("kind", "usizeFieldOutOfBounds"), ("index", index), ("size", size)]
+  | .scalarFieldMissing width offset =>
+      Json.mkObj [("kind", "scalarFieldMissing"), ("width", width), ("offset", offset)]
+  | .invalidCases => Json.mkObj [("kind", "invalidCases")]
+  | .referenceCountUnderflow location =>
+      Json.mkObj [("kind", "referenceCountUnderflow"), ("location", location)]
+  | .expectedHeapReference => Json.mkObj [("kind", "expectedHeapReference")]
+  | .externalFailure name message =>
+      Json.mkObj [
+        ("kind", "externalFailure"), ("name", name.toString), ("message", message)]
+  | .unreachable => Json.mkObj [("kind", "unreachable")]
+  | .malformed message => Json.mkObj [("kind", "malformed"), ("message", message)]
+
 def outcomeJson : Outcome → Json
   | .returned value => Json.mkObj [("kind", "returned"), ("value", valueJson value)]
-  | .fault fault => Json.mkObj [("kind", "fault"), ("fault", s!"{repr fault}")]
+  | .fault fault => Json.mkObj [("kind", "fault"), ("fault", runtimeFaultJson fault)]
 
 def externalEventJson (event : ExternalEvent) : Json :=
   Json.mkObj [

@@ -55,3 +55,8 @@ W4. A0 owns new emitter and external-engine runner paths and produces the
 first standards-consumable, host-backed Wasm artifact for the W3 corpus. It
 must consume the frozen semantic ABI unchanged; concrete linear-memory layout
 and production ABI compatibility remain W6 work.
+
+The A0 corpus compares successful returns, entry arguments, reachable heaps,
+and structured runtime faults against live W3 observations. Semantic host
+faults use the same constructor-and-fields JSON shape as the Lean oracle;
+runner assertions and target-integrity failures remain fatal harness errors.

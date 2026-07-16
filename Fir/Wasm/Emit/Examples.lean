@@ -55,6 +55,14 @@ def abiNestedHeapProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl p tobjectType (.ctor pairInfo #[.fvar x, .fvar y])) <|
       .return p)] }
 
+def abiObjectProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 7))) <|
+      .let (letDecl y tobjectType (.lit (.nat 8))) <|
+      .let (letDecl p objType (.ctor pairInfo #[.fvar x, .fvar y])) <|
+      .let (letDecl r tobjectType (.oproj 2 p)) <|
+      .return r)] }
+
 def initialFixtures : List CorpusFixture := [
   { name := "literal", program := abiLiteralProgram },
   { name := "erased", program := abiErasedProgram },
@@ -81,7 +89,8 @@ def initialFixtures : List CorpusFixture := [
   { name := "default-case", program := abiDefaultCaseProgram },
   { name := "string-heap", program := abiStringHeapProgram },
   { name := "natural-heap", program := abiNaturalHeapProgram },
-  { name := "nested-heap", program := abiNestedHeapProgram }]
+  { name := "nested-heap", program := abiNestedHeapProgram },
+  { name := "projection-fault", program := abiObjectProjectionFaultProgram }]
 
 def initialCorpus : Array Fir.LeanIR.ImpureProgram :=
   initialFixtures.toArray.map (·.program)
