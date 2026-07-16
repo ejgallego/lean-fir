@@ -118,6 +118,30 @@ def scalarCaseProgram : ImpureProgram :=
 
 #guard returned? (runMain scalarCaseProgram) (.object (.tagged 30))
 
+def byteArrayIdentityCode : LCNF.Code .impure :=
+  .inc x 1 true false <|
+  .return x
+
+def byteArrayIdentityProgram : ImpureProgram :=
+  { decls := #[decl `main #[param x] objType (.code byteArrayIdentityCode)] }
+
+def byteArrayIdentity? : Bool :=
+  let bytes : Array UInt8 := #[0, 127, 128, 255]
+  let (runtime, reference) := alloc {} (.byteArray bytes)
+  match runProgram 100 rejectExternals byteArrayIdentityProgram `main
+      #[.object reference] runtime with
+  | .done observation =>
+      match observation.outcome, reference with
+      | .returned (.object returned), .heap location =>
+          returned == reference &&
+            match getLiveCell { heap := observation.heap } location with
+            | .ok cell => cell.object == .byteArray bytes
+            | .error _ => false
+      | _, _ => false
+  | .outOfFuel _ => false
+
+#guard byteArrayIdentity?
+
 def idDecl : LCNF.Decl .impure :=
   decl `id #[param x] objType (.code (.return x))
 
