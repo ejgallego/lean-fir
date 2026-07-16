@@ -1,105 +1,127 @@
 # FIR research notes
 
-## Lean compiler IR status
+This document records architectural rationale. Implementation status and the
+ordered work queue live only in `docs/pass-correctness-plan.md`.
 
-Lean currently has two relevant compiler IR layers.
+## Compiler target
 
-The primary compiler pipeline is centered on `Lean.Compiler.LCNF`. `Lean.Compiler.Main`
-calls `LCNF.main`, the pass manager runs base/mono/impure LCNF phases, and the C emitter
-operates directly on impure LCNF.
+FIR targets `Lean.Compiler.LCNF` in Lean 4.32.0. The normal compiler starts
+with base LCNF, lowers it to monomorphic LCNF, lowers that to impure LCNF, and
+emits C directly from the final saved impure declarations.
 
-The older lower `Lean.IR` layer still exists. It defines `IRType`, `Expr`, `FnBody`, and
-`Decl`, and the LCNF pipeline still lowers impure LCNF to `Lean.IR` with `IR.toIR` before
-calling `IR.compile`. This lower layer is still useful for interpreter metadata and the
-LLVM-facing code path, but it is not the best v1 anchor if the goal is to track the current
-compiler.
+The older `Lean.IR` remains in Lean. Final impure LCNF is also translated
+through `Lean.IR.toIR` for interpreter metadata and LLVM-related consumers,
+but that is a parallel branch rather than an intermediate representation on
+the direct C-emission path. `docs/lcnf-to-c.md` records the exact 4.32 pass
+sequence.
 
-## Master drift check
+Lean exposes three phase-level LCNF representations:
 
-I checked upstream `lean4` master at commit `9b4f465` from 2026-07-06 against the installed
-Lean 4.31.0 toolchain in this environment.
+| Phase | Syntax index | Distinguishing property |
+|---|---|---|
+| base | `.pure` | source type information and polymorphism remain |
+| mono | `.pure` | polymorphism has been eliminated |
+| impure | `.impure` | runtime layout, mutation, effects, and ownership are explicit |
 
-The files `Lean.Compiler.IR.Basic`, `Lean.Compiler.IR.ToIR`, and `Lean.Compiler.IR.Checker`
-were byte-identical between Lean 4.31.0 and that master checkout. `Lean.Compiler.LCNF.Basic`
-had only a small unrelated change around reducibility queries.
+Because base and mono share the `.pure` syntax index, FIR wraps declarations
+in `Program phase`. This prevents statements about the two compiler snapshots
+from being mixed accidentally and gives each phase a place for its own
+well-formedness invariant.
 
-The important drift is architectural rather than syntactic: LCNF is the compiler-centered IR,
-while lower `Lean.IR` remains a lower layer.
+## Semantic foundation
 
-## Existing semantics and checks
+`Fir.LeanIR.Impure` is the reference semantics for the lower, pre-Wasm
+boundary. Its runtime model includes:
 
-Upstream Lean provides structural and type-shape checkers for compiler IRs, not a full
-mechanized operational semantics or compiler-correctness theorem for LCNF or lower `Lean.IR`.
+- tagged and heap object references, machine scalars, `usize`, erased values,
+  and reset/reuse tokens;
+- constructor fields split into object, `usize`, and scalar storage;
+- closures, boxes, strings, natural values, opaque objects, reference counts,
+  persistent objects, and liveness;
+- allocation, projections, mutation, tagging, boxing, reference-count
+  operations, deletion, reset, and reuse;
+- typed external requests and responses, an abstract world, and an observable
+  external-event trace.
 
-The LCNF checker validates local context shape, application types, branch/case structure,
-join-point arity, and uniqueness properties. The lower `Lean.IR` checker validates variables,
-join points, object/scalar expectations, constructor runtime limits, and application arity.
+The canonical semantics is the relational `Step` in
+`Fir/LeanIR/Interpreter.lean`. The executable runner uses the same core step
+function, and its soundness results produce relational executions. Outcomes
+distinguish returned values and runtime faults; running out of fuel belongs to
+the runner, not to source-program behavior. The final impure instruction
+forms are handled exhaustively, so this semantics has no catch-all
+"unmodeled instruction" result.
 
-The closest paper background for the lower reference-counting IR is "Counting Immutable Beans".
-LCNF itself is A-normal-form-inspired compiler infrastructure with explicit pure and impure
-phases.
+Observational equivalence for pass proofs is deliberately stronger than
+return-value equality and weaker than heap equality. It compares returned
+values or faults, the external world and trace, and the heap reachable from
+observable roots, modulo a partial address renaming. Unreachable garbage is
+not observable.
 
-## WebAssembly in Lean
+The original evaluator remains under `Fir.LeanIR.Legacy` as a small,
+non-exported differential baseline. `lake lean Inspect` compiles four real
+Lean declarations through `LCNF.main`, reads their saved impure LCNF, and
+reports both the legacy result and the new machine result. In Lean 4.32 the
+new machine executes all four:
 
-The official WebAssembly spec gives the baseline execution semantics and a reference
-interpreter. The current online core spec is WebAssembly 3.0 dated 2026-06-25.
+| Declaration | Relevant emitted form | New machine |
+|---|---|---|
+| `litNat` | literal and return | executes |
+| `idNat` | borrowed parameter, `inc`, return | executes |
+| `branchNat` | constructor `cases` | executes |
+| `pairFirst` | object projection and `inc` | executes |
 
-Lean projects found during research:
+## Pass-proof harness
 
-- Talos (`cajal-technologies/talos`): Lean 4.31.0, executable Wasm semantics, examples, and
-  WP/spec predicates. This is the best candidate for a future FIR-to-Wasm bridge.
-- Wean (`pmatos/wean`): useful WebAssembly 3.0 runtime/equivalence reference, but pinned to
-  Lean 4.27.0-rc1 in the inspected checkout.
-- `aionescu/lean-wasm`: a small intrinsically typed interpreter and useful design reference,
-  but its proof-carrying evaluator still has unfinished proof placeholders.
+`Fir.LeanIR.Pipeline` copies the exact built-in 4.32 pass keys, including
+occurrence numbers and phase transitions, and checks them against
+`LCNF.builtinPassManager` at elaboration time. A Lean upgrade that changes the
+pipeline therefore fails locally instead of silently invalidating the proof
+roadmap.
 
-## V1 formal model
+The same module constructs the proof worklist mechanically in reverse:
+`saveImpure` back through the impure passes, then late mono, SCC splitting,
+early mono, base, and finally `toLCNF`. Administrative passes can be discharged
+separately from behavior-changing passes. The theorem interfaces are present;
+proofs for the individual upstream transformations are the continuing
+campaign.
 
-V1 formalizes a deliberately tiny impure LCNF subset:
+`Fir.LeanIR.Checkpoint` also provides an opt-in wrapper around Lean 4.32's
+actual `simpCase` pass. `Inspect` installs it dynamically, records declaration
+groups immediately before and after the pass, and reports per-sample size
+deltas. The wrapper calls the upstream pass body and is not registered
+globally, so importing FIR does not change downstream compilation.
 
-- let-bound literals,
-- erased values,
-- variable return,
-- unreachable,
-- unsupported-operation rejection.
+## WebAssembly direction
 
-This gives a stable executable evaluator, a matching big-step relation, and trivial theorems
-that can be used to evaluate future proof ergonomics before adding heap, reference counting,
-constructors, calls, or Wasm simulation.
+`Fir.Wasm` defines a small semantic ABI over core Wasm value types. Object
+references and most Lean values use `i32`; `UInt64` and `USize` use `i64`.
+Every impure LCNF value or instruction form lowers either to core symbolic
+Wasm control/data instructions or to a typed `fir.*` runtime operation.
+Runtime imports are generated and deduplicated from actual use.
 
-## Compiler-emitted LCNF observations
+The optional package in `integration/talos` resolves symbolic locals, branch
+labels, calls, imports, functions, and exports into Talos's `Wasm.Module`.
+It pins a Talos revision whose interpreter uses Lean 4.32. Its smoke test runs
+a scalar identity module in Talos. Runtime implementations for heap-bearing
+`fir.*` imports and the cross-language simulation theorem remain future proof
+targets.
 
-`lake lean Inspect` now compiles a few local declarations through `LCNF.main` and reads the
-local impure declaration extension with `getLocalImpureDecl?`.
+## Semantic discrepancies
 
-With Lean 4.33.0-rc1, the emitted shapes and coverage report are already informative:
+Proof failures and differential mismatches are expected engineering output.
+The `bugs/` directory defines a versioned textual card with compiler phase,
+pass occurrence, exact reproduction commands, expected and actual semantics,
+proof evidence, classification, workaround, upstream tracking, and permanent
+regression links. `make bug-cards` enforces that structure.
 
-- A literal `Nat` definition becomes a literal let followed by `return`.
-- Identity on `Nat` uses a borrowed parameter (`@&x`), then `inc x`, then `return x`.
-- Branching on `Bool` emits `cases` with literal-return branches.
-- First projection from `Nat × Nat` emits `oproj[0]`, then `inc`, then `return`.
+## External references
 
-Current generated coverage:
+Upstream Lean supplies extensive structural and type-shape checkers for LCNF
+and lower IR, but FIR does not assume a pre-existing complete operational
+semantics or pass-correctness development. The closest background for the
+lower reference-counting design is *Counting Immutable Beans*.
 
-```text
-litNat: params=0, borrowed=0, code-supported=yes, call-ready=yes, sample-eval=ok, first-unsupported=-
-idNat: params=1, borrowed=1, code-supported=yes, call-ready=yes, sample-eval=ok, first-unsupported=-
-branchNat: params=1, borrowed=0, code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=cases
-pairFirst: params=1, borrowed=1, code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=oproj
-```
-
-The `inc` instruction is now modeled as an observational no-op in the FIR evaluator. That
-makes the body of `idNat` supported. Declaration-level simulation now binds parameters to
-argument values, so generated `idNat` is also call-ready and evaluates successfully on a
-sample literal argument.
-
-Parameter binding is now present, so the next open semantic increments are constructor cases
-and object projection. Full heap layout, destructive update, closures, and precise
-reference-counting soundness should still wait.
-
-## Next bridge target
-
-The next milestone should relate this LCNF subset to Wasm observations, probably through Talos
-rather than raw Wasm syntax or binary parsing. The initial relation should compare return-value
-observations for straight-line code before modeling heap layout, Lean runtime imports, reference
-counting, closures, or constructors.
+For WebAssembly, the official core specification remains the normative
+semantic reference. Talos (`cajal-technologies/talos`) supplies the executable
+Lean semantics used by FIR's optional bridge. Wean (`pmatos/wean`) and
+`aionescu/lean-wasm` are useful design references but are not dependencies.

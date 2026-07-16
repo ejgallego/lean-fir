@@ -1,11 +1,12 @@
 import Lean.Compiler.LCNF
 import Lean.Elab.Command
-import Fir.LeanIR.Examples
+import Fir.LeanIR
+import Fir.LeanIR.LegacyExamples
 
 open Lean
 open Lean.Elab.Command
 open Lean.Compiler
-open Fir.LeanIR.LCNFCore
+open Fir.LeanIR.Legacy
 
 namespace Fir.Inspect
 
@@ -58,9 +59,9 @@ partial def firstUnsupportedCode? : LCNF.Code .impure -> Option String
   | .dec .. => some "dec"
   | .del .. => some "del"
 
-#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.letLitReturn == none
-#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.incLetReturn == none
-#guard firstUnsupportedCode? Fir.LeanIR.LCNFExamples.unsupportedSetTag == some "setTag"
+#guard firstUnsupportedCode? Fir.LeanIR.LegacyExamples.letLitReturn == none
+#guard firstUnsupportedCode? Fir.LeanIR.LegacyExamples.incLetReturn == none
+#guard firstUnsupportedCode? Fir.LeanIR.LegacyExamples.unsupportedSetTag == some "setTag"
 
 def borrowedParamCount (params : Array (LCNF.Param .impure)) : Nat :=
   params.foldl (init := 0) fun count param =>
@@ -71,23 +72,53 @@ def firstUnsupportedDecl? (decl : LCNF.Decl .impure) : Option String :=
   | .code code => firstUnsupportedCode? code
   | .extern _ => some "extern"
 
-def declSupported? (decl : LCNF.Decl .impure) : Bool :=
+def legacySupported? (decl : LCNF.Decl .impure) : Bool :=
   match decl.value with
   | .code code => supportedCode? code
   | .extern _ => false
 
-def callReady? (decl : LCNF.Decl .impure) : Bool :=
-  declSupported? decl
+def legacyCallReady? (decl : LCNF.Decl .impure) : Bool :=
+  legacySupported? decl
 
-def sampleArgs? : Name -> Option (List Value)
+def legacySampleArgs? : Name -> Option (List Value)
   | `Fir.Inspect.CompilerSamples.litNat => some []
   | `Fir.Inspect.CompilerSamples.idNat => some [.lit (.nat 42)]
   | _ => none
 
-def sampleEvalText (decl : LCNF.Decl .impure) : String :=
-  match sampleArgs? decl.name with
+def legacyEvalText (decl : LCNF.Decl .impure) : String :=
+  match legacySampleArgs? decl.name with
   | none => "skipped"
   | some args => resultText (evalDecl args decl)
+
+def machineResultText : Fir.LeanIR.Impure.RunResult → String
+  | .done observation =>
+      match observation.outcome with
+      | .returned _ => "ok"
+      | .fault fault => s!"fault({repr fault})"
+  | .outOfFuel _ => "out-of-fuel"
+
+def pairRuntimeAndValue : Fir.LeanIR.Impure.RuntimeState × Fir.LeanIR.Impure.Value :=
+  let info : LCNF.CtorInfo :=
+    { name := `Prod.mk, cidx := 0, size := 2, usize := 0, ssize := 0 }
+  match Fir.LeanIR.Impure.allocCtor {} info #[
+      .object (.tagged 41), .object (.tagged 42)] with
+  | .ok result => result
+  | .error _ => ({}, .erased)
+
+def machineSample? : Name →
+    Option (Fir.LeanIR.Impure.RuntimeState × Array Fir.LeanIR.Impure.Value)
+  | `Fir.Inspect.CompilerSamples.litNat => some ({}, #[])
+  | `Fir.Inspect.CompilerSamples.idNat => some ({}, #[.object (.tagged 42)])
+  | `Fir.Inspect.CompilerSamples.branchNat => some ({}, #[.object (.tagged 1)])
+  | `Fir.Inspect.CompilerSamples.pairFirst => some (pairRuntimeAndValue.1, #[pairRuntimeAndValue.2])
+  | _ => none
+
+def machineEvalText (decl : LCNF.Decl .impure) : String :=
+  match machineSample? decl.name with
+  | none => "skipped"
+  | some (runtime, args) =>
+      machineResultText <| Fir.LeanIR.Impure.runProgram 100
+        Fir.LeanIR.Impure.rejectExternals { decls := #[decl] } decl.name args runtime
 
 def reasonText : Option String -> String
   | none => "-"
@@ -95,29 +126,52 @@ def reasonText : Option String -> String
 
 def coverageLine (decl : LCNF.Decl .impure) : String :=
   s!"{decl.name}: params={decl.params.size}, borrowed={borrowedParamCount decl.params}, " ++
-    s!"code-supported={supportedText (declSupported? decl)}, " ++
-    s!"call-ready={supportedText (callReady? decl)}, " ++
-    s!"sample-eval={sampleEvalText decl}, " ++
-    s!"first-unsupported={reasonText (firstUnsupportedDecl? decl)}"
+    s!"legacy-supported={supportedText (legacySupported? decl)}, " ++
+    s!"legacy-call-ready={supportedText (legacyCallReady? decl)}, " ++
+    s!"legacy-eval={legacyEvalText decl}, " ++
+    s!"machine-eval={machineEvalText decl}, " ++
+    s!"legacy-first-unsupported={reasonText (firstUnsupportedDecl? decl)}"
 
 structure GeneratedLCNFReport where
   formatted : String
   coverage : String
+  checkpoint : String
+
+def checkpointDeclSize? (decls : Array (LCNF.Decl .impure)) (declName : Name) : Option Nat :=
+  (decls.find? (·.name == declName)).map (·.size)
+
+def checkpointText (declName : Name) (checkpoint : Option Fir.LeanIR.ImpurePassCheckpoint) : String :=
+  match checkpoint with
+  | none => s!"{declName}: simpCase checkpoint missing"
+  | some checkpoint =>
+      match checkpointDeclSize? checkpoint.before declName,
+        checkpointDeclSize? checkpoint.after declName with
+      | some beforeSize, some afterSize =>
+          s!"{declName}: pass={checkpoint.key.name}, occurrence={checkpoint.key.occurrence}, " ++
+            s!"before-size={beforeSize}, after-size={afterSize}"
+      | _, _ => s!"{declName}: simpCase checkpoint did not contain the declaration"
 
 def compileAndReportImpureDecl (declName : Name) : CoreM GeneratedLCNFReport := do
   Lean.Compiler.LCNF.main #[declName] (← getOptions)
+  let checkpoint ← Fir.LeanIR.findLatestImpurePassCheckpoint?
+    (Fir.LeanIR.pass .impure `simpCase) declName
   let some decl ← Lean.Compiler.LCNF.getLocalImpureDecl? declName
     | return {
         formatted := s!"{declName}: no local impure LCNF declaration",
-        coverage := s!"{declName}: code-supported=no, call-ready=no, sample-eval=skipped, first-unsupported=no-local-impure-decl" }
+        coverage := s!"{declName}: legacy-supported=no, legacy-call-ready=no, " ++
+          "legacy-eval=skipped, machine-eval=skipped, " ++
+          "legacy-first-unsupported=no-local-impure-decl",
+        checkpoint := checkpointText declName checkpoint }
   return {
     formatted := toString (← Lean.Compiler.LCNF.ppDecl' decl .impure),
-    coverage := coverageLine decl }
+    coverage := coverageLine decl,
+    checkpoint := checkpointText declName checkpoint }
 
 @[command_elab firInspectLCNF]
 def elabFirInspectLCNF : CommandElab := fun stx => do
   match stx with
   | `(#fir_inspect_lcnf $ids:ident*) =>
+      liftCoreM Fir.LeanIR.installSimpCaseCapture
       let reports ← ids.mapM fun id => do
         let declName ← resolveGlobalConstNoOverload id
         liftCoreM <| compileAndReportImpureDecl declName
@@ -129,6 +183,10 @@ def elabFirInspectLCNF : CommandElab := fun stx => do
       liftIO <| IO.println "Generated LCNF Coverage"
       reports.forM fun report =>
         liftIO <| IO.println report.coverage
+      liftIO <| IO.println ""
+      liftIO <| IO.println "Compiler Checkpoints"
+      reports.forM fun report =>
+        liftIO <| IO.println report.checkpoint
   | _ => throwError "unsupported #fir_inspect_lcnf syntax"
 
 namespace CompilerSamples
@@ -157,26 +215,26 @@ def InspectEntry.line (entry : InspectEntry) : String :=
 
 def entries : List InspectEntry :=
   [ { name := "letLitReturn",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.letLitReturn,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.letLitReturn },
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.letLitReturn,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.letLitReturn },
     { name := "nestedLetReturnFirst",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.nestedLetReturnFirst,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.nestedLetReturnFirst },
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.nestedLetReturnFirst,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.nestedLetReturnFirst },
     { name := "shadowingReturnLatest",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.shadowingReturnLatest,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.shadowingReturnLatest },
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.shadowingReturnLatest,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.shadowingReturnLatest },
     { name := "erasedLetReturn",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.erasedLetReturn,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.erasedLetReturn },
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.erasedLetReturn,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.erasedLetReturn },
     { name := "incLetReturn",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.incLetReturn,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.incLetReturn },
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.incLetReturn,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.incLetReturn },
     { name := "unsupportedSetTag",
-      supported := supportedCode? Fir.LeanIR.LCNFExamples.unsupportedSetTag,
-      result := eval ({} : Env) Fir.LeanIR.LCNFExamples.unsupportedSetTag } ]
+      supported := supportedCode? Fir.LeanIR.LegacyExamples.unsupportedSetTag,
+      result := eval ({} : Env) Fir.LeanIR.LegacyExamples.unsupportedSetTag } ]
 
 def main : IO Unit := do
-  IO.println "FIR inspection"
+  IO.println "FIR legacy baseline"
   for entry in entries do
     IO.println entry.line
 

@@ -1,1 +1,2 @@
-import Fir.LeanIR.Examples
+import Fir.LeanIR
+import Fir.Wasm

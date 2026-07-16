@@ -2,12 +2,12 @@ import Lean.Compiler.LCNF.Basic
 
 namespace Fir.LeanIR
 
-namespace LCNFCore
+namespace Legacy
 
 open Lean
 open Lean.Compiler
 
-/-- Values modeled by the v1 FIR subset. -/
+/-- Values modeled by FIR's original differential baseline. -/
 inductive Value where
   | lit (value : LCNF.LitValue)
   | erased
@@ -327,6 +327,6 @@ theorem eval_let_erased_return (env : Env) (x : FVarId) (type : Expr) :
   change eval (bind env x .erased) (.return x) = .ok .erased
   simp [eval]
 
-end LCNFCore
+end Legacy
 
 end Fir.LeanIR

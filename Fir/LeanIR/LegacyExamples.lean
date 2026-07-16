@@ -1,12 +1,12 @@
-import Fir.LeanIR.LCNFCore
+import Fir.LeanIR.Legacy
 
 namespace Fir.LeanIR
 
-namespace LCNFExamples
+namespace LegacyExamples
 
 open Lean
 open Lean.Compiler
-open LCNFCore
+open Legacy
 
 def x : FVarId := ⟨`x⟩
 def y : FVarId := ⟨`y⟩
@@ -119,6 +119,6 @@ example : SupportedCode incLetReturn := by
   exact SupportedCode.letDecl (SupportedLetValue.lit lit42)
     (SupportedCode.inc (SupportedCode.ret x))
 
-end LCNFExamples
+end LegacyExamples
 
 end Fir.LeanIR

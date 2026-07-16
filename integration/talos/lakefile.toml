@@ -1,0 +1,15 @@
+name = "FirTalos"
+version = "0.1.0"
+defaultTargets = ["FirTalos"]
+packagesDir = "../../.lake/talos-packages"
+
+[[require]]
+name = "Fir"
+path = "../.."
+
+[[require]]
+name = "Interpreter"
+path = "../../.deps/talos/interpreter"
+
+[[lean_lib]]
+name = "FirTalos"
