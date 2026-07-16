@@ -113,9 +113,16 @@ production heap layout.
   while both retain structural compiler evidence for the unexecuted arm. The
   complete chain lifts to `CodeWP (.cases ...)` through the executable case
   compiler.
+- The local W4 judgment now reaches Talos's public fuel-free execution
+  predicates. `FunctionBodyPost` installs the verified body at one concrete
+  runtime/handle store, `CodeWP.toTerminatesWithRelated` and its partial
+  counterpart produce `RelatedPost`, and exported-name wrappers retain the
+  module's actual `findExport` witness. This store-specific bridge avoids the
+  stronger store-polymorphic premise required by `FuncSpec`.
 
-The next W4 slice lifts the completed local fragment through `RelatedPost` to
-whole exported functions. The adapter still rejects initializers and closures.
+The next W4 slice connects those wrappers to whole-module adaptation and
+instantiates the supported fragment on representative W3 programs. The adapter
+still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

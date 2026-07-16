@@ -13,3 +13,4 @@ import FirTalos.Correctness.Execution
 import FirTalos.Correctness.Lowering
 import FirTalos.Correctness.Composition
 import FirTalos.Correctness.Semantics
+import FirTalos.Correctness.Function
