@@ -276,10 +276,36 @@ def ScopedFVarRelated (rho : FVarIdMap FVarId)
     FVarRelated rho left right
 
 /--
-The semantic fragment of impure `LetValue` alpha-equivalence. Constructor
-metadata that affects the interpreter is deliberately required to be equal;
-the remaining proof obligation is to derive this relation from Lean's
-executable `LCNF.AlphaEqv.eqvLetValue` checker.
+Exact `.box` type metadata required by the runtime semantics but not implied by
+Lean's executable alpha-equivalence checker.
+-/
+def LetValueBoxTypesEq : LCNF.LetValue .impure → LCNF.LetValue .impure → Prop
+  | .box leftType _, .box rightType _ => leftType = rightType
+  | _, _ => True
+
+private theorem reader_andM_run_eq_true_iff
+    (left right : ReaderM ρ Bool) (env : ρ) :
+    (left <&&> right).run env = true ↔
+      left.run env = true ∧ right.run env = true := by
+  unfold andM
+  simp only [ReaderT.run, ReaderT.bind, Bind.bind, Pure.pure]
+  cases h : left env <;> simp [ToBool.toBool, ReaderT.pure]
+
+private theorem litValue_eq_of_beq {left right : LCNF.LitValue}
+    (equal : (left == right) = true) : left = right := by
+  change LCNF.instBEqLitValue.beq left right = true at equal
+  cases left <;> cases right <;> simp_all [LCNF.instBEqLitValue.beq]
+
+private theorem ctorInfo_eq_of_beq {left right : LCNF.CtorInfo}
+    (equal : (left == right) = true) : left = right := by
+  change LCNF.instBEqCtorInfo.beq left right = true at equal
+  cases left
+  cases right
+  simp_all [LCNF.instBEqCtorInfo.beq]
+
+/--
+The semantic fragment of impure `LetValue` alpha-equivalence. All constructor
+metadata observed by the interpreter is deliberately required to be equal.
 -/
 inductive LetValueRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId) :
@@ -315,12 +341,138 @@ inductive LetValueRelated (rho : FVarIdMap FVarId)
   | isShared (related : ScopedFVarRelated rho leftScope rightScope leftVar rightVar) :
       LetValueRelated rho leftScope rightScope (.isShared leftVar) (.isShared rightVar)
 
+/--
+A successful executable let-value check yields the semantic relation when both
+values are scoped and their runtime-observed box types agree exactly.
+-/
+theorem letValueRelated_of_eqvLetValue_true
+    (leftScoped : letValueScoped leftScope left = true)
+    (rightScoped : letValueScoped rightScope right = true)
+    (boxTypesEq : LetValueBoxTypesEq left right)
+    (accepted : (LCNF.AlphaEqv.eqvLetValue left right).run rho = true) :
+    LetValueRelated rho leftScope rightScope left right := by
+  cases left <;> cases right <;>
+    simp [LCNF.AlphaEqv.eqvLetValue, reader_andM_run_eq_true_iff] at accepted
+  all_goals try contradiction
+  case lit.lit =>
+    rename_i leftValue rightValue
+    change (leftValue == rightValue) = true at accepted
+    have valueEq : leftValue = rightValue := litValue_eq_of_beq accepted
+    subst rightValue
+    exact .lit leftValue
+  case erased.erased => exact .erased
+  case fvar.fvar =>
+    rename_i leftFn leftArgs rightFn rightArgs
+    simp only [letValueScoped, Bool.and_eq_true] at leftScoped rightScoped
+    exact .fvar ⟨leftScoped.1, rightScoped.1, accepted.1⟩
+      (argsRelated_of_eqvArgs_true leftScoped.2 rightScoped.2 accepted.2)
+  case ctor.ctor =>
+    rename_i leftInfo leftArgs _ rightInfo rightArgs _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have infoCheck := accepted.1
+    change (leftInfo == rightInfo) = true at infoCheck
+    have infoEq : leftInfo = rightInfo := ctorInfo_eq_of_beq infoCheck
+    subst rightInfo
+    exact .ctor (argsRelated_of_eqvArgs_true leftScoped rightScoped accepted.2)
+  case oproj.oproj =>
+    rename_i leftIndex leftVar _ rightIndex rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have indexCheck := accepted.1
+    change (leftIndex == rightIndex) = true at indexCheck
+    have indexEq : leftIndex = rightIndex := eq_of_beq indexCheck
+    subst rightIndex
+    exact .oproj ⟨leftScoped, rightScoped, accepted.2⟩
+  case uproj.uproj =>
+    rename_i leftIndex leftVar _ rightIndex rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have indexCheck := accepted.1
+    change (leftIndex == rightIndex) = true at indexCheck
+    have indexEq : leftIndex = rightIndex := eq_of_beq indexCheck
+    subst rightIndex
+    exact .uproj ⟨leftScoped, rightScoped, accepted.2⟩
+  case sproj.sproj =>
+    rename_i leftWidth leftOffset leftVar _ rightWidth rightOffset rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have metadataCheck := accepted.1
+    change (leftWidth == rightWidth && leftOffset == rightOffset) = true at metadataCheck
+    simp only [Bool.and_eq_true] at metadataCheck
+    have widthEq : leftWidth = rightWidth := eq_of_beq metadataCheck.1
+    have offsetEq : leftOffset = rightOffset := eq_of_beq metadataCheck.2
+    subst rightWidth
+    subst rightOffset
+    exact .sproj ⟨leftScoped, rightScoped, accepted.2⟩
+  case fap.fap =>
+    rename_i leftName leftArgs _ rightName rightArgs _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have nameCheck := accepted.1
+    change (leftName == rightName) = true at nameCheck
+    have nameEq : leftName = rightName := eq_of_beq nameCheck
+    subst rightName
+    exact .fap (argsRelated_of_eqvArgs_true leftScoped rightScoped accepted.2)
+  case pap.pap =>
+    rename_i leftName leftArgs _ rightName rightArgs _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have nameCheck := accepted.1
+    change (leftName == rightName) = true at nameCheck
+    have nameEq : leftName = rightName := eq_of_beq nameCheck
+    subst rightName
+    exact .pap (argsRelated_of_eqvArgs_true leftScoped rightScoped accepted.2)
+  case reset.reset =>
+    rename_i leftCount leftVar _ rightCount rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    have countCheck := accepted.1
+    change (leftCount == rightCount) = true at countCheck
+    have countEq : leftCount = rightCount := eq_of_beq countCheck
+    subst rightCount
+    exact .reset ⟨leftScoped, rightScoped, accepted.2⟩
+  case reuse.reuse =>
+    rename_i leftVar leftInfo leftUpdate leftArgs _
+      rightVar rightInfo rightUpdate rightArgs _
+    simp only [letValueScoped, Bool.and_eq_true] at leftScoped rightScoped
+    have metadataCheck := accepted.1
+    change (leftInfo == rightInfo && leftUpdate == rightUpdate) = true at metadataCheck
+    simp only [Bool.and_eq_true] at metadataCheck
+    have infoEq : leftInfo = rightInfo := ctorInfo_eq_of_beq metadataCheck.1
+    have updateEq : leftUpdate = rightUpdate := eq_of_beq metadataCheck.2
+    subst rightInfo
+    subst rightUpdate
+    exact .reuse ⟨leftScoped.1, rightScoped.1, accepted.2.1⟩
+      (argsRelated_of_eqvArgs_true leftScoped.2 rightScoped.2 accepted.2.2)
+  case box.box =>
+    rename_i leftType leftVar _ rightType rightVar _
+    simp only [letValueScoped, Bool.and_eq_true] at leftScoped rightScoped
+    change leftType = rightType at boxTypesEq
+    subst rightType
+    exact .box ⟨leftScoped.2, rightScoped.2, accepted.2⟩
+  case unbox.unbox =>
+    rename_i leftVar _ rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    exact .unbox ⟨leftScoped, rightScoped, accepted⟩
+  case isShared.isShared =>
+    rename_i leftVar _ rightVar _
+    simp only [letValueScoped] at leftScoped rightScoped
+    exact .isShared ⟨leftScoped, rightScoped, accepted⟩
+
 /-- Declaration data inspected while evaluating a `let` value. -/
 structure LetDeclValueRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
     (left right : LCNF.LetDecl .impure) : Prop where
   type_eq : left.type = right.type
   value : LetValueRelated rho leftScope rightScope left.value right.value
+
+/--
+Lift executable let-value soundness to declaration data using the exact result
+type equality required by `.unbox`.
+-/
+theorem letDeclValueRelated_of_eqvLetValue_true
+    (typeEq : left.type = right.type)
+    (leftScoped : letValueScoped leftScope left.value = true)
+    (rightScoped : letValueScoped rightScope right.value = true)
+    (boxTypesEq : LetValueBoxTypesEq left.value right.value)
+    (accepted : (LCNF.AlphaEqv.eqvLetValue left.value right.value).run rho = true) :
+    LetDeclValueRelated rho leftScope rightScope left right :=
+  ⟨typeEq, letValueRelated_of_eqvLetValue_true
+    leftScoped rightScoped boxTypesEq accepted⟩
 
 /-- A fresh binder does not reuse the runtime lookup name of an older scope entry. -/
 def FreshForScope (fvarId : FVarId) (scope : List FVarId) : Prop :=

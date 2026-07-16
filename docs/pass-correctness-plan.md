@@ -287,11 +287,22 @@ check when both arrays are lexically scoped. Their loop invariants respectively
 track the unprocessed suffixes and the successfully checked prefix while
 recording that the reader map is unchanged.
 
+The executable let-value bridge is now proved too.
+`letValueRelated_of_eqvLetValue_true` covers every impure constructor and uses
+the argument soundness theorem for nested argument arrays.
+`letDeclValueRelated_of_eqvLetValue_true` lifts that result to declarations.
+Both the `.box` type and declaration result type remain exact premises: Lean's
+checker establishes only type alpha-equivalence, while FIR's current runtime
+semantics observes those types during boxing and unboxing. This isolates the
+remaining type-level obligation instead of folding it into the recursive code
+proof.
+
 The remaining bounded work is:
 
-1. derive binder classification from `withFVar` and hygiene, bridge the
-   let-value checker to the semantic relation, and extend the simulation
-   through recursive code to prove `Code.alphaEqv` sound;
+1. derive binder classification from `withFVar` and hygiene, discharge or
+   refine the exact runtime-type premises at the impure phase boundary, and
+   extend the simulation through recursive code to prove `Code.alphaEqv`
+   sound;
 2. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
 3. lift the resulting theorem through recursive code, declarations, and program
