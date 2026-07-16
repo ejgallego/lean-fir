@@ -122,10 +122,14 @@ Artifacts are written under `_build/validation/`.  Each case retains protocol
 results, backend logs, generated impure LCNF, declaration names, instruction
 forms, and the comparison summary.  Process logging, per-case result writing,
 result-domain checks, and semantic comparison use actual backend names rather
-than assuming LCNF.  `_build/validation/comparison.json` identifies its reference
-and candidate explicitly; this is the backend-neutral artifact boundary used
-by later V8 and Talos adapters.  It is written for successful and failed
-comparisons, with selected/compared/equal/finding counts and typed findings for
+than assuming LCNF.  Pair-scoped files under
+`_build/validation/comparisons/`—for example `native--lcnf.json`—identify their
+reference and candidate explicitly.  This is the backend-neutral artifact
+boundary used by later V8 and Talos adapters, and it lets native–LCNF,
+native–V8, and V8–Talos evidence coexist in one output tree.  Backend names are
+validated before being used as path components.  A comparison file is written
+for successful and failed comparisons, with selected/compared/equal/finding
+counts and typed findings for
 `execution`, `result-domain`, `audit`, and `comparison` phases.  Each finding
 retains its backend and case ID when applicable, so automation does not need to
 recover structure from stderr text.  The native oracle's `--manifest` JSONL is

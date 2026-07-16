@@ -26,10 +26,24 @@ MANIFEST_FIELDS = {
     "effectProjections",
 }
 EFFECT_PROJECTION_FIELDS = {"external", "operation", "argSchemas", "resultSchema"}
+BACKEND_NAME_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 
 
 class ValidationError(RuntimeError):
     pass
+
+
+def validate_backend_name(name: object, context: str = "backend") -> str:
+    if (
+        not isinstance(name, str)
+        or not name
+        or not name[0].isalpha()
+        or any(character not in BACKEND_NAME_CHARACTERS for character in name)
+    ):
+        raise ValidationError(
+            f"{context}: name must use lowercase letters, digits, '-' or '_'"
+        )
+    return name
 
 
 @dataclass(frozen=True)
@@ -441,8 +455,11 @@ def write_comparison_artifact(
 ) -> None:
     recorded_findings = findings or []
     selected = len(comparisons) if selected_count is None else selected_count
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "comparison.json").write_text(
+    destination = comparison_artifact_path(
+        out_dir, reference_backend, candidate_backend
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
         json.dumps(
             {
                 "version": PROTOCOL_VERSION,
@@ -465,6 +482,14 @@ def write_comparison_artifact(
         + "\n",
         encoding="utf-8",
     )
+
+
+def comparison_artifact_path(
+    out_dir: Path, reference_backend: str, candidate_backend: str
+) -> Path:
+    reference = validate_backend_name(reference_backend, "reference backend")
+    candidate = validate_backend_name(candidate_backend, "candidate backend")
+    return out_dir / "comparisons" / f"{reference}--{candidate}.json"
 
 
 @dataclass(frozen=True)
@@ -626,18 +651,7 @@ def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
             f"adapter config {path}: unknown fields: {', '.join(unknown)}"
         )
 
-    name = value["name"]
-    allowed_name_characters = "abcdefghijklmnopqrstuvwxyz0123456789-_"
-    if (
-        not isinstance(name, str)
-        or not name
-        or not name[0].isalpha()
-        or any(character not in allowed_name_characters for character in name)
-    ):
-        raise ValidationError(
-            f"adapter config {path}: name must use lowercase letters, digits, "
-            "'-' or '_'"
-        )
+    name = validate_backend_name(value["name"], f"adapter config {path}")
 
     def checked_command(field_name: str, required_command: bool) -> list[str]:
         command = value.get(field_name, [])
@@ -681,6 +695,8 @@ def validate_pair(
     candidate: BackendAdapter,
 ) -> tuple[list[dict], list[ValidationFinding]]:
     """Execute, audit, persist, and compare one reference/candidate pair."""
+    validate_backend_name(reference.name, "reference backend")
+    validate_backend_name(candidate.name, "candidate backend")
     reference_run = reference.execute(context)
     candidate_run = candidate.execute(context)
     findings = list(reference_run.findings) + list(candidate_run.findings)

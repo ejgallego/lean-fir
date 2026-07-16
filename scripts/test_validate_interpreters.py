@@ -479,15 +479,25 @@ class HarnessTests(unittest.TestCase):
             harness.write_comparison_artifact(
                 out_dir, "native", "v8", comparisons
             )
-            first = (out_dir / "comparison.json").read_bytes()
+            path = out_dir / "comparisons" / "native--v8.json"
+            first = path.read_bytes()
             harness.write_comparison_artifact(
                 out_dir, "native", "v8", comparisons
             )
-            self.assertEqual(first, (out_dir / "comparison.json").read_bytes())
+            self.assertEqual(first, path.read_bytes())
             artifact = json.loads(first)
             self.assertEqual(artifact["reference"], "native")
             self.assertEqual(artifact["candidate"], "v8")
             self.assertEqual(artifact["comparisons"], comparisons)
+
+    def test_comparison_artifact_rejects_unsafe_backend_names(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                harness.ValidationError, "candidate backend: name"
+            ):
+                harness.write_comparison_artifact(
+                    Path(directory), "native", "../v8", []
+                )
 
     def test_adapter_audit_and_semantic_mismatch_are_both_reported(self) -> None:
         class FakeAdapter:
@@ -550,7 +560,11 @@ class HarnessTests(unittest.TestCase):
                 (Path(directory) / "case" / "v8" / "result.json").is_file()
             )
             artifact = json.loads(
-                (Path(directory) / "comparison.json").read_text(encoding="utf-8")
+                (
+                    Path(directory)
+                    / "comparisons"
+                    / "native--v8.json"
+                ).read_text(encoding="utf-8")
             )
             self.assertEqual(
                 [finding["phase"] for finding in artifact["findings"]],
