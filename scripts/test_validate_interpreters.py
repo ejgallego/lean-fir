@@ -110,6 +110,50 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertFalse(equal)
 
+    def test_generic_backend_comparison_uses_protocol_observations(self) -> None:
+        manifest = {"case": descriptor("case")}
+        comparisons, failures = harness.compare_backend_results(
+            manifest,
+            ["case"],
+            "native",
+            {"case": success("case", "native", 41)},
+            "v8",
+            {"case": success("case", "v8", 42)},
+        )
+        self.assertEqual(comparisons[0]["oracle"], "native")
+        self.assertEqual(comparisons[0]["candidate"], "v8")
+        self.assertFalse(comparisons[0]["equal"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("native=", failures[0])
+        self.assertIn("v8=", failures[0])
+
+    def test_generic_comparison_skips_only_explicitly_blocked_cases(self) -> None:
+        manifest = {"case": descriptor("case")}
+        comparisons, failures = harness.compare_backend_results(
+            manifest,
+            ["case"],
+            "native",
+            {"case": success("case", "native")},
+            "lcnf",
+            {"case": success("case", "lcnf")},
+            {"case"},
+        )
+        self.assertEqual(comparisons, [])
+        self.assertEqual(failures, [])
+
+    def test_result_domain_is_configurable_per_backend_run(self) -> None:
+        results = {
+            "selected": success("selected", "v8"),
+            "unknown": success("unknown", "v8"),
+        }
+        self.assertEqual(
+            harness.result_domain_failures(results, "v8", ["selected", "missing"]),
+            [
+                "v8 backend returned unknown cases: unknown",
+                "v8 backend omitted cases: missing",
+            ],
+        )
+
     def test_effect_mismatch_is_semantic(self) -> None:
         native = success("case", "native")
         native["outcome"]["success"]["observation"]["effects"] = [
@@ -358,6 +402,31 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(first, (out_dir / "corpus.json").read_bytes())
             artifact = json.loads(first)
             self.assertEqual(artifact, {"version": 1, "cases": manifest})
+
+    def test_comparison_artifact_names_actual_backends_and_is_deterministic(self) -> None:
+        comparisons = [
+            {
+                "caseId": "case",
+                "oracle": "native",
+                "candidate": "v8",
+                "equal": True,
+                "case": descriptor("case"),
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            harness.write_comparison_artifact(
+                out_dir, "native", "v8", comparisons
+            )
+            first = (out_dir / "comparison.json").read_bytes()
+            harness.write_comparison_artifact(
+                out_dir, "native", "v8", comparisons
+            )
+            self.assertEqual(first, (out_dir / "comparison.json").read_bytes())
+            artifact = json.loads(first)
+            self.assertEqual(artifact["oracle"], "native")
+            self.assertEqual(artifact["candidate"], "v8")
+            self.assertEqual(artifact["comparisons"], comparisons)
 
     def test_coverage_separates_static_and_executed_forms(self) -> None:
         manifest = [

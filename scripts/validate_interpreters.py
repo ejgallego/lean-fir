@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run FIR's native oracle and final-impure LCNF candidate on one corpus."""
+"""Compare Lean's native oracle with protocol-compatible candidate backends."""
 
 from __future__ import annotations
 
@@ -619,10 +619,82 @@ def success_observation(record: dict) -> dict:
     return success["observation"]
 
 
-def compare_success(native: dict, candidate: dict) -> tuple[bool, dict, dict]:
-    native_observation = success_observation(native)
+def compare_success(oracle: dict, candidate: dict) -> tuple[bool, dict, dict]:
+    oracle_observation = success_observation(oracle)
     candidate_observation = success_observation(candidate)
-    return native_observation == candidate_observation, native_observation, candidate_observation
+    return (
+        oracle_observation == candidate_observation,
+        oracle_observation,
+        candidate_observation,
+    )
+
+
+def result_domain_failures(
+    results: dict[str, dict], backend: str, expected_cases: list[str]
+) -> list[str]:
+    """Check which case IDs a backend returned, independently of how it ran."""
+    expected = set(expected_cases)
+    actual = set(results)
+    failures: list[str] = []
+    unknown = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    if unknown:
+        failures.append(
+            f"{backend} backend returned unknown cases: {', '.join(unknown)}"
+        )
+    if missing:
+        failures.append(f"{backend} backend omitted cases: {', '.join(missing)}")
+    return failures
+
+
+def compare_backend_results(
+    descriptor_by_id: dict[str, dict],
+    selected: list[str],
+    oracle_backend: str,
+    oracle_results: dict[str, dict],
+    candidate_backend: str,
+    candidate_results: dict[str, dict],
+    blocked_cases: set[str] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Compare semantic observations without imposing candidate-specific policy."""
+    blocked = blocked_cases or set()
+    comparisons: list[dict] = []
+    failures: list[str] = []
+    for case_id in selected:
+        if case_id in blocked:
+            continue
+        oracle = oracle_results.get(case_id)
+        if oracle is None:
+            failures.append(f"{case_id}: {oracle_backend} backend returned no result")
+            continue
+        candidate = candidate_results.get(case_id)
+        if candidate is None:
+            failures.append(f"{case_id}: {candidate_backend} backend returned no result")
+            continue
+        try:
+            equal, oracle_observation, candidate_observation = compare_success(
+                oracle, candidate
+            )
+        except ValidationError as error:
+            failures.append(str(error))
+            continue
+        comparisons.append(
+            {
+                "caseId": case_id,
+                "oracle": oracle_backend,
+                "candidate": candidate_backend,
+                "equal": equal,
+                "case": descriptor_by_id[case_id],
+            }
+        )
+        if not equal:
+            failures.append(
+                f"{case_id}: semantic mismatch\n"
+                f"  {oracle_backend}={json.dumps(oracle_observation, sort_keys=True)}\n"
+                f"  {candidate_backend}="
+                f"{json.dumps(candidate_observation, sort_keys=True)}"
+            )
+    return comparisons, failures
 
 
 def write_artifact(out_dir: Path, case_id: str, backend: str, record: dict) -> None:
@@ -630,6 +702,37 @@ def write_artifact(out_dir: Path, case_id: str, backend: str, record: dict) -> N
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "result.json").write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def write_process_artifacts(
+    destination: Path, completed: subprocess.CompletedProcess[str]
+) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "stdout.jsonl").write_text(completed.stdout, encoding="utf-8")
+    (destination / "stderr.log").write_text(completed.stderr, encoding="utf-8")
+
+
+def write_comparison_artifact(
+    out_dir: Path,
+    oracle_backend: str,
+    candidate_backend: str,
+    comparisons: list[dict],
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "comparison.json").write_text(
+        json.dumps(
+            {
+                "version": PROTOCOL_VERSION,
+                "oracle": oracle_backend,
+                "candidate": candidate_backend,
+                "comparisons": comparisons,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -661,9 +764,7 @@ def main() -> int:
 
     lcnf_command = ["lake", "env", "lean", "FirValidationLCNF.lean"]
     lcnf_run = run(lcnf_command)
-    (args.out_dir / "lcnf").mkdir(parents=True, exist_ok=True)
-    (args.out_dir / "lcnf" / "stdout.jsonl").write_text(lcnf_run.stdout, encoding="utf-8")
-    (args.out_dir / "lcnf" / "stderr.log").write_text(lcnf_run.stderr, encoding="utf-8")
+    write_process_artifacts(args.out_dir / "lcnf", lcnf_run)
     if lcnf_run.returncode != 0:
         raise ValidationError(f"LCNF backend failed:\n{lcnf_run.stdout}{lcnf_run.stderr}")
     lcnf_results = result_map(records_from_output(lcnf_run.stdout, lcnf_command), "lcnf")
@@ -671,74 +772,52 @@ def main() -> int:
     coverage, coverage_failures = coverage_report(descriptors, lcnf_results, selected)
     write_coverage_artifact(args.out_dir, coverage)
     failures: list[str] = list(coverage_failures)
-    coverage_failed_cases = {
-        failure.split(":", maxsplit=1)[0] for failure in coverage_failures
-    }
-    comparisons: list[dict] = []
+    blocked_cases: set[str] = set()
+    native_results: dict[str, dict] = {}
     for case_id in selected:
         native_command = ["lake", "exe", "fir-native-oracle", "--case", case_id]
         native_run = run(native_command)
+        native_dir = args.out_dir / case_id / "native"
+        write_process_artifacts(native_dir, native_run)
         if native_run.returncode != 0:
             failures.append(f"{case_id}: native process exited {native_run.returncode}")
+            blocked_cases.add(case_id)
             continue
         native_records = records_from_output(native_run.stdout, native_command)
-        native_results = result_map(native_records, "native")
-        if set(native_results) != {case_id}:
-            failures.append(f"{case_id}: native backend returned {sorted(native_results)}")
+        case_results = result_map(native_records, "native")
+        if set(case_results) != {case_id}:
+            failures.append(f"{case_id}: native backend returned {sorted(case_results)}")
+            blocked_cases.add(case_id)
             continue
-        native = native_results[case_id]
+        native = case_results[case_id]
+        native_results[case_id] = native
         candidate = lcnf_results.get(case_id)
-        if candidate is None:
-            failures.append(f"{case_id}: LCNF backend returned no result")
-            continue
         write_artifact(args.out_dir, case_id, "native", native)
-        write_artifact(args.out_dir, case_id, "lcnf", candidate)
-        native_dir = args.out_dir / case_id / "native"
-        (native_dir / "stdout.jsonl").write_text(native_run.stdout, encoding="utf-8")
-        (native_dir / "stderr.log").write_text(native_run.stderr, encoding="utf-8")
-        if case_id in coverage_failed_cases:
-            continue
-        try:
-            equal, native_observation, lcnf_observation = compare_success(native, candidate)
-        except ValidationError as error:
-            failures.append(str(error))
-            continue
-        if not equal:
-            failures.append(
-                f"{case_id}: semantic mismatch\n"
-                f"  native={json.dumps(native_observation, sort_keys=True)}\n"
-                f"  lcnf={json.dumps(lcnf_observation, sort_keys=True)}"
-            )
-            continue
-        comparisons.append(
-            {
-                "caseId": case_id,
-                "oracle": "native",
-                "candidate": "lcnf",
-                "equal": True,
-                "case": descriptor_by_id[case_id],
-            }
-        )
-        forms = diagnostics(candidate).get("lcnf-forms", "-")
-        print(f"PASS {case_id:<22} lcnf=[{forms}]")
+        if candidate is not None:
+            write_artifact(args.out_dir, case_id, "lcnf", candidate)
 
-    extra_lcnf = sorted(set(lcnf_results) - set(all_cases))
-    missing_lcnf = sorted(set(all_cases) - set(lcnf_results))
-    if extra_lcnf:
-        failures.append(f"LCNF backend returned unknown cases: {', '.join(extra_lcnf)}")
-    if missing_lcnf:
-        failures.append(f"LCNF backend omitted cases: {', '.join(missing_lcnf)}")
+    failures.extend(result_domain_failures(lcnf_results, "lcnf", all_cases))
+    comparisons, comparison_failures = compare_backend_results(
+        descriptor_by_id,
+        selected,
+        "native",
+        native_results,
+        "lcnf",
+        lcnf_results,
+        blocked_cases,
+    )
+    failures.extend(comparison_failures)
+    write_comparison_artifact(args.out_dir, "native", "lcnf", comparisons)
+    for comparison in comparisons:
+        if comparison["equal"]:
+            case_id = comparison["caseId"]
+            forms = diagnostics(lcnf_results[case_id]).get("lcnf-forms", "-")
+            print(f"PASS {case_id:<22} lcnf=[{forms}]")
 
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
         return 1
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / "comparison.json").write_text(
-        json.dumps({"version": PROTOCOL_VERSION, "comparisons": comparisons}, indent=2)
-        + "\n",
-        encoding="utf-8",
-    )
     print(f"validated {len(selected)} case(s): native == final-impure LCNF")
     return 0
 

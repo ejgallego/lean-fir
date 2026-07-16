@@ -50,14 +50,19 @@ schema.
 
 Artifacts are written under `_build/validation/`.  Each case retains protocol
 results, backend logs, generated impure LCNF, declaration names, instruction
-forms, and the comparison summary.  The native oracle's `--manifest` JSONL is
+forms, and the comparison summary.  Process logging, per-case result writing,
+result-domain checks, and semantic comparison use actual backend names rather
+than assuming LCNF.  `_build/validation/comparison.json` identifies its oracle
+and candidate explicitly; this is the backend-neutral artifact boundary used
+by later V8 and Talos adapters.  The native oracle's `--manifest` JSONL is
 the single discovery surface for the harness: case and tag selection no longer
 depend on a second ad-hoc listing command.  The harness validates and
 canonicalizes those descriptors into `_build/validation/corpus.json`, ordered
-by case ID with deterministic tag and required-form lists.  Each successful
+by case ID with deterministic tag and required-form lists.  Each attempted
 comparison embeds the corresponding descriptor, so entry name, provenance,
 arguments, schemas, fuel, tags, and intended LCNF/external coverage remain
-attached to later differential runs.  `requiredExternals` records names that
+attached to later differential runs, including semantic mismatches.
+`requiredExternals` records names that
 must occur in the compiled artifact; `requiredExecutedExternals` records the
 stronger path obligation that the interpreter must actually dispatch them.
 Both fields are required, even when empty, and are canonicalized as sorted
@@ -113,7 +118,10 @@ has no default for that field: a new fixture must explicitly state its intended
 path instead of silently inheriting telemetry-only coverage.  A second
 compile-time guard requires the union to retain all 23 source-reachable forms
 currently exercised in final impure LCNF, so removing a fixture cannot silently
-lower corpus-wide instruction coverage.
+lower corpus-wide instruction coverage.  Coverage failures and semantic
+mismatches are independent signals: the harness still compares protocol
+observations when an LCNF coverage obligation fails, and reports both findings
+from the same run.
 
 ## Current corpus
 
