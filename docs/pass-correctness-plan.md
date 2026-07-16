@@ -62,9 +62,11 @@ The following work is implemented and checked by the default build:
   projection classes, cases/defaults, direct and closure calls, joins,
   boxing, mutation, reference counts, deletion, both reuse paths, and typed
   externals.
-- `Inspect` evaluates real compiler output for literals, identity, Boolean
-  branching, and product projection with the new machine while retaining the
-  original evaluator as a differential baseline.
+- `make validate` compiles one shared source corpus through Lean's native
+  backend and final impure LCNF, compares versioned structured observations,
+  checks emitted-form coverage, and retains the exact compiler artifacts.
+- `Inspect` remains a pass-checkpoint diagnostic; the original evaluator is a
+  unit fixture rather than the semantic oracle.
 - `PassCorrectness.lean` defines same-phase equivalence, cross-phase forward
   simulation, and impure observation equivalence modulo address renaming and
   unreachable heap garbage.
@@ -210,6 +212,12 @@ an earlier LCNF phase:
 The core FIR build remains independent of Talos. This keeps AGPL licensing and
 the external repository pin explicit and avoids making proof work depend on a
 network checkout.
+
+The validation track does not overlap this compiler work.  Once the Wasm track
+provides an executable supported fragment and stable artifact/ABI handoff, the
+validation runner will execute that artifact in V8 against the native Lean
+oracle.  Talos then becomes another consumer of the same backend protocol and
+is compared with V8 on identical modules and inputs.
 
 ## Differential checkpoints and bug cards
 

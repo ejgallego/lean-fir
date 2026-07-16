@@ -16,6 +16,7 @@ implemented foundation and the remaining proof order.
 - Lean toolchain: `leanprover/lean4:v4.32.0`
 - Lake from the pinned Lean toolchain
 - `rg` for the placeholder scan
+- Python 3 for the validation orchestrator
 - Optional: `lean-beam` for fast Lean diagnostics
 
 ## Common Commands
@@ -24,10 +25,11 @@ implemented foundation and the remaining proof order.
 make check
 ```
 
-`make check` runs the build, examples, inspection entrypoint, and placeholder
-and bug-card scans. Use `make examples`, `make inspect`, or `make bug-cards`
-for an individual layer. `make beam` checks the consolidated Lean entrypoints
-and fixtures through Lean Beam.
+`make check` runs the build, examples, native-vs-LCNF validation, and
+placeholder and bug-card scans. Use `make examples`, `make validate`,
+`make inspect`, or `make bug-cards` for an individual layer. `make beam` checks
+the consolidated Lean entrypoints and fixtures through Lean Beam. `make inspect`
+remains a pass-checkpoint diagnostic; it is not the semantic oracle.
 
 The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
@@ -60,14 +62,19 @@ baseline are not re-exported.
 - `Fir/LeanIR/InterpreterExamples.lean`: executable coverage for calls,
   closures, joins, cases, constructors, mutation, ownership, reuse, and
   externals.
+- `Fir/Validation/`: the versioned observation protocol, compiler-generated
+  source corpus, final-impure capture, structured codecs, and LCNF candidate.
+- `FirValidationNative.lean` and `FirValidationLCNF.lean`: native oracle and
+  compiler-backed candidate entrypoints used by `make validate`.
 - `Fir/Wasm/`: the semantic ABI and exhaustive symbolic lowering of impure
   LCNF.
 - `integration/talos/`: optional pinned translation into Talos syntax and an
   executable Talos smoke test.
 - `Fir/LeanIR/Legacy.lean` and `LegacyExamples.lean`: the original small
   evaluator, isolated as a differential fixture.
-- `Inspect`: compiler-generated final-LCNF reporting with both legacy and new
-  machine evaluation results plus real `simpCase` checkpoint deltas.
+- `Inspect`: legacy coverage and real `simpCase` checkpoint diagnostics.
+- `docs/validation.md`: corpus, artifacts, comparison contract, and the
+  deferred V8/Talos backend handoff.
 - `docs/research.md`: Lean IR and Wasm formalization research notes.
 - `docs/lcnf-to-c.md`: pass-by-pass guide from Lean expressions through LCNF
   to direct C emission.

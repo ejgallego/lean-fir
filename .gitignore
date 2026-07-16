@@ -5,6 +5,8 @@
 .deps/
 .worktrees/
 build/
+_build/
+__pycache__/
 *.olean
 *.ilean
 *.c

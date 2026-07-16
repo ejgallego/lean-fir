@@ -4,3 +4,7 @@ defaultTargets = ["Fir"]
 
 [[lean_lib]]
 name = "Fir"
+
+[[lean_exe]]
+name = "fir-native-oracle"
+root = "FirValidationNative"
