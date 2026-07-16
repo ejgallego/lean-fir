@@ -103,6 +103,21 @@ def caseProgram : ImpureProgram :=
 
 #guard returned? (runMain caseProgram) (.object (.tagged 1))
 
+def thirdInfo : LCNF.CtorInfo :=
+  { name := `ScalarChoice.third, cidx := 2, size := 0, usize := 0, ssize := 0 }
+
+def scalarCaseCode : LCNF.Code .impure :=
+  .let (letDecl c u8Type (.lit (.uint8 2))) <|
+  .cases (.mk `ScalarChoice objType c #[
+    .ctorAlt falseInfo (.let (letDecl x objType (.lit (.nat 10))) (.return x)),
+    .ctorAlt trueInfo (.let (letDecl y objType (.lit (.nat 20))) (.return y)),
+    .ctorAlt thirdInfo (.let (letDecl z objType (.lit (.nat 30))) (.return z))])
+
+def scalarCaseProgram : ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code scalarCaseCode)] }
+
+#guard returned? (runMain scalarCaseProgram) (.object (.tagged 30))
+
 def idDecl : LCNF.Decl .impure :=
   decl `id #[param x] objType (.code (.return x))
 

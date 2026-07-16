@@ -287,6 +287,8 @@ def getTag (runtime : RuntimeState) (value : Value) : Except RuntimeFault Nat :=
       let cell ← getLiveCell runtime location
       let .ctor object := cell.object | throw .expectedConstructor
       return object.tag
+  | .scalar value => .ok value.toUInt64.toNat
+  | .usize value => .ok value.toNat
   | _ => .error .expectedConstructor
 
 def getObjectField (runtime : RuntimeState) (value : Value) (index : Nat) :
