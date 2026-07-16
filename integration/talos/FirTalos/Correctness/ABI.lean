@@ -5,6 +5,7 @@ namespace FirTalos.Correctness
 open Fir.Wasm
 open Fir.LeanIR.Impure
 
+deriving instance ReflBEq, LawfulBEq for AbiKind
 deriving instance ReflBEq, LawfulBEq for ObjectRef
 deriving instance ReflBEq, LawfulBEq for ScalarValue
 deriving instance ReflBEq, LawfulBEq for Value
@@ -31,6 +32,12 @@ def FreshHandles (table : HandleTable) : Prop :=
 def HandleTableInvariant (table : HandleTable) : Prop :=
   Coherent table ∧ FreshHandles table
 
+/-- Every handle decoded before an allocation retains its semantic value. -/
+def HandleTableExtends (before after : HandleTable) : Prop :=
+  ∀ {handle : Handle} {value : Value},
+    HandleTable.lookup? before.entries handle = some value →
+      HandleTable.lookup? after.entries handle = some value
+
 @[simp] theorem coherent_empty : Coherent ({} : HandleTable) := by
   simp [Coherent, HandleTable.findHandle?]
 
@@ -40,6 +47,18 @@ def HandleTableInvariant (table : HandleTable) : Prop :=
 theorem HandleTableInvariant.coherent {table : HandleTable}
     (invariant : HandleTableInvariant table) : Coherent table :=
   invariant.1
+
+@[refl] theorem HandleTableExtends.refl (table : HandleTable) :
+    HandleTableExtends table table := by
+  intro handle value lookup
+  exact lookup
+
+theorem HandleTableExtends.trans {first second third : HandleTable}
+    (firstSecond : HandleTableExtends first second)
+    (secondThird : HandleTableExtends second third) :
+    HandleTableExtends first third := by
+  intro handle value lookup
+  exact secondThird (firstSecond lookup)
 
 /--
 Successful opaque-handle encoding is immediately decodable when the input
@@ -177,6 +196,133 @@ theorem handleTableInvariant_of_encode
               have old_lt := fresh lookup
               change candidateHandle.toNat < before.next + 1
               omega
+
+/-- Successful handle encoding either reuses the table or extends it freshly. -/
+theorem handleTableExtends_of_encode
+    {before after : HandleTable} {kind : AbiKind} {value : Value} {handle : Handle}
+    (invariant : HandleTableInvariant before)
+    (usesHandle : kind.usesHandle = true)
+    (encoded : before.encode kind value = .ok (after, handle)) :
+    HandleTableExtends before after := by
+  unfold HandleTableExtends
+  rcases invariant with ⟨_, fresh⟩
+  have kindNotErased : (kind == .erased) = false := by
+    cases kind <;> simp_all [AbiKind.usesHandle] <;> rfl
+  have acceptsValue : kind.acceptsValue value = true := by
+    cases accepted : kind.acceptsValue value with
+    | false =>
+        exfalso
+        simp only [HandleTable.encode, kindNotErased, usesHandle, accepted] at encoded
+        change Except.error (HandleError.valueKindMismatch kind value) =
+          Except.ok (after, handle) at encoded
+        contradiction
+    | true => rfl
+  intro oldHandle oldValue oldLookup
+  cases found : HandleTable.findHandle? before.entries value with
+  | some oldHandle =>
+      simp [HandleTable.encode, kindNotErased, usesHandle, acceptsValue, found] at encoded
+      rcases encoded with ⟨rfl, rfl⟩
+      exact oldLookup
+  | none =>
+      by_cases invalidNext : before.next < firstHandle
+      · simp [HandleTable.encode, kindNotErased, usesHandle, acceptsValue, found,
+          invalidNext] at encoded
+      · by_cases exhausted : maxHandle < before.next
+        · simp [HandleTable.encode, kindNotErased, usesHandle, acceptsValue, found,
+            invalidNext, exhausted] at encoded
+        · simp [HandleTable.encode, kindNotErased, usesHandle, acceptsValue, found,
+            invalidNext, exhausted] at encoded
+          rcases encoded with ⟨rfl, rfl⟩
+          let newHandle := UInt32.ofNat before.next
+          have next_lt_size : before.next < UInt32.size := by
+            simp [UInt32.size, maxHandle] at exhausted ⊢
+            omega
+          have next_toNat : newHandle.toNat = before.next := by
+            exact UInt32.toNat_ofNat_of_lt' next_lt_size
+          have old_lt := fresh oldLookup
+          have new_ne_old : newHandle ≠ oldHandle := by
+            intro equal
+            have equalNat := congrArg UInt32.toNat equal
+            rw [next_toNat] at equalNat
+            omega
+          simp [HandleTable.lookup?, newHandle, new_ne_old, oldLookup]
+
+/-- Direct handle decoding is stable when successful lookups are preserved. -/
+theorem decode_of_handleTableExtends
+    {before after : HandleTable} {handle : Handle} {value : Value}
+    (extension : HandleTableExtends before after)
+    (decoded : before.decode handle = .ok value) :
+    after.decode handle = .ok value := by
+  by_cases reserved : handle == reservedHandle
+  · simp [HandleTable.decode, reserved] at decoded
+  · simp only [HandleTable.decode, reserved] at decoded ⊢
+    cases beforeLookup : HandleTable.lookup? before.entries handle with
+    | none => simp [beforeLookup] at decoded
+    | some oldValue =>
+        have afterLookup := extension beforeLookup
+        rw [afterLookup]
+        simpa [beforeLookup] using decoded
+
+/-- Handle-based decoding is stable when the handle table grows. -/
+theorem decodeAs_of_handleTableExtends
+    {before after : HandleTable} {kind : AbiKind} {handle : Handle} {value : Value}
+    (extension : HandleTableExtends before after)
+    (decoded : before.decodeAs kind handle = .ok value) :
+    after.decodeAs kind handle = .ok value := by
+  by_cases erased : (kind == .erased) = true
+  · have kindEq : kind = .erased := LawfulBEq.eq_of_beq erased
+    subst kind
+    by_cases handleReserved : (handle == reservedHandle) = true
+    · simp only [HandleTable.decodeAs, beq_self_eq_true, ↓reduceIte,
+        handleReserved] at decoded ⊢
+      exact decoded
+    · simp only [HandleTable.decodeAs, beq_self_eq_true, ↓reduceIte,
+        handleReserved] at decoded
+      change Except.error (HandleError.invalidSentinel .erased handle) =
+        Except.ok value at decoded
+      contradiction
+  · by_cases usesHandle : kind.usesHandle = true
+    · simp only [HandleTable.decodeAs, erased, Bool.false_eq_true, ↓reduceIte,
+        usesHandle] at decoded ⊢
+      cases beforeDecoded : before.decode handle with
+      | error error =>
+          rw [beforeDecoded] at decoded
+          contradiction
+      | ok decodedValue =>
+          have afterDecoded :=
+            decode_of_handleTableExtends extension beforeDecoded
+          rw [afterDecoded]
+          rw [beforeDecoded] at decoded
+          exact decoded
+    · simp only [HandleTable.decodeAs, erased, Bool.false_eq_true, ↓reduceIte,
+        usesHandle] at decoded
+      contradiction
+
+/-- Physical ABI decoding is stable under an alias-preserving table extension. -/
+theorem decodeValue_of_handleTableExtends
+    {before after : HandleTable} {kind : AbiKind} {physical : Wasm.Value}
+    {value : Value}
+    (extension : HandleTableExtends before after)
+    (decoded : decodeValue before kind physical = .ok value) :
+    decodeValue after kind physical = .ok value := by
+  cases kind <;> cases physical <;> simp only [decodeValue] at decoded ⊢ <;>
+    try exact decoded
+  all_goals
+    split at decoded
+    · rename_i decodedValue decodedBefore
+      have decodedAfter :=
+        decodeAs_of_handleTableExtends extension decodedBefore
+      rw [decodedAfter]
+      simpa using decoded
+    · contradiction
+
+theorem decodesValue_of_handleTableExtends
+    {before after : HandleTable} {kind : AbiKind} {physical : Wasm.Value}
+    {value : Value}
+    (extension : HandleTableExtends before after)
+    (decoded : DecodesValue before kind physical value) :
+    DecodesValue after kind physical value :=
+  decodeValue_of_handleTableExtends extension decoded
 
 theorem decodeValue_handle_of_decodeAs
     {table : HandleTable} {kind : AbiKind} {handle : Handle} {value : Value}

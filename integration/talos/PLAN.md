@@ -77,17 +77,21 @@ production heap layout.
   lets with local fields, and object-projection lets. Adapter proofs distribute
   instruction conversion over concatenation and join independently adapted
   value/continuation sequences at the resolved numeric destination local.
+- W4 now has the source-environment/target-local relation used to chain those
+  rules. It is stated through the adapter's own `findFVar?` resolver, is stable
+  under handle-table extension, and is preserved by checked destination writes.
+  Successful opaque-handle encoding supplies both the table-extension proof
+  and the decoded destination value, so existing aliases remain valid after a
+  constructor, projection, or literal result is bound.
 
-The next W4 slice introduces the source-environment/target-local relation and
-proves it is preserved by a successful destination binding and handle-table
-extension. It must also expose a transparent structural proof interface for
-the call-free portion of `compileCode`: the general compiler is deliberately
-an opaque `partial def`, so recursive proof equations must be obtained by a
+The next W4 slice must expose a transparent structural proof interface for the
+call-free portion of `compileCode`: the general compiler is deliberately an
+opaque `partial def`, so recursive proof equations must be obtained by a
 non-duplicating refactor or an explicit lowering derivation rather than an
-unrelated proof-only compiler. With that interface, the local rules compose
-over `let` chains and the recursive case chain, then lift through `RelatedPost`
-to whole exported functions. The adapter still rejects initializers and
-closures.
+unrelated proof-only compiler. With that interface, the local rules and the
+new environment/local relation compose over `let` chains and the recursive
+case chain, then lift through `RelatedPost` to whole exported functions. The
+adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -385,9 +389,11 @@ lifting, instantiates constructor/projection stack shapes, and proves one
 complete source-related constructor-case test. A separate composition module
 now packages local loads, destination stores, complete initial-fragment let
 sequences, and adapter concatenation. Its active proof obligation is the
-source-environment/local relation plus a transparent structural interface for
-recursive `compileCode` composition; layer 5 can then instantiate the bridge
-without mentioning runner fuel in the public theorem.
+transparent structural interface for recursive `compileCode` composition;
+`FirTalos/Correctness/Locals.lean` now provides the source-environment/local
+relation, checked-write preservation, and handle-allocation chaining needed at
+each recursive boundary. Layer 5 can then instantiate the bridge without
+mentioning runner fuel in the public theorem.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
