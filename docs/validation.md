@@ -38,6 +38,36 @@ Native therefore remains the corpus and source-semantics provider without
 forcing a future V8 or Talos adapter to imitate native's one-process-per-case
 execution strategy.
 
+An adapter can also be registered without changing the harness.  The config is
+JSON, and commands are argv arrays executed directly rather than shell text:
+
+```json
+{
+  "name": "v8",
+  "buildCommand": ["node", "scripts/build-lean-wasm.mjs"],
+  "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
+  "resultDomain": "selected",
+  "timeoutSeconds": 120
+}
+```
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --adapter-config configs/v8-validation.json \
+  --reference native --candidate v8
+```
+
+`buildCommand` is optional.  `resultDomain` is `selected` when the command emits
+only requested cases and `corpus` when it emits the whole manifest.  Both
+commands receive `FIR_VALIDATION_BACKEND`, `FIR_VALIDATION_OUT_DIR`, and
+`FIR_VALIDATION_PROTOCOL_VERSION`.  The run command additionally receives
+`FIR_VALIDATION_CORPUS`, the absolute path of the canonical corpus JSON, and
+`FIR_VALIDATION_CASES`, a JSON array preserving the requested order.  It writes
+protocol JSONL to stdout; stdout, stderr, result records, domain failures, and
+comparisons then follow the same path as built-in adapters.  This contract does
+not assume how a Wasm module is produced or initialized, so it can be exercised
+only after the compiler track deliberately supplies those pieces.
+
 ## Case and observation contract
 
 `Fir.Validation.Corpus` defines each case once.  A case names its source entry,

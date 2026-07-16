@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -482,6 +483,58 @@ class HarnessTests(unittest.TestCase):
             self.assertTrue(
                 (Path(directory) / "case" / "v8" / "result.json").is_file()
             )
+
+    def test_external_adapter_config_uses_argv_not_a_shell_command(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "name": "v8",
+                        "buildCommand": ["node", "scripts/build-v8.mjs"],
+                        "runCommand": ["node", "scripts/run-v8.mjs"],
+                        "resultDomain": "selected",
+                        "timeoutSeconds": 30,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(adapter.name, "v8")
+            self.assertEqual(adapter.run_command, ["node", "scripts/run-v8.mjs"])
+            self.assertEqual(adapter.result_domain, "selected")
+            self.assertEqual(adapter.timeout_seconds, 30)
+
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["runCommand"] = "node scripts/run-v8.mjs"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(harness.ValidationError, "argv array"):
+                harness.external_adapter_from_config(path)
+
+    def test_external_adapter_receives_corpus_and_selection_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            record = success("case", "v8")
+            program = (
+                "import json,os;"
+                "assert json.loads(os.environ['FIR_VALIDATION_CASES']) == ['case'];"
+                "assert os.path.isfile(os.environ['FIR_VALIDATION_CORPUS']);"
+                "assert os.environ['FIR_VALIDATION_BACKEND'] == 'v8';"
+                f"print({json.dumps(json.dumps(record))})"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                "v8", [sys.executable, "-c", program], "selected"
+            )
+            context = harness.RunContext(
+                harness.ROOT, out_dir, descriptors, ["case"]
+            )
+            backend_run = adapter.execute(context)
+            self.assertEqual(backend_run.failures, [])
+            self.assertEqual(backend_run.expected_cases, ["case"])
+            self.assertEqual(backend_run.results, {"case": record})
+            self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
 
     def test_coverage_separates_static_and_executed_forms(self) -> None:
         manifest = [

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -39,11 +40,20 @@ class ValidationError(RuntimeError):
     pass
 
 
-def run(command: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str],
+    timeout: int = 120,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    environment = None
+    if extra_env is not None:
+        environment = os.environ.copy()
+        environment.update(extra_env)
     try:
         return subprocess.run(
             command,
             cwd=ROOT,
+            env=environment,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -866,6 +876,149 @@ class LcnfAdapter:
         return BackendAudit(report, failures)
 
 
+@dataclass(frozen=True)
+class ExternalCommandAdapter:
+    """Protocol adapter driven by shell-free commands from a JSON config."""
+
+    name: str
+    run_command: list[str]
+    result_domain: str
+    build_command: list[str] = field(default_factory=list)
+    timeout_seconds: int = 120
+
+    def environment(self, out_dir: Path) -> dict[str, str]:
+        return {
+            "FIR_VALIDATION_BACKEND": self.name,
+            "FIR_VALIDATION_OUT_DIR": str((out_dir / self.name).resolve()),
+            "FIR_VALIDATION_PROTOCOL_VERSION": str(PROTOCOL_VERSION),
+        }
+
+    def build(self, context: BuildContext) -> None:
+        if context.no_build or not self.build_command:
+            return
+        destination = context.out_dir / self.name / "build"
+        destination.mkdir(parents=True, exist_ok=True)
+        completed = run(
+            self.build_command,
+            self.timeout_seconds,
+            self.environment(context.out_dir),
+        )
+        write_process_artifacts(destination, completed)
+        if completed.returncode != 0:
+            raise ValidationError(
+                f"failed to build {self.name} validation backend; "
+                f"see {destination}"
+            )
+
+    def execute(self, context: RunContext) -> BackendRun:
+        destination = context.out_dir / self.name
+        destination.mkdir(parents=True, exist_ok=True)
+        environment = self.environment(context.out_dir)
+        environment.update(
+            {
+                "FIR_VALIDATION_CASES": json.dumps(
+                    context.selected, separators=(",", ":")
+                ),
+                "FIR_VALIDATION_CORPUS": str(
+                    (context.out_dir / "corpus.json").resolve()
+                ),
+            }
+        )
+        completed = run(self.run_command, self.timeout_seconds, environment)
+        write_process_artifacts(destination, completed)
+        expected_cases = (
+            context.selected
+            if self.result_domain == "selected"
+            else context.all_cases
+        )
+        backend_run = BackendRun(self.name, list(expected_cases))
+        if completed.returncode != 0:
+            backend_run.failures.append(
+                f"{self.name} process exited {completed.returncode}"
+            )
+            backend_run.blocked_cases.update(context.selected)
+            return backend_run
+        backend_run.results = result_map(
+            records_from_output(completed.stdout, self.run_command), self.name
+        )
+        return backend_run
+
+    def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        return BackendAudit()
+
+
+def external_adapter_from_config(path: Path) -> ExternalCommandAdapter:
+    """Load a declarative external adapter while rejecting shell commands."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValidationError(f"cannot read adapter config {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValidationError(f"adapter config {path}: expected a JSON object")
+    required = {"name", "runCommand", "resultDomain"}
+    optional = {"buildCommand", "timeoutSeconds"}
+    missing = sorted(required - value.keys())
+    unknown = sorted(value.keys() - required - optional)
+    if missing:
+        raise ValidationError(
+            f"adapter config {path}: missing fields: {', '.join(missing)}"
+        )
+    if unknown:
+        raise ValidationError(
+            f"adapter config {path}: unknown fields: {', '.join(unknown)}"
+        )
+
+    name = value["name"]
+    allowed_name_characters = "abcdefghijklmnopqrstuvwxyz0123456789-_"
+    if (
+        not isinstance(name, str)
+        or not name
+        or not name[0].isalpha()
+        or any(character not in allowed_name_characters for character in name)
+    ):
+        raise ValidationError(
+            f"adapter config {path}: name must use lowercase letters, digits, "
+            "'-' or '_'"
+        )
+
+    def checked_command(field_name: str, required_command: bool) -> list[str]:
+        command = value.get(field_name, [])
+        if (
+            not isinstance(command, list)
+            or (required_command and not command)
+            or not all(isinstance(argument, str) and argument for argument in command)
+        ):
+            requirement = "a nonempty" if required_command else "an"
+            raise ValidationError(
+                f"adapter config {path}: {field_name} must be {requirement} argv array"
+            )
+        return list(command)
+
+    run_command = checked_command("runCommand", True)
+    build_command = checked_command("buildCommand", False)
+    result_domain = value["resultDomain"]
+    if result_domain not in ("selected", "corpus"):
+        raise ValidationError(
+            f"adapter config {path}: resultDomain must be 'selected' or 'corpus'"
+        )
+    timeout_seconds = value.get("timeoutSeconds", 120)
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or timeout_seconds <= 0
+    ):
+        raise ValidationError(
+            f"adapter config {path}: timeoutSeconds must be a positive integer"
+        )
+    return ExternalCommandAdapter(
+        name,
+        run_command,
+        result_domain,
+        build_command,
+        timeout_seconds,
+    )
+
+
 BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
     "native": NativeAdapter(),
     "lcnf": LcnfAdapter(),
@@ -941,26 +1094,45 @@ def main() -> int:
     )
     parser.add_argument(
         "--reference",
-        choices=sorted(BACKEND_ADAPTERS),
         default="native",
         help="backend supplying the reference observation",
     )
     parser.add_argument(
         "--candidate",
-        choices=sorted(BACKEND_ADAPTERS),
         default="lcnf",
         help="backend whose observation is checked",
+    )
+    parser.add_argument(
+        "--adapter-config",
+        action="append",
+        type=Path,
+        default=[],
+        help="register an external protocol backend from this JSON file",
     )
     args = parser.parse_args()
 
     if args.reference == args.candidate:
         raise ValidationError("reference and candidate backends must differ")
-    reference = BACKEND_ADAPTERS[args.reference]
-    candidate = BACKEND_ADAPTERS[args.candidate]
+    adapters = dict(BACKEND_ADAPTERS)
+    for path in args.adapter_config:
+        adapter = external_adapter_from_config(path)
+        if adapter.name in adapters:
+            raise ValidationError(
+                f"backend registered more than once: {adapter.name}"
+            )
+        adapters[adapter.name] = adapter
+    unknown_backends = sorted({args.reference, args.candidate} - adapters.keys())
+    if unknown_backends:
+        raise ValidationError(
+            "unknown validation backend(s): "
+            f"{', '.join(unknown_backends)}; registered: {', '.join(sorted(adapters))}"
+        )
+    reference = adapters[args.reference]
+    candidate = adapters[args.candidate]
     build_context = BuildContext(ROOT, args.out_dir, args.no_build)
     adapters_to_build = {
         adapter.name: adapter
-        for adapter in (BACKEND_ADAPTERS["native"], reference, candidate)
+        for adapter in (adapters["native"], reference, candidate)
     }
     for adapter in adapters_to_build.values():
         adapter.build(build_context)
