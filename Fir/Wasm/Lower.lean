@@ -11,8 +11,8 @@ inductive CallTarget where
   deriving Inhabited, BEq
 
 inductive Instruction where
-  | i32Const (value : UInt32)
-  | i64Const (value : UInt64)
+  | i32Const (kind : AbiKind) (value : UInt32)
+  | i64Const (kind : AbiKind) (value : UInt64)
   | localGet (fvarId : FVarId)
   | localSet (fvarId : FVarId)
   | call (target : CallTarget)
@@ -120,7 +120,7 @@ partial def collectLocals (locals : LocalKinds) :
 
 def compileArg (context : Context) :
     LCNF.Arg .impure → Except CompileError (List Instruction × AbiKind)
-  | .erased => .ok ([.i32Const 0], .erased)
+  | .erased => .ok ([.i32Const .erased 0], .erased)
   | .fvar fvarId =>
       match findLocalKind? context.localKinds fvarId with
       | some kind => .ok ([.localGet fvarId], kind)
@@ -140,11 +140,11 @@ def getLocal (context : Context) (fvarId : FVarId) :
   | none => .error (.unknownVariable fvarId)
 
 def compileLiteral (result : AbiKind) : LCNF.LitValue → List Instruction
-  | .uint8 value => [.i32Const (UInt32.ofNat value.toNat)]
-  | .uint16 value => [.i32Const (UInt32.ofNat value.toNat)]
-  | .uint32 value => [.i32Const value]
-  | .uint64 value => [.i64Const value]
-  | .usize value => [.i64Const value]
+  | .uint8 value => [.i32Const .uint8 (UInt32.ofNat value.toNat)]
+  | .uint16 value => [.i32Const .uint16 (UInt32.ofNat value.toNat)]
+  | .uint32 value => [.i32Const .uint32 value]
+  | .uint64 value => [.i64Const .uint64 value]
+  | .usize value => [.i64Const .usize value]
   | value@(.nat _) | value@(.str _) => [.call (.runtime (.literal value result))]
 
 def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
@@ -155,7 +155,7 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       unless resultKind.acceptsLiteral literal do
         throw (.malformed "literal kind does not match its declaration")
       return compileLiteral resultKind literal
-  | .erased => return [.i32Const 0]
+  | .erased => return [.i32Const .erased 0]
   | .proj _ _ _ h => nomatch h
   | .const _ _ _ h => nomatch h
   | .fvar fvarId args =>
@@ -235,7 +235,7 @@ partial def compileCaseChain (context : Context) (discr : FVarId)
       return [
         .localGet discr,
         .call (.runtime .getTag),
-        .i32Const (UInt32.ofNat info.cidx),
+        .i32Const .uint32 (UInt32.ofNat info.cidx),
         .i32Eq,
         .ifElse thenBody elseBody]
 

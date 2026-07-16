@@ -48,8 +48,8 @@ mutual
 
 partial def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
     (labels : List FVarId) : Fir.Wasm.Instruction → Except AdapterError Wasm.Instruction
-  | .i32Const value => return .const value
-  | .i64Const value => return .constI64 value
+  | .i32Const _ value => return .const value
+  | .i64Const _ value => return .constI64 value
   | .localGet fvarId => do
       let locals := function.params.toList ++ function.locals.toList
       let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)
