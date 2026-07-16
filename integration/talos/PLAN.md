@@ -73,6 +73,12 @@ local rules over the call-free code fragment. That result can then be lifted
 through `RelatedPost` to whole exported functions. The adapter still rejects
 initializers and closures.
 
+An independent artifact lane, A0, may proceed in parallel with W4. It turns
+the already checked semantic module into a standards-consumable host-backed
+Wasm artifact and runs the W3 corpus in an external engine. A0 does not define
+the production linear-memory ABI and must consume, rather than modify, the
+frozen semantic ABI and supported-fragment boundary.
+
 ## Architecture decisions
 
 ### Two-level type information
@@ -363,6 +369,56 @@ Each slice includes runtime functions, contracts, differential examples, and
 an extension of the supported-fragment theorem. Do not mark ownership or
 reuse complete using an observational no-op runtime.
 
+### A0: emit the first host-backed Wasm artifact
+
+A0 is an independently assignable artifact lane. It can run in parallel with
+W4 because it consumes the checked output of `Fir.Wasm.lower` and the W2 host
+contracts without changing either one. Its first result is intentionally a
+demonstrator for the initial semantic fragment, not the W6 production runtime.
+
+Deliverables:
+
+1. serialize the validated symbolic instruction subset to standard WAT or a
+   `.wasm` binary, with a deterministic command-line entry point;
+2. preserve import module/name pairs, signatures, function indices, and
+   exports exactly as checked by FIR and exercised by the Talos adapter;
+3. provide an external-engine host shim for the W2 `fir.*` imports using the
+   same opaque-handle behavior and structured failure boundary;
+4. run the four W3 ABI-correct literal/constructor/projection/case programs in
+   that engine; and
+5. compare decoded returns and observable runtime state with the existing W3
+   differential oracle, recording every discrepancy as a Wasm bug card.
+
+Lane boundary and ownership:
+
+- prefer new emitter modules under `Fir/Wasm/Emit/` and isolated runner/tests
+  under `integration/talos/artifact/`;
+- do not edit `Fir/Wasm/ABI.lean`, `Fir/Wasm/Lower.lean`,
+  `Fir/Wasm/WellFormed.lean`, or `FirTalos/Correctness/` in the A0 branch;
+- do not add a second ABI, locally reinterpret handles, or silently accept a
+  program rejected by `lowerSupported` or `validateModule`;
+- route any required root build-target or shared-contract change through the
+  integration owner as a separate commit; and
+- report the chosen external engine and encoder, including their pinned
+  versions and licensing consequences, before making them required tooling.
+
+Definition of done:
+
+- one deterministic command produces an artifact from every program in the
+  initial W3 corpus;
+- an independent standards-conforming engine validates and executes it;
+- the four decoded outcomes agree with W3, including reachable heap evidence;
+- malformed or unsupported modules fail before emission with specific errors;
+- emitted artifacts are reproducible byte-for-byte (or text-for-text for the
+  initial WAT checkpoint); and
+- `git diff --check`, `make check`, `make talos-check`, and the lane-local
+  external-engine tests pass.
+
+A0 hands back an emitter API over a validated `Fir.Wasm.Module`, an artifact
+CLI, the isolated host shim, and engine-level regression evidence. W4 may use
+that evidence as testing support, but no W4 theorem depends on the external
+engine or serializer.
+
 ### W6: refine to a concrete runtime
 
 Once the semantic backend is stable, introduce a separate concrete target:
@@ -388,6 +444,7 @@ After W0 lands, use file-level ownership to minimize conflicts:
 | Host codec/runtime | new `FirTalos/Codec.lean`, `Runtime.lean` | frozen ABI |
 | Contracts/proofs | new `FirTalos/Contracts.lean`, `Correctness/` | codec and adapter APIs |
 | Differential tests | new `FirTalos/Differential.lean` | adapter and runtime |
+| A0 artifact emission | new `Fir/Wasm/Emit/`, `integration/talos/artifact/` | W1 checker, W2 contracts, W3 corpus |
 
 Only one package owns an existing shared file at a time. Prefer new modules
 for contracts, fixtures, and proofs. If an agent discovers that the frozen ABI

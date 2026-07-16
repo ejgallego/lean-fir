@@ -42,3 +42,9 @@ successful encodings, and out-of-range constructor tags are rejected before
 the `Nat`-to-`i32` case comparison can truncate them. A common Talos `wp`
 theorem lifts any exact successful semantic-host step through its abstract
 host contract.
+
+The plan also defines A0, an independent artifact lane that can run alongside
+W4. A0 owns new emitter and external-engine runner paths and produces the
+first standards-consumable, host-backed Wasm artifact for the W3 corpus. It
+must consume the frozen semantic ABI unchanged; concrete linear-memory layout
+and production ABI compatibility remain W6 work.
