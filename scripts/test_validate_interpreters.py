@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 import validate_interpreters as harness
+import validation_harness as core
+import validation_lcnf as lcnf
 
 
 def success(case_id: str, backend: str, value: int = 42) -> dict:
@@ -109,6 +111,12 @@ def with_form_diagnostics(
 
 
 class HarnessTests(unittest.TestCase):
+    def test_generic_core_does_not_own_lcnf_execution_or_coverage(self) -> None:
+        self.assertFalse(hasattr(core, "LcnfAdapter"))
+        self.assertFalse(hasattr(core, "coverage_report"))
+        self.assertIs(harness.LcnfAdapter, lcnf.LcnfAdapter)
+        self.assertIs(harness.coverage_report, lcnf.coverage_report)
+
     def test_equal_successes(self) -> None:
         equal, _, _ = harness.compare_success(success("case", "native"), success("case", "lcnf"))
         self.assertTrue(equal)

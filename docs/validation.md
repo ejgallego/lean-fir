@@ -38,6 +38,19 @@ Native therefore remains the corpus and source-semantics provider without
 forcing a future V8 or Talos adapter to imitate native's one-process-per-case
 execution strategy.
 
+The implementation preserves that boundary at the module level:
+
+- `scripts/validation_harness.py` owns backend-neutral protocol results,
+  observations, findings, artifacts, adapter interfaces, native execution, and
+  declarative external commands;
+- `scripts/validation_lcnf.py` imports the generic layer and owns LCNF execution,
+  diagnostics, and form/external coverage policy;
+- `scripts/validate_interpreters.py` is the thin CLI and built-in adapter
+  registry.
+
+The generic module never imports the LCNF module.  A V8 or Talos integration can
+therefore reuse it without loading LCNF coverage assumptions.
+
 An adapter can also be registered without changing the harness.  The config is
 JSON, and commands are argv arrays executed directly rather than shell text:
 
