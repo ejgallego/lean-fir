@@ -14,9 +14,8 @@ regression: Fir/LeanIR/InterpreterExamples.lean#isSharedCaseProgram
 
 # Summary
 
-FIR's impure interpreter represents the result of `isShared` as a scalar
-`UInt8`, but final impure LCNF immediately eliminates that result as a boxed
-`Bool` constructor.
+FIR's impure interpreter originally represented `isShared` as scalar `UInt8`,
+but its case discriminator path originally accepted only object constructors.
 
 ## Minimal reproduction
 
@@ -37,21 +36,23 @@ python3 scripts/validate_interpreters.py --case tuple-rotate
 ## Expected semantics
 
 The LCNF interpreter should return the same packed `UInt32` or nested product
-as Lean's native compiler. `isShared` has impure result type `obj`, and its
-consumer expects the `Bool.false` or `Bool.true` constructor tag.
+as Lean's native compiler. Lean 4.32 gives `isShared` impure result type
+`UInt8`; scalar cases interpret `0` and `1` as the `Bool.false` and
+`Bool.true` alternative tags.
 
 ## Actual behavior
 
 Both LCNF executions terminate with
 `RuntimeFault.expectedConstructor` at the `cases` immediately following
-`isShared`; native execution returns normally.
+`isShared`; native execution returns normally because scalar case
+discriminants are valid.
 
 ## Proof or differential evidence
 
 The generated artifacts contain `let isSharedCheck := isShared value; cases
-isSharedCheck`. FIR's `Runtime.isShared` returns `.scalar (.uint8 ...)`, while
-`Interpreter.coreStep` implements `cases` through `getTag`, which accepts only
-tagged or heap object values.
+isSharedCheck`. Lean's `ExpandResetReuse` constructs that binding and its join
+parameter with type `UInt8`. The failing FIR revision routed `cases` through a
+`getTag` that accepted only tagged or heap object values.
 
 ## Semantic impact
 
@@ -76,8 +77,9 @@ none
 
 ## Resolution and regression
 
-FIR now returns tagged `Bool.false`/`Bool.true` object values from `isShared`,
-matching the value's final impure type and its use by `cases`. The direct
-`isSharedCaseProgram` interpreter guard and the compiler-generated
-`packed-preserve` and `tuple-rotate` differential cases cover the repaired
-boundary.
+FIR's `getTag` accepts scalar and `USize` discriminants, while `isShared`
+retains Lean 4.32's scalar `UInt8` result. The direct `isSharedCaseProgram`
+interpreter guard and the compiler-generated `packed-preserve` and
+`tuple-rotate` differential cases cover the repaired boundary. A later
+temporary change to tagged objects was reverted under
+`FIR-BUG-wasm-none-isShared-abi-drift`.

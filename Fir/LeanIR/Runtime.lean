@@ -387,11 +387,11 @@ def unbox (runtime : RuntimeState) (type : Expr) (value : Value) : Except Runtim
 
 def isShared (runtime : RuntimeState) (value : Value) : Except RuntimeFault Value :=
   match value with
-  | .object (.tagged _) => .ok (.object (.tagged 1))
+  | .object (.tagged _) => .ok (.scalar (.uint8 1))
   | .object (.heap location) => do
       let cell ← getLiveCell runtime location
       let shared := cell.persistent || cell.rc != 1
-      return .object (.tagged (if shared then 1 else 0))
+      return .scalar (.uint8 (if shared then 1 else 0))
   | _ => .error .expectedObject
 
 def reset (runtime : RuntimeState) (count : Nat) (value : Value) :

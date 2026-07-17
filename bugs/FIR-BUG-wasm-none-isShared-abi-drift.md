@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-isShared-abi-drift
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -80,4 +80,8 @@ none
 
 ## Resolution and regression
 
-unresolved
+FIR's shared runtime now returns `.scalar (.uint8 0)` or
+`.scalar (.uint8 1)`, and the hand-written `rcProgram`,
+`persistentRcProgram`, and `isSharedCaseProgram` declarations use the same
+`UInt8` type emitted by Lean 4.32. `Fir/Wasm/Examples.lean` permanently checks
+that the repaired programs lower against the frozen semantic ABI.
