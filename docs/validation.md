@@ -221,6 +221,14 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "resultDomain": "selected",
   "timeoutSeconds": 120,
   "productManifest": "products.json",
+  "buildTools": [
+    {"kind": "build-launcher", "name": "node", "command": "node"},
+    {
+      "kind": "build-driver",
+      "name": "scripts/build-lean-wasm.mjs",
+      "path": "../scripts/build-lean-wasm.mjs"
+    }
+  ],
   "tools": [
     {"kind": "engine", "name": "node", "command": "node"},
     {
@@ -245,32 +253,44 @@ commands receive `FIR_VALIDATION_BACKEND`, `FIR_VALIDATION_OUT_DIR`,
 of the canonical corpus JSON), and `FIR_VALIDATION_CASES` (a JSON array
 preserving the requested order).  Candidate builds therefore happen only
 after the native oracle has defined and selected the corpus.  The run command
-additionally receives the captured product and tool inventories.  It writes
+additionally receives the captured product and execution-tool inventories.
+Both phases receive `FIR_VALIDATION_BUILD_TOOLS`, the captured build-tool
+inventory; the build can therefore record or check the exact launcher and
+driver paths and hashes under which it is running.  The run command writes
 protocol JSONL to stdout; stdout, stderr, result records, domain failures, and
 comparisons then follow the same path as built-in adapters.
 
-Every JSON external adapter must declare its execution tools.  A tool has a
+Every JSON external adapter must declare its execution tools in `tools`, and
+an adapter with a `buildCommand` must likewise declare `buildTools`.  A tool has a
 restricted lowercase `kind`, a normalized report-stable relative POSIX `name`,
 and exactly one source locator.  `command` is a bare executable name resolved
-through `PATH`; exactly one command tool is required and it must equal
-`runCommand[0]`.  `path` is a normalized POSIX path resolved relative to the
-adapter config, may use leading `..`, and must resolve to exactly one later
-`runCommand` argument under the owning project root.  Duplicate identities and
-duplicate sources are rejected.  After the optional build, the harness hashes
-each regular tool file, replaces the matching run argv entries with those exact
-captured absolute paths, and verifies the files immediately before and after
-execution.  Thus a changing `PATH`, engine symlink, or runner alias cannot make
-the run execute bytes different from the recorded engine and runner.  Direct
-in-process adapter construction may omit tools for protocol-only tests, but a
-declarative real-engine adapter cannot.
+through `PATH`; exactly one command tool is required per phase and it must equal
+that phase's command at index zero.  `path` is a normalized POSIX path resolved
+relative to the adapter config, may use leading `..`, and must resolve to
+exactly one later argument of the owning phase command under the project root.
+Duplicate identities and duplicate sources within a phase are rejected.
+
+Build tools are captured before the build starts; execution tools are captured
+after it finishes.  The harness replaces matching argv entries with those exact
+captured absolute paths and verifies all captured files after the build and
+immediately before and after execution.  Thus a changing `PATH`, launcher
+symlink, build driver, engine, or runner alias cannot make either phase execute
+bytes different from the recorded tools.  Direct in-process adapter
+construction may omit tools for protocol-only tests, but a declarative adapter
+cannot.
 
 The run command receives `FIR_VALIDATION_TOOLS`, a compact sorted JSON array of
-the captured backend, kind, logical name, SHA-256, and exact local path.  The
-machine-local path is not written to `matrix.json`; the matrix retains the tool
-bytes under `evidence/tools/<sha256>`, binds their logical identities and hashes
-into `identity.run`, and reports `toolCount`.  Tools are execution provenance,
+the captured execution tools.  The matrix additionally includes every captured
+build tool.  For both phases it records the backend, kind, logical name, and
+SHA-256 while omitting the machine-local path; it retains the exact bytes under
+`evidence/tools/<sha256>`, binds their logical identities and hashes into
+`identity.run`, and reports the combined `toolCount`.  Tools are provenance,
 not compiler products, so they do not use the per-case product-consumption
-receipt.
+receipt.  This proves the exact declared launcher/driver and engine/runner
+bytes used by the harness.  It does not yet claim a transitive source or import
+closure for compilers launched indirectly by those tools.  A `--no-build` run
+captures no build tools, so reused products do not falsely claim a build that
+the harness did not observe.
 
 The optional static `products` array or dynamic `productManifest` declares
 regular build outputs whose bytes affect the backend's semantics.  A dynamic

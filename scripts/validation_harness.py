@@ -1486,10 +1486,17 @@ class ExternalCommandAdapter:
     product_declarations: tuple[ProductDeclaration, ...] = ()
     product_manifest: str | None = None
     tool_declarations: tuple[ToolDeclaration, ...] = ()
+    build_tool_declarations: tuple[ToolDeclaration, ...] = ()
     _built_products: tuple[ValidationProduct, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_tools: tuple[ValidationTool, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_build_tools: tuple[ValidationTool, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_build_command: tuple[str, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_run_command: tuple[str, ...] | None = field(
@@ -1541,6 +1548,21 @@ class ExternalCommandAdapter:
                 f"{self.name} validation corpus changed {phase}"
             )
 
+    def tool_environment_value(
+        self, tools: tuple[ValidationTool, ...]
+    ) -> str:
+        return json.dumps(
+            [
+                {
+                    **tool.to_json(),
+                    "path": str(tool.source_path),
+                }
+                for tool in tools
+            ],
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
     def collect_products(self, out_dir: Path) -> tuple[ValidationProduct, ...]:
         declarations = self.product_declarations
         products: list[ValidationProduct] = []
@@ -1573,40 +1595,44 @@ class ExternalCommandAdapter:
             sorted(products, key=lambda item: (item.kind, item.name))
         )
 
-    def collect_tools(self) -> tuple[ValidationTool, ...]:
+    def collect_tools(
+        self, declarations: tuple[ToolDeclaration, ...]
+    ) -> tuple[ValidationTool, ...]:
         return tuple(
             validation_tool_from_declaration(self.name, declaration)
             for declaration in sorted(
-                self.tool_declarations,
+                declarations,
                 key=lambda item: (item.kind, item.name),
             )
         )
 
-    def bind_run_command(self, root: Path) -> tuple[str, ...]:
+    def bind_command(
+        self,
+        root: Path,
+        command: list[str],
+        declarations: tuple[ToolDeclaration, ...],
+        tools: tuple[ValidationTool, ...],
+        phase: str,
+    ) -> tuple[str, ...]:
         """Replace declared tool arguments with the exact captured files."""
-        if self._built_tools is None:
-            raise ValidationError(
-                f"{self.name} adapter tools must be captured before binding"
-            )
-        declarations = sorted(
-            self.tool_declarations,
-            key=lambda item: (item.kind, item.name),
-        )
         if not declarations:
-            return tuple(self.run_command)
-        bound = list(self.run_command)
-        pairs = list(zip(declarations, self._built_tools, strict=True))
+            return tuple(command)
+        ordered_declarations = sorted(
+            declarations, key=lambda item: (item.kind, item.name)
+        )
+        bound = list(command)
+        pairs = list(zip(ordered_declarations, tools, strict=True))
         command_pairs = [
             pair for pair in pairs if pair[0].command is not None
         ]
         if len(command_pairs) != 1:
             raise ValidationError(
-                f"{self.name} adapter must declare exactly one command tool"
+                f"{self.name} {phase} must declare exactly one command tool"
             )
         command_declaration, command_tool = command_pairs[0]
         if bound[0] != command_declaration.command:
             raise ValidationError(
-                f"{self.name} command tool does not match runCommand[0]"
+                f"{self.name} command tool does not match {phase}Command[0]"
             )
         if command_tool.source_path is None:
             raise ValidationError(f"{self.name} command tool has no source path")
@@ -1630,7 +1656,8 @@ class ExternalCommandAdapter:
             if len(matches) != 1:
                 raise ValidationError(
                     f"{self.name} path tool {declaration.kind}:"
-                    f"{declaration.name} must match exactly one runCommand argument"
+                    f"{declaration.name} must match exactly one "
+                    f"{phase}Command argument"
                 )
             if tool.source_path is None:
                 raise ValidationError(
@@ -1640,12 +1667,10 @@ class ExternalCommandAdapter:
             bound[matches[0]] = str(tool.source_path)
         return tuple(bound)
 
-    def verify_captured_tools(self, phase: str) -> None:
-        if self._built_tools is None:
-            raise ValidationError(
-                f"{self.name} adapter must be built before tool verification"
-            )
-        for tool in self._built_tools:
+    def verify_captured_tools(
+        self, tools: tuple[ValidationTool, ...], phase: str
+    ) -> None:
+        for tool in tools:
             if tool.source_path is None:
                 raise ValidationError(
                     f"{self.name} tool {tool.kind}:{tool.name} has no source path"
@@ -1701,8 +1726,24 @@ class ExternalCommandAdapter:
     def build(self, context: BuildContext) -> None:
         self._built_products = None
         self._built_tools = None
+        self._built_build_tools = None
+        self._built_build_command = None
         self._built_run_command = None
         self._build_artifacts = ()
+        if not context.no_build and self.build_command:
+            self._built_build_tools = self.collect_tools(
+                self.build_tool_declarations
+            )
+            self._built_build_command = self.bind_command(
+                context.root,
+                self.build_command,
+                self.build_tool_declarations,
+                self._built_build_tools,
+                "build",
+            )
+        else:
+            self._built_build_tools = ()
+            self._built_build_command = tuple(self.build_command)
         if not context.no_build and self.build_command:
             if self.product_manifest is not None:
                 self.clear_dynamic_product_staging(context.out_dir)
@@ -1710,14 +1751,23 @@ class ExternalCommandAdapter:
                 self.remove_stale_products(context.out_dir)
             destination = context.out_dir / self.name / "build"
             destination.mkdir(parents=True, exist_ok=True)
+            build_environment = self.environment(
+                context.out_dir, context.run_context
+            )
+            build_environment["FIR_VALIDATION_BUILD_TOOLS"] = (
+                self.tool_environment_value(self._built_build_tools)
+            )
             completed = run(
-                self.build_command,
+                list(self._built_build_command),
                 context.root,
                 self.timeout_seconds,
-                self.environment(context.out_dir, context.run_context),
+                build_environment,
             )
             self._build_artifacts = write_process_artifacts(
                 destination, completed, f"{self.name}/build"
+            )
+            self.verify_captured_tools(
+                self._built_build_tools, "during build"
             )
             if completed.returncode != 0:
                 raise ValidationError(
@@ -1727,8 +1777,14 @@ class ExternalCommandAdapter:
         if context.run_context is not None:
             self.verify_corpus(context.run_context, "during build")
         self._built_products = self.collect_products(context.out_dir)
-        self._built_tools = self.collect_tools()
-        self._built_run_command = self.bind_run_command(context.root)
+        self._built_tools = self.collect_tools(self.tool_declarations)
+        self._built_run_command = self.bind_command(
+            context.root,
+            self.run_command,
+            self.tool_declarations,
+            self._built_tools,
+            "run",
+        )
 
     def execute(self, context: RunContext) -> BackendRun:
         destination = context.out_dir / self.name
@@ -1736,6 +1792,7 @@ class ExternalCommandAdapter:
         if (
             self._built_products is None
             or self._built_tools is None
+            or self._built_build_tools is None
             or self._built_run_command is None
         ):
             raise ValidationError(
@@ -1746,7 +1803,10 @@ class ExternalCommandAdapter:
             raise ValidationError(
                 f"{self.name} products changed between build and execution"
             )
-        self.verify_captured_tools("between build and execution")
+        self.verify_captured_tools(
+            (*self._built_build_tools, *self._built_tools),
+            "between build and execution",
+        )
         environment = self.environment(context.out_dir, context)
         environment.update(
             {
@@ -1767,16 +1827,11 @@ class ExternalCommandAdapter:
                     separators=(",", ":"),
                     sort_keys=True,
                 ),
-                "FIR_VALIDATION_TOOLS": json.dumps(
-                    [
-                        {
-                            **tool.to_json(),
-                            "path": str(tool.source_path),
-                        }
-                        for tool in self._built_tools
-                    ],
-                    separators=(",", ":"),
-                    sort_keys=True,
+                "FIR_VALIDATION_TOOLS": self.tool_environment_value(
+                    self._built_tools
+                ),
+                "FIR_VALIDATION_BUILD_TOOLS": self.tool_environment_value(
+                    self._built_build_tools
                 ),
             }
         )
@@ -1794,7 +1849,10 @@ class ExternalCommandAdapter:
                 f"{self.name} products changed during execution"
             )
         self.verify_corpus(context, "during execution")
-        self.verify_captured_tools("during execution")
+        self.verify_captured_tools(
+            (*self._built_build_tools, *self._built_tools),
+            "during execution",
+        )
         expected_cases = (
             context.selected
             if self.result_domain == "selected"
@@ -1804,7 +1862,7 @@ class ExternalCommandAdapter:
             self.name,
             list(expected_cases),
             products=list(self._built_products),
-            tools=list(self._built_tools),
+            tools=[*self._built_build_tools, *self._built_tools],
             artifacts=[*self._build_artifacts, *execution_artifacts],
         )
         if completed.returncode != 0:
@@ -1847,6 +1905,7 @@ def external_adapter_from_config(
         "products",
         "productManifest",
         "tools",
+        "buildTools",
     }
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
@@ -1946,88 +2005,134 @@ def external_adapter_from_config(
             raise ValidationError(
                 f"adapter config {path}: productManifest requires buildCommand"
             )
-    raw_tools = value.get("tools", [])
-    if not isinstance(raw_tools, list):
-        raise ValidationError(
-            f"adapter config {path}: tools must be an object array"
-        )
-    tool_declarations: list[ToolDeclaration] = []
-    tool_keys: set[tuple[str, str]] = set()
-    tool_sources: set[tuple[str, str]] = set()
-    for index, tool in enumerate(raw_tools):
-        tool_context = f"adapter config {path}/tools/{index}"
-        if not isinstance(tool, dict):
-            raise ValidationError(f"{tool_context}: expected an object")
-        fields = set(tool)
-        locator_fields = fields & {"path", "command"}
-        if (
-            not {"kind", "name"} <= fields
-            or not fields <= {"kind", "name", "path", "command"}
-            or len(locator_fields) != 1
-        ):
+    def checked_tools(
+        field_name: str, owning_command: list[str], command_field: str
+    ) -> tuple[ToolDeclaration, ...]:
+        tool_label = "tool" if field_name == "tools" else "build tool"
+        raw_tools = value.get(field_name, [])
+        if not isinstance(raw_tools, list):
             raise ValidationError(
-                f"{tool_context}: expected kind, name, and exactly one of "
-                "path or command"
+                f"adapter config {path}: {field_name} must be an object array"
             )
-        kind = validate_backend_name(tool["kind"], tool_context)
-        tool_name = checked_relative_posix_path(tool["name"], tool_context)
-        key = (kind, tool_name)
-        if key in tool_keys:
-            raise ValidationError(
-                f"adapter config {path}: duplicate tool: {kind}:{tool_name}"
-            )
-        tool_keys.add(key)
-        if "path" in tool:
-            raw_path = checked_config_relative_posix_path(
-                tool["path"], tool_context
-            )
-            declaration = ToolDeclaration(
-                kind,
-                tool_name,
-                path=Path(os.path.abspath(path.parent / raw_path)),
-            )
-        else:
-            command = tool["command"]
+        tool_declarations: list[ToolDeclaration] = []
+        tool_keys: set[tuple[str, str]] = set()
+        tool_sources: set[tuple[str, str]] = set()
+        for index, tool in enumerate(raw_tools):
+            tool_context = f"adapter config {path}/{field_name}/{index}"
+            if not isinstance(tool, dict):
+                raise ValidationError(f"{tool_context}: expected an object")
+            fields = set(tool)
+            locator_fields = fields & {"path", "command"}
             if (
-                not isinstance(command, str)
-                or not command
-                or "\x00" in command
-                or "/" in command
-                or "\\" in command
+                not {"kind", "name"} <= fields
+                or not fields <= {"kind", "name", "path", "command"}
+                or len(locator_fields) != 1
             ):
                 raise ValidationError(
-                    f"{tool_context}: command must be a bare PATH command"
+                    f"{tool_context}: expected kind, name, and exactly one of "
+                    "path or command"
                 )
-            declaration = ToolDeclaration(
-                kind,
-                tool_name,
-                command=command,
+            kind = validate_backend_name(tool["kind"], tool_context)
+            tool_name = checked_relative_posix_path(
+                tool["name"], tool_context
             )
-        source = (
-            ("path", str(declaration.path))
-            if declaration.path is not None
-            else ("command", str(declaration.command))
-        )
-        if source in tool_sources:
+            key = (kind, tool_name)
+            if key in tool_keys:
+                raise ValidationError(
+                    f"adapter config {path}: duplicate {tool_label}: "
+                    f"{kind}:{tool_name}"
+                )
+            tool_keys.add(key)
+            if "path" in tool:
+                raw_path = checked_config_relative_posix_path(
+                    tool["path"], tool_context
+                )
+                declaration = ToolDeclaration(
+                    kind,
+                    tool_name,
+                    path=Path(os.path.abspath(path.parent / raw_path)),
+                )
+            else:
+                command = tool["command"]
+                if (
+                    not isinstance(command, str)
+                    or not command
+                    or "\x00" in command
+                    or "/" in command
+                    or "\\" in command
+                ):
+                    raise ValidationError(
+                        f"{tool_context}: command must be a bare PATH command"
+                    )
+                declaration = ToolDeclaration(
+                    kind,
+                    tool_name,
+                    command=command,
+                )
+            source = (
+                ("path", str(declaration.path))
+                if declaration.path is not None
+                else ("command", str(declaration.command))
+            )
+            if source in tool_sources:
+                raise ValidationError(
+                    f"adapter config {path}: duplicate {tool_label} "
+                    f"source: {source[1]}"
+                )
+            tool_sources.add(source)
+            tool_declarations.append(declaration)
+        if not owning_command:
+            if tool_declarations:
+                raise ValidationError(
+                    f"adapter config {path}: {field_name} requires "
+                    f"{command_field}"
+                )
+            return ()
+        if not tool_declarations:
             raise ValidationError(
-                f"adapter config {path}: duplicate tool source: {source[1]}"
+                f"adapter config {path}: {field_name} must be nonempty"
             )
-        tool_sources.add(source)
-        tool_declarations.append(declaration)
-    if not tool_declarations:
-        raise ValidationError(f"adapter config {path}: tools must be nonempty")
-    command_declarations = [
-        declaration
-        for declaration in tool_declarations
-        if declaration.command is not None
-    ]
-    if len(command_declarations) != 1:
-        raise ValidationError(
-            f"adapter config {path}: tools must contain exactly one command"
+        command_declarations = [
+            declaration
+            for declaration in tool_declarations
+            if declaration.command is not None
+        ]
+        if len(command_declarations) != 1:
+            raise ValidationError(
+                f"adapter config {path}: {field_name} must contain exactly "
+                "one command"
+            )
+        if command_declarations[0].command != owning_command[0]:
+            raise ValidationError(
+                f"adapter config {path}: {field_name} command tool must "
+                f"match {command_field}[0]"
+            )
+        return tuple(
+            sorted(
+                tool_declarations,
+                key=lambda declaration: (declaration.kind, declaration.name),
+            )
         )
-    if command_declarations[0].command != run_command[0]:
+
+    tool_declarations = checked_tools("tools", run_command, "runCommand")
+    build_tool_declarations = checked_tools(
+        "buildTools", build_command, "buildCommand"
+    )
+    duplicate_tool_keys = sorted(
+        {
+            (declaration.kind, declaration.name)
+            for declaration in tool_declarations
+        }
+        & {
+            (declaration.kind, declaration.name)
+            for declaration in build_tool_declarations
+        }
+    )
+    if duplicate_tool_keys:
+        kind, tool_name = duplicate_tool_keys[0]
         raise ValidationError(
-            f"adapter config {path}: command tool must match runCommand[0]"
+            f"adapter config {path}: duplicate tool across build and run: "
+            f"{kind}:{tool_name}"
         )
     return ExternalCommandAdapter(
         name=name,
@@ -2042,12 +2147,8 @@ def external_adapter_from_config(
             )
         ),
         product_manifest=product_manifest,
-        tool_declarations=tuple(
-            sorted(
-                tool_declarations,
-                key=lambda declaration: (declaration.kind, declaration.name),
-            )
-        ),
+        tool_declarations=tool_declarations,
+        build_tool_declarations=build_tool_declarations,
     )
 
 

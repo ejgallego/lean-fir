@@ -5,6 +5,18 @@
   "resultDomain": "selected",
   "timeoutSeconds": 120,
   "productManifest": "products.json",
+  "buildTools": [
+    {
+      "kind": "build-driver",
+      "name": "FirValidationWasm.lean",
+      "path": "../FirValidationWasm.lean"
+    },
+    {
+      "kind": "build-launcher",
+      "name": "lake",
+      "command": "lake"
+    }
+  ],
   "tools": [
     {
       "kind": "engine",

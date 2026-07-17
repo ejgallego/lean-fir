@@ -1233,6 +1233,18 @@ class HarnessTests(unittest.TestCase):
                                 "path": "modules/validation.wasm",
                             }
                         ],
+                        "buildTools": [
+                            {
+                                "kind": "build-driver",
+                                "name": "scripts/build-v8.mjs",
+                                "path": "../scripts/build-v8.mjs",
+                            },
+                            {
+                                "kind": "build-launcher",
+                                "name": "node",
+                                "command": "node",
+                            },
+                        ],
                         "tools": [
                             {
                                 "kind": "runner",
@@ -1259,6 +1271,19 @@ class HarnessTests(unittest.TestCase):
                 (
                     harness.ProductDeclaration(
                         "wasm-module", "modules/validation.wasm"
+                    ),
+                ),
+            )
+            self.assertEqual(
+                adapter.build_tool_declarations,
+                (
+                    harness.ToolDeclaration(
+                        "build-driver",
+                        "scripts/build-v8.mjs",
+                        path=root / "scripts" / "build-v8.mjs",
+                    ),
+                    harness.ToolDeclaration(
+                        "build-launcher", "node", command="node"
                     ),
                 ),
             )
@@ -1430,6 +1455,67 @@ class HarnessTests(unittest.TestCase):
             ):
                 harness.external_adapter_from_config(path)
 
+    def test_external_adapter_build_tool_config_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = {
+                "name": "v8",
+                "buildCommand": ["node", "build.mjs"],
+                "runCommand": ["node", "run.mjs"],
+                "resultDomain": "selected",
+                "tools": [
+                    {"kind": "engine", "name": "node", "command": "node"}
+                ],
+            }
+
+            path.write_text(json.dumps(base), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "buildTools must be nonempty"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["buildTools"] = [
+                {
+                    "kind": "build-launcher",
+                    "name": "other",
+                    "command": "other",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, r"must match buildCommand\[0\]"
+            ):
+                harness.external_adapter_from_config(path)
+
+            del value["buildCommand"]
+            value["buildTools"] = [
+                {
+                    "kind": "build-launcher",
+                    "name": "node-build",
+                    "command": "node",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "buildTools requires buildCommand"
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["buildTools"] = [
+                {
+                    "kind": "engine",
+                    "name": "node",
+                    "command": "node",
+                }
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "duplicate tool across build and run"
+            ):
+                harness.external_adapter_from_config(path)
+
     def test_external_adapter_product_config_is_strict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "v8.json"
@@ -1438,6 +1524,16 @@ class HarnessTests(unittest.TestCase):
                 "buildCommand": ["node", "build.mjs"],
                 "runCommand": ["node", "run.mjs"],
                 "resultDomain": "selected",
+                "buildTools": [
+                    {
+                        "kind": "build-launcher",
+                        "name": "node-build",
+                        "command": "node",
+                    }
+                ],
+                "tools": [
+                    {"kind": "engine", "name": "node", "command": "node"}
+                ],
             }
 
             for product_path in (
@@ -1481,9 +1577,6 @@ class HarnessTests(unittest.TestCase):
 
             value = dict(base)
             value["productManifest"] = "products.json"
-            value["tools"] = [
-                {"kind": "engine", "name": "node", "command": "node"}
-            ]
             path.write_text(json.dumps(value), encoding="utf-8")
             adapter = harness.external_adapter_from_config(path)
             self.assertEqual(adapter.product_manifest, "products.json")
@@ -1906,6 +1999,9 @@ class HarnessTests(unittest.TestCase):
             build_program = (
                 "import json,os,pathlib;"
                 "assert json.loads(os.environ['FIR_VALIDATION_CASES'])==['case'];"
+                "build_tools=json.loads(os.environ['FIR_VALIDATION_BUILD_TOOLS']);"
+                "assert [(tool['kind'],tool['name']) for tool in build_tools]"
+                "==[('build-launcher','python-build')];"
                 "assert pathlib.Path(os.environ['FIR_VALIDATION_CORPUS']).is_file();"
                 "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
                 "'modules','validation.wasm');"
@@ -1943,7 +2039,7 @@ class HarnessTests(unittest.TestCase):
                     {
                         "name": "v8",
                         "buildCommand": [
-                            sys.executable,
+                            engine_command,
                             "-c",
                             build_program,
                         ],
@@ -1953,6 +2049,13 @@ class HarnessTests(unittest.TestCase):
                             {
                                 "kind": "wasm-module",
                                 "path": "modules/validation.wasm",
+                            }
+                        ],
+                        "buildTools": [
+                            {
+                                "kind": "build-launcher",
+                                "name": "python-build",
+                                "command": engine_command,
                             }
                         ],
                         "tools": [
@@ -2052,6 +2155,13 @@ class HarnessTests(unittest.TestCase):
                 [
                     {
                         "backend": "v8",
+                        "kind": "build-launcher",
+                        "name": "python-build",
+                        "sha256": engine_sha256,
+                        "artifact": f"evidence/tools/{engine_sha256}",
+                    },
+                    {
+                        "backend": "v8",
                         "kind": "engine",
                         "name": "python",
                         "sha256": engine_sha256,
@@ -2066,7 +2176,7 @@ class HarnessTests(unittest.TestCase):
                     },
                 ],
             )
-            self.assertEqual(matrix["summary"]["toolCount"], 2)
+            self.assertEqual(matrix["summary"]["toolCount"], 3)
             self.assertEqual(matrix["summary"]["artifactCount"], 6)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
@@ -2428,6 +2538,120 @@ class HarnessTests(unittest.TestCase):
                 "path tool runner:runner.py must match exactly one runCommand argument",
             ):
                 unbound.build(build_context)
+
+    def test_external_adapter_binds_build_tools_before_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            builder = root / "builder.py"
+            builder.write_bytes(b"original builder")
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            run_context = harness.RunContext(
+                root, out_dir, descriptors, ["case"]
+            )
+            engine_command = Path(sys.executable).name
+            engine_path_text = shutil.which(engine_command)
+            self.assertIsNotNone(engine_path_text)
+            assert engine_path_text is not None
+            engine_path = Path(engine_path_text).resolve()
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=[engine_command, str(builder)],
+                run_command=[engine_command, "-c", "raise SystemExit(7)"],
+                result_domain="selected",
+                build_tool_declarations=(
+                    harness.ToolDeclaration(
+                        "build-driver", "builder.py", path=builder
+                    ),
+                    harness.ToolDeclaration(
+                        "build-launcher",
+                        "python-build",
+                        command=engine_command,
+                    ),
+                ),
+                tool_declarations=(
+                    harness.ToolDeclaration(
+                        "engine", "python", command=engine_command
+                    ),
+                ),
+            )
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+            build_context = harness.BuildContext(
+                root, out_dir, False, run_context
+            )
+            with mock.patch.object(
+                core, "run", return_value=completed
+            ) as run_mock:
+                adapter.build(build_context)
+            self.assertEqual(
+                run_mock.call_args.args[0],
+                [str(engine_path), str(builder.resolve())],
+            )
+            build_environment = run_mock.call_args.args[3]
+            build_tools = json.loads(
+                build_environment["FIR_VALIDATION_BUILD_TOOLS"]
+            )
+            self.assertEqual(
+                [(tool["kind"], tool["name"]) for tool in build_tools],
+                [
+                    ("build-driver", "builder.py"),
+                    ("build-launcher", "python-build"),
+                ],
+            )
+            self.assertEqual(
+                [tool["path"] for tool in build_tools],
+                [str(builder.resolve()), str(engine_path)],
+            )
+
+            failed = mock.Mock(returncode=7, stdout="", stderr="failed")
+            with mock.patch.object(core, "run", return_value=failed):
+                backend_run = adapter.execute(run_context)
+            self.assertEqual(
+                [(tool.kind, tool.name) for tool in backend_run.tools],
+                [
+                    ("build-driver", "builder.py"),
+                    ("build-launcher", "python-build"),
+                    ("engine", "python"),
+                ],
+            )
+
+            builder.write_bytes(b"changed before execution")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "tools changed between build and execution",
+            ):
+                adapter.execute(run_context)
+
+            builder.write_bytes(b"original builder")
+
+            def mutate_builder(*args: object, **kwargs: object) -> mock.Mock:
+                builder.write_bytes(b"changed during build")
+                return completed
+
+            with mock.patch.object(core, "run", side_effect=mutate_builder):
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "tools changed during build"
+                ):
+                    adapter.build(build_context)
+
+            adapter.build(
+                harness.BuildContext(root, out_dir, True, run_context)
+            )
+            with mock.patch.object(core, "run", return_value=failed) as run_mock:
+                backend_run = adapter.execute(run_context)
+            self.assertEqual(
+                [(tool.kind, tool.name) for tool in backend_run.tools],
+                [("engine", "python")],
+            )
+            self.assertEqual(
+                json.loads(
+                    run_mock.call_args.args[3][
+                        "FIR_VALIDATION_BUILD_TOOLS"
+                    ]
+                ),
+                [],
+            )
 
     def test_native_adapter_executes_the_captured_binary_directly(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
