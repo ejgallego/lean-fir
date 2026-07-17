@@ -64,8 +64,32 @@ assert.equal(corpus.version, 1, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
 const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
-assert.equal(products.length, CASE_IDS.length * 2,
-  "the V8 adapter requires a module and compiler manifest per case");
+assert.equal(products.length, CASE_IDS.length * 2 + 1,
+  "the V8 adapter requires its product inventory and two products per case");
+
+const inventoryMatches = products.filter((product) =>
+  product.kind === "product-manifest" && product.name === "products.json");
+assert.equal(inventoryMatches.length, 1, "missing or duplicate product inventory");
+const inventoryProduct = inventoryMatches[0];
+assert.equal(inventoryProduct.backend, "v8");
+assert.match(inventoryProduct.sha256, /^[0-9a-f]{64}$/);
+const inventoryBytes = await readFile(inventoryProduct.path);
+const consumedInventorySha256 = sha256(inventoryBytes);
+assert.equal(consumedInventorySha256, inventoryProduct.sha256,
+  "loaded product inventory disagrees with the captured product");
+const inventory = JSON.parse(inventoryBytes.toString("utf8"));
+const expectedInventoryProducts = products
+  .filter((product) => product !== inventoryProduct)
+  .map((product) => ({ kind: product.kind, path: product.name }))
+  .sort((left, right) =>
+    left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path));
+assert.equal(inventory.version, 1, "unsupported product inventory version");
+assert.deepStrictEqual(
+  [...inventory.products].sort((left, right) =>
+    left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path)),
+  expectedInventoryProducts,
+  "product inventory disagrees with captured products",
+);
 
 function caseProduct(caseId, kind, suffix) {
   const name = `modules/${caseId}.wasm${suffix}`;
@@ -137,6 +161,11 @@ for (const caseId of selectedCases) {
     ? { usize: { value } }
     : { bits: { width: spec.width, value } };
   const receipt = JSON.stringify([
+    {
+      kind: inventoryProduct.kind,
+      name: inventoryProduct.name,
+      sha256: consumedInventorySha256,
+    },
     {
       kind: manifestProduct.kind,
       name: manifestProduct.name,

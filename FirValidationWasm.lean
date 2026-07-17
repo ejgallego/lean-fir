@@ -10,6 +10,9 @@ namespace FirValidationWasm
 def caseIds : Array String :=
   #["uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max"]
 
+def productJson (kind path : String) : Json :=
+  Json.mkObj [("kind", kind), ("path", path)]
+
 syntax (name := firValidationWasm) "#fir_validation_wasm" : command
 
 @[command_elab firValidationWasm]
@@ -39,6 +42,17 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     liftIO <| IO.FS.writeBinFile modulePath artifact.bytes
     liftIO <| IO.FS.writeFile (modulePath.toString ++ ".json")
       artifact.manifest.compress
+  let manifestProducts :=
+    caseIds.map (fun caseId =>
+      productJson "wasm-manifest" s!"modules/{caseId}.wasm.json") ++
+    caseIds.map (fun caseId =>
+      productJson "wasm-module" s!"modules/{caseId}.wasm")
+  let productManifest := Json.mkObj [
+    ("version", Json.num 1),
+    ("products", Json.arr manifestProducts)]
+  liftIO <| IO.FS.writeFile
+    ((outputDirectory : System.FilePath) / "products.json")
+    productManifest.compress
 
 end FirValidationWasm
 

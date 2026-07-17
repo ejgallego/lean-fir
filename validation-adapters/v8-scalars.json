@@ -4,48 +4,7 @@
   "runCommand": ["node", "scripts/run_validation_v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
-  "products": [
-    {
-      "kind": "wasm-manifest",
-      "path": "modules/uint8-max.wasm.json"
-    },
-    {
-      "kind": "wasm-manifest",
-      "path": "modules/uint16-max.wasm.json"
-    },
-    {
-      "kind": "wasm-manifest",
-      "path": "modules/uint32-max.wasm.json"
-    },
-    {
-      "kind": "wasm-manifest",
-      "path": "modules/uint64-max.wasm.json"
-    },
-    {
-      "kind": "wasm-manifest",
-      "path": "modules/usize-max.wasm.json"
-    },
-    {
-      "kind": "wasm-module",
-      "path": "modules/uint8-max.wasm"
-    },
-    {
-      "kind": "wasm-module",
-      "path": "modules/uint16-max.wasm"
-    },
-    {
-      "kind": "wasm-module",
-      "path": "modules/uint32-max.wasm"
-    },
-    {
-      "kind": "wasm-module",
-      "path": "modules/uint64-max.wasm"
-    },
-    {
-      "kind": "wasm-module",
-      "path": "modules/usize-max.wasm"
-    }
-  ],
+  "productManifest": "products.json",
   "tools": [
     {
       "kind": "engine",

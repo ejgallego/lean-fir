@@ -220,9 +220,7 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
-  "products": [
-    {"kind": "wasm-module", "path": "modules/validation.wasm"}
-  ],
+  "productManifest": "products.json",
   "tools": [
     {"kind": "engine", "name": "node", "command": "node"},
     {
@@ -274,13 +272,23 @@ into `identity.run`, and reports `toolCount`.  Tools are execution provenance,
 not compiler products, so they do not use the per-case product-consumption
 receipt.
 
-The optional `products` array declares regular build outputs whose bytes affect
-the backend's semantics.  Each declaration has a restricted lowercase `kind`
-and a normalized relative POSIX `path` beneath that backend's
-`FIR_VALIDATION_OUT_DIR`; absolute paths, traversal, duplicate paths,
-directories, and symlinks are rejected.  Products require `buildCommand`.
-Before an ordinary build the harness removes any declared stale files, then
-hashes the newly produced raw bytes with SHA-256 immediately after the build.
+The optional static `products` array or dynamic `productManifest` declares
+regular build outputs whose bytes affect the backend's semantics.  A dynamic
+manifest is a strict `{"version":1,"products":[...]}` object emitted by the
+current build; the harness retains it as a `product-manifest` product and
+verifies that its declarations exactly match the matrix products for that
+backend.  Each declaration has a restricted lowercase `kind` and a normalized
+relative POSIX `path` beneath that backend's `FIR_VALIDATION_OUT_DIR`; absolute
+paths, traversal, duplicate paths, manifest self-reference, directories, and
+symlinks are rejected.  The static and dynamic forms are mutually exclusive
+and require `buildCommand`.
+
+The per-backend output directory is disposable staging owned exclusively by
+the adapter.  Before an ordinary dynamic build the harness rejects a symlink or
+non-directory root and clears that staging tree, preventing a new inventory
+from claiming an undeclared stale output.  It then parses and hashes the exact
+newly produced bytes after the build.  Static builds remove their declared
+stale files before running.
 `--no-build` instead captures the existing declared files for deliberate reuse.
 Before starting the engine and again after it exits, the harness verifies that
 every product still has the captured digest.  Missing or mutated products are
@@ -290,10 +298,9 @@ The run command receives `FIR_VALIDATION_PRODUCTS`, a compact JSON array with
 each verified product's backend, kind, stable output-relative name, SHA-256,
 and absolute local path.  `matrix.json` records the same entries without the
 machine-local path under `products`, sorted deterministically and counted as
-`productCount`.  A future V8 adapter can therefore execute the exact declared
-`.wasm` bytes and retain their identity in the report.  This establishes only
-the generic producer/engine handoff: it neither invokes the developing Wasm
-compiler nor assumes how V8 and Talos will later share one module.
+`productCount`.  The V8 adapter executes the exact compiler-produced `.wasm`
+bytes and consumes the build-produced product inventory.  This generic handoff
+does not assume how V8 and Talos will later share one module.
 
 Handoff is not, by itself, consumption evidence.  When products are declared,
 each protocol result from the external engine must include exactly one

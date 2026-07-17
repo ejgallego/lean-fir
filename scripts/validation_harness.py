@@ -31,6 +31,13 @@ MANIFEST_FIELDS = {
 }
 EFFECT_PROJECTION_FIELDS = {"external", "operation", "argSchemas", "resultSchema"}
 BACKEND_NAME_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-_"
+RESERVED_PRODUCT_KIND = "product-manifest"
+RESERVED_PRODUCT_PATHS = {
+    "stdout.jsonl",
+    "stderr.log",
+    "build/stdout.jsonl",
+    "build/stderr.log",
+}
 
 
 class ValidationError(RuntimeError):
@@ -288,18 +295,30 @@ def checked_sha256(value: object, context: str) -> str:
     return value
 
 
-def validation_product_from_file(
+def validation_product_and_content_from_file(
     backend: str,
     declaration: ProductDeclaration,
     out_dir: Path,
-) -> ValidationProduct:
+) -> tuple[ValidationProduct, bytes]:
     backend_name = validate_backend_name(backend)
     kind = validate_backend_name(declaration.kind, f"{backend_name} product kind")
     product_path = checked_relative_posix_path(
         declaration.path, f"{backend_name} product"
     )
-    backend_root = (out_dir / backend_name).resolve()
+    backend_root = out_dir.resolve() / backend_name
+    if backend_root.is_symlink() or not backend_root.is_dir():
+        raise ValidationError(
+            f"{backend_name} product root is not a regular directory"
+        )
     path = backend_root.joinpath(*PurePosixPath(product_path).parts)
+    parent = backend_root
+    for part in PurePosixPath(product_path).parts[:-1]:
+        parent = parent / part
+        if parent.is_symlink() or not parent.is_dir():
+            raise ValidationError(
+                f"{backend_name} product path contains a symlink or "
+                f"non-directory parent: {product_path}"
+            )
     resolved = path.resolve()
     try:
         resolved.relative_to(backend_root)
@@ -318,11 +337,83 @@ def validation_product_from_file(
         raise ValidationError(
             f"cannot hash {backend_name} product {product_path}: {error}"
         ) from error
-    return ValidationProduct(
-        backend_name,
-        kind,
-        product_path,
-        sha256_bytes(content),
+    return (
+        ValidationProduct(
+            backend_name,
+            kind,
+            product_path,
+            sha256_bytes(content),
+        ),
+        content,
+    )
+
+
+def validation_product_from_file(
+    backend: str,
+    declaration: ProductDeclaration,
+    out_dir: Path,
+) -> ValidationProduct:
+    return validation_product_and_content_from_file(
+        backend, declaration, out_dir
+    )[0]
+
+
+def product_declarations_from_manifest(
+    content: bytes, context: str
+) -> tuple[ProductDeclaration, ...]:
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{context}: cannot parse product manifest: {error}"
+        ) from error
+    if not isinstance(value, dict) or set(value) != {"version", "products"}:
+        raise ValidationError(
+            f"{context}: product manifest must contain version and products"
+        )
+    version = value["version"]
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version != PROTOCOL_VERSION
+    ):
+        raise ValidationError(
+            f"{context}: product manifest has unsupported version"
+        )
+    products = value["products"]
+    if not isinstance(products, list) or not products:
+        raise ValidationError(
+            f"{context}: product manifest products must be a nonempty array"
+        )
+    declarations: list[ProductDeclaration] = []
+    paths: set[str] = set()
+    for index, product in enumerate(products):
+        product_context = f"{context}/products/{index}"
+        if not isinstance(product, dict) or set(product) != {"kind", "path"}:
+            raise ValidationError(
+                f"{product_context}: expected kind and path fields"
+            )
+        kind = validate_backend_name(product["kind"], product_context)
+        path = checked_relative_posix_path(product["path"], product_context)
+        if kind == RESERVED_PRODUCT_KIND:
+            raise ValidationError(
+                f"{product_context}: product kind is reserved"
+            )
+        if path in RESERVED_PRODUCT_PATHS:
+            raise ValidationError(
+                f"{product_context}: product path is reserved by the harness"
+            )
+        if path in paths:
+            raise ValidationError(
+                f"{context}: duplicate product path: {path}"
+            )
+        paths.add(path)
+        declarations.append(ProductDeclaration(kind, path))
+    return tuple(
+        sorted(
+            declarations,
+            key=lambda declaration: (declaration.kind, declaration.path),
+        )
     )
 
 
@@ -1392,6 +1483,7 @@ class ExternalCommandAdapter:
     build_command: list[str] = field(default_factory=list)
     timeout_seconds: int = 120
     product_declarations: tuple[ProductDeclaration, ...] = ()
+    product_manifest: str | None = None
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     _built_products: tuple[ValidationProduct, ...] | None = field(
         default=None, init=False, repr=False, compare=False
@@ -1417,12 +1509,35 @@ class ExternalCommandAdapter:
         }
 
     def collect_products(self, out_dir: Path) -> tuple[ValidationProduct, ...]:
-        return tuple(
+        declarations = self.product_declarations
+        products: list[ValidationProduct] = []
+        if self.product_manifest is not None:
+            manifest_declaration = ProductDeclaration(
+                RESERVED_PRODUCT_KIND, self.product_manifest
+            )
+            manifest_product, content = validation_product_and_content_from_file(
+                self.name, manifest_declaration, out_dir
+            )
+            declarations = product_declarations_from_manifest(
+                content, f"{self.name} product manifest"
+            )
+            if any(
+                declaration.path == self.product_manifest
+                for declaration in declarations
+            ):
+                raise ValidationError(
+                    f"{self.name} product manifest cannot declare itself"
+                )
+            products.append(manifest_product)
+        products.extend(
             validation_product_from_file(self.name, declaration, out_dir)
             for declaration in sorted(
-                self.product_declarations,
+                declarations,
                 key=lambda item: (item.kind, item.path),
             )
+        )
+        return tuple(
+            sorted(products, key=lambda item: (item.kind, item.name))
         )
 
     def collect_tools(self) -> tuple[ValidationTool, ...]:
@@ -1534,15 +1649,34 @@ class ExternalCommandAdapter:
                     f"{declaration.path}"
                 )
 
+    def clear_dynamic_product_staging(self, out_dir: Path) -> None:
+        backend_root = out_dir.resolve() / self.name
+        if backend_root.is_symlink() or (
+            backend_root.exists() and not backend_root.is_dir()
+        ):
+            raise ValidationError(
+                f"{self.name} output path is not a regular directory"
+            )
+        if backend_root.exists():
+            try:
+                shutil.rmtree(backend_root)
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot clear {self.name} product staging: {error}"
+                ) from error
+
     def build(self, context: BuildContext) -> None:
         self._built_products = None
         self._built_tools = None
         self._built_run_command = None
         self._build_artifacts = ()
         if not context.no_build and self.build_command:
+            if self.product_manifest is not None:
+                self.clear_dynamic_product_staging(context.out_dir)
+            else:
+                self.remove_stale_products(context.out_dir)
             destination = context.out_dir / self.name / "build"
             destination.mkdir(parents=True, exist_ok=True)
-            self.remove_stale_products(context.out_dir)
             completed = run(
                 self.build_command,
                 context.root,
@@ -1676,7 +1810,13 @@ def external_adapter_from_config(
     if not isinstance(value, dict):
         raise ValidationError(f"adapter config {path}: expected a JSON object")
     required = {"name", "runCommand", "resultDomain"}
-    optional = {"buildCommand", "timeoutSeconds", "products", "tools"}
+    optional = {
+        "buildCommand",
+        "timeoutSeconds",
+        "products",
+        "productManifest",
+        "tools",
+    }
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
     if missing:
@@ -1733,9 +1873,17 @@ def external_adapter_from_config(
                 f"{product_context}: expected kind and path fields"
             )
         kind = validate_backend_name(product["kind"], product_context)
+        if kind == RESERVED_PRODUCT_KIND:
+            raise ValidationError(
+                f"{product_context}: product kind is reserved"
+            )
         product_path = checked_relative_posix_path(
             product["path"], product_context
         )
+        if product_path in RESERVED_PRODUCT_PATHS:
+            raise ValidationError(
+                f"{product_context}: product path is reserved by the harness"
+            )
         if product_path in product_paths:
             raise ValidationError(
                 f"adapter config {path}: duplicate product path: {product_path}"
@@ -1746,6 +1894,27 @@ def external_adapter_from_config(
         raise ValidationError(
             f"adapter config {path}: products require buildCommand"
         )
+    raw_product_manifest = value.get("productManifest")
+    product_manifest = None
+    if raw_product_manifest is not None:
+        product_manifest = checked_relative_posix_path(
+            raw_product_manifest,
+            f"adapter config {path}: productManifest",
+        )
+        if product_manifest in RESERVED_PRODUCT_PATHS:
+            raise ValidationError(
+                f"adapter config {path}: productManifest path is reserved "
+                "by the harness"
+            )
+        if product_declarations:
+            raise ValidationError(
+                f"adapter config {path}: products and productManifest are "
+                "mutually exclusive"
+            )
+        if not build_command:
+            raise ValidationError(
+                f"adapter config {path}: productManifest requires buildCommand"
+            )
     raw_tools = value.get("tools", [])
     if not isinstance(raw_tools, list):
         raise ValidationError(
@@ -1841,6 +2010,7 @@ def external_adapter_from_config(
                 key=lambda declaration: (declaration.kind, declaration.path),
             )
         ),
+        product_manifest=product_manifest,
         tool_declarations=tuple(
             sorted(
                 tool_declarations,
@@ -2258,6 +2428,7 @@ def verify_matrix_artifact(
     if not isinstance(raw_products, list):
         raise ValidationError("validation matrix has malformed products")
     products: list[ValidationProduct] = []
+    product_contents: dict[tuple[str, str, str], bytes] = {}
     for item in raw_products:
         if not isinstance(item, dict) or set(item) != {
             "backend", "kind", "name", "sha256", "artifact"
@@ -2272,12 +2443,13 @@ def verify_matrix_artifact(
         expected_artifact = f"evidence/products/{digest}"
         if item["artifact"] != expected_artifact:
             raise ValidationError("validation product has noncanonical artifact path")
-        verify_evidence_file(
+        product_content = verify_evidence_file(
             report_root,
             item["artifact"],
             digest,
             f"validation product {backend}:{kind}:{name}",
         )
+        product_contents[(backend, kind, name)] = product_content
         products.append(ValidationProduct(backend, kind, name, digest))
     product_keys = [
         (product.backend, product.kind, product.name) for product in products
@@ -2286,6 +2458,35 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix has duplicate products")
     if product_keys != sorted(product_keys):
         raise ValidationError("validation matrix products are not sorted")
+    for backend in checked_backends:
+        manifests = [
+            product
+            for product in products
+            if product.backend == backend
+            and product.kind == RESERVED_PRODUCT_KIND
+        ]
+        if len(manifests) > 1:
+            raise ValidationError(
+                "validation matrix has multiple product manifests for a backend"
+            )
+        if not manifests:
+            continue
+        manifest = manifests[0]
+        declarations = product_declarations_from_manifest(
+            product_contents[(manifest.backend, manifest.kind, manifest.name)],
+            f"retained {backend} product manifest",
+        )
+        declared = {(item.kind, item.path) for item in declarations}
+        retained = {
+            (product.kind, product.name)
+            for product in products
+            if product.backend == backend
+            and product.kind != RESERVED_PRODUCT_KIND
+        }
+        if declared != retained:
+            raise ValidationError(
+                f"retained {backend} product manifest disagrees with matrix products"
+            )
 
     raw_tools = value["tools"]
     if not isinstance(raw_tools, list):

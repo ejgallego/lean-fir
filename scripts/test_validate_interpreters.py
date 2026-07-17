@@ -1479,6 +1479,196 @@ class HarnessTests(unittest.TestCase):
             ):
                 harness.external_adapter_from_config(path)
 
+            value = dict(base)
+            value["productManifest"] = "products.json"
+            value["tools"] = [
+                {"kind": "engine", "name": "node", "command": "node"}
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(adapter.product_manifest, "products.json")
+            self.assertEqual(adapter.product_declarations, ())
+
+            value["products"] = [
+                {"kind": "wasm-module", "path": "module.wasm"}
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "mutually exclusive"
+            ):
+                harness.external_adapter_from_config(path)
+
+            del value["products"]
+            del value["buildCommand"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "requires buildCommand"
+            ):
+                harness.external_adapter_from_config(path)
+
+            for manifest_path in (
+                "../products.json",
+                "/tmp/products.json",
+                "build/stdout.jsonl",
+            ):
+                value = dict(base)
+                value["productManifest"] = manifest_path
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "normalized relative POSIX path|reserved by the harness",
+                ):
+                    harness.external_adapter_from_config(path)
+
+    def test_dynamic_product_manifest_is_captured_and_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            backend_dir = out_dir / "v8"
+            module = backend_dir / "modules" / "module.wasm"
+            module.parent.mkdir(parents=True)
+            module.write_bytes(b"wasm product")
+            manifest = backend_dir / "products.json"
+            manifest_value = {
+                "version": 1,
+                "products": [
+                    {"kind": "wasm-module", "path": "modules/module.wasm"}
+                ],
+            }
+            manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=[sys.executable, "-c", "pass"],
+                run_command=[sys.executable, "-c", "pass"],
+                result_domain="selected",
+                product_manifest="products.json",
+            )
+            adapter.build(harness.BuildContext(root, out_dir, True))
+            self.assertEqual(
+                [(product.kind, product.name) for product in adapter._built_products],
+                [
+                    ("product-manifest", "products.json"),
+                    ("wasm-module", "modules/module.wasm"),
+                ],
+            )
+
+            manifest_value["products"].append(
+                {"kind": "debug-info", "path": "modules/debug.txt"}
+            )
+            manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "product is not a regular file"
+            ):
+                adapter.collect_products(out_dir)
+
+            manifest_value["products"] = [
+                {"kind": "product-manifest", "path": "nested.json"}
+            ]
+            manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "product kind is reserved"
+            ):
+                adapter.collect_products(out_dir)
+
+            invalid_manifests = [
+                (
+                    {"version": 2, "products": []},
+                    "unsupported version",
+                ),
+                (
+                    {"version": 1, "products": []},
+                    "nonempty array",
+                ),
+                (
+                    {"version": 1, "products": [], "extra": True},
+                    "must contain version and products",
+                ),
+                (
+                    {
+                        "version": 1,
+                        "products": [
+                            {"kind": "wasm-module", "path": "module.wasm"},
+                            {"kind": "debug-info", "path": "module.wasm"},
+                        ],
+                    },
+                    "duplicate product path",
+                ),
+                (
+                    {
+                        "version": 1,
+                        "products": [
+                            {
+                                "kind": "wasm-module",
+                                "path": "build/stdout.jsonl",
+                            }
+                        ],
+                    },
+                    "reserved by the harness",
+                ),
+            ]
+            for invalid, message in invalid_manifests:
+                manifest.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaisesRegex(harness.ValidationError, message):
+                    adapter.collect_products(out_dir)
+
+            real_parent = backend_dir / "real"
+            real_parent.mkdir()
+            (real_parent / "nested.wasm").write_bytes(b"nested")
+            (backend_dir / "alias").symlink_to(real_parent, target_is_directory=True)
+            manifest_value["products"] = [
+                {"kind": "wasm-module", "path": "alias/nested.wasm"}
+            ]
+            manifest.write_text(json.dumps(manifest_value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "contains a symlink"
+            ):
+                adapter.collect_products(out_dir)
+
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "marker"
+            marker.write_text("keep", encoding="utf-8")
+            shutil.rmtree(backend_dir)
+            self.assertFalse(backend_dir.exists())
+            backend_dir.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(
+                harness.ValidationError, "not a regular directory"
+            ):
+                adapter.clear_dynamic_product_staging(out_dir)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_retained_product_manifest_must_match_matrix_products(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            backend_dir = out_dir / "v8"
+            backend_dir.mkdir()
+            content = json.dumps(
+                {
+                    "version": 1,
+                    "products": [
+                        {"kind": "wasm-module", "path": "module.wasm"}
+                    ],
+                }
+            ).encode("utf-8")
+            (backend_dir / "products.json").write_bytes(content)
+            product = harness.ValidationProduct(
+                "v8",
+                "product-manifest",
+                "products.json",
+                harness.sha256_bytes(content),
+            )
+            descriptors = [descriptor("case")]
+            context = harness.RunContext(
+                harness.ROOT, out_dir, descriptors, ["case"]
+            )
+            harness.write_matrix_artifact(
+                context, ["v8"], [], [], products=(product,)
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "disagrees with matrix products"
+            ):
+                harness.verify_matrix_artifact(out_dir / "matrix.json")
+
     def test_validation_input_hashes_bytes_with_stable_path_labels(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
@@ -1629,30 +1819,8 @@ class HarnessTests(unittest.TestCase):
             adapter.run_command,
             ["node", "scripts/run_validation_v8.mjs"],
         )
-        self.assertEqual(
-            adapter.product_declarations,
-            tuple(
-                sorted(
-                    (
-                        harness.ProductDeclaration(
-                            kind, f"modules/{case_id}.wasm{suffix}"
-                        )
-                        for kind, suffix in (
-                            ("wasm-manifest", ".json"),
-                            ("wasm-module", ""),
-                        )
-                        for case_id in (
-                            "uint8-max",
-                            "uint16-max",
-                            "uint32-max",
-                            "uint64-max",
-                            "usize-max",
-                        )
-                    ),
-                    key=lambda product: (product.kind, product.path),
-                )
-            ),
-        )
+        self.assertEqual(adapter.product_declarations, ())
+        self.assertEqual(adapter.product_manifest, "products.json")
         self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
