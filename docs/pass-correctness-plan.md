@@ -568,6 +568,24 @@ chosen branch observationally equivalent. The next proof slice should replace
 this local one-step witness with a relation spanning the transformed program's
 recursive traversal and declarations.
 
+`NonLockstepExamples.ProgramStateRel` now supplies that first program-aware
+slice. Its source and target contain different `main` declaration bodies: the
+actual pass recursively traverses two `let`s and eliminates a closed singleton
+case. The relation follows both machines from declaration invocation through
+those continuations, permits the target to stutter at the eliminated case, and
+rejoins them for return, nullary global caching, and extra-argument failure.
+The resulting bisimulation relates every initial argument array and therefore
+closes `SamePhaseCorrect` for the two distinct programs. An executable command
+also confirms that Lean's actual 4.32 pass produces the proved target syntax.
+
+The fixture constructs its discriminant internally. This is important:
+singleton elimination is not observationally correct for every untyped raw
+discriminant value, because the source inspects the value while the eliminated
+target does not. Generalizing the program-aware relation to open case inputs
+therefore requires the planned typed-entry/runtime invariant; it should not be
+hidden by weakening the simulation or by silently restricting
+`SamePhaseCorrect`.
+
 The remaining bounded work is:
 
 1. refactor FIR's opaque hygiene/binder traversals into transparent total
