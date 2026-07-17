@@ -13,6 +13,12 @@ def caseIds : Array String :=
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
 
+def buildInputJson (kind name : String) (path : System.FilePath) : Json :=
+  Json.mkObj [
+    ("kind", kind),
+    ("name", name),
+    ("path", path.toString)]
+
 def parseSelectedCaseIds (raw : String) : Except String (Array String) := do
   let .arr values ← Json.parse raw
     | throw "FIR_VALIDATION_CASES must be a JSON array"
@@ -37,6 +43,7 @@ syntax (name := firValidationWasm) "#fir_validation_wasm" : command
 
 @[command_elab firValidationWasm]
 def elabFirValidationWasm : CommandElab := fun _ => do
+  let env ← getEnv
   let selected ← liftIO selectedCaseIds
   let outputDirectory :=
     (← liftIO <| IO.getEnv "FIR_VALIDATION_OUT_DIR").getD
@@ -68,6 +75,19 @@ def elabFirValidationWasm : CommandElab := fun _ => do
       productJson "wasm-manifest" s!"modules/{caseId}.wasm.json") ++
     selected.map (fun caseId =>
       productJson "wasm-module" s!"modules/{caseId}.wasm")
+  let leanInput ← liftIO do
+    return buildInputJson "lean-compiler" "bin/lean" (← IO.appPath)
+  let oleanInputs ← env.header.moduleNames.mapM fun moduleName => do
+    let path ← liftIO <| findOLean moduleName
+    let name := moduleName.toString.replace "." "/" ++ ".olean"
+    return buildInputJson "lean-olean" name path
+  let buildInputManifest := Json.mkObj [
+    ("version", Json.num 1),
+    ("scope", "reported-loaded"),
+    ("inputs", Json.arr <| #[leanInput] ++ oleanInputs)]
+  liftIO <| IO.FS.writeFile
+    ((outputDirectory : System.FilePath) / "build-inputs.json")
+    buildInputManifest.compress
   let productManifest := Json.mkObj [
     ("version", Json.num 1),
     ("products", Json.arr manifestProducts)]

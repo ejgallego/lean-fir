@@ -879,6 +879,7 @@ class HarnessTests(unittest.TestCase):
                     "inputCount": 1,
                     "productCount": 0,
                     "toolCount": 0,
+                    "buildInputCount": 0,
                     "artifactCount": 4,
                 },
             )
@@ -1036,6 +1037,24 @@ class HarnessTests(unittest.TestCase):
                 [
                     harness.ValidationProduct(
                         "v8", "wasm-module", "module.wasm", "3" * 64
+                    )
+                ],
+            ),
+        )
+        self.assertNotEqual(
+            run,
+            harness.validation_run_sha256(
+                selection,
+                ["native", "v8"],
+                [("native", "v8")],
+                inputs,
+                [product],
+                build_inputs=[
+                    harness.ValidationBuildInput(
+                        "v8",
+                        "lean-olean",
+                        "Fir/Wasm/Emit/Source.olean",
+                        "5" * 64,
                     )
                 ],
             ),
@@ -1613,6 +1632,29 @@ class HarnessTests(unittest.TestCase):
                 ):
                     harness.external_adapter_from_config(path)
 
+            value = dict(base)
+            value["buildInputManifest"] = "build-inputs.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(
+                adapter.build_input_manifest, "build-inputs.json"
+            )
+
+            value["productManifest"] = "build-inputs.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "collides with a product path"
+            ):
+                harness.external_adapter_from_config(path)
+
+            del value["productManifest"]
+            del value["buildCommand"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "requires buildCommand"
+            ):
+                harness.external_adapter_from_config(path)
+
     def test_dynamic_product_manifest_is_captured_and_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1729,6 +1771,168 @@ class HarnessTests(unittest.TestCase):
             ):
                 adapter.clear_dynamic_product_staging(out_dir)
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_build_input_manifest_is_strict_and_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.olean"
+            source.write_bytes(b"olean")
+
+            def manifest(inputs: list[dict], **extra: object) -> bytes:
+                return json.dumps(
+                    {
+                        "version": 1,
+                        "scope": "reported-loaded",
+                        "inputs": inputs,
+                        **extra,
+                    }
+                ).encode("utf-8")
+
+            valid = {
+                "kind": "lean-olean",
+                "name": "Example.olean",
+                "path": str(source),
+            }
+            declarations = core.build_input_declarations_from_manifest(
+                manifest([valid]), "test build inputs"
+            )
+            captured = core.validation_build_input_from_file(
+                "v8", declarations[0]
+            )
+            self.assertEqual(captured.sha256, harness.sha256_bytes(b"olean"))
+
+            malformed = (
+                {"version": 2, "scope": "reported-loaded", "inputs": [valid]},
+                {"version": 1, "scope": "exact", "inputs": [valid]},
+                {"version": 1, "scope": "reported-loaded", "inputs": []},
+                {
+                    "version": 1,
+                    "scope": "reported-loaded",
+                    "inputs": [valid, valid],
+                },
+                {
+                    "version": 1,
+                    "scope": "reported-loaded",
+                    "inputs": [
+                        valid,
+                        {
+                            "kind": "other-input",
+                            "name": "other",
+                            "path": str(source),
+                        },
+                    ],
+                },
+                {
+                    "version": 1,
+                    "scope": "reported-loaded",
+                    "inputs": [valid | {"path": "relative.olean"}],
+                },
+            )
+            for value in malformed:
+                with self.assertRaises(harness.ValidationError):
+                    core.build_input_declarations_from_manifest(
+                        json.dumps(value).encode("utf-8"),
+                        "test build inputs",
+                    )
+
+            leaf_link = root / "leaf.olean"
+            leaf_link.symlink_to(source)
+            declaration = core.BuildInputDeclaration(
+                "lean-olean", "Leaf.olean", leaf_link
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "path contains a symlink"
+            ):
+                core.validation_build_input_from_file("v8", declaration)
+
+            real_parent = root / "real"
+            real_parent.mkdir()
+            nested = real_parent / "nested.olean"
+            nested.write_bytes(b"nested")
+            parent_link = root / "linked"
+            parent_link.symlink_to(real_parent, target_is_directory=True)
+            declaration = core.BuildInputDeclaration(
+                "lean-olean", "Nested.olean", parent_link / "nested.olean"
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "path contains a symlink"
+            ):
+                core.validation_build_input_from_file("v8", declaration)
+
+    def test_external_build_inputs_fail_closed_and_no_build_omits_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            source = root / "compiler.input"
+            source.write_bytes(b"original input")
+            raw_manifest = {
+                "version": 1,
+                "scope": "reported-loaded",
+                "inputs": [
+                    {
+                        "kind": "fixture-source",
+                        "name": "compiler.input",
+                        "path": str(source),
+                    }
+                ],
+            }
+            build_program = (
+                "import json,os,pathlib;"
+                "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
+                "'build-inputs.json');"
+                "path.parent.mkdir(parents=True,exist_ok=True);"
+                f"path.write_text({json.dumps(json.dumps(raw_manifest))})"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=[sys.executable, "-c", build_program],
+                run_command=[sys.executable, "-c", "raise SystemExit(7)"],
+                result_domain="selected",
+                build_input_manifest="build-inputs.json",
+            )
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            run_context = harness.RunContext(
+                root, out_dir, descriptors, ["case"]
+            )
+            build_context = harness.BuildContext(
+                root, out_dir, False, run_context
+            )
+            adapter.build(build_context)
+            self.assertEqual(
+                [(item.kind, item.name) for item in adapter._built_build_inputs],
+                [
+                    ("build-input-manifest", "build-inputs.json"),
+                    ("fixture-source", "compiler.input"),
+                ],
+            )
+
+            source.write_bytes(b"changed before execution")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "build inputs changed between build and execution",
+            ):
+                adapter.execute(run_context)
+
+            source.write_bytes(b"original input")
+            adapter.build(build_context)
+            failed = mock.Mock(returncode=7, stdout="", stderr="failed")
+
+            def mutate_input(*args: object, **kwargs: object) -> mock.Mock:
+                source.write_bytes(b"changed during execution")
+                return failed
+
+            with mock.patch.object(core, "run", side_effect=mutate_input):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "build inputs changed during execution",
+                ):
+                    adapter.execute(run_context)
+
+            adapter.build(
+                harness.BuildContext(root, out_dir, True, run_context)
+            )
+            self.assertEqual(adapter._built_build_inputs, ())
 
     def test_retained_product_manifest_must_match_matrix_products(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1954,6 +2158,7 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(adapter.product_declarations, ())
         self.assertEqual(adapter.product_manifest, "products.json")
+        self.assertEqual(adapter.build_input_manifest, "build-inputs.json")
         self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
@@ -1995,6 +2200,9 @@ class HarnessTests(unittest.TestCase):
             product_path.write_bytes(b"stale-product")
             adapter_path = root / "v8.json"
             runner_path = root / "runner.py"
+            material_path = root / "compiler.input"
+            material_bytes = b"exact compiler input"
+            material_path.write_bytes(material_bytes)
             product_sha256 = harness.sha256_bytes(product_bytes)
             build_program = (
                 "import json,os,pathlib;"
@@ -2006,7 +2214,12 @@ class HarnessTests(unittest.TestCase):
                 "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
                 "'modules','validation.wasm');"
                 "path.parent.mkdir(parents=True,exist_ok=True);"
-                f"path.write_bytes({product_bytes!r})"
+                f"path.write_bytes({product_bytes!r});"
+                "closure={'version':1,'scope':'reported-loaded','inputs':["
+                "{'kind':'fixture-source','name':'compiler.input','path':"
+                f"{str(material_path)!r}" "}]};"
+                "pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
+                "'build-inputs.json').write_text(json.dumps(closure))"
             )
             program = (
                 "import hashlib,json,os,pathlib;"
@@ -2051,6 +2264,7 @@ class HarnessTests(unittest.TestCase):
                                 "path": "modules/validation.wasm",
                             }
                         ],
+                        "buildInputManifest": "build-inputs.json",
                         "buildTools": [
                             {
                                 "kind": "build-launcher",
@@ -2177,6 +2391,28 @@ class HarnessTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(matrix["summary"]["toolCount"], 3)
+            self.assertEqual(matrix["summary"]["buildInputCount"], 2)
+            self.assertEqual(
+                [
+                    (item["kind"], item["name"])
+                    for item in matrix["buildInputs"]
+                ],
+                [
+                    ("build-input-manifest", "build-inputs.json"),
+                    ("fixture-source", "compiler.input"),
+                ],
+            )
+            material_sha256 = harness.sha256_bytes(material_bytes)
+            self.assertEqual(
+                matrix["buildInputs"][1],
+                {
+                    "backend": "v8",
+                    "kind": "fixture-source",
+                    "name": "compiler.input",
+                    "sha256": material_sha256,
+                    "artifact": f"evidence/build-inputs/{material_sha256}",
+                },
+            )
             self.assertEqual(matrix["summary"]["artifactCount"], 6)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
@@ -2220,9 +2456,24 @@ class HarnessTests(unittest.TestCase):
                 matrix["identity"],
             )
 
+            tampered_matrix = json.loads(original_matrix_bytes)
+            tampered_matrix["buildInputs"].pop()
+            tampered_matrix["summary"]["buildInputCount"] -= 1
+            matrix_path.write_text(
+                json.dumps(tampered_matrix, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "require exactly one manifest|disagrees with matrix build inputs",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(original_matrix_bytes)
+
             plan_path.unlink()
             adapter_path.unlink()
             runner_path.unlink()
+            material_path.unlink()
             product_path.unlink()
             (out_dir / "comparisons" / "native--v8.json").unlink()
             for item in matrix["artifacts"]:

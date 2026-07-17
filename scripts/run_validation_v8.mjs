@@ -67,6 +67,33 @@ const corpus = JSON.parse(
 assert.equal(corpus.version, 1, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
+const buildInputManifest = JSON.parse(
+  await readFile(
+    `${requiredEnvironment("FIR_VALIDATION_OUT_DIR")}/build-inputs.json`,
+    "utf8",
+  ),
+);
+assert.equal(buildInputManifest.version, 1,
+  "unsupported build input manifest version");
+assert.equal(buildInputManifest.scope, "reported-loaded",
+  "unsupported build input manifest scope");
+assert.ok(Array.isArray(buildInputManifest.inputs)
+  && buildInputManifest.inputs.length > 5,
+  "the Lean build input manifest must report a transitive closure");
+const buildInputNames = new Set(
+  buildInputManifest.inputs.map((input) => input.name),
+);
+for (const name of [
+  "bin/lean",
+  "Init.olean",
+  "Lean/Elab/Command.olean",
+  "Fir/Validation/Corpus.olean",
+  "Fir/Wasm/Emit/Source.olean",
+]) {
+  assert.ok(buildInputNames.has(name),
+    `the Lean build input manifest is missing ${name}`);
+}
+
 const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
 assert.equal(products.length, selectedCases.length * 2 + 1,
   "the V8 adapter requires its product inventory and two products per case");

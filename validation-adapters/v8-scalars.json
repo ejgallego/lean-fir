@@ -5,6 +5,7 @@
   "resultDomain": "selected",
   "timeoutSeconds": 120,
   "productManifest": "products.json",
+  "buildInputManifest": "build-inputs.json",
   "buildTools": [
     {
       "kind": "build-driver",

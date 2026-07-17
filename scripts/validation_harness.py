@@ -32,6 +32,8 @@ MANIFEST_FIELDS = {
 EFFECT_PROJECTION_FIELDS = {"external", "operation", "argSchemas", "resultSchema"}
 BACKEND_NAME_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 RESERVED_PRODUCT_KIND = "product-manifest"
+RESERVED_BUILD_INPUT_KIND = "build-input-manifest"
+BUILD_INPUT_SCOPE = "reported-loaded"
 RESERVED_PRODUCT_PATHS = {
     "stdout.jsonl",
     "stderr.log",
@@ -104,6 +106,31 @@ class ToolDeclaration:
 
 
 @dataclass(frozen=True)
+class BuildInputDeclaration:
+    kind: str
+    name: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class ValidationBuildInput:
+    backend: str
+    kind: str
+    name: str
+    sha256: str
+    content: bytes | None = field(default=None, compare=False, repr=False)
+    source_path: Path | None = field(default=None, compare=False, repr=False)
+
+    def to_json(self) -> dict[str, str]:
+        return {
+            "backend": self.backend,
+            "kind": self.kind,
+            "name": self.name,
+            "sha256": self.sha256,
+        }
+
+
+@dataclass(frozen=True)
 class ValidationProduct:
     backend: str
     kind: str
@@ -156,14 +183,17 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def canonical_json_sha256(value: object) -> str:
-    content = json.dumps(
+def canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(
         value,
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
-    return sha256_bytes(content)
+
+
+def canonical_json_sha256(value: object) -> str:
+    return sha256_bytes(canonical_json_bytes(value))
 
 
 def validation_selection_sha256(
@@ -185,6 +215,7 @@ def validation_run_sha256(
     inputs: tuple[ValidationInput, ...],
     products: list[ValidationProduct],
     tools: list[ValidationTool] | None = None,
+    build_inputs: list[ValidationBuildInput] | None = None,
 ) -> str:
     return canonical_json_sha256(
         {
@@ -198,6 +229,9 @@ def validation_run_sha256(
             "inputs": [item.to_json() for item in inputs],
             "products": [product.to_json() for product in products],
             "tools": [tool.to_json() for tool in (tools or [])],
+            "buildInputs": [
+                item.to_json() for item in (build_inputs or [])
+            ],
         }
     )
 
@@ -415,6 +449,200 @@ def product_declarations_from_manifest(
             key=lambda declaration: (declaration.kind, declaration.path),
         )
     )
+
+
+def build_input_declarations_from_manifest(
+    content: bytes, context: str
+) -> tuple[BuildInputDeclaration, ...]:
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{context}: cannot parse build input manifest: {error}"
+        ) from error
+    if not isinstance(value, dict) or set(value) != {
+        "version", "scope", "inputs"
+    }:
+        raise ValidationError(
+            f"{context}: build input manifest must contain version, scope, "
+            "and inputs"
+        )
+    version = value["version"]
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version != PROTOCOL_VERSION
+    ):
+        raise ValidationError(
+            f"{context}: build input manifest has unsupported version"
+        )
+    if value["scope"] != BUILD_INPUT_SCOPE:
+        raise ValidationError(
+            f"{context}: build input manifest has unsupported scope"
+        )
+    raw_inputs = value["inputs"]
+    if not isinstance(raw_inputs, list) or not raw_inputs:
+        raise ValidationError(
+            f"{context}: build input manifest inputs must be a nonempty array"
+        )
+    declarations: list[BuildInputDeclaration] = []
+    identities: set[tuple[str, str]] = set()
+    sources: set[str] = set()
+    for index, item in enumerate(raw_inputs):
+        item_context = f"{context}/inputs/{index}"
+        if not isinstance(item, dict) or set(item) != {
+            "kind", "name", "path"
+        }:
+            raise ValidationError(
+                f"{item_context}: expected kind, name, and path fields"
+            )
+        kind = validate_backend_name(item["kind"], item_context)
+        if kind == RESERVED_BUILD_INPUT_KIND:
+            raise ValidationError(
+                f"{item_context}: build input kind is reserved"
+            )
+        name = checked_relative_posix_path(item["name"], item_context)
+        raw_path = item["path"]
+        if (
+            not isinstance(raw_path, str)
+            or not raw_path
+            or "\x00" in raw_path
+            or not Path(raw_path).is_absolute()
+        ):
+            raise ValidationError(
+                f"{item_context}: path must be an absolute filesystem path"
+            )
+        path = Path(os.path.abspath(raw_path))
+        identity = (kind, name)
+        if identity in identities:
+            raise ValidationError(
+                f"{context}: duplicate build input: {kind}:{name}"
+            )
+        identities.add(identity)
+        source = str(path)
+        if source in sources:
+            raise ValidationError(
+                f"{context}: duplicate build input path: {source}"
+            )
+        sources.add(source)
+        declarations.append(BuildInputDeclaration(kind, name, path))
+    return tuple(
+        sorted(
+            declarations,
+            key=lambda declaration: (declaration.kind, declaration.name),
+        )
+    )
+
+
+def regular_file_content_without_symlinks(path: Path, context: str) -> bytes:
+    absolute = Path(os.path.abspath(path))
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise ValidationError(f"{context}: path contains a symlink")
+    if not absolute.is_file():
+        raise ValidationError(f"{context}: path is not a regular file")
+    try:
+        return absolute.read_bytes()
+    except OSError as error:
+        raise ValidationError(f"{context}: cannot read file: {error}") from error
+
+
+def validation_build_input_from_file(
+    backend: str, declaration: BuildInputDeclaration
+) -> ValidationBuildInput:
+    backend_name = validate_backend_name(
+        backend, "validation build input backend"
+    )
+    kind = validate_backend_name(
+        declaration.kind, "validation build input kind"
+    )
+    name = checked_relative_posix_path(
+        declaration.name, "validation build input name"
+    )
+    context = f"validation build input {backend_name}:{kind}:{name}"
+    content = regular_file_content_without_symlinks(
+        declaration.path, context
+    )
+    return ValidationBuildInput(
+        backend_name,
+        kind,
+        name,
+        sha256_bytes(content),
+        content,
+        Path(os.path.abspath(declaration.path)),
+    )
+
+
+def canonical_build_input_manifest_bytes(
+    build_inputs: tuple[ValidationBuildInput, ...]
+) -> bytes:
+    value = {
+        "version": PROTOCOL_VERSION,
+        "scope": BUILD_INPUT_SCOPE,
+        "inputs": [
+            {
+                "kind": item.kind,
+                "name": item.name,
+                "sha256": item.sha256,
+            }
+            for item in sorted(
+                build_inputs, key=lambda item: (item.kind, item.name)
+            )
+        ],
+    }
+    return canonical_json_bytes(value)
+
+
+def build_inputs_from_canonical_manifest(
+    backend: str, content: bytes, context: str
+) -> tuple[ValidationBuildInput, ...]:
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{context}: cannot parse canonical build input manifest: {error}"
+        ) from error
+    if not isinstance(value, dict) or set(value) != {
+        "version", "scope", "inputs"
+    }:
+        raise ValidationError(
+            f"{context}: malformed canonical build input manifest"
+        )
+    if (
+        value["version"] != PROTOCOL_VERSION
+        or isinstance(value["version"], bool)
+        or value["scope"] != BUILD_INPUT_SCOPE
+        or not isinstance(value["inputs"], list)
+        or not value["inputs"]
+    ):
+        raise ValidationError(
+            f"{context}: malformed canonical build input manifest"
+        )
+    inputs: list[ValidationBuildInput] = []
+    for index, item in enumerate(value["inputs"]):
+        item_context = f"{context}/inputs/{index}"
+        if not isinstance(item, dict) or set(item) != {
+            "kind", "name", "sha256"
+        }:
+            raise ValidationError(
+                f"{item_context}: expected kind, name, and sha256 fields"
+            )
+        kind = validate_backend_name(item["kind"], item_context)
+        if kind == RESERVED_BUILD_INPUT_KIND:
+            raise ValidationError(
+                f"{item_context}: build input kind is reserved"
+            )
+        name = checked_relative_posix_path(item["name"], item_context)
+        digest = checked_sha256(item["sha256"], item_context)
+        inputs.append(ValidationBuildInput(backend, kind, name, digest))
+    keys = [(item.kind, item.name) for item in inputs]
+    if len(set(keys)) != len(keys) or keys != sorted(keys):
+        raise ValidationError(
+            f"{context}: canonical build inputs are duplicate or unsorted"
+        )
+    return tuple(inputs)
 
 
 def validation_tool_from_file(
@@ -989,6 +1217,48 @@ def retain_validation_tools(
     return retained
 
 
+def retain_validation_build_inputs(
+    context: RunContext,
+    build_inputs: list[ValidationBuildInput],
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for item in build_inputs:
+        if item.content is None:
+            raise ValidationError(
+                f"validation build input has no retainable content: "
+                f"{item.backend}:{item.kind}:{item.name}"
+            )
+        if item.source_path is not None:
+            captured = validation_build_input_from_file(
+                item.backend,
+                BuildInputDeclaration(
+                    item.kind, item.name, item.source_path
+                ),
+            )
+            if captured != item:
+                raise ValidationError(
+                    f"validation build input changed before evidence "
+                    f"retention: {item.backend}:{item.kind}:{item.name}"
+                )
+        elif item.kind != RESERVED_BUILD_INPUT_KIND:
+            raise ValidationError(
+                f"validation build input has no retainable source: "
+                f"{item.backend}:{item.kind}:{item.name}"
+            )
+        retained.append(
+            {
+                **item.to_json(),
+                "artifact": retain_evidence_blob(
+                    context.out_dir,
+                    "build-inputs",
+                    item.sha256,
+                    item.content,
+                ),
+            }
+        )
+    return retained
+
+
 VALIDATION_ARTIFACT_KINDS = {
     "backend-result",
     "process-stdout",
@@ -1356,6 +1626,7 @@ class BackendRun:
     blocked_cases: set[str] = field(default_factory=set)
     products: list[ValidationProduct] = field(default_factory=list)
     tools: list[ValidationTool] = field(default_factory=list)
+    build_inputs: list[ValidationBuildInput] = field(default_factory=list)
     artifacts: list[ValidationArtifact] = field(default_factory=list)
 
 
@@ -1485,6 +1756,7 @@ class ExternalCommandAdapter:
     timeout_seconds: int = 120
     product_declarations: tuple[ProductDeclaration, ...] = ()
     product_manifest: str | None = None
+    build_input_manifest: str | None = None
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     build_tool_declarations: tuple[ToolDeclaration, ...] = ()
     _built_products: tuple[ValidationProduct, ...] | None = field(
@@ -1494,6 +1766,9 @@ class ExternalCommandAdapter:
         default=None, init=False, repr=False, compare=False
     )
     _built_build_tools: tuple[ValidationTool, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_build_inputs: tuple[ValidationBuildInput, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_build_command: tuple[str, ...] | None = field(
@@ -1583,6 +1858,14 @@ class ExternalCommandAdapter:
                 raise ValidationError(
                     f"{self.name} product manifest cannot declare itself"
                 )
+            if self.build_input_manifest is not None and any(
+                declaration.path == self.build_input_manifest
+                for declaration in declarations
+            ):
+                raise ValidationError(
+                    f"{self.name} product manifest cannot declare its "
+                    "build input manifest"
+                )
             products.append(manifest_product)
         products.extend(
             validation_product_from_file(self.name, declaration, out_dir)
@@ -1593,6 +1876,39 @@ class ExternalCommandAdapter:
         )
         return tuple(
             sorted(products, key=lambda item: (item.kind, item.name))
+        )
+
+    def collect_build_inputs(
+        self, out_dir: Path
+    ) -> tuple[ValidationBuildInput, ...]:
+        if self.build_input_manifest is None:
+            return ()
+        declaration = ProductDeclaration(
+            RESERVED_BUILD_INPUT_KIND, self.build_input_manifest
+        )
+        _, content = validation_product_and_content_from_file(
+            self.name, declaration, out_dir
+        )
+        declarations = build_input_declarations_from_manifest(
+            content, f"{self.name} build input manifest"
+        )
+        members = tuple(
+            validation_build_input_from_file(self.name, item)
+            for item in declarations
+        )
+        canonical = canonical_build_input_manifest_bytes(members)
+        manifest = ValidationBuildInput(
+            self.name,
+            RESERVED_BUILD_INPUT_KIND,
+            self.build_input_manifest,
+            sha256_bytes(canonical),
+            canonical,
+        )
+        return tuple(
+            sorted(
+                (*members, manifest),
+                key=lambda item: (item.kind, item.name),
+            )
         )
 
     def collect_tools(
@@ -1691,7 +2007,14 @@ class ExternalCommandAdapter:
 
     def remove_stale_products(self, out_dir: Path) -> None:
         backend_root = (out_dir / self.name).resolve()
-        for declaration in self.product_declarations:
+        declarations = list(self.product_declarations)
+        if self.build_input_manifest is not None:
+            declarations.append(
+                ProductDeclaration(
+                    RESERVED_BUILD_INPUT_KIND, self.build_input_manifest
+                )
+            )
+        for declaration in declarations:
             path = backend_root.joinpath(*PurePosixPath(declaration.path).parts)
             if path.is_symlink() or path.is_file():
                 try:
@@ -1727,6 +2050,7 @@ class ExternalCommandAdapter:
         self._built_products = None
         self._built_tools = None
         self._built_build_tools = None
+        self._built_build_inputs = None
         self._built_build_command = None
         self._built_run_command = None
         self._build_artifacts = ()
@@ -1777,6 +2101,11 @@ class ExternalCommandAdapter:
         if context.run_context is not None:
             self.verify_corpus(context.run_context, "during build")
         self._built_products = self.collect_products(context.out_dir)
+        self._built_build_inputs = (
+            self.collect_build_inputs(context.out_dir)
+            if not context.no_build
+            else ()
+        )
         self._built_tools = self.collect_tools(self.tool_declarations)
         self._built_run_command = self.bind_command(
             context.root,
@@ -1793,6 +2122,7 @@ class ExternalCommandAdapter:
             self._built_products is None
             or self._built_tools is None
             or self._built_build_tools is None
+            or self._built_build_inputs is None
             or self._built_run_command is None
         ):
             raise ValidationError(
@@ -1802,6 +2132,15 @@ class ExternalCommandAdapter:
         if self.collect_products(context.out_dir) != self._built_products:
             raise ValidationError(
                 f"{self.name} products changed between build and execution"
+            )
+        if (
+            self.build_input_manifest is not None
+            and self._built_build_inputs
+            and self.collect_build_inputs(context.out_dir)
+            != self._built_build_inputs
+        ):
+            raise ValidationError(
+                f"{self.name} build inputs changed between build and execution"
             )
         self.verify_captured_tools(
             (*self._built_build_tools, *self._built_tools),
@@ -1848,6 +2187,15 @@ class ExternalCommandAdapter:
             raise ValidationError(
                 f"{self.name} products changed during execution"
             )
+        if (
+            self.build_input_manifest is not None
+            and self._built_build_inputs
+            and self.collect_build_inputs(context.out_dir)
+            != self._built_build_inputs
+        ):
+            raise ValidationError(
+                f"{self.name} build inputs changed during execution"
+            )
         self.verify_corpus(context, "during execution")
         self.verify_captured_tools(
             (*self._built_build_tools, *self._built_tools),
@@ -1863,6 +2211,7 @@ class ExternalCommandAdapter:
             list(expected_cases),
             products=list(self._built_products),
             tools=[*self._built_build_tools, *self._built_tools],
+            build_inputs=list(self._built_build_inputs),
             artifacts=[*self._build_artifacts, *execution_artifacts],
         )
         if completed.returncode != 0:
@@ -1904,6 +2253,7 @@ def external_adapter_from_config(
         "timeoutSeconds",
         "products",
         "productManifest",
+        "buildInputManifest",
         "tools",
         "buildTools",
     }
@@ -2004,6 +2354,31 @@ def external_adapter_from_config(
         if not build_command:
             raise ValidationError(
                 f"adapter config {path}: productManifest requires buildCommand"
+            )
+    raw_build_input_manifest = value.get("buildInputManifest")
+    build_input_manifest = None
+    if raw_build_input_manifest is not None:
+        build_input_manifest = checked_relative_posix_path(
+            raw_build_input_manifest,
+            f"adapter config {path}: buildInputManifest",
+        )
+        if build_input_manifest in RESERVED_PRODUCT_PATHS:
+            raise ValidationError(
+                f"adapter config {path}: buildInputManifest path is "
+                "reserved by the harness"
+            )
+        if (
+            build_input_manifest == product_manifest
+            or build_input_manifest in product_paths
+        ):
+            raise ValidationError(
+                f"adapter config {path}: buildInputManifest path collides "
+                "with a product path"
+            )
+        if not build_command:
+            raise ValidationError(
+                f"adapter config {path}: buildInputManifest requires "
+                "buildCommand"
             )
     def checked_tools(
         field_name: str, owning_command: list[str], command_field: str
@@ -2147,6 +2522,7 @@ def external_adapter_from_config(
             )
         ),
         product_manifest=product_manifest,
+        build_input_manifest=build_input_manifest,
         tool_declarations=tool_declarations,
         build_tool_declarations=build_tool_declarations,
     )
@@ -2253,6 +2629,7 @@ def write_matrix_artifact(
     products: tuple[ValidationProduct, ...] = (),
     tools: tuple[ValidationTool, ...] = (),
     artifacts: tuple[ValidationArtifact, ...] = (),
+    build_inputs: tuple[ValidationBuildInput, ...] = (),
 ) -> Path:
     context.out_dir.mkdir(parents=True, exist_ok=True)
     inputs = (
@@ -2304,6 +2681,64 @@ def write_matrix_artifact(
     if len(set(tool_keys)) != len(tool_keys):
         raise ValidationError("validation matrix contains duplicate backend tools")
     retained_tools = retain_validation_tools(context, sorted_tools)
+    sorted_build_inputs = sorted(
+        build_inputs,
+        key=lambda item: (item.backend, item.kind, item.name),
+    )
+    for item in sorted_build_inputs:
+        validate_backend_name(
+            item.backend, "validation build input backend"
+        )
+        validate_backend_name(item.kind, "validation build input kind")
+        checked_relative_posix_path(
+            item.name, "validation build input name"
+        )
+        if item.backend not in backend_names:
+            raise ValidationError(
+                f"validation build input names inactive backend: "
+                f"{item.backend}"
+            )
+        checked_sha256(item.sha256, "validation build input")
+    build_input_keys = [
+        (item.backend, item.kind, item.name)
+        for item in sorted_build_inputs
+    ]
+    if len(set(build_input_keys)) != len(build_input_keys):
+        raise ValidationError(
+            "validation matrix contains duplicate build inputs"
+        )
+    for backend in backend_names:
+        backend_inputs = [
+            item for item in sorted_build_inputs if item.backend == backend
+        ]
+        manifests = [
+            item
+            for item in backend_inputs
+            if item.kind == RESERVED_BUILD_INPUT_KIND
+        ]
+        members = [
+            item
+            for item in backend_inputs
+            if item.kind != RESERVED_BUILD_INPUT_KIND
+        ]
+        if bool(manifests) != bool(members) or len(manifests) > 1:
+            raise ValidationError(
+                f"validation build inputs for {backend} require exactly one "
+                "manifest"
+            )
+        if manifests:
+            manifest = manifests[0]
+            expected = canonical_build_input_manifest_bytes(tuple(members))
+            if manifest.content != expected or manifest.sha256 != sha256_bytes(
+                expected
+            ):
+                raise ValidationError(
+                    f"validation build input manifest for {backend} "
+                    "disagrees with inputs"
+                )
+    retained_build_inputs = retain_validation_build_inputs(
+        context, sorted_build_inputs
+    )
     sorted_artifacts = sorted(
         artifacts,
         key=lambda artifact: (artifact.kind, artifact.name),
@@ -2366,6 +2801,7 @@ def write_matrix_artifact(
         inputs,
         sorted_products,
         sorted_tools,
+        sorted_build_inputs,
     )
     matrix_value = {
         "version": PROTOCOL_VERSION,
@@ -2379,6 +2815,7 @@ def write_matrix_artifact(
         "inputs": retained_inputs,
         "products": retained_products,
         "tools": retained_tools,
+        "buildInputs": retained_build_inputs,
         "artifacts": retained_artifacts,
         "pairs": pairs,
         "findings": [finding.to_json() for finding in findings],
@@ -2398,6 +2835,7 @@ def write_matrix_artifact(
             "inputCount": len(inputs),
             "productCount": len(sorted_products),
             "toolCount": len(sorted_tools),
+            "buildInputCount": len(sorted_build_inputs),
             "artifactCount": len(sorted_artifacts),
         },
     }
@@ -2463,6 +2901,7 @@ def verify_matrix_artifact(
         "inputs",
         "products",
         "tools",
+        "buildInputs",
         "artifacts",
         "pairs",
         "findings",
@@ -2650,6 +3089,89 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix has duplicate tools")
     if tool_keys != sorted(tool_keys):
         raise ValidationError("validation matrix tools are not sorted")
+
+    raw_build_inputs = value["buildInputs"]
+    if not isinstance(raw_build_inputs, list):
+        raise ValidationError("validation matrix has malformed buildInputs")
+    build_inputs: list[ValidationBuildInput] = []
+    build_input_contents: dict[tuple[str, str, str], bytes] = {}
+    for item in raw_build_inputs:
+        if not isinstance(item, dict) or set(item) != {
+            "backend", "kind", "name", "sha256", "artifact"
+        }:
+            raise ValidationError(
+                "validation matrix has malformed build input"
+            )
+        backend = validate_backend_name(
+            item["backend"], "validation build input backend"
+        )
+        kind = validate_backend_name(
+            item["kind"], "validation build input kind"
+        )
+        name = checked_relative_posix_path(
+            item["name"], "validation build input name"
+        )
+        digest = checked_sha256(item["sha256"], "validation build input")
+        if backend not in checked_backends:
+            raise ValidationError(
+                "validation build input names inactive backend"
+            )
+        expected_artifact = f"evidence/build-inputs/{digest}"
+        if item["artifact"] != expected_artifact:
+            raise ValidationError(
+                "validation build input has noncanonical artifact path"
+            )
+        content = verify_evidence_file(
+            report_root,
+            item["artifact"],
+            digest,
+            f"validation build input {backend}:{kind}:{name}",
+        )
+        if kind == RESERVED_BUILD_INPUT_KIND:
+            build_input_contents[(backend, kind, name)] = content
+        build_inputs.append(
+            ValidationBuildInput(backend, kind, name, digest)
+        )
+    build_input_keys = [
+        (item.backend, item.kind, item.name) for item in build_inputs
+    ]
+    if len(set(build_input_keys)) != len(build_input_keys):
+        raise ValidationError("validation matrix has duplicate build inputs")
+    if build_input_keys != sorted(build_input_keys):
+        raise ValidationError("validation matrix build inputs are not sorted")
+    for backend in checked_backends:
+        backend_inputs = [
+            item for item in build_inputs if item.backend == backend
+        ]
+        manifests = [
+            item
+            for item in backend_inputs
+            if item.kind == RESERVED_BUILD_INPUT_KIND
+        ]
+        members = tuple(
+            item
+            for item in backend_inputs
+            if item.kind != RESERVED_BUILD_INPUT_KIND
+        )
+        if bool(manifests) != bool(members) or len(manifests) > 1:
+            raise ValidationError(
+                f"validation build inputs for {backend} require exactly one "
+                "manifest"
+            )
+        if manifests:
+            manifest = manifests[0]
+            declared = build_inputs_from_canonical_manifest(
+                backend,
+                build_input_contents[
+                    (manifest.backend, manifest.kind, manifest.name)
+                ],
+                f"retained {backend} build input manifest",
+            )
+            if declared != members:
+                raise ValidationError(
+                    f"retained {backend} build input manifest disagrees "
+                    "with matrix build inputs"
+                )
 
     raw_artifacts = value["artifacts"]
     if not isinstance(raw_artifacts, list):
@@ -2888,6 +3410,7 @@ def verify_matrix_artifact(
         "inputCount",
         "productCount",
         "toolCount",
+        "buildInputCount",
         "artifactCount",
     }
     if not isinstance(summary, dict) or set(summary) != expected_summary_fields:
@@ -2907,6 +3430,7 @@ def verify_matrix_artifact(
         "inputCount": len(inputs),
         "productCount": len(products),
         "toolCount": len(tools),
+        "buildInputCount": len(build_inputs),
         "artifactCount": len(artifacts),
     }
     if summary != expected_summary:
@@ -2935,6 +3459,7 @@ def verify_matrix_artifact(
         tuple(inputs),
         products,
         tools,
+        build_inputs,
     )
     if run_sha256 != expected_run_sha256:
         raise ValidationError("validation run identity mismatch")
@@ -3149,6 +3674,11 @@ def validate_matrix(
         for backend_run in backend_runs.values()
         for tool in backend_run.tools
     )
+    build_inputs = tuple(
+        item
+        for backend_run in backend_runs.values()
+        for item in backend_run.build_inputs
+    )
     artifacts = tuple(
         artifact
         for backend_run in backend_runs.values()
@@ -3162,6 +3692,7 @@ def validate_matrix(
         products,
         tools,
         artifacts,
+        build_inputs,
     )
     return pair_results, all_findings
 

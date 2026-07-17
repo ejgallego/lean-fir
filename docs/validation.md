@@ -72,7 +72,8 @@ The matrix also derives two full SHA-256 identities from compact canonical JSON.
 `identity.selection` binds the corpus digest and ordered selected case IDs.
 `identity.run` binds that selection, participating backends, directed pair
 order, every input digest, every sorted backend product, and the exact backend
-tool files.  Observations and findings are deliberately excluded, so repeated
+tool and reported build-input files.  Observations and findings are
+deliberately excluded, so repeated
 executions of the same evidence contract share an identity even when they
 expose nondeterminism or a regression.
 
@@ -90,10 +91,11 @@ loaded olean and host dynamic library remains future hardening.  The V8 adapter
 registers Node and its runner as tools while keeping the compiler-produced
 `.wasm` and ABI manifest as products.
 
-Every input, backend tool, backend product, backend result/process artifact,
-and pair comparison is copied into
+Every input, backend tool, reported build input, backend product, backend
+result/process artifact, and pair comparison is copied into
 an append-only content-addressed location beneath `evidence/inputs`,
-`evidence/tools`, `evidence/products`, `evidence/artifacts`, or
+`evidence/tools`, `evidence/build-inputs`, `evidence/products`,
+`evidence/artifacts`, or
 `evidence/comparisons`.  Matrix
 entries carry the canonical report-relative artifact path and raw-byte SHA-256.
 Existing blobs are reused only when their bytes agree; symlinks, non-regular
@@ -221,6 +223,7 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "resultDomain": "selected",
   "timeoutSeconds": 120,
   "productManifest": "products.json",
+  "buildInputManifest": "build-inputs.json",
   "buildTools": [
     {"kind": "build-launcher", "name": "node", "command": "node"},
     {
@@ -291,6 +294,56 @@ bytes used by the harness.  It does not yet claim a transitive source or import
 closure for compilers launched indirectly by those tools.  A `--no-build` run
 captures no build tools, so reused products do not falsely claim a build that
 the harness did not observe.
+
+An ordinary external build may also emit `buildInputManifest`, a strict
+reported-loaded inventory distinct from both tools and products:
+
+```json
+{
+  "version": 1,
+  "scope": "reported-loaded",
+  "inputs": [
+    {
+      "kind": "lean-compiler",
+      "name": "bin/lean",
+      "path": "/absolute/path/to/lean"
+    },
+    {
+      "kind": "lean-olean",
+      "name": "Fir/Wasm/Emit/Source.olean",
+      "path": "/absolute/path/to/Fir/Wasm/Emit/Source.olean"
+    }
+  ]
+}
+```
+
+The path-bearing build output is deliberately machine-local.  The harness
+rejects missing files, duplicate identities or paths, non-absolute paths, and
+symlinks in any path component; hashes every declared regular file with
+SHA-256; and derives a canonical path-free manifest containing only kind,
+logical name, and digest.  The matrix records the canonical manifest and every
+member under `buildInputs`, retains exact member bytes under
+`evidence/build-inputs/<sha256>`, binds the sorted closure into `identity.run`,
+and reports `buildInputCount`.  Read-only verification reparses the retained
+canonical manifest and requires exact equality with the matrix closure.
+
+`FirValidationWasm.lean` obtains this inventory from the same running Lean
+process that emits the Wasm: `IO.appPath` reports the compiler executable,
+`Environment.header.moduleNames` reports all direct and transitive imported
+modules, and `Lean.findOLean` resolves the artifact loaded for each module.  On
+the current toolchain this is materially stronger than `lean --deps`, which
+reports only direct dependencies, and than Lake trace hashes, which are not
+cryptographic evidence identities.  The reported-loaded scope is intentionally
+honest: it does not prove that a file could not be swapped while Lean was
+loading it, nor does it discover arbitrary IO performed by command elaborators
+or the host dynamic loader.  Exact file-open provenance would require a future
+Lean recorder or execution from a sealed content-addressed snapshot.
+
+The build-input inventory is not copied into process environment variables;
+large Lean closures can exceed operating-system argv/environment limits.  It
+is an evidence channel.  `--no-build` ignores stale inventories and records
+zero build inputs, so reused products never claim a producer closure the
+harness did not observe.
 
 The optional static `products` array or dynamic `productManifest` declares
 regular build outputs whose bytes affect the backend's semantics.  A dynamic
