@@ -85,6 +85,20 @@ Wasm artifact and runs the W3 corpus in an external engine. A0 does not define
 the production linear-memory ABI and must consume, rather than modify, the
 frozen semantic ABI and supported-fragment boundary.
 
+## Cross-lane coordination board
+
+| Date | Producer | Consumer | Status | Item |
+|---|---|---|---|---|
+| 2026-07-17 | A0 source emission | W4 ABI/validation proofs | action required | Rebase on `main` at or after `4841a09`, then resolve `FIR-BUG-wasm-none-compiler-nat-literal-kind`. Lean 4.32 emits the literal in `def litNat : Nat := 42` with local ABI kind `tagged`, but `AbiKind.acceptsLiteralInvariant` classifies every natural literal as `tobject`; the lowerer's existing `acceptsLiteral` relation already admits natural literals at `tagged`, `object`, and `tobject`. The fix and its invariant proof belong in the W4-owned ABI/validation contract, not in A0. |
+| 2026-07-17 | A0 source emission | W4 and integration owners | landed | `4841a09` adds `#fir_wasm_emit`, which captures an actual Lean 4.32 final-impure declaration and deterministically emits `.wasm`, `.wasm.json`, and `.wasm.lcnf`. The external-engine smoke test currently uses a closed `UInt64` declaration; the rejected compiler-produced `Nat` declaration remains an exact regression and is not normalized or silently accepted. |
+
+No shared semantic contract was changed by these A0 slices. Once W4 repairs
+and proves the natural-literal invariant, A0 should replace the rejection
+regression with a successful source-to-engine test and close the bug card.
+Meanwhile A0 can proceed independently by separating module generation from
+fixture invocation, then emitting and executing parameterized scalar source
+declarations with an explicit argument schema.
+
 ## Architecture decisions
 
 ### Two-level type information
