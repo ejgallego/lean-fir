@@ -140,6 +140,47 @@ theorem compileLetValue_scalarProjection
   simp [compileLetValue, valueEq, resultEq, objectEq]
   rfl
 
+theorem compileLetValue_box
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {type : Lean.Expr} {scalarId : Lean.FVarId}
+    {scalarKind resultKind : AbiKind} {scalarInstruction : Instruction}
+    (valueEq : decl.value = .box type scalarId)
+    (resultEq : letValueKind decl = .ok resultKind)
+    (scalarEq : getLocal context scalarId = .ok (scalarInstruction, scalarKind))
+    (annotationEq : checkedAbiKind type = .ok scalarKind) :
+    compileLetValue context decl =
+      .ok [scalarInstruction, .call (.runtime (.box scalarKind resultKind))] := by
+  have notDifferent : ¬(scalarKind != scalarKind) = true := by
+    cases scalarKind <;> decide
+  simp [compileLetValue, valueEq, resultEq, scalarEq, annotationEq]
+  change (if (scalarKind != scalarKind) = true then _ else
+    Except.ok [scalarInstruction, .call (.runtime (.box scalarKind resultKind))]) = _
+  rw [if_neg notDifferent]
+
+theorem compileLetValue_unbox
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {objectId : Lean.FVarId} {objectKind resultKind : AbiKind}
+    {objectInstruction : Instruction}
+    (valueEq : decl.value = .unbox objectId)
+    (resultEq : letValueKind decl = .ok resultKind)
+    (objectEq : getLocal context objectId = .ok (objectInstruction, objectKind)) :
+    compileLetValue context decl =
+      .ok [objectInstruction, .call (.runtime (.unbox resultKind))] := by
+  simp [compileLetValue, valueEq, resultEq, objectEq]
+  rfl
+
+theorem compileLetValue_isShared
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {objectInstruction : Instruction}
+    (valueEq : decl.value = .isShared objectId)
+    (resultEq : letValueKind decl = .ok .uint8)
+    (objectEq : getLocal context objectId = .ok (objectInstruction, objectKind)) :
+    compileLetValue context decl =
+      .ok [objectInstruction, .call (.runtime .isShared)] := by
+  simp [compileLetValue, valueEq, resultEq, objectEq]
+  rfl
+
 theorem compileCaseChain_constructor
     {context : Context} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
@@ -370,6 +411,99 @@ theorem scalarProjection_host_simulates
   · exact hostStep_scalarProj_of_decode_encode initial width offset resultKind
       physicalArgs sourceObject sourceValue physical decodedArgs projected encoded
   · exact ⟨rfl, decodedResult⟩
+  · exact invariant
+
+/-- Boxing may allocate and therefore follows the handle-result invariant
+path used by constructor allocation. -/
+theorem box_host_simulates
+    (initial : Wasm.Store RuntimeHost) (scalarKind resultKind : AbiKind)
+    (type : Lean.Expr) (physicalArgs : List Wasm.Value) (sourceScalar : Value)
+    (sourceRuntime : RuntimeState) (sourceValue : Value)
+    {after : HandleTable} {handle : Handle}
+    (invariant : HandleTableInvariant initial.host.handles)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decodedArgs : decodeArgs initial.host.handles #[scalarKind] physicalArgs =
+      .ok #[sourceScalar])
+    (boxed : Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar =
+      .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    ∃ final,
+      hostStep (.box scalarKind resultKind) initial physicalArgs =
+        .Return [.i32 handle] final ∧
+      StepResultRelated sourceRuntime sourceValue resultKind final (.i32 handle) ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      handles := after
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_box_of_decode_encode initial scalarKind resultKind type
+      physicalArgs sourceScalar sourceRuntime sourceValue typeEq decodedArgs boxed
+      usesHandle encoded
+  · exact ⟨rfl, decodeValue_handle_of_decodeAs usesHandle
+      (decodeAs_of_encode invariant.coherent usesHandle encoded)⟩
+  · exact handleTableInvariant_of_encode invariant usesHandle encoded
+
+/-- Unboxing preserves the runtime and handle table and returns a direct
+integer/usize lane. -/
+theorem unbox_host_simulates
+    (initial : Wasm.Store RuntimeHost) (scalarKind : AbiKind) (type : Lean.Expr)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceValue : Value)
+    (physical : Wasm.Value)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (unboxed : Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles scalarKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (decodedResult : DecodesValue initial.host.handles scalarKind physical sourceValue) :
+    ∃ final,
+      hostStep (.unbox scalarKind) initial physicalArgs = .Return [physical] final ∧
+      StepResultRelated initial.host.runtime sourceValue scalarKind final physical ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_unbox_of_decode_encode initial scalarKind type physicalArgs
+      sourceObject sourceValue physical typeEq decodedArgs unboxed encoded
+  · exact ⟨rfl, decodedResult⟩
+  · exact invariant
+
+/-- `isShared` preserves runtime and handles and returns Lean's checked UInt8
+case discriminator. -/
+theorem isShared_host_simulates
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (shared : UInt8)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (evaluated : Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject =
+      .ok (.scalar (.uint8 shared))) :
+    ∃ final,
+      hostStep .isShared initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat shared.toNat)] final ∧
+      StepResultRelated initial.host.runtime (.scalar (.uint8 shared)) .uint8 final
+        (.i32 (UInt32.ofNat shared.toNat)) ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_isShared_of_decode initial physicalArgs sourceObject shared
+      decodedArgs evaluated
+  · exact ⟨rfl, decodeValue_uint8 initial.host.handles shared⟩
   · exact invariant
 
 /-- Constructor tag lookup preserves the source tag modulo the checked i32 lane. -/
@@ -881,6 +1015,129 @@ theorem wp_scalarProjection_call
   · simpa using hStack
   · exact hostStep_scalarProj_of_decode_encode initial width offset resultKind
       [.i32 objectHandle] sourceObject sourceValue physical decoded projected encoded
+  · simpa [hResults] using continued
+
+/-- Generated-stack rule for boxing a direct scalar into an opaque object
+handle. -/
+theorem wp_box_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (scalarKind resultKind : AbiKind) (type : Lean.Expr)
+    (physicalScalar : Wasm.Value) (sourceScalar : Value)
+    (sourceRuntime : RuntimeState) (sourceValue : Value)
+    (after : HandleTable) (resultHandle : Handle) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.box scalarKind resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalScalar :: tail)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[scalarKind] [physicalScalar] =
+      .ok #[sourceScalar])
+    (boxed : Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar =
+      .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, resultHandle))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 resultHandle :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [physicalScalar]) (results := [.i32 resultHandle])
+    hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_box_of_decode_encode initial scalarKind resultKind type
+      [physicalScalar] sourceScalar sourceRuntime sourceValue typeEq decoded boxed
+      usesHandle encoded
+  · simpa [hResults] using continued
+
+/-- Generated-stack rule for unboxing an object handle into a direct scalar. -/
+theorem wp_unbox_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (scalarKind : AbiKind) (type : Lean.Expr) (objectHandle : Handle)
+    (sourceObject sourceValue : Value) (physical : Wasm.Value)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.unbox scalarKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = .i32 objectHandle :: tail)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (unboxed : Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles scalarKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := physical :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [.i32 objectHandle]) (results := [physical])
+    hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_unbox_of_decode_encode initial scalarKind type [.i32 objectHandle]
+      sourceObject sourceValue physical typeEq decoded unboxed encoded
+  · simpa [hResults] using continued
+
+/-- Generated-stack rule for the direct UInt8 `isShared` result. -/
+theorem wp_isShared_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (objectHandle : Handle) (sourceObject : Value) (shared : UInt8)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .isShared))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = .i32 objectHandle :: tail)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (evaluated : Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 (UInt32.ofNat shared.toNat) :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [.i32 objectHandle])
+    (results := [.i32 (UInt32.ofNat shared.toNat)]) hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_isShared_of_decode initial [.i32 objectHandle] sourceObject shared
+      decoded evaluated
   · simpa [hResults] using continued
 
 end FirTalos.Correctness

@@ -34,6 +34,9 @@ def supportedScalarProjectionKind : AbiKind → Bool
   | .uint8 | .uint16 | .uint32 | .uint64 => true
   | _ => false
 
+def supportedBoxScalarKind (kind : AbiKind) : Bool :=
+  supportedScalarProjectionKind kind || kind == .usize
+
 def addSupportedParams? (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     Option LocalKinds :=
   params.foldlM (init := locals) fun locals param => do
@@ -81,6 +84,26 @@ def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
       let objectKind ← findLocalKind? locals objectId
       if (objectKind == .object || objectKind == .tobject) &&
           supportedScalarProjectionKind declared then
+        some declared
+      else
+        none
+  | .box type scalarId =>
+      let scalarKind ← findLocalKind? locals scalarId
+      let annotationKind ← abiValueKind? type
+      if annotationKind == scalarKind && supportedBoxScalarKind scalarKind &&
+          declared == .tobject then
+        some declared
+      else
+        none
+  | .unbox objectId =>
+      let objectKind ← findLocalKind? locals objectId
+      if objectKind.isObjectLike && supportedBoxScalarKind declared then
+        some declared
+      else
+        none
+  | .isShared objectId =>
+      let objectKind ← findLocalKind? locals objectId
+      if objectKind.isObjectLike && declared == .uint8 then
         some declared
       else
         none

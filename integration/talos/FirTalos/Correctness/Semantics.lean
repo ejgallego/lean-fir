@@ -1132,6 +1132,185 @@ theorem codeWP_scalarProjection_let
   simpa using
     codeWP_let (context := context) valueCompiled valueAdapted resultFound step continued
 
+/-- Boxing instance of the reusable direct-`let` boundary. -/
+theorem letStepSimulates_box
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {type : Lean.Expr} {scalarId : Lean.FVarId}
+    {scalarKind resultKind : AbiKind}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {scalarIndex resultIndex : Nat} {physicalScalar : Wasm.Value}
+    {sourceScalar sourceValue : Value} {sourceRuntime : RuntimeState}
+    {after : HandleTable} {resultHandle : Handle}
+    (valueEq : decl.value = .box type scalarId)
+    (scalarLookup : lookupValue sourceEnv scalarId = .ok sourceScalar)
+    (boxed : Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar =
+      .ok (sourceRuntime, sourceValue))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some resultKind)
+    (hScalar : locals.get scalarIndex = some physicalScalar)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.box scalarKind resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[scalarKind] [physicalScalar] =
+      .ok #[sourceScalar])
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, resultHandle))
+    (targetSet : locals.set? resultIndex (.i32 resultHandle) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet scalarIndex, .call id]
+      initial.host.runtime sourceRuntime sourceEnv sourceValue initial
+      (successfulHostStore initial sourceRuntime after)
+      locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [scalarLookup]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar) =
+      .ok (sourceRuntime, .value sourceValue)
+    rw [boxed]
+    rfl
+  · refine ⟨rfl, rfl, rfl, ?_, ?_⟩
+    · exact handleTableInvariant_of_encode initialRelated.2.2.2.1 usesHandle encoded
+    · exact EnvLocalsRelated.bind_handle_of_encode
+        initialRelated.2.2.2.2 initialRelated.2.2.2.1 resultFound kindAt
+        usesHandle encoded targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_box_let scalarKind resultKind type physicalScalar sourceScalar
+        sourceRuntime sourceValue after resultHandle tail hScalar hImp hSat hi
+        hContract hParams hResults typeEq decoded boxed usesHandle encoded
+        targetSet continued
+
+/-- Unboxing instance of the reusable direct-`let` boundary. -/
+theorem letStepSimulates_unbox
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {scalarKind : AbiKind} {type : Lean.Expr}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject sourceValue : Value} {physical : Wasm.Value}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = type)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (unboxed : Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject =
+      .ok sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some scalarKind)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.unbox scalarKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decodedObject :
+      decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+        .ok #[sourceObject])
+    (encodedResult : encodeValue initial.host.handles scalarKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (decodedResult : DecodesValue initial.host.handles scalarKind physical sourceValue)
+    (targetSet : locals.set? resultIndex physical = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      initial.host.runtime initial.host.runtime sourceEnv sourceValue initial
+      (successfulHostStore initial initial.host.runtime initial.host.handles)
+      locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [objectLookup, resultTypeEq]
+    change ((fun result : Value =>
+      (initial.host.runtime, LetAction.value result)) <$>
+        Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject) =
+      .ok (initial.host.runtime, .value sourceValue)
+    rw [unboxed]
+    rfl
+  · refine ⟨rfl, rfl, rfl, initialRelated.2.2.2.1, ?_⟩
+    exact EnvLocalsRelated.bind_direct initialRelated.2.2.2.2
+      resultFound kindAt decodedResult targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_unbox_let scalarKind type objectHandle sourceObject sourceValue physical
+        tail hObject hImp hSat hi hContract hParams hResults typeEq decodedObject
+        unboxed encodedResult targetSet continued
+
+/-- `isShared` instance with Lean 4.32's direct UInt8 result. -/
+theorem letStepSimulates_isShared
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject : Value} {shared : UInt8}
+    (valueEq : decl.value = .isShared objectId)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (evaluated : Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some .uint8)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .isShared))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decodedObject :
+      decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+        .ok #[sourceObject])
+    (targetSet : locals.set? resultIndex (.i32 (UInt32.ofNat shared.toNat)) =
+      some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      initial.host.runtime initial.host.runtime sourceEnv (.scalar (.uint8 shared)) initial
+      (successfulHostStore initial initial.host.runtime initial.host.handles)
+      locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [objectLookup]
+    change ((fun result : Value =>
+      (initial.host.runtime, LetAction.value result)) <$>
+        Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject) =
+      .ok (initial.host.runtime, .value (.scalar (.uint8 shared)))
+    rw [evaluated]
+    rfl
+  · refine ⟨rfl, rfl, rfl, initialRelated.2.2.2.1, ?_⟩
+    exact EnvLocalsRelated.bind_direct initialRelated.2.2.2.2
+      resultFound kindAt (decodeValue_uint8 initial.host.handles shared) targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_isShared_let objectHandle sourceObject shared tail hObject hImp hSat hi
+        hContract hParams hResults decodedObject evaluated targetSet continued
+
 /-- The empty constructor-test suffix executes its already adapted fallback. -/
 theorem caseChainWP_nil
     {context : Fir.Wasm.Context}

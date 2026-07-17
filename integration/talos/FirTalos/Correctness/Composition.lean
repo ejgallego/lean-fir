@@ -287,6 +287,157 @@ theorem wp_scalarProjection_let
     · apply wp_localSet_of_set hSet
       exact continued
 
+/-- Complete generated boxing `let`: load the direct scalar, allocate or tag
+the boxed value in the semantic host, and bind its opaque handle. -/
+theorem wp_box_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {scalarIndex resultIndex : Nat}
+    (scalarKind resultKind : Fir.Wasm.AbiKind) (type : Lean.Expr)
+    (physicalScalar : Wasm.Value) (sourceScalar : Fir.LeanIR.Impure.Value)
+    (sourceRuntime : Fir.LeanIR.Impure.RuntimeState)
+    (sourceValue : Fir.LeanIR.Impure.Value)
+    (after : Fir.Wasm.HandleTable) (resultHandle : Fir.Wasm.Handle)
+    (tail : List Wasm.Value)
+    (hScalar : locals.get scalarIndex = some physicalScalar)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.box scalarKind resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[scalarKind] [physicalScalar] =
+      .ok #[sourceScalar])
+    (boxed : Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar =
+      .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, resultHandle))
+    (hSet : locals.set? resultIndex (.i32 resultHandle) = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet scalarIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets (indices := [scalarIndex]) (values := [physicalScalar]) tail
+  · exact .cons hScalar .nil
+  · apply wp_box_call scalarKind resultKind type physicalScalar sourceScalar
+      sourceRuntime sourceValue after resultHandle tail hImp hSat hi hContract
+      hParams hResults
+    · rfl
+    · exact typeEq
+    · exact decoded
+    · exact boxed
+    · exact usesHandle
+    · exact encoded
+    · apply wp_localSet_of_set hSet
+      exact continued
+
+/-- Complete generated unboxing `let`. -/
+theorem wp_unbox_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {objectIndex resultIndex : Nat}
+    (scalarKind : Fir.Wasm.AbiKind) (type : Lean.Expr)
+    (objectHandle : Fir.Wasm.Handle)
+    (sourceObject sourceValue : Fir.LeanIR.Impure.Value)
+    (physical : Wasm.Value) (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.unbox scalarKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (unboxed : Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles scalarKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (hSet : locals.set? resultIndex physical = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets
+    (indices := [objectIndex]) (values := [.i32 objectHandle]) tail
+  · exact .cons hObject .nil
+  · apply wp_unbox_call scalarKind type objectHandle sourceObject sourceValue
+      physical tail hImp hSat hi hContract hParams hResults
+    · rfl
+    · exact typeEq
+    · exact decoded
+    · exact unboxed
+    · exact encoded
+    · apply wp_localSet_of_set hSet
+      exact continued
+
+/-- Complete generated `isShared` `let`. -/
+theorem wp_isShared_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {objectIndex resultIndex : Nat}
+    (objectHandle : Fir.Wasm.Handle) (sourceObject : Fir.LeanIR.Impure.Value)
+    (shared : UInt8) (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .isShared))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (evaluated : Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (hSet : locals.set? resultIndex (.i32 (UInt32.ofNat shared.toNat)) = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets
+    (indices := [objectIndex]) (values := [.i32 objectHandle]) tail
+  · exact .cons hObject .nil
+  · apply wp_isShared_call objectHandle sourceObject shared tail
+      hImp hSat hi hContract hParams hResults
+    · rfl
+    · exact decoded
+    · exact evaluated
+    · apply wp_localSet_of_set hSet
+      exact continued
+
 /-- A generated `i32.const` followed by the destination `local.set`. -/
 theorem wp_i32Const_let
     {Host : Type} {module : Wasm.Module} {env : Wasm.HostEnv Host}

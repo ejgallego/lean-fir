@@ -16,6 +16,9 @@ inductive HostOperation where
   | objectProj (index : Nat) (result : AbiKind)
   | usizeProj (index : Nat)
   | scalarProj (width offset : Nat) (result : AbiKind)
+  | box (scalar result : AbiKind)
+  | unbox (scalar : AbiKind)
+  | isShared
   | getTag
   deriving Inhabited, BEq
 
@@ -26,6 +29,9 @@ def HostOperation.runtimeOp : HostOperation → RuntimeOp
   | .objectProj index result => .objectProj index result
   | .usizeProj index => .usizeProj index
   | .scalarProj width offset result => .scalarProj width offset result
+  | .box scalar result => .box scalar result
+  | .unbox scalar => .unbox scalar
+  | .isShared => .isShared
   | .getTag => .getTag
 
 def HostOperation.signature (operation : HostOperation) : Signature :=
@@ -38,7 +44,21 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .objectProj index result => some (.objectProj index result)
   | .usizeProj index => some (.usizeProj index)
   | .scalarProj width offset result => some (.scalarProj width offset result)
+  | .box scalar result => some (.box scalar result)
+  | .unbox scalar => some (.unbox scalar)
+  | .isShared => some .isShared
   | .getTag => some .getTag
+  | _ => none
+
+/-- Recover the exact canonical impure type retained by integer boxing.
+Floating-point kinds stay unavailable until the shared runtime grows matching
+`ScalarValue` constructors. -/
+def runtimeScalarType? : AbiKind → Option Lean.Expr
+  | .uint8 => some Lean.Compiler.LCNF.ImpureType.uint8
+  | .uint16 => some Lean.Compiler.LCNF.ImpureType.uint16
+  | .uint32 => some Lean.Compiler.LCNF.ImpureType.uint32
+  | .uint64 => some Lean.Compiler.LCNF.ImpureType.uint64
+  | .usize => some Lean.Compiler.LCNF.ImpureType.usize
   | _ => none
 
 def structuredTrapMessage : StructuredTrap → String
@@ -89,6 +109,29 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       match args[0]? with
       | some object =>
           match getScalarField runtime object width offset with
+          | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .box scalar _ =>
+      match runtimeScalarType? scalar, args[0]? with
+      | some type, some value =>
+          match Fir.LeanIR.Impure.box runtime type value with
+          | .ok result => .ok (result.1, #[result.2])
+          | .error fault => .error (.source fault)
+      | none, _ => .error (.target (.abiKindMismatch scalar))
+      | _, none => .error (.target (.arityMismatch 1 args.size))
+  | .unbox scalar =>
+      match runtimeScalarType? scalar, args[0]? with
+      | some type, some value =>
+          match Fir.LeanIR.Impure.unbox runtime type value with
+          | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none, _ => .error (.target (.abiKindMismatch scalar))
+      | _, none => .error (.target (.arityMismatch 1 args.size))
+  | .isShared =>
+      match args[0]? with
+      | some object =>
+          match Fir.LeanIR.Impure.isShared runtime object with
           | .ok value => .ok (runtime, #[value])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
@@ -236,6 +279,71 @@ theorem hostStep_scalarProj_of_decode_encode
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     HostOperation.runtimeOp, RuntimeOp.signature, decoded, projected,
     encodeResults_singleton_of_encodeValue encoded]
+
+theorem hostStep_box_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (scalarKind resultKind : AbiKind)
+    (type : Lean.Expr) (physicalArgs : List Wasm.Value) (sourceScalar : Value)
+    (sourceRuntime : RuntimeState) (sourceValue : Value)
+    {after : HandleTable} {handle : Handle}
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[scalarKind] physicalArgs =
+      .ok #[sourceScalar])
+    (boxed : Fir.LeanIR.Impure.box initial.host.runtime type sourceScalar =
+      .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    hostStep (.box scalarKind resultKind) initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, typeEq, decoded, boxed,
+    encodeResults_handle_singleton_of_encode usesHandle encoded]
+
+theorem hostStep_unbox_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (scalarKind : AbiKind) (type : Lean.Expr)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceValue : Value)
+    (physical : Wasm.Value)
+    (typeEq : runtimeScalarType? scalarKind = some type)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (unboxed : Fir.LeanIR.Impure.unbox initial.host.runtime type sourceObject =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles scalarKind sourceValue =
+      .ok (initial.host.handles, physical)) :
+    hostStep (.unbox scalarKind) initial physicalArgs =
+      .Return [physical] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, typeEq, decoded, unboxed,
+    encodeResults_singleton_of_encodeValue encoded]
+
+theorem hostStep_isShared_of_decode
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (shared : UInt8)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (evaluated : Fir.LeanIR.Impure.isShared initial.host.runtime sourceObject =
+      .ok (.scalar (.uint8 shared))) :
+    hostStep .isShared initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat shared.toNat)] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, evaluated,
+    encodeResults_singleton_of_encodeValue (by rfl :
+      encodeValue initial.host.handles .uint8 (.scalar (.uint8 shared)) =
+        .ok (initial.host.handles, .i32 (UInt32.ofNat shared.toNat)))]
 
 theorem hostStep_getTag_of_decode
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)

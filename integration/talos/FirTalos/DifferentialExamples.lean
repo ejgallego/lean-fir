@@ -125,6 +125,58 @@ def abiScalarProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
 #guard relatedSourceFault? (runDifferential abiScalarProjectionFaultProgram `main #[])
   (.scalarFieldMissing 1 0)
 
+def abiBoxRoundtripProgram (value : UInt64) : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl s u64Type (.lit (.uint64 value))) <|
+      .let (letDecl b tobjectType (.box u64Type s)) <|
+      .let (letDecl r u64Type (.unbox b)) <|
+      .return r)] }
+
+#guard supportedProgram (abiBoxRoundtripProgram 44)
+
+#guard relatedReturn? (runDifferential (abiBoxRoundtripProgram 44) `main #[])
+  (.scalar (.uint64 44))
+
+def differentialMaxUInt64 : UInt64 := 18446744073709551615
+
+#guard relatedReturn?
+  (runDifferential (abiBoxRoundtripProgram differentialMaxUInt64) `main #[])
+  (.scalar (.uint64 differentialMaxUInt64))
+
+def abiHeapBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl s u64Type (.lit (.uint64 differentialMaxUInt64))) <|
+      .let (letDecl b tobjectType (.box u64Type s)) <|
+      .return b)] }
+
+#guard supportedProgram abiHeapBoxProgram
+
+#guard (runDifferential abiHeapBoxProgram `main #[]).isRelated
+
+#guard relatedReachableHeapSize? (runDifferential abiHeapBoxProgram `main #[]) 1
+
+def abiIsSharedTaggedProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u8Type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 9))) <|
+      .let (letDecl r u8Type (.isShared x)) <|
+      .return r)] }
+
+#guard supportedProgram abiIsSharedTaggedProgram
+
+#guard relatedReturn? (runDifferential abiIsSharedTaggedProgram `main #[])
+  (.scalar (.uint8 1))
+
+def abiIsSharedUniqueProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u8Type (.code <|
+      .let (letDecl p objType (.ctor projectionInfo #[])) <|
+      .let (letDecl r u8Type (.isShared p)) <|
+      .return r)] }
+
+#guard supportedProgram abiIsSharedUniqueProgram
+
+#guard relatedReturn? (runDifferential abiIsSharedUniqueProgram `main #[])
+  (.scalar (.uint8 0))
+
 /-- The original fixture is intentionally rejected under the existing
 `FIR-BUG-wasm-none-object-nat-fixture` card after its source run is recorded. -/
 def malformedNatFixtureIsExplained : Bool :=

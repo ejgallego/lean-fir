@@ -535,6 +535,23 @@ compiler-shaped scalar differential fixture will arrive with W5.3, because
 constructor allocation reserves scalar storage but `sset` initializes its
 typed value.
 
+W5.2 is complete. Boxing reconstructs the exact canonical impure integer or
+`USize` type from the ABI kind, so large heap boxes retain the same observable
+type metadata as FIR. Boxed results use `tobject` in the proved fragment
+because the runtime representation depends on the payload; unboxing and
+`isShared` return direct scalar lanes without changing the handle table.
+Host-step, instruction-stack, local-binding, and `LetStepSimulates` rules cover
+all three operations, including allocation-side handle extension for boxing.
+
+The shared `isShared` contract was repaired first in its own integration
+commit: Lean 4.32's `ExpandResetReuse` emits `UInt8`, and FIR now agrees while
+scalar case discriminants continue through `getTag`. This resolves
+`FIR-BUG-wasm-none-isShared-abi-drift` and corrects the historical account in
+`FIR-BUG-impure-isShared-bool-representation`. Differential regressions cover
+small tagged and maximum-width heap boxing, round-trip unboxing, reachable
+boxed heap evidence, and both tagged/shared and unique-heap `isShared`
+results. Floating-point boxing remains gated by the shared runtime gap.
+
 ### A0: emit the first host-backed Wasm artifact
 
 A0 is an independently assignable artifact lane. It can run in parallel with

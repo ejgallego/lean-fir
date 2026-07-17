@@ -84,6 +84,27 @@ def scalarProjectionHostsWork : Bool :=
 
 #guard scalarProjectionHostsWork
 
+def runtimeMaxUInt64 : UInt64 := 18446744073709551615
+
+def boxingHostsWork : Bool :=
+  match hostStep (.box .uint64 .tobject) emptyHostStore [.i64 runtimeMaxUInt64] with
+  | .Return [.i32 boxedHandle] store =>
+      match store.host.handles.decodeAs .tobject boxedHandle with
+      | .ok boxedValue =>
+          match hostStep (.unbox .uint64) store [.i32 boxedHandle] with
+          | .Return [.i64 value] store =>
+              value == runtimeMaxUInt64 && store.host.trap?.isNone &&
+                match hostStep .isShared store [.i32 boxedHandle] with
+                | .Return [.i32 shared] store =>
+                    shared == 0 && store.host.trap?.isNone &&
+                      boxedValue == .object (.heap 0)
+                | _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+#guard boxingHostsWork
+
 def constructorTagHostWorks : Bool :=
   let allocate := HostOperation.allocCtor
     Fir.LeanIR.InterpreterExamples.trueInfo #[] .tagged

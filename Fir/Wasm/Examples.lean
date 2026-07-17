@@ -218,6 +218,29 @@ def unsupportedFloatProjectionProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard !supportedProgram unsupportedFloatProjectionProgram
 
+def boxed : FVarId := ⟨`boxed⟩
+
+def supportedBoxRoundtripProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedBoxRoundtrip #[] u64Type (.code <|
+      .let (letDecl s u64Type (.lit (.uint64 44))) <|
+      .let (letDecl boxed LCNF.ImpureType.tobject (.box u64Type s)) <|
+      .let (letDecl r u64Type (.unbox boxed)) <|
+      .return r)] }
+
+#guard supportedProgram supportedBoxRoundtripProgram
+
+def supportedIsSharedProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedIsShared #[param x LCNF.ImpureType.tobject] u8Type (.code <|
+      .let (letDecl r u8Type (.isShared x)) (.return r))] }
+
+#guard supportedProgram supportedIsSharedProgram
+
+def malformedPreciseBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `malformedPreciseBox #[param s u64Type] objType (.code <|
+      .let (letDecl boxed objType (.box u64Type s)) (.return boxed))] }
+
+#guard !supportedProgram malformedPreciseBoxProgram
+
 def unsupportedTypeProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `unsupported #[param x unknownAbiType] unknownAbiType
     (.code (.return x))] }
