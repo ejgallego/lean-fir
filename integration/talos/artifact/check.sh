@@ -18,6 +18,7 @@ source_artifacts=(
   source-uint16-id
   source-uint32-id
   source-uint64-id
+  source-string-input
 )
 for source in "${source_artifacts[@]}"; do
   test -s "_build/$source.wasm"
@@ -34,40 +35,38 @@ for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm.lcnf" "_build/$source.wasm.lcnf"
 done
 node --input-type=module -e '
+  import assert from "node:assert/strict";
   import fs from "node:fs";
+  import { SemanticHost, manifestValue } from "./run-artifacts.mjs";
   const cases = [
-    [process.argv[1], "uint64", 64, 0, 0xffffffffffffffffn],
-    [process.argv[2], "usize", 64, 1, 42n],
-    [process.argv[3], "uint8", 8, 1, 0xffn],
-    [process.argv[4], "uint16", 16, 1, 0xffffn],
-    [process.argv[5], "uint32", 32, 1, 0xffffffffn],
-    [process.argv[6], "uint64", 64, 1, 0xffffffffffffffffn],
+    [process.argv[1], "uint64", [], 0xffffffffffffffffn],
+    [process.argv[2], "usize", ["usize"], 42n],
+    [process.argv[3], "uint8", ["uint8"], 0xffn],
+    [process.argv[4], "uint16", ["uint16"], 0xffffn],
+    [process.argv[5], "uint32", ["uint32"], 0xffffffffn],
+    [process.argv[6], "uint64", ["uint64"], 0xffffffffffffffffn],
+    [process.argv[7], "uint64", ["object"], 0xffffffffffffffffn, "hello α_world_β"],
   ];
-  function physicalArgument(kind, argument) {
-    if (kind === "usize" && argument.kind === "usize") {
-      return BigInt(argument.value);
-    }
-    if (["uint8", "uint16", "uint32", "uint64"].includes(kind) &&
-        argument.kind === "scalar" && argument.scalarKind === kind) {
-      const value = BigInt(argument.value);
-      return kind === "uint64" ? value : Number(value);
-    }
-    throw new Error(`unsupported source argument ${kind}/${argument.kind}`);
-  }
-  for (const [path, kind, width, arity, expected] of cases) {
+  for (const [path, kind, params, expected, initialString] of cases) {
     const bytes = fs.readFileSync(path);
     const manifest = JSON.parse(fs.readFileSync(path + ".json", "utf8"));
-    if (!WebAssembly.validate(bytes)) process.exit(1);
-    if (manifest.result !== kind || manifest.params.length !== arity ||
-        manifest.arguments.length !== arity ||
-        (arity === 1 && manifest.params[0] !== kind)) process.exit(1);
+    assert.ok(WebAssembly.validate(bytes), `${path} failed WebAssembly validation`);
+    assert.equal(manifest.result, kind);
+    assert.deepStrictEqual(manifest.params, params);
+    assert.equal(manifest.arguments.length, params.length);
+    const host = new SemanticHost(manifest.initialRuntime);
+    if (initialString !== undefined) {
+      const argument = manifestValue(manifest.arguments[0]);
+      assert.equal(argument.kind, "heap");
+      assert.deepStrictEqual(host.liveCell(argument.location).object,
+        { kind: "string", value: initialString });
+    }
     const args = manifest.params.map((kind, index) =>
-      physicalArgument(kind, manifest.arguments[index]));
-    const { instance } = await WebAssembly.instantiate(bytes, {});
+      host.encode(kind, manifestValue(manifest.arguments[index])));
+    const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     const result = instance.exports[manifest.entry](...args);
-    const unsigned = BigInt.asUintN(width,
-      typeof result === "bigint" ? result : BigInt(result));
-    if (unsigned !== expected) process.exit(1);
+    const decoded = host.decode(manifest.result, result);
+    assert.equal(decoded.value, expected);
     console.log(`PASS source ${manifest.entry}`);
   }
 ' \
@@ -76,7 +75,8 @@ node --input-type=module -e '
   _build/source-uint8-id.wasm \
   _build/source-uint16-id.wasm \
   _build/source-uint32-id.wasm \
-  _build/source-uint64-id.wasm
+  _build/source-uint64-id.wasm \
+  _build/source-string-input.wasm
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"

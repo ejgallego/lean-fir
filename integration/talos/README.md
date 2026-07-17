@@ -60,3 +60,7 @@ The A0 corpus compares successful returns, entry arguments, reachable heaps,
 and structured runtime faults against live W3 observations. Semantic host
 faults use the same constructor-and-fields JSON shape as the Lean oracle;
 runner assertions and target-integrity failures remain fatal harness errors.
+Compiler-produced source artifacts may also carry an `initialRuntime` manifest
+object. The V8 host reconstructs its FIR heap before turning semantic object
+arguments into opaque `i32` handles; this currently covers a real string input,
+while string identity awaits the W4 ownership-operation gate.

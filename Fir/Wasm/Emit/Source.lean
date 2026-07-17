@@ -53,6 +53,24 @@ def ModuleArtifact.withInvocation (artifact : ModuleArtifact) (artifactName : St
     manifest }
 
 /--
+Attach one checked semantic invocation whose arguments may refer to an explicit
+initial FIR runtime. The runtime is invocation data and does not affect the
+captured declaration, lowered module, or encoded Wasm bytes.
+-/
+def ModuleArtifact.withRuntimeInvocation (artifact : ModuleArtifact) (artifactName : String)
+    (sourceEntry entry : Name) (runtime : RuntimeState) (args : Array Value) :
+    Except CompileError Artifact := do
+  let manifest ← Manifest.artifactJsonWithRuntime artifactName sourceEntry entry artifact.module
+      runtime args
+    |>.mapError .manifest
+  return {
+    source := artifact.source
+    module := artifact.module
+    bytes := artifact.bytes
+    formattedLcnf := artifact.formattedLcnf
+    manifest }
+
+/--
 Compile a Lean declaration and attach one checked semantic invocation. The
 arguments affect only the manifest, never capture, lowering, or Wasm bytes.
 -/
@@ -61,6 +79,13 @@ def compile (entry : Name) (args : Array Value) (dependencies : Array Name := #[
   let result ← compileModule entry dependencies
   return result.bind fun artifact =>
     artifact.withInvocation entry.toString entry entry args
+
+/-- Compile a Lean declaration and attach an invocation with an explicit initial runtime. -/
+def compileWithRuntime (entry : Name) (runtime : RuntimeState) (args : Array Value)
+    (dependencies : Array Name := #[]) : CoreM (Except CompileError Artifact) := do
+  let result ← compileModule entry dependencies
+  return result.bind fun artifact =>
+    artifact.withRuntimeInvocation entry.toString entry entry runtime args
 
 /-- Compile a zero-argument Lean declaration and record its closed invocation. -/
 def compileClosed (entry : Name) (dependencies : Array Name := #[]) :

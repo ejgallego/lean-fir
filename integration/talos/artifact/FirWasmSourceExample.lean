@@ -11,6 +11,8 @@ def idUInt32 (value : UInt32) : UInt32 := value
 
 def idUInt64 (value : UInt64) : UInt64 := value
 
+def acceptString (_value : String) : UInt64 := 18446744073709551615
+
 end Fir.Wasm.Emit.SourceFixture
 
 #fir_wasm_emit Fir.Validation.Corpus.Source.maxUInt64 to "_build/source-uint64.wasm"
@@ -29,3 +31,6 @@ end Fir.Wasm.Emit.SourceFixture
 
 #fir_wasm_emit Fir.Wasm.Emit.SourceFixture.idUInt64 with [uint64(18446744073709551615)]
   to "_build/source-uint64-id.wasm"
+
+#fir_wasm_emit Fir.Wasm.Emit.SourceFixture.acceptString with [string("hello α_world_β")]
+  to "_build/source-string-input.wasm"

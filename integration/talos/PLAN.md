@@ -84,6 +84,9 @@ the already checked semantic module into a standards-consumable host-backed
 Wasm artifact and runs the W3 corpus in an external engine. A0 does not define
 the production linear-memory ABI and must consume, rather than modify, the
 frozen semantic ABI and supported-fragment boundary.
+It now emits closed and parameterized compiler-produced scalar sources and
+heap-backed source invocations with an explicit initial FIR runtime. The
+Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 
 ## Cross-lane coordination board
 
@@ -93,14 +96,18 @@ frozen semantic ABI and supported-fragment boundary.
 | 2026-07-17 | A0 source emission | W4 and integration owners | landed | `4841a09` adds `#fir_wasm_emit`, which captures an actual Lean 4.32 final-impure declaration and deterministically emits `.wasm`, `.wasm.json`, and `.wasm.lcnf`. The external-engine smoke test currently uses a closed `UInt64` declaration; the rejected compiler-produced `Nat` declaration remains an exact regression and is not normalized or silently accepted. |
 | 2026-07-17 | A0 parameterized source emission | W4 and integration owners | landed | Source capture/lowering now produces a reusable module artifact before a checked semantic invocation is attached. `#fir_wasm_emit` accepts range-checked integer and tagged argument syntax; the compiler-produced `idUSize : USize → USize` fixture carries its `usize` schema and argument through the manifest and returns `42` in V8. No shared ABI or supported-fragment contract changed. |
 | 2026-07-17 | A0 scalar source arguments | W4 and integration owners | ready | Compiler-produced identity declarations for `UInt8`, `UInt16`, `UInt32`, and `UInt64` now execute at maximum-width inputs in V8. Arguments come from the checked manifest, and target `i32` results are normalized to their declared unsigned source widths. No shared contract changed. |
+| 2026-07-17 | A0 heap-backed source arguments | W4 and integration owners | ready | Source manifests can now carry a checked `initialRuntime` heap, and `#fir_wasm_emit` accepts string literals by allocating them in that runtime. V8 reconstructs the heap and passes an opaque handle to a compiler-produced `String → UInt64` fixture. The full `idString : String → String` capture is intentionally deferred: Lean 4.32 emits `inc[ref] value; return value`, and ownership operations remain in the W4-owned supported-fragment lane. No shared contract changed. |
 
 No shared semantic contract was changed by these A0 slices. Once W4 repairs
 and proves the natural-literal invariant, A0 should replace the rejection
 regression with a successful source-to-engine test and close the bug card.
 A0 has now separated module generation from fixture invocation and covers all
 unsigned integer and `USize` parameter kinds with explicit ABI schemas. Its
-next independent slice is to design the explicit initial-runtime format
-required by heap-backed source arguments.
+initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
+vocabulary as the W3 observation oracle. Its next heap-returning source slice
+depends on W4 admitting and proving the compiler-produced ownership operation;
+independent A0 work can next exercise structured constructor arguments or
+package source invocation as a corpus-driven command.
 
 ## Architecture decisions
 

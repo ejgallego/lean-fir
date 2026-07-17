@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
@@ -13,7 +14,7 @@ class SemanticFault extends Error {
   }
 }
 
-function manifestValue(argument) {
+export function manifestValue(argument) {
   assert.ok(argument && typeof argument === "object", "manifest argument must be an object");
   switch (argument.kind) {
     case "tagged":
@@ -30,16 +31,82 @@ function manifestValue(argument) {
       };
     case "erased":
       return { kind: "erased" };
+    case "heap":
+      assert.ok(Number.isSafeInteger(argument.location) && argument.location >= 0,
+        "heap argument location must be a nonnegative safe integer");
+      return { kind: "heap", location: argument.location };
     case "reuseToken":
-      assert.equal(argument.location, null, "heap-backed reuse tokens require an initial runtime");
-      return { kind: "reuseToken", location: null };
+      assert.ok(argument.location === null ||
+        (Number.isSafeInteger(argument.location) && argument.location >= 0),
+        "reuse-token location must be null or a nonnegative safe integer");
+      return { kind: "reuseToken", location: argument.location };
     default:
       throw new Error(`unsupported manifest argument kind: ${argument.kind}`);
   }
 }
 
-class SemanticHost {
-  constructor() {
+function runtimeScalarValue(value) {
+  assert.ok(value && typeof value === "object", "runtime scalar value must be an object");
+  assert.ok(SCALAR_KINDS.has(value.kind), `unsupported runtime scalar kind: ${value.kind}`);
+  return { scalarKind: value.kind, value: BigInt(value.value) };
+}
+
+function runtimeValue(value) {
+  assert.ok(value && typeof value === "object", "runtime value must be an object");
+  switch (value.kind) {
+    case "object":
+      assert.ok(value.reference && typeof value.reference === "object",
+        "runtime object reference must be an object");
+      if (value.reference.kind === "tagged") {
+        return { kind: "tagged", payload: BigInt(value.reference.payload) };
+      }
+      if (value.reference.kind === "heap") {
+        assert.ok(Number.isSafeInteger(value.reference.location) && value.reference.location >= 0,
+          "runtime heap location must be a nonnegative safe integer");
+        return { kind: "heap", location: value.reference.location };
+      }
+      throw new Error(`unsupported runtime object reference: ${value.reference.kind}`);
+    case "usize":
+      return { kind: "usize", value: BigInt(value.value) };
+    case "scalar": {
+      const scalar = runtimeScalarValue(value.scalar);
+      return { kind: "scalar", ...scalar };
+    }
+    case "erased":
+      return { kind: "erased" };
+    case "reuseToken":
+      return { kind: "reuseToken", location: value.location };
+    default:
+      throw new Error(`unsupported initial-runtime value: ${value.kind}`);
+  }
+}
+
+function runtimeHeapObject(object) {
+  assert.ok(object && typeof object === "object", "runtime heap object must be an object");
+  switch (object.kind) {
+    case "ctor":
+      assert.ok(Array.isArray(object.objectFields), "constructor objectFields must be an array");
+      assert.ok(Array.isArray(object.usizeFields), "constructor usizeFields must be an array");
+      assert.ok(Array.isArray(object.scalarFields), "constructor scalarFields must be an array");
+      return {
+        kind: "ctor",
+        tag: BigInt(object.tag),
+        objectFields: object.objectFields.map(runtimeValue),
+        usizeFields: object.usizeFields.map(BigInt),
+        scalarFields: object.scalarFields,
+      };
+    case "string":
+      assert.equal(typeof object.value, "string", "runtime string value must be a string");
+      return { kind: "string", value: object.value };
+    case "natural":
+      return { kind: "natural", value: BigInt(object.value) };
+    default:
+      throw new Error(`unsupported initial-runtime heap object: ${object.kind}`);
+  }
+}
+
+export class SemanticHost {
+  constructor(initialRuntime = undefined) {
     this.nextHandle = 1;
     this.handles = new Map();
     this.valueHandles = new Map();
@@ -47,6 +114,38 @@ class SemanticHost {
     this.heap = [];
     this.world = 0;
     this.trace = [];
+    if (initialRuntime !== undefined) {
+      this.loadInitialRuntime(initialRuntime);
+    }
+  }
+
+  loadInitialRuntime(runtime) {
+    assert.ok(runtime && typeof runtime === "object", "initialRuntime must be an object");
+    assert.ok(Number.isSafeInteger(runtime.nextLocation) && runtime.nextLocation >= 0,
+      "initialRuntime.nextLocation must be a nonnegative safe integer");
+    assert.ok(Array.isArray(runtime.heap), "initialRuntime.heap must be an array");
+    const locations = new Set();
+    this.heap = runtime.heap.map((cell) => {
+      assert.ok(cell && typeof cell === "object", "runtime heap cell must be an object");
+      assert.ok(Number.isSafeInteger(cell.location) && cell.location >= 0,
+        "runtime heap location must be a nonnegative safe integer");
+      assert.ok(cell.location < runtime.nextLocation,
+        `runtime heap location ${cell.location} is not below nextLocation`);
+      assert.ok(!locations.has(cell.location), `duplicate runtime heap location ${cell.location}`);
+      locations.add(cell.location);
+      assert.ok(Number.isSafeInteger(cell.rc) && cell.rc >= 0,
+        "runtime reference count must be a nonnegative safe integer");
+      assert.equal(typeof cell.persistent, "boolean", "runtime persistent flag must be boolean");
+      assert.equal(typeof cell.live, "boolean", "runtime live flag must be boolean");
+      return {
+        location: cell.location,
+        rc: cell.rc,
+        persistent: cell.persistent,
+        live: cell.live,
+        object: runtimeHeapObject(cell.object),
+      };
+    });
+    this.nextLocation = runtime.nextLocation;
   }
 
   valueKey(value) {
@@ -380,7 +479,7 @@ class SemanticHost {
   }
 }
 
-async function runArtifact(manifestPath) {
+export async function runArtifact(manifestPath) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const expectedPath = join(dirname(manifestPath), `${manifest.fixture}.expected.json`);
   const expected = JSON.parse(await readFile(expectedPath, "utf8"));
@@ -388,7 +487,7 @@ async function runArtifact(manifestPath) {
   const bytes = await readFile(wasmPath);
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed standard WebAssembly validation`);
 
-  const host = new SemanticHost();
+  const host = new SemanticHost(manifest.initialRuntime);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -413,16 +512,21 @@ async function runArtifact(manifestPath) {
   console.log(`PASS ${manifest.fixture}`);
 }
 
-const artifactDirectory = process.argv[2];
-if (!artifactDirectory) {
-  console.error("usage: node run-artifacts.mjs <artifact-directory>");
-  process.exit(2);
+export async function runArtifactDirectory(artifactDirectory) {
+  const manifests = (await readdir(artifactDirectory))
+    .filter((name) => name.endsWith(".wasm.json"))
+    .sort();
+  assert.ok(manifests.length > 0, `no .wasm.json manifests found in ${artifactDirectory}`);
+  for (const manifest of manifests) {
+    await runArtifact(join(artifactDirectory, manifest));
+  }
 }
 
-const manifests = (await readdir(artifactDirectory))
-  .filter((name) => name.endsWith(".wasm.json"))
-  .sort();
-assert.ok(manifests.length > 0, `no .wasm.json manifests found in ${artifactDirectory}`);
-for (const manifest of manifests) {
-  await runArtifact(join(artifactDirectory, manifest));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const artifactDirectory = process.argv[2];
+  if (!artifactDirectory) {
+    console.error("usage: node run-artifacts.mjs <artifact-directory>");
+    process.exit(2);
+  }
+  await runArtifactDirectory(artifactDirectory);
 }
