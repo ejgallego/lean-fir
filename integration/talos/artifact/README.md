@@ -71,6 +71,12 @@ the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
 with range checks before compilation. Heap-backed initial arguments, external
 declarations, and recursive source programs remain explicit follow-up work.
 
+The lane-local source fixture executes compiler-produced identity declarations
+for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` at their boundary values.
+The Node runner derives every physical argument from the manifest and
+normalizes signed WebAssembly `i32` results back to the declared unsigned
+source width before comparison.
+
 Lean 4.32's compiler-produced small `Nat` literal currently exposes a shared
 supported-domain mismatch tracked by
 `FIR-BUG-wasm-none-compiler-nat-literal-kind`; the bridge rejects that program
