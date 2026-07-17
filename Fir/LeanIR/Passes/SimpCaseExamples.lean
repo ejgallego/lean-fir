@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
-import Fir.LeanIR.Passes.AlphaEqvTrusted
+import Fir.LeanIR.Passes.SimpCaseCorrectness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
 
@@ -12,6 +12,7 @@ open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseCorrectness
 
 def selectedBranch : LCNF.Code .impure :=
   .return x
@@ -39,16 +40,22 @@ def alphaRight : LCNF.Code .impure :=
 def thirdInfo : LCNF.CtorInfo :=
   { name := `Third, cidx := 2, size := 0, usize := 0, ssize := 0 }
 
-def alphaFoldCode : LCNF.Code .impure :=
-  .cases (.mk `Three objType c #[
+def alphaFoldBeforeCases : LCNF.Cases .impure :=
+  .mk `Three objType c #[
     .ctorAlt falseInfo alphaLeft,
     .ctorAlt trueInfo alphaRight,
-    .ctorAlt thirdInfo selectedBranch])
+    .ctorAlt thirdInfo selectedBranch]
+
+def alphaFoldAfterCases : LCNF.Cases .impure :=
+  .mk `Three objType c #[
+    .ctorAlt thirdInfo selectedBranch,
+    .default alphaLeft]
+
+def alphaFoldCode : LCNF.Code .impure :=
+  .cases alphaFoldBeforeCases
 
 def alphaFoldExpected : LCNF.Code .impure :=
-  .cases (.mk `Three objType c #[
-    .ctorAlt thirdInfo selectedBranch,
-    .default alphaLeft])
+  .cases alphaFoldAfterCases
 
 /-!
 `Code.alphaEqv` relies on the compiler invariant that every local `FVarId` is
@@ -145,6 +152,36 @@ theorem alphaLocalCodeEquivalent :
   · exact .nil
   · intro name decl found
     simp [alphaProofState, Program.findDecl?] at found
+
+def alphaFoldProofState : MachineState := {
+  program := { decls := #[] }
+  control := .code alphaFoldCode
+  env := bind [] c (.object (.tagged 1))
+}
+
+/-- The actual default-folding fixture is semantically correct at the `True`
+constructor tag, where the pass replaces `alphaRight` by `alphaLeft`. -/
+theorem alphaFoldTrueCodeEquivalent :
+    CodeEquivalentAt externals alphaFoldProofState
+      alphaFoldCode alphaFoldExpected := by
+  intro observation
+  apply fold_to_default_correct_of_local_alpha
+    (scope := []) (discr := .object (.tagged 1)) (tag := 1)
+    (beforeBranch := alphaRight) (representative := alphaLeft)
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · exact alphaCodeSideConditionsReverse
+  · exact alphaCodeSideConditions
+  · exact ⟨2, by native_decide⟩
+  · exact ⟨2, by native_decide⟩
+  · intro fvarId member
+    simp at member
+  · exact .nil
+  · intro name decl found
+    simp [alphaFoldProofState, Program.findDecl?] at found
 
 def proofCaseTable : LCNF.Cases .impure :=
   .mk ``Bool objType c #[]

@@ -520,6 +520,25 @@ fixture now closes all the way to `CodeEquivalentAt`. The compiler-facing
 checks through the existing audited correspondence axiom. It adds no trusted
 assumption and deliberately does not assume checker symmetry.
 
+`SimpCaseCorrectness` now specializes that boundary to the pass's
+alpha-equivalent default folding. The axiom-free theorem consumes two local
+checker acceptances; the compiler-facing theorem consumes both Lean Boolean
+checks and reuses the sole audited correspondence bridge. A regression proves
+the real `foldAlphaEquivalent` fixture observationally equivalent at the
+`True` constructor tag, exactly where `alphaRight` is replaced by
+`alphaLeft`. The existing command regression still executes Lean's actual
+pass and confirms the resulting syntax.
+
+Attempting to replace that command bridge with a kernel theorem exposed a
+second upstream proof-interface gap. Lean 4.32 keeps `filterUnreachable`,
+`addDefaultAlt`, `simplifyCases`, and recursive `Code.simpCase` module-private;
+downstream code cannot even name the transparent first kernel, while the
+recursive traversal is additionally an opaque `partial def`.
+`FIR-BUG-impure-simpCase-private-proof-interface` records the failed minimal
+statement and the required public graph/equation interface. FIR retains the
+proved specification plus actual-pass regression without duplicating the
+effectful compiler or adding another axiom.
+
 The remaining bounded work is:
 
 1. refactor FIR's opaque hygiene/binder traversals into transparent total
@@ -531,8 +550,9 @@ The remaining bounded work is:
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
-   to the local rewrite theorems, creating a bug card for every mismatch;
+4. once Lean exports a pass graph/equation interface, connect
+   `filterUnreachable`, `addDefaultAlt`, `simplifyCases`, and recursive
+   `Code.simpCase` directly to the local rewrite theorems;
 5. lift the resulting theorem through declarations and program entry
    evaluation;
 6. expand the compiler-generated conformance corpus around the whole pass;
