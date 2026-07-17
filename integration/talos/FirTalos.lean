@@ -15,6 +15,7 @@ import FirTalos.Correctness.Composition
 import FirTalos.Correctness.Semantics
 import FirTalos.Correctness.Function
 import FirTalos.Correctness.SupportedExport
+import FirTalos.Correctness.Program
 import FirTalos.Correctness.FunctionExamples
 import FirTalos.Correctness.FunctionCtorProjectionExample
 import FirTalos.Correctness.FunctionCaseExample

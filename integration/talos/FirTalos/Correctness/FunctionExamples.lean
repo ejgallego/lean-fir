@@ -1,4 +1,4 @@
-import FirTalos.Correctness.SupportedExport
+import FirTalos.Correctness.Program
 import Fir.Wasm.Examples
 
 namespace FirTalos.Correctness
@@ -238,50 +238,82 @@ theorem abiLiteralLocalSet :
       some abiLiteralUpdatedLocals := by
   native_decide
 
-/-- The local W4 proof for the real W3 literal body and concrete initial state. -/
+theorem abiLiteralCompileDecl :
+    Fir.Wasm.compileLetValue abiLiteralContext abiLiteralDecl =
+      .ok [.call (.runtime (.literal (.nat 42) .tobject))] := by
+  have tobjectNotObject :
+      (LCNF.ImpureType.tobject == LCNF.ImpureType.object) = false := by
+    native_decide
+  have tobjectNotTagged :
+      (LCNF.ImpureType.tobject == LCNF.ImpureType.tagged) = false := by
+    native_decide
+  have tobjectSelf :
+      (LCNF.ImpureType.tobject == LCNF.ImpureType.tobject) = true := by
+    native_decide
+  simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind,
+    Fir.Wasm.checkedAbiKind, Fir.Wasm.abiKind, Fir.Wasm.abiKind?,
+    abiLiteralDecl, letDecl, tobjectType,
+    AbiKind.acceptsLiteral, Fir.Wasm.compileLiteral,
+    tobjectNotObject, tobjectNotTagged, tobjectSelf]
+  rfl
+
+/-- Program-level W4 simulation certificate for the generated literal body. -/
+theorem abiLiteralMain_simulation :
+    CodeSimulation abiLiteralContext abiLiteralSourceModule
+      abiLiteralSourceFunction [] abiLiteralAdaptedModule.wasmModule
+      abiLiteralResolvedHosts.env {} [] abiLiteralCode
+      abiLiteralMainFunction.body
+      (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost))
+      (abiLiteralMainFunction.toLocals []) {}
+      (.object (.tagged (UInt64.ofNat 42))) .tobject := by
+  have valueAdapted :
+      instructions abiLiteralSourceModule abiLiteralSourceFunction []
+          [.call (.runtime (.literal (.nat 42) .tobject))] =
+        .ok [.call 0] := by
+    have callFound :
+        callIndex? abiLiteralSourceModule
+          (.runtime (.literal (.nat 42) .tobject)) = some 0 := by
+      native_decide
+    simp [instructions, instruction, callFound]
+    rfl
+  have step := letStepSimulates_naturalLiteral
+    (context := abiLiteralContext)
+    (sourceFunction := abiLiteralSourceFunction)
+    (module := abiLiteralAdaptedModule.wasmModule)
+    (hostEnv := abiLiteralResolvedHosts.env)
+    (spec := abiLiteralResolvedHosts.spec) (id := 0) (imp := abiLiteralImport)
+    (decl := abiLiteralDecl) (sourceEnv := [])
+    (initial := abiLiteralAdaptedModule.wasmModule.initialStore)
+    (locals := abiLiteralMainFunction.toLocals [])
+    (updated := abiLiteralUpdatedLocals) (resultIndex := 0) (value := 42)
+    (after := abiLiteralAfterHandles) (handle := 1)
+    rfl abiLiteralInitialState_related (by native_decide) (by native_decide)
+    abiLiteralImport_found abiLiteralHostsSatisfy (by native_decide)
+    (by simp [ResolvedHosts.spec, abiLiteralResolvedHosts_operations])
+    (by native_decide) (by native_decide)
+    (by simpa [literal, maxTaggedPayload] using abiLiteralEncoded)
+    abiLiteralLocalSet
+  rw [abiLiteralMain_body]
+  apply CodeSimulation.letValue abiLiteralCompileDecl valueAdapted
+    (by native_decide) step
+  apply CodeSimulation.ret
+  · simp [Fir.Wasm.getLocal, Fir.Wasm.findLocalKind?, abiLiteralContext]
+  · native_decide
+  · native_decide
+  · exact lookup_bind_self [] abiLiteralDecl.fvarId
+      (.object (.tagged (UInt64.ofNat 42)))
+  · simpa [abiLiteralDecl, letDecl, literal, maxTaggedPayload,
+      successfulHostStore] using step.2.2.1
+
+/-- The old local judgment is now a corollary of the program-level induction. -/
 theorem abiLiteralMain_codeWP :
     CodeWP abiLiteralContext abiLiteralSourceModule abiLiteralSourceFunction []
       abiLiteralAdaptedModule.wasmModule abiLiteralResolvedHosts.env
       {} [] abiLiteralCode abiLiteralMainFunction.body
       (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost))
       (abiLiteralMainFunction.toLocals []) []
-      (ReturnPost {} (.object (.tagged (UInt64.ofNat 42))) .tobject []) := by
-  rw [abiLiteralMain_body]
-  apply codeWP_naturalLiteral_return
-    (spec := abiLiteralResolvedHosts.spec) (id := 0) (imp := abiLiteralImport)
-    (decl := abiLiteralDecl) (resultIndex := 0) (value := 42)
-    (after := abiLiteralAfterHandles) (handle := 1)
-    (updated := abiLiteralUpdatedLocals)
-  · rfl
-  · have tobjectNotObject :
-        (LCNF.ImpureType.tobject == LCNF.ImpureType.object) = false := by
-      native_decide
-    have tobjectNotTagged :
-        (LCNF.ImpureType.tobject == LCNF.ImpureType.tagged) = false := by
-      native_decide
-    have tobjectSelf :
-        (LCNF.ImpureType.tobject == LCNF.ImpureType.tobject) = true := by
-      native_decide
-    simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind,
-      Fir.Wasm.checkedAbiKind, Fir.Wasm.abiKind, Fir.Wasm.abiKind?,
-      abiLiteralDecl, letDecl, tobjectType,
-      AbiKind.acceptsLiteral, Fir.Wasm.compileLiteral,
-      tobjectNotObject, tobjectNotTagged, tobjectSelf]
-    rfl
-  · simp [Fir.Wasm.getLocal, Fir.Wasm.findLocalKind?, abiLiteralContext,
-      abiLiteralDecl, letDecl]
-  · native_decide
-  · native_decide
-  · native_decide
-  · exact abiLiteralInitialState_related
-  · exact abiLiteralImport_found
-  · exact abiLiteralHostsSatisfy
-  · native_decide
-  · simp [ResolvedHosts.spec, abiLiteralResolvedHosts_operations]
-  · native_decide
-  · native_decide
-  · simpa [literal, maxTaggedPayload] using abiLiteralEncoded
-  · exact abiLiteralLocalSet
+      (ReturnPost {} (.object (.tagged (UInt64.ofNat 42))) .tobject []) :=
+  abiLiteralMain_simulation.toCodeWP
 
 /-- The concrete W3 result observation is accepted by the comparison policy. -/
 theorem abiLiteralObservation_related :
@@ -326,6 +358,14 @@ theorem abiLiteralMain_export_correct :
       (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost)) []
       (RelatedPost #[.tobject]
         (ReturnedObservation {} (.object (.tagged (UInt64.ofNat 42))))) :=
-  abiLiteralMain_export_correct_of_codeWP abiLiteralMain_codeWP
+  (abiLiteralSupportedExport.correct_of_simulation
+    abiLiteralObservation_related abiLiteralMain_simulation rfl).2
+
+/-- The same generic proof certifies successful source evaluation. -/
+theorem abiLiteralMain_source_evaluates :
+    CodeEvaluates abiLiteralContext {} [] abiLiteralCode {}
+      (.object (.tagged (UInt64.ofNat 42))) :=
+  (abiLiteralSupportedExport.correct_of_simulation
+    abiLiteralObservation_related abiLiteralMain_simulation rfl).1
 
 end FirTalos.Correctness
