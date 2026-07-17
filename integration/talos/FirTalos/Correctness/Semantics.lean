@@ -130,6 +130,33 @@ def SourceExternalLetResult (context : Fir.Wasm.Context)
       env := bind sourceEnv decl.fvarId sourceValue
       runtime := nextRuntime }
 
+/-- The two executable source paths for a zero-argument declaration. A cache
+hit stages and binds the cached value in three steps; a miss additionally
+consumes the interpreter's cache frame after evaluating the declaration. -/
+inductive LazyCachePath where
+  | hit
+  | miss
+  deriving Inhabited, BEq
+
+def LazyCachePath.sourceSteps : LazyCachePath → Nat
+  | .hit => 3
+  | .miss => 4
+
+def SourceLazyLetResult (path : LazyCachePath) (context : Fir.Wasm.Context)
+    (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) : Prop :=
+  ExecSteps externals path.sourceSteps {
+      program := context.program
+      control := .code (.let decl continuation)
+      env := sourceEnv
+      runtime := sourceRuntime } {
+      program := context.program
+      control := .code continuation
+      env := bind sourceEnv decl.fvarId sourceValue
+      runtime := nextRuntime }
+
 /-- One successful non-binding source instruction step. Quantifying over the
 external implementation records that admitted mutation and ownership nodes are
 internal runtime effects, not external calls. -/
@@ -206,6 +233,120 @@ def ExternalLetStepSimulates (context : Fir.Wasm.Context)
       Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
       Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
         targetStore { targetLocals with values := tail } hostEnv
+
+/-- Semantic boundary for lazy zero-argument calls. It records whether the
+source took the three-step cache hit or four-step cache miss path while using
+one continuation-polymorphic target transformer for the generated globals and
+conditional miss body. -/
+def LazyLetStepSimulates (path : LazyCachePath) (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store RuntimeHost)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat) : Prop :=
+  SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion RuntimeHost)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+/-- Proof obligation for the miss-only body between the flag test and cached
+value load. Runtime/external call rules and atomic global writes discharge this
+obligation without reopening the surrounding conditional. -/
+def LazyMissBodySimulates
+    (module : Wasm.Module) (hostEnv : Wasm.HostEnv RuntimeHost)
+    (missBody : Wasm.Program) (valueIndex resultIndex : Nat)
+    (targetStore nextStore : Wasm.Store RuntimeHost)
+    (targetLocals nextLocals : Wasm.Locals) : Prop :=
+  ∀ (rest : Wasm.Program) (Q : Wasm.Assertion RuntimeHost)
+      (tail : List Wasm.Value),
+    Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+    Wasm.wp module missBody
+      (fun continuation => match continuation with
+        | .Fallthrough bodyStore bodyLocals =>
+            Wasm.wp module
+              (.globalGet valueIndex :: .localSet resultIndex :: rest)
+              Q bodyStore { bodyLocals with values := tail } hostEnv
+        | .Break 0 bodyStore bodyLocals =>
+            Wasm.wp module
+              (.globalGet valueIndex :: .localSet resultIndex :: rest)
+              Q bodyStore { bodyLocals with values := tail } hostEnv
+        | .Break (level + 1) bodyStore bodyLocals =>
+            Q (.Break level bodyStore bodyLocals)
+        | other => Q other)
+      targetStore { targetLocals with values := tail } hostEnv
+
+theorem lazyLetStepSimulates_hit
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {missBody : Wasm.Program} {flagIndex valueIndex resultIndex : Nat}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals} {cached : Wasm.Value}
+    (sourceStep : SourceLazyLetResult .hit context targetStore.host.externals
+      sourceRuntime sourceEnv decl continuation nextRuntime sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals)
+    (hFlag : targetStore.globals.globals[flagIndex]? = some (.i32 1))
+    (hValue : targetStore.globals.globals[valueIndex]? = some cached)
+    (hSet : targetLocals.set? resultIndex cached = some nextLocals)
+    (nextStoreEq : nextStore = targetStore)
+    (nextStateRelated : StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals) :
+    LazyLetStepSimulates .hit context sourceFunction module hostEnv
+      targetStore.host.externals decl continuation
+      [.globalGet flagIndex, .iff 0 0 [] missBody, .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+      targetLocals nextLocals resultIndex := by
+  refine ⟨sourceStep, stateRelated, nextStateRelated, ?_⟩
+  intro rest Q tail continued
+  subst nextStore
+  apply wp_lazy_cache_hit hFlag hValue
+  apply wp_localSet_of_set hSet
+  exact continued
+
+theorem lazyLetStepSimulates_miss
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {missBody : Wasm.Program} {flagIndex valueIndex resultIndex : Nat}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals}
+    (sourceStep : SourceLazyLetResult .miss context targetStore.host.externals
+      sourceRuntime sourceEnv decl continuation nextRuntime sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals)
+    (hFlag : targetStore.globals.globals[flagIndex]? = some (.i32 0))
+    (missStep : LazyMissBodySimulates module hostEnv missBody valueIndex
+      resultIndex targetStore nextStore targetLocals nextLocals)
+    (nextStateRelated : StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals) :
+    LazyLetStepSimulates .miss context sourceFunction module hostEnv
+      targetStore.host.externals decl continuation
+      [.globalGet flagIndex, .iff 0 0 [] missBody, .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+      targetLocals nextLocals resultIndex := by
+  refine ⟨sourceStep, stateRelated, nextStateRelated, ?_⟩
+  intro rest Q tail continued
+  apply wp_lazy_cache_miss (rest := .localSet resultIndex :: rest) hFlag
+  convert missStep rest Q tail continued using 1
+  funext continuation
+  cases continuation with
+  | Break level bodyStore bodyLocals => cases level <;> rfl
+  | _ => rfl
 
 theorem externalLetStepSimulates_of_call
     {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
@@ -433,6 +574,44 @@ theorem codeWP_externalLet
       ExternalLetStepSimulates context sourceFunction module hostEnv externals
         decl continuation targetValue sourceRuntime nextRuntime sourceEnv
         sourceValue targetStore nextStore targetLocals nextLocals resultIndex)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+        nextStore nextLocals tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
+/-- Recursive `CodeWP` rule for either lazy cache path. The compiler and
+adapter witnesses fix the generated globals/conditional prefix, while the
+path-specific simulation supplies its semantic WP transformer. -/
+theorem codeWP_lazyLet
+    {path : LazyCachePath} {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step : LazyLetStepSimulates path context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+      sourceValue targetStore nextStore targetLocals nextLocals resultIndex)
     (continued :
       CodeWP context sourceModule sourceFunction labels module hostEnv
         nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation targetRest

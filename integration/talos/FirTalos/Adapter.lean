@@ -76,6 +76,8 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
       let locals := function.params.toList ++ function.locals.toList
       let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)
       return .localSet index
+  | .globalGet index _ => return .globalGet index
+  | .globalSet index _ => return .globalSet index
   | .call target => do
       let some index := callIndex? module target | throw .unknownCallTarget
       return .call index
@@ -113,6 +115,14 @@ def importDecl (sourceImport : Fir.Wasm.Import) : Wasm.ImportDecl :=
     params := sourceImport.signature.params.toList.map abiKind
     results := sourceImport.signature.results.toList.map abiKind }
 
+def zeroValue (kind : Fir.Wasm.AbiKind) : Wasm.Value :=
+  match abiKind kind with
+  | .i32 => .i32 0
+  | .i64 => .i64 0
+  | .f32 => .f32 0
+  | .f64 => .f64 0
+  | _ => .i32 0
+
 def function (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
     Except AdapterError Wasm.Function := do
   return {
@@ -132,7 +142,9 @@ def adapt (source : Fir.Wasm.Module) : Except AdapterError AdaptedModule := do
   let wasmModule : Wasm.Module := {
     funcs := functions
     imports := source.imports.toList.map importDecl
-    exports }
+    exports
+    globals := source.cacheGlobalKinds.toList.map fun kind =>
+      { init := zeroValue kind } }
   match wasmModule.validate with
   | .ok _ => pure ()
   | .error message => throw (.targetValidation message)

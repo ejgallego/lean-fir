@@ -279,18 +279,15 @@ design:
 The choice must specify heterogeneous captured values, oversaturated calls,
 recursive targets, and the representation of fixed arguments.
 
-### Initializers are explicit work
+### Initializers use source-compatible lazy caching
 
-`Fir.Wasm.Module.initializers` is currently ignored by the Talos adapter. Do
-not silently map every zero-parameter declaration to a Talos start function.
-First decide whether the semantic backend uses:
-
-- explicit initialization invoked by the harness;
-- a generated aggregate start function; or
-- source-compatible lazy global evaluation.
-
-Until then, the proved fragment excludes programs whose behavior depends on
-global initialization or lazy caching.
+`Fir.Wasm.Module.initializers` records only zero-argument declarations that
+are actually called from generated code. Each declaration receives a mutable
+`i32` initialized flag and one mutable physical value global. A call checks
+the flag, evaluates the declaration on a miss, records the value in both the
+shared semantic runtime and the Wasm global, then loads the cached lane. A hit
+loads the value directly. There is no Wasm start function and no eager
+execution of ordinary zero-argument entrypoints.
 
 ### Validation belongs to FIR
 
@@ -617,6 +614,25 @@ prefix plus the existing call-free fragment to executable source and fuel-free
 target correctness. Regressions cover both a successful echo call—including
 world and trace—and the reject-by-default fault path. No semantic mismatch or
 new bug card was found.
+
+W5.7 is complete. The backend implements source-compatible lazy global
+evaluation rather than eager Wasm initialization. The lowerer discovers only
+called zero-argument declarations, assigns deterministic flag/value global
+pairs, emits a conditional miss path, and records the semantic value through
+the new `cacheSet` runtime operation before writing the physical lane. The
+validator checks cache declarations and global kinds; the Talos adapter
+allocates zero-initialized mutable globals; and the binary emitter serializes
+the global section plus `global.get` and `global.set` instructions.
+
+The proof surface fixes the exact compiler equation and adapter mappings,
+proves the semantic cache host step, provides cache-set and hit/miss Talos WP
+composition rules, distinguishes the source interpreter's three-step hit and
+four-step miss protocols, composes both through `CodeWP`, and exposes
+`SupportedExport.execCorrect_of_lazyLet`. A differential regression calls a
+zero-argument external twice and checks one external event, one world update,
+one semantic global, and equal returned values; a binary regression checks
+that the generated global-bearing module encodes successfully. This resolves
+`FIR-BUG-wasm-none-zero-arg-initializers`; no new bug card was required.
 
 ### A0: emit the first host-backed Wasm artifact
 

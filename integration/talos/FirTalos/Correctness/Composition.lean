@@ -152,6 +152,63 @@ theorem wp_external_let
   · apply wp_localSet_of_set hSet
     exact continued
 
+/-- A populated lazy-cache flag skips the miss body and loads the cached
+physical value without changing either host or Wasm state. -/
+theorem wp_lazy_cache_hit
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {missBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {store : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {flagIndex valueIndex : Nat} {cached : Wasm.Value}
+    {tail : List Wasm.Value}
+    (hFlag : store.globals.globals[flagIndex]? = some (.i32 1))
+    (hValue : store.globals.globals[valueIndex]? = some cached)
+    (continued :
+      Wasm.wp module rest Q store { locals with values := cached :: tail } env) :
+    Wasm.wp module
+      (.globalGet flagIndex :: .iff 0 0 [] missBody ::
+        .globalGet valueIndex :: rest)
+      Q store { locals with values := tail } env := by
+  rw [Wasm.wp_globalGet_cons, hFlag]
+  apply Wasm.wp_iff_cons (c := 1) (vs := tail) rfl
+  simp only [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp [hValue, continued]
+
+/-- An empty lazy-cache flag selects the generated miss body. The premise is
+the ordinary Talos block postcondition, leaving the declaration call,
+semantic `cacheSet`, and the two physical global writes available for
+operation-specific composition. -/
+theorem wp_lazy_cache_miss
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {missBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {store : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {flagIndex valueIndex : Nat} {tail : List Wasm.Value}
+    (hFlag : store.globals.globals[flagIndex]? = some (.i32 0))
+    (hBody :
+      Wasm.wp module missBody
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module (.globalGet valueIndex :: rest) Q nextStore
+                { nextLocals with values := tail } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module (.globalGet valueIndex :: rest) Q nextStore
+                { nextLocals with values := tail } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := tail } env) :
+    Wasm.wp module
+      (.globalGet flagIndex :: .iff 0 0 [] missBody ::
+        .globalGet valueIndex :: rest)
+      Q store { locals with values := tail } env := by
+  rw [Wasm.wp_globalGet_cons, hFlag]
+  apply Wasm.wp_iff_cons (c := 0) (vs := tail) rfl
+  convert hBody using 1
+  · simp
+  · funext continuation
+    cases continuation with
+    | Break level nextStore nextLocals => cases level <;> rfl
+    | _ => rfl
+
 /--
 Complete generated constructor `let` sequence: load every field local, call
 the semantic constructor host with the reversed physical stack prefix, and

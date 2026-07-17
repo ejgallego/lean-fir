@@ -105,6 +105,52 @@ def relatedExternalState? (result : DifferentialResult) : Bool :=
 #guard relatedSourceFault? (runDifferential externalProgram `main #[])
   (.externalFailure `external "no external implementation installed")
 
+def cachedExternalDecl : LCNF.Decl .impure :=
+  decl `cachedExternal #[] u64Type (.extern { entries := [] })
+
+def cachedFirst : FVarId := ⟨`cachedFirst⟩
+def cachedSecond : FVarId := ⟨`cachedSecond⟩
+
+def cachedExternalCode : LCNF.Code .impure :=
+  .let (letDecl cachedFirst u64Type (.fap `cachedExternal #[])) <|
+  .let (letDecl cachedSecond u64Type (.fap `cachedExternal #[])) <|
+  .return cachedSecond
+
+def cachedExternalProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[cachedExternalDecl,
+      decl `main #[] u64Type (.code cachedExternalCode)] }
+
+def countingExternal : ExternalImpl where
+  call _ runtime := .ok {
+    value := .scalar (.uint64 91)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world + 1 }
+
+#guard supportedProgram cachedExternalProgram
+
+#guard match lowerSupported cachedExternalProgram with
+  | .ok module =>
+      module.initializers == #[`cachedExternal] &&
+        module.cacheGlobalKinds == #[.uint32, .uint64] &&
+        module.runtimeOperations.contains (.cacheSet `cachedExternal .uint64)
+  | .error _ => false
+
+def relatedCachedExternalState? (result : DifferentialResult) : Bool :=
+  match result with
+  | .related source (.returned target runtime) =>
+      let value := Value.scalar (.uint64 91)
+      source.outcome == .returned value && target == value &&
+        source.world == 1 && runtime.world == 1 &&
+        source.trace.size == 1 && source.trace == runtime.trace &&
+        findGlobal? runtime.globals `cachedExternal == some value &&
+        source.trace[0]?.any fun event =>
+          event.name == `cachedExternal && event.args.isEmpty && event.result == value
+  | _ => false
+
+#guard relatedCachedExternalState?
+  (runDifferential cachedExternalProgram `main #[] (externals := countingExternal))
+
 def abiStringProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] objType (.code <|
       .let (letDecl x objType (.lit (.str "reachable"))) (.return x))] }

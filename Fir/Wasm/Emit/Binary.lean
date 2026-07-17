@@ -115,6 +115,8 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
       let some index := findFVarIndex? locals fvarId |
         throw (.unknownLocal context.function.name fvarId)
       return #[0x21] ++ encodeU32 index
+  | .globalGet index _ => return #[0x23] ++ encodeU32 index
+  | .globalSet index _ => return #[0x24] ++ encodeU32 index
   | .call target => do
       let some index := findCallTarget? context.module target |
         throw (.unknownCallTarget context.function.name)
@@ -175,6 +177,15 @@ private def encodeExport (module : Module) (name : Name) : Except EncodeError By
   let some index := findFunctionTarget? module name | throw (.unknownExport name)
   return encodeName name.toString ++ #[0x00] ++ encodeU32 index
 
+private def encodeGlobal (kind : AbiKind) : Bytes :=
+  let initializer :=
+    match kind.valueType with
+    | .i32 => #[0x41, 0x00, 0x0b]
+    | .i64 => #[0x42, 0x00, 0x0b]
+    | .f32 => #[0x43, 0x00, 0x00, 0x00, 0x00, 0x0b]
+    | .f64 => #[0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0b]
+  #[encodeValueType kind.valueType, 0x01] ++ initializer
+
 private def encodeSection (id : UInt8) (payload : Bytes) : Bytes :=
   #[id] ++ encodeU32 payload.size ++ payload
 
@@ -199,6 +210,7 @@ def encode (module : Module) : Except EncodeError ByteArray := do
   let functionPayload := encodeVector <|
     module.functions.toList.zipIdx.map fun (_, index) =>
       encodeU32 (module.imports.size + index)
+  let globalPayload := encodeVector <| module.cacheGlobalKinds.toList.map encodeGlobal
   let exportPayload ← encodeVector <$> module.exports.toList.mapM (encodeExport module)
   let codePayload ← encodeVector <$> module.functions.toList.mapM (encodeFunctionBody module)
 
@@ -209,6 +221,8 @@ def encode (module : Module) : Except EncodeError ByteArray := do
     bytes := bytes ++ encodeSection 0x02 importPayload
   unless module.functions.isEmpty do
     bytes := bytes ++ encodeSection 0x03 functionPayload
+  unless module.initializers.isEmpty do
+    bytes := bytes ++ encodeSection 0x06 globalPayload
   unless module.exports.isEmpty do
     bytes := bytes ++ encodeSection 0x07 exportPayload
   unless module.functions.isEmpty do

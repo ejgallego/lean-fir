@@ -54,6 +54,18 @@ theorem instruction_localSet
   rw [instruction, found]
   rfl
 
+@[simp] theorem instruction_globalGet
+    (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
+    (labels : List FVarId) (index : Nat) (kind : Fir.Wasm.AbiKind) :
+    instruction sourceModule source labels (.globalGet index kind) =
+      .ok (.globalGet index) := by rw [instruction]; rfl
+
+@[simp] theorem instruction_globalSet
+    (sourceModule : Fir.Wasm.Module) (source : Fir.Wasm.Function)
+    (labels : List FVarId) (index : Nat) (kind : Fir.Wasm.AbiKind) :
+    instruction sourceModule source labels (.globalSet index kind) =
+      .ok (.globalSet index) := by rw [instruction]; rfl
+
 /-- A resolved branch target becomes its de Bruijn label depth. -/
 theorem instruction_br
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
@@ -85,6 +97,8 @@ theorem adapt_preserves_module_layout
         target.wasmModule = {
           funcs := functions
           imports := source.imports.toList.map importDecl
+          globals := source.cacheGlobalKinds.toList.map fun kind =>
+            { init := zeroValue kind }
           exports := source.exports.toList.filterMap fun name =>
             (source.functions.findIdx? (·.name == name)).map fun index =>
               { name := name.toString
@@ -109,6 +123,8 @@ theorem adapt_preserves_module_layout
           let targetModule : Wasm.Module := {
             funcs := functions
             imports := source.imports.toList.map importDecl
+            globals := source.cacheGlobalKinds.toList.map fun kind =>
+              { init := zeroValue kind }
             exports }
           cases targetValid : targetModule.validate with
           | error message =>

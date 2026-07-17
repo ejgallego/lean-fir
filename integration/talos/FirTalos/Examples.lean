@@ -122,7 +122,7 @@ def adaptProgram? (program : Fir.LeanIR.ImpureProgram) : Option AdaptedModule :=
 
 #guard Fir.Wasm.literalModule?.any fun source =>
   match module { source with initializers := #[`main] } with
-  | .error (.invalidModule (.unsupportedInitializer `main)) => true
-  | _ => false
+  | .ok target => target.globals.length == 2
+  | .error _ => false
 
 end FirTalos

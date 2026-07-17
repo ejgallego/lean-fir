@@ -1470,4 +1470,49 @@ theorem wp_external_call
       initial physicalArgs semanticArgs response resultSignature decoded called encoded
   · simpa [hResults] using continued
 
+/-- Generated-stack rule for the cache-miss runtime write. The operation
+returns the same physical value while extending the semantic runtime's global
+environment, so the subsequent Wasm `global.set` can store that lane without
+losing the source-level cache transition. -/
+theorem wp_cacheSet_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (declaration : Lean.Name) (kind : AbiKind)
+    (physicalArgs : List Wasm.Value) (sourceValue : Value)
+    (after : HandleTable) (physicalResult : Wasm.Value)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.cacheSet declaration kind)))
+    (hParams : imp.params.length = 1)
+    (hArgCount : physicalArgs.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (decoded : decodeArgs initial.host.handles #[kind] physicalArgs =
+      .ok #[sourceValue])
+    (encoded : encodeValue initial.host.handles kind sourceValue =
+      .ok (after, physicalResult))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := initial.host.runtime.setGlobal declaration sourceValue
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := physicalResult :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [physicalResult])
+    hImp hSat hi hContract
+  · omega
+  · exact hStack
+  · exact hostStep_cacheSet_of_decode_encode declaration kind initial
+      physicalArgs sourceValue decoded encoded
+  · simpa [hResults] using continued
+
 end FirTalos.Correctness

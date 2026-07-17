@@ -63,6 +63,16 @@ def abiObjectProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r tobjectType (.oproj 2 p)) <|
       .return r)] }
 
+def abiCachedExternalProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[
+      decl `cachedBinaryExternal #[] u64Type (.extern { entries := [] }),
+      decl `main #[] u64Type (.code <|
+        .let (letDecl x u64Type
+          (.fap `cachedBinaryExternal #[])) <|
+        .let (letDecl y u64Type
+          (.fap `cachedBinaryExternal #[])) <|
+        .return y)] }
+
 def initialFixtures : List CorpusFixture := [
   { name := "literal", program := abiLiteralProgram },
   { name := "erased", program := abiErasedProgram },
@@ -117,5 +127,9 @@ def encodeProgram (program : Fir.LeanIR.ImpureProgram) : Except String ByteArray
 #guard match encodeProgram abiLiteralProgram with
   | .ok bytes => bytes.data.extract 0 header.size == header
   | .error _ => false
+
+/- Global section plus `global.get`/`global.set` opcodes encode as a complete
+standard Wasm module for the lazy-cache path. -/
+#guard (encodeProgram abiCachedExternalProgram).isOk
 
 end Fir.Wasm.Emit.Examples

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-zero-arg-initializers
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -54,4 +54,13 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved in W5.7 by replacing the parameter-count heuristic with a scan for
+actual zero-argument calls. `Module.initializers` is now the ordered lazy-cache
+registry: each entry gets a flag/value global pair, and ordinary uncalled
+zero-argument functions such as `main` are not executed implicitly.
+
+`FirTalos.DifferentialExamples.cachedExternalProgram` calls one zero-argument
+external twice and checks that source and target both perform exactly one
+external event and world update while retaining the semantic cached global.
+`Fir.Wasm.Emit.Examples.abiCachedExternalProgram` checks that the corresponding
+global-bearing standard Wasm binary encodes successfully.

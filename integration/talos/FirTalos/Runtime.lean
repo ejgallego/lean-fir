@@ -25,6 +25,7 @@ inductive HostOperation where
   | objectProj (index : Nat) (result : AbiKind)
   | usizeProj (index : Nat)
   | scalarProj (width offset : Nat) (result : AbiKind)
+  | cacheSet (declaration : Lean.Name) (value : AbiKind)
   | box (scalar result : AbiKind)
   | unbox (scalar : AbiKind)
   | isShared
@@ -49,6 +50,7 @@ def HostOperation.runtimeOp : HostOperation → Option RuntimeOp
   | .objectProj index result => some (.objectProj index result)
   | .usizeProj index => some (.usizeProj index)
   | .scalarProj width offset result => some (.scalarProj width offset result)
+  | .cacheSet declaration value => some (.cacheSet declaration value)
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
@@ -76,6 +78,7 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .objectProj index result => some (.objectProj index result)
   | .usizeProj index => some (.usizeProj index)
   | .scalarProj width offset result => some (.scalarProj width offset result)
+  | .cacheSet declaration value => some (.cacheSet declaration value)
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
@@ -171,6 +174,10 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
           match getScalarField runtime object width offset with
           | .ok value => .ok (runtime, #[value])
           | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .cacheSet declaration _ =>
+      match args[0]? with
+      | some value => .ok (runtime.setGlobal declaration value, #[value])
       | none => .error (.target (.arityMismatch 1 args.size))
   | .box scalar _ =>
       match runtimeScalarType? scalar, args[0]? with
@@ -318,6 +325,26 @@ theorem hostStep_external_singleton_of_decode_call_encode
           targetFailure? := none } } := by
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     resultSignature, decoded, called,
+    encodeResults_singleton_of_encodeValue encoded]
+
+theorem hostStep_cacheSet_of_decode_encode
+    (declaration : Lean.Name) (kind : AbiKind)
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceValue : Value) {after : HandleTable} {physicalResult : Wasm.Value}
+    (decoded : decodeArgs initial.host.handles #[kind] physicalArgs =
+      .ok #[sourceValue])
+    (encoded : encodeValue initial.host.handles kind sourceValue =
+      .ok (after, physicalResult)) :
+    hostStep (.cacheSet declaration kind) initial physicalArgs =
+      .Return [physicalResult] {
+        initial with host := {
+          initial.host with
+          runtime := initial.host.runtime.setGlobal declaration sourceValue
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded,
     encodeResults_singleton_of_encodeValue encoded]
 
 theorem hostStep_naturalLiteral_of_encode

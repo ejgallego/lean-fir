@@ -102,6 +102,8 @@ theorem abiLiteralAdaptedModule_layout :
         abiLiteralAdaptedModule.wasmModule = {
           funcs := functions
           imports := abiLiteralSourceModule.imports.toList.map importDecl
+          globals := abiLiteralSourceModule.cacheGlobalKinds.toList.map fun kind =>
+            { init := zeroValue kind }
           exports := abiLiteralSourceModule.exports.toList.filterMap fun name =>
             (abiLiteralSourceModule.functions.findIdx? (·.name == name)).map
               fun index =>

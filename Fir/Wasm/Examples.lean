@@ -593,8 +593,8 @@ def ctorProjectionModule? : Option Module :=
   | _ => false
 
 #guard literalModule?.any fun module =>
-  match validateModule { module with initializers := #[`main] } with
-  | .error (.unsupportedInitializer `main) => true
+  match validateModule { module with initializers := #[`missing] } with
+  | .error (.invalidInitializer `missing) => true
   | _ => false
 
 def taggedValue : Value := .object (.tagged 42)

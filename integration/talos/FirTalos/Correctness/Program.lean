@@ -200,6 +200,34 @@ theorem SourceExternalLetResult.thenCodeEvaluates
   obtain ⟨count, steps⟩ := execSteps_compose externalSteps suffix
   exact ⟨count, final, steps, done⟩
 
+/-- Either exact lazy-cache prefix (three-step hit or four-step miss) composes
+with the existing call-free source evaluation relation. -/
+theorem SourceLazyLetResult.thenCodeEvaluates
+    {path : LazyCachePath} {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceValue resultValue : Value}
+    (sourceStep : SourceLazyLetResult path context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) continuation resultRuntime
+      resultValue) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+      (ReturnedObservation resultRuntime resultValue) := by
+  have lazySteps :
+      ExecSteps externals path.sourceSteps
+        (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+        (sourceCodeState context nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation) := by
+    unfold SourceLazyLetResult at sourceStep
+    simpa [sourceCodeState] using sourceStep
+  rcases continued.execEvaluates externals with
+    ⟨suffixCount, final, suffix, done⟩
+  obtain ⟨count, steps⟩ := execSteps_compose lazySteps suffix
+  exact ⟨count, final, steps, done⟩
+
 /--
 The case-specific W4 boundary. It records the source-selected branch and a
 transformer that installs any proof of that branch beneath the generated case
@@ -458,6 +486,46 @@ theorem SupportedExport.execCorrect_of_externalLet
         .related (ReturnedObservation resultRuntime resultValue)
           (.returned resultValue resultRuntime))
     (sourceStep : SourceExternalLetResult context initial.host.externals
+      initialRuntime [] decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind [] decl.fvarId sourceValue) continuation resultRuntime resultValue)
+    (correct :
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+        initialRuntime [] (.let decl continuation) spec.targetFunction.body
+        initial targetLocals []
+        (ReturnPost resultRuntime resultValue resultKind []))
+    (canonicalLocals : targetLocals = spec.targetFunction.toLocals []) :
+    ExecEvaluates initial.host.externals
+        (sourceCodeState context initialRuntime [] (.let decl continuation))
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ExportTerminatesWith hosts.env target.wasmModule exportName initial []
+        (RelatedPost #[resultKind]
+          (ReturnedObservation resultRuntime resultValue)) := by
+  constructor
+  · exact sourceStep.thenCodeEvaluates continued
+  · apply spec.terminatesWithRelated_of_return related
+    simpa [canonicalLocals] using correct
+
+/-- Whole-export W5.7 theorem for a checked lazy zero-argument call prefix.
+The path records whether the source and target take the initialized-cache hit
+or the miss that evaluates and records the declaration exactly once. -/
+theorem SupportedExport.execCorrect_of_lazyLet
+    {path : LazyCachePath} {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts} {exportName : String}
+    (spec : SupportedExport program context (.let decl continuation)
+      sourceModule sourceFunction target hosts exportName)
+    {initialRuntime nextRuntime resultRuntime : RuntimeState}
+    {initial : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {sourceValue resultValue : Value} {resultKind : AbiKind}
+    (related :
+      compareObservations (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime) =
+        .related (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime))
+    (sourceStep : SourceLazyLetResult path context initial.host.externals
       initialRuntime [] decl continuation nextRuntime sourceValue)
     (continued : CodeEvaluates context nextRuntime
       (bind [] decl.fvarId sourceValue) continuation resultRuntime resultValue)

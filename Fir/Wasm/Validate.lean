@@ -25,12 +25,14 @@ inductive SymbolicError where
   | unsupportedClosure (index : Nat)
   | duplicateExport (name : Name)
   | unknownExport (name : Name)
-  | unsupportedInitializer (name : Name)
   | duplicateLocal (function : Name) (fvarId : FVarId)
   | duplicateLabel (function : Name) (fvarId : FVarId)
   | unknownLocal (function : Name) (fvarId : FVarId)
   | unknownLabel (function : Name) (fvarId : FVarId)
+  | unknownGlobal (function : Name) (index : Nat)
+  | invalidGlobalKind (function : Name) (index : Nat)
   | unknownCallTarget (function : Name)
+  | invalidInitializer (name : Name)
   | invalidConstant (function : Name) (kind : AbiKind) (physical : ValueType)
   | stackUnderflow (function : Name) (expected : List AbiKind)
   | stackMismatch (function : Name) (expected actual : List AbiKind)
@@ -67,6 +69,17 @@ def Module.callSignature? (module : Module) : CallTarget → Option Signature
       match module.imports.find? (·.declaration? == some name) with
       | some import_ => some import_.signature
       | none => (module.functions.find? (·.name == name)).map Function.signature
+
+/-- Physical lazy-cache layout: an i32 initialized flag followed by the
+declaration's singleton semantic result. -/
+def Module.cacheGlobalKinds (module : Module) : Array AbiKind :=
+  module.initializers.foldl (init := #[]) fun kinds name =>
+    match module.callSignature? (.declaration name) with
+    | some signature =>
+        match signature.results[0]? with
+        | some result => (kinds.push .uint32).push result
+        | none => kinds
+    | none => kinds
 
 def validateOperations : List RuntimeOp → Nat → Except SymbolicError Unit
   | [], _ => pure ()
@@ -124,8 +137,13 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
   for name in module.exports do
     unless module.functions.any (·.name == name) do
       throw (.unknownExport name)
-  if let some initializer := module.initializers[0]? then
-    throw (.unsupportedInitializer initializer)
+  unless listAllUnique module.initializers.toList do
+    throw (.invalidInitializer module.initializers[0]!)
+  for initializer in module.initializers do
+    let some signature := module.callSignature? (.declaration initializer) |
+      throw (.invalidInitializer initializer)
+    unless signature.params.isEmpty && signature.results.size == 1 do
+      throw (.invalidInitializer initializer)
 
 abbrev OperandStack := List AbiKind
 
@@ -205,6 +223,19 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
   | .localSet fvarId => do
       let some kind := findLocalKind? context.locals fvarId |
         throw (.unknownLocal context.function.name fvarId)
+      let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
+      return { fallthrough := stack? }
+  | .globalGet index kind => do
+      let some expected := context.module.cacheGlobalKinds[index]? |
+        throw (.unknownGlobal context.function.name index)
+      unless kind == expected do
+        throw (.invalidGlobalKind context.function.name index)
+      return { fallthrough := stack?.map (· ++ [kind]) }
+  | .globalSet index kind => do
+      let some expected := context.module.cacheGlobalKinds[index]? |
+        throw (.unknownGlobal context.function.name index)
+      unless kind == expected do
+        throw (.invalidGlobalKind context.function.name index)
       let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
       return { fallthrough := stack? }
   | .call target => do

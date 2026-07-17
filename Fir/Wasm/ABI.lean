@@ -187,6 +187,7 @@ inductive RuntimeOp where
   | objectProj (index : Nat) (result : AbiKind)
   | usizeProj (index : Nat)
   | scalarProj (width offset : Nat) (result : AbiKind)
+  | cacheSet (declaration : Name) (value : AbiKind)
   | partialApply (function : Name) (arity fixed : Nat) (fields : Array AbiKind)
       (result : AbiKind)
   | closureApply (args : Array AbiKind) (result : Array AbiKind)
@@ -215,6 +216,7 @@ def RuntimeOp.abiWellFormed : RuntimeOp → Bool
   | .objectProj _ result => result.isObjectField
   | .usizeProj _ => true
   | .scalarProj _ _ result => result.isScalar
+  | .cacheSet _ value => value != .erased
   | .partialApply _ arity fixed _ result => fixed < arity && result.isObjectLike
   | .closureApply _ results => results.size <= 1
   | .reset _ => true
@@ -235,6 +237,7 @@ def RuntimeOp.signature : RuntimeOp → Signature
   | .objectProj _ result => { params := #[.tobject], results := #[result] }
   | .usizeProj _ => { params := #[.tobject], results := #[.usize] }
   | .scalarProj _ _ result => { params := #[.tobject], results := #[result] }
+  | .cacheSet _ value => { params := #[value], results := #[value] }
   | .partialApply _ _ _ fields result => { params := fields, results := #[result] }
   | .closureApply args result => { params := #[.tobject] ++ args, results := result }
   | .reset _ => { params := #[.tobject], results := #[.reuseToken] }
@@ -258,6 +261,7 @@ def RuntimeOp.stem : RuntimeOp → String
   | .objectProj .. => "oproj"
   | .usizeProj .. => "uproj"
   | .scalarProj .. => "sproj"
+  | .cacheSet .. => "cache_set"
   | .partialApply .. => "pap"
   | .closureApply .. => "apply"
   | .reset .. => "reset"

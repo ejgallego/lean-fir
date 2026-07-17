@@ -8,9 +8,10 @@ open Lean.Compiler
 /--
 The proof-oriented backend fragment: literals, erased values, constructors,
 object/usize/integer-scalar projections, boxing, object mutation, constructor
-cases, ownership operations, reset/reuse, exact external calls, returns, and
-unreachable code. Internal calls, joins, initializers-as-effects, closures, and
-recursion remain deliberate later gates.
+cases, ownership operations, reset/reuse, exact external calls (including
+lazy caching of zero-argument declarations), returns, and unreachable code.
+Internal calls, joins, closures, indirect dispatch, and recursion remain
+deliberate later gates.
 -/
 def supportedLetValue : LCNF.LetValue .impure → Bool
   | .lit _ | .erased | .ctor _ _ | .oproj _ _ => true

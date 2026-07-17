@@ -15,6 +15,8 @@ inductive Instruction where
   | i64Const (kind : AbiKind) (value : UInt64)
   | localGet (fvarId : FVarId)
   | localSet (fvarId : FVarId)
+  | globalGet (index : Nat) (kind : AbiKind)
+  | globalSet (index : Nat) (kind : AbiKind)
   | call (target : CallTarget)
   | i32Eq
   | block (label : FVarId) (body : List Instruction)
@@ -56,6 +58,46 @@ structure Context where
   program : Fir.LeanIR.ImpureProgram
   localKinds : LocalKinds
   joins : JoinPoints := []
+  cachedDeclarations : Array Name := #[]
+
+def addUniqueName (names : Array Name) (name : Name) : Array Name :=
+  if names.contains name then names else names.push name
+
+mutual
+
+partial def collectCachedCallsCode (names : Array Name) :
+    LCNF.Code .impure → Array Name
+  | .let decl continuation =>
+      let names :=
+        match decl.value with
+        | .fap name args => if args.isEmpty then addUniqueName names name else names
+        | _ => names
+      collectCachedCallsCode names continuation
+  | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      collectCachedCallsCode (collectCachedCallsCode names decl.value) continuation
+  | .cases cases => cases.alts.foldl collectCachedCallsAlt names
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation => collectCachedCallsCode names continuation
+  | .jmp .. | .return .. | .unreach .. => names
+
+partial def collectCachedCallsAlt (names : Array Name) :
+    LCNF.Alt .impure → Array Name
+  | .ctorAlt _ code | .default code => collectCachedCallsCode names code
+  | .alt _ _ _ h => nomatch h
+
+end
+
+def cachedDeclarationNames (program : Fir.LeanIR.ImpureProgram) : Array Name :=
+  program.decls.foldl (init := #[]) fun names decl =>
+    match decl.value with
+    | .code code => collectCachedCallsCode names code
+    | .extern _ => names
 
 def insertLocal (locals : LocalKinds) (fvarId : FVarId) (kind : AbiKind) : LocalKinds :=
   (fvarId, kind) :: locals.filter fun entry => entry.fst.name != fvarId.name
@@ -181,8 +223,24 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       return [object, .call (.runtime (.scalarProj width offset resultKind))]
   | .fap name args =>
       let (arguments, _) ← compileArgs context args
-      let some _ := context.program.findDecl? name | throw (.unknownDeclaration name)
-      return arguments ++ [.call (.declaration name)]
+      let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
+      if args.isEmpty && target.params.isEmpty then
+        let some cacheIndex := context.cachedDeclarations.findIdx? (· == name) |
+          throw (.malformed s!"missing lazy cache slot for {name}")
+        let flagIndex := 2 * cacheIndex
+        let valueIndex := flagIndex + 1
+        return [
+          .globalGet flagIndex .uint32,
+          .ifElse
+            []
+            ([.call (.declaration name),
+              .call (.runtime (.cacheSet name resultKind)),
+              .globalSet valueIndex resultKind,
+              .i32Const .uint32 1,
+              .globalSet flagIndex .uint32]),
+          .globalGet valueIndex resultKind]
+      else
+        return arguments ++ [.call (.declaration name)]
   | .pap name args =>
       let (arguments, kinds) ← compileArgs context args
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
@@ -212,6 +270,33 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       unless resultKind == .uint8 do
         throw (.malformed "isShared must produce UInt8")
       return [object, .call (.runtime .isShared)]
+
+/-- Transparent compiler equation for a zero-argument call with an allocated
+lazy-cache slot. This fixes the exact flag/value layout and miss sequence used
+by the adapter and semantic proofs. -/
+theorem compileLetValue_fap_cached
+    (context : Context) (fvarId : FVarId) (type : Expr) (name : Name)
+    (target : LCNF.Decl .impure) (resultKind : AbiKind) (cacheIndex : Nat)
+    (kindEq : checkedAbiKind type = .ok resultKind)
+    (targetEq : context.program.findDecl? name = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (cacheEq : context.cachedDeclarations.findIdx? (· == name) = some cacheIndex) :
+    compileLetValue context {
+      fvarId
+      binderName := fvarId.name
+      type
+      value := .fap name #[] } = .ok [
+        .globalGet (2 * cacheIndex) .uint32,
+        .ifElse [] [
+          .call (.declaration name),
+          .call (.runtime (.cacheSet name resultKind)),
+          .globalSet (2 * cacheIndex + 1) resultKind,
+          .i32Const .uint32 1,
+          .globalSet (2 * cacheIndex) .uint32],
+        .globalGet (2 * cacheIndex + 1) resultKind] := by
+  simp [compileLetValue, letValueKind, kindEq, compileArgs, targetEq, paramsEq,
+    cacheEq]
+  rfl
 
 def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .impure)) :
     Except CompileError (List Instruction) := do
@@ -797,14 +882,15 @@ def collectRuntimeOps (functions : Array Function) : Array RuntimeOp :=
   functions.foldl (init := #[]) fun operations function =>
     function.body.foldl collectRuntimeOpsInstruction operations
 
-def lowerDecl (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure) :
+def lowerDecl (program : Fir.LeanIR.ImpureProgram)
+    (cachedDeclarations : Array Name) (decl : LCNF.Decl .impure) :
     Except CompileError (Option Function) := do
   match decl.value with
   | .extern _ => return none
   | .code code =>
       let paramLocals ← addParams [] decl.params
       let allLocals ← collectLocals paramLocals code
-      let context : Context := { program, localKinds := allLocals }
+      let context : Context := { program, localKinds := allLocals, cachedDeclarations }
       let body ← compileCode context code
       let isParam (fvarId : FVarId) := decl.params.any (·.fvarId.name == fvarId.name)
       let locals := allLocals.reverse.filter fun entry => !isParam entry.fst
@@ -820,7 +906,8 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure) :
         body }
 
 def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := do
-  let functions ← program.decls.filterMapM (lowerDecl program)
+  let cachedDeclarations := cachedDeclarationNames program
+  let functions ← program.decls.filterMapM (lowerDecl program cachedDeclarations)
   let operations := collectRuntimeOps functions
   unless operations.all RuntimeOp.abiWellFormed do
     throw (.malformed "generated runtime operation violates the semantic ABI")
@@ -837,7 +924,7 @@ def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := d
     imports := runtimeImports ++ externalImports
     functions
     exports
-    initializers := #[]
+    initializers := cachedDeclarations
     runtimeOperations := operations }
 
 end Fir.Wasm
