@@ -465,6 +465,43 @@ theorem joinParamBodyRelated :
           ({} : FVarIdMap FVarId)) = true
       native_decide)
 
+theorem joinCodeSideConditions :
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] [] joinAlphaLeft joinAlphaRight := by
+  unfold joinAlphaLeft joinAlphaRight
+  apply CodeSideConditions.jp
+  · constructor
+    · intro old oldScoped
+      simp at oldScoped
+    · intro old oldScoped
+      simp at oldScoped
+  · constructor
+    · intro old oldScoped
+      simp at oldScoped
+    · intro old oldScoped
+      simp at oldScoped
+  · exact joinParamBodySideConditions
+  · apply CodeSideConditions.letE
+    · rfl
+    · rfl
+    · rfl
+    · trivial
+    · intro old oldScoped
+      simp at oldScoped
+    · intro old oldScoped
+      simp at oldScoped
+    · apply CodeSideConditions.jmp <;> native_decide
+
+/--
+The declarative relation covers an alpha-renamed join declaration, its
+parameterized case body, and the jump through the active join scope.
+-/
+theorem joinLocalCodeRelated :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] [] joinAlphaLeft joinAlphaRight :=
+  codeRelated_of_local_accepts joinCodeSideConditions
+    ⟨8, by native_decide⟩
+
 #guard Local.check 8 joinAlphaLeft joinAlphaRight
 #guard !Local.check 8 joinAlphaLeft joinBodyMismatch
 #guard !Local.check 8 joinAlphaLeft joinTargetMismatch

@@ -8,6 +8,8 @@ open Fir.LeanIR.ImpureHygiene
 
 set_option linter.unusedVariables false
 
+mutual
+
 /--
 Well-formedness and runtime-metadata premises not supplied by executable
 alpha-equivalence. Constructor and instruction metadata equality deliberately
@@ -42,6 +44,31 @@ inductive CodeSideConditions :
       CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
+  | jp
+      (leftFresh : FreshJoinBinder leftDecl.fvarId leftScope leftJoins)
+      (rightFresh : FreshJoinBinder rightDecl.fvarId rightScope rightJoins)
+      (body : ParamBodySideConditions
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        leftDecl.params.toList rightDecl.params.toList
+        leftDecl.value rightDecl.value)
+      (continuation :
+        CodeSideConditions
+          (leftJoins := leftDecl.fvarId :: leftJoins)
+          (rightJoins := rightDecl.fvarId :: rightJoins)
+          (rho.insert rightDecl.fvarId leftDecl.fvarId)
+          leftScope rightScope leftContinuation rightContinuation) :
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        (.jp leftDecl leftContinuation) (.jp rightDecl rightContinuation)
+  | jmp
+      (leftTargetScoped : leftJoins.contains leftTarget = true)
+      (rightTargetScoped : rightJoins.contains rightTarget = true)
+      (leftArgsScoped : argsScoped leftScope leftArgs = true)
+      (rightArgsScoped : argsScoped rightScope rightArgs = true) :
+      CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        (.jmp leftTarget leftArgs) (.jmp rightTarget rightArgs)
   | cases
       (leftDiscrScoped : leftScope.contains leftCases.discr = true)
       (rightDiscrScoped : rightScope.contains rightCases.discr = true)
@@ -170,28 +197,7 @@ inductive ParamBodySideConditions :
         rho leftScope rightScope
         (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
 
-/-- Declarative result of traversing two related parameter lists. -/
-inductive ParamBodyRelated :
-    FVarIdMap FVarId → List FVarId → List FVarId →
-      {leftJoins rightJoins : List FVarId} →
-      List (LCNF.Param .impure) → List (LCNF.Param .impure) →
-      LCNF.Code .impure → LCNF.Code .impure → Prop where
-  | nil
-      (body : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
-        rho leftScope rightScope leftCode rightCode) :
-      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
-        rho leftScope rightScope [] [] leftCode rightCode
-  | cons
-      (leftFresh : FreshForScope leftParam.fvarId leftScope)
-      (rightFresh : FreshForScope rightParam.fvarId rightScope)
-      (rest : ParamBodyRelated
-        (leftJoins := leftJoins) (rightJoins := rightJoins)
-        (rho.insert rightParam.fvarId leftParam.fvarId)
-        (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
-        leftRest rightRest leftCode rightCode) :
-      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
-        rho leftScope rightScope
-        (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
+end
 
 /-- Side conditions for one impure case alternative. -/
 inductive AltSideConditions (rho : FVarIdMap FVarId)
@@ -262,13 +268,13 @@ private theorem altsRelated_of_local_check_by_selector_using
     (ctorSound : ∀ tag leftCode rightCode,
       HasCtorAlt tag leftCode originalLeft →
       HasCtorAlt tag rightCode originalRight →
-      Local.AcceptsAt rho leftCode rightCode →
+      (Local.eqv fuel leftCode rightCode).run rho = true →
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope leftCode rightCode)
     (defaultSound : ∀ leftCode rightCode,
       HasDefaultAlt leftCode originalLeft →
       HasDefaultAlt rightCode originalRight →
-      Local.AcceptsAt rho leftCode rightCode →
+      (Local.eqv fuel leftCode rightCode).run rho = true →
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope leftCode rightCode)
     (leftSubset : ∀ alt, alt ∈ left → alt ∈ originalLeft)
@@ -313,7 +319,7 @@ private theorem altsRelated_of_local_check_by_selector_using
                     ⟨leftInfo, rightSubset _ List.mem_cons_self, by simp⟩
                   exact .cons
                     (.ctor (ctorSound leftInfo.cidx leftCode rightCode
-                      leftHas rightHas ⟨fuel, accepted.2.1⟩))
+                      leftHas rightHas accepted.2.1))
                     (ih
                       (fun alt member =>
                         leftSubset alt (List.mem_cons_of_mem _ member))
@@ -338,7 +344,7 @@ private theorem altsRelated_of_local_check_by_selector_using
                     rightSubset _ List.mem_cons_self
                   exact .cons
                     (.default (defaultSound leftCode rightCode leftHas rightHas
-                      ⟨fuel, accepted.1⟩))
+                      accepted.1))
                     (ih
                       (fun alt member =>
                         leftSubset alt (List.mem_cons_of_mem _ member))
@@ -346,34 +352,32 @@ private theorem altsRelated_of_local_check_by_selector_using
                         rightSubset alt (List.mem_cons_of_mem _ member))
                       accepted.2)
 
-/--
-For the code fragment represented by `CodeRelated`, transparent local
-acceptance plus the explicit side conditions constructs the declarative
-relation. This theorem is independent of the upstream correspondence axiom.
--/
-theorem codeRelated_of_local_accepts
+mutual
+
+/-- Exact-fuel worker shared by code and parameter-body soundness. -/
+private theorem codeRelated_of_local_check
     {leftJoins rightJoins : List FVarId}
     (side : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope left right)
-    (accepted : Local.AcceptsAt rho left right) :
+    (accepted : Local.checkAt fuel rho left right = true) :
     CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope left right := by
-  induction side with
+  cases side with
   | ret leftScoped rightScoped =>
       exact .terminal
-        (terminalCodeRelated_of_local_return leftScoped rightScoped accepted)
+        (terminalCodeRelated_of_local_return leftScoped rightScoped ⟨fuel, accepted⟩)
   | unreachable => exact .terminal .unreachable
   | letE typeEq leftValueScoped rightValueScoped boxTypesEq
-      leftFresh rightFresh continuation continuation_ih =>
-      rename_i leftScope' rightScope' leftContinuation rightContinuation
-        rho' leftDecl rightDecl
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      leftFresh rightFresh continuation =>
+      rename_i leftContinuation rightContinuation leftDecl rightDecl
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (LCNF.AlphaEqv.eqvType leftDecl.type rightDecl.type <&&>
             LCNF.AlphaEqv.eqvLetValue leftDecl.value rightDecl.value <&&>
             LCNF.AlphaEqv.withFVar leftDecl.fvarId rightDecl.fvarId
-              (Local.eqv fuel leftContinuation rightContinuation)).run rho' = true
+              (Local.eqv fuel leftContinuation rightContinuation)).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -383,18 +387,50 @@ theorem codeRelated_of_local_accepts
             leftValueScoped rightValueScoped boxTypesEq accepted.2.1
         · exact leftFresh
         · exact rightFresh
-        · exact continuation_ih ⟨fuel, accepted.2.2⟩
+        · exact codeRelated_of_local_check continuation accepted.2.2
+  | jp leftFresh rightFresh body continuation =>
+      rename_i leftContinuation rightContinuation leftDecl rightDecl
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
+          (LCNF.AlphaEqv.eqvType leftDecl.type rightDecl.type <&&>
+            Local.withParamsUsing leftDecl.params rightDecl.params
+              (Local.eqv fuel leftDecl.value rightDecl.value) <&&>
+            LCNF.AlphaEqv.withFVar leftDecl.fvarId rightDecl.fvarId
+              (Local.eqv fuel leftContinuation rightContinuation)).run rho = true
+            at accepted
+        rw [reader_andM_run_eq_true_iff] at accepted
+        rw [reader_andM_run_eq_true_iff] at accepted
+        rw [withFVar_run] at accepted
+        apply CodeRelated.jp leftFresh rightFresh
+        · apply paramBodyRelated_of_local_check body
+          simpa [Local.withParamsUsing] using accepted.2.1
+        · exact codeRelated_of_local_check continuation accepted.2.2
+  | jmp leftTargetScoped rightTargetScoped leftArgsScoped rightArgsScoped =>
+      rename_i leftArgs rightArgs leftTarget rightTarget
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
+          (LCNF.AlphaEqv.eqvFVar leftTarget rightTarget <&&>
+            LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true at accepted
+        rw [reader_andM_run_eq_true_iff] at accepted
+        apply CodeRelated.jmp
+        · exact ⟨leftTargetScoped, rightTargetScoped, accepted.1⟩
+        · exact argsRelated_of_eqvArgs_true
+            leftArgsScoped rightArgsScoped accepted.2
   | cases leftDiscrScoped rightDiscrScoped leftNormalization rightNormalization
-      ctorBranches defaultBranches ctorBranches_ih defaultBranches_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftCases rightCases
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      ctorBranches defaultBranches =>
+      rename_i leftCases rightCases
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (LCNF.AlphaEqv.eqvFVar leftCases.discr rightCases.discr <&&>
             LCNF.AlphaEqv.eqvType leftCases.resultType rightCases.resultType <&&>
             Local.eqvAltsUsing (Local.eqv fuel) leftCases.alts rightCases.alts).run
-              rho' = true at accepted
+              rho = true at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         apply CodeRelated.cases
@@ -405,7 +441,12 @@ theorem codeRelated_of_local_accepts
           split at alternativesAccepted
           · have alternativesRelated :=
               altsRelated_of_local_check_by_selector_using
-                ctorBranches_ih defaultBranches_ih
+                (fun tag leftCode rightCode leftHas rightHas accepted =>
+                  codeRelated_of_local_check
+                    (ctorBranches tag leftCode rightCode leftHas rightHas) accepted)
+                (fun leftCode rightCode leftHas rightHas accepted =>
+                  codeRelated_of_local_check
+                    (defaultBranches leftCode rightCode leftHas rightHas) accepted)
                 (fun alt member =>
                   (sortAlts_perm leftCases.alts).mem_iff.mpr member)
                 (fun alt member =>
@@ -416,17 +457,17 @@ theorem codeRelated_of_local_accepts
             exact chooseAlt_related alternativesRelated
           · contradiction
   | oset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
-      continuation continuation_ih =>
-      rename_i leftScope' leftField rightScope' rightField rho'
-        leftJoins' rightJoins' leftContinuation rightContinuation
+      continuation =>
+      rename_i leftField rightField leftContinuation rightContinuation
         leftObject leftIndex rightObject rightIndex
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftIndex == rightIndex) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
             LCNF.AlphaEqv.eqvArg leftField rightField <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -436,19 +477,19 @@ theorem codeRelated_of_local_accepts
         apply CodeRelated.oset
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.1⟩
         · exact ⟨leftFieldScoped, rightFieldScoped, accepted.2.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2.2⟩
+        · exact codeRelated_of_local_check continuation accepted.2.2.2
   | uset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
-      continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
-        leftObject leftIndex leftField rightObject rightIndex rightField
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      continuation =>
+      rename_i leftContinuation rightContinuation leftObject leftIndex leftField
+        rightObject rightIndex rightField
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftIndex == rightIndex) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
             LCNF.AlphaEqv.eqvFVar leftField rightField <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -458,22 +499,22 @@ theorem codeRelated_of_local_accepts
         apply CodeRelated.uset
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.1⟩
         · exact ⟨leftFieldScoped, rightFieldScoped, accepted.2.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2.2⟩
+        · exact codeRelated_of_local_check continuation accepted.2.2.2
   | sset leftObjectScoped rightObjectScoped leftFieldScoped rightFieldScoped
-      continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
+      continuation =>
+      rename_i leftContinuation rightContinuation
         leftObject leftWidth leftOffset leftField leftType
         rightObject rightWidth rightOffset rightField rightType
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftWidth == rightWidth) <&&>
             pure (leftOffset == rightOffset) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
             LCNF.AlphaEqv.eqvFVar leftField rightField <&&>
             LCNF.AlphaEqv.eqvType leftType rightType <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -487,17 +528,17 @@ theorem codeRelated_of_local_accepts
         apply CodeRelated.sset
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.2.1⟩
         · exact ⟨leftFieldScoped, rightFieldScoped, accepted.2.2.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2.2.2.2⟩
-  | setTag leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
+        · exact codeRelated_of_local_check continuation accepted.2.2.2.2.2
+  | setTag leftObjectScoped rightObjectScoped continuation =>
+      rename_i leftContinuation rightContinuation
         leftObject leftTag rightObject rightTag
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftTag == rightTag) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -505,20 +546,20 @@ theorem codeRelated_of_local_accepts
         subst rightTag
         apply CodeRelated.setTag
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2⟩
-  | inc leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
+        · exact codeRelated_of_local_check continuation accepted.2.2
+  | inc leftObjectScoped rightObjectScoped continuation =>
+      rename_i leftContinuation rightContinuation
         leftObject leftAmount leftCheck leftPersistent
         rightObject rightAmount rightCheck rightPersistent
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftAmount == rightAmount) <&&>
             pure (leftCheck == rightCheck) <&&>
             pure (leftPersistent == rightPersistent) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -533,21 +574,21 @@ theorem codeRelated_of_local_accepts
         subst rightPersistent
         apply CodeRelated.inc
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.2.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2.2.2⟩
-  | dec leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
+        · exact codeRelated_of_local_check continuation accepted.2.2.2.2
+  | dec leftObjectScoped rightObjectScoped continuation =>
+      rename_i leftContinuation rightContinuation
         leftObject leftAmount leftCheck leftPersistent leftObjects
         rightObject rightAmount rightCheck rightPersistent rightObjects
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (pure (leftAmount == rightAmount) <&&>
             pure (leftCheck == rightCheck) <&&>
             pure (leftPersistent == rightPersistent) <&&>
             pure (leftObjects == rightObjects) <&&>
             LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
@@ -566,21 +607,23 @@ theorem codeRelated_of_local_accepts
         subst rightObjects
         apply CodeRelated.dec
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.2.2.2.2.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2.2.2.2.2⟩
-  | del leftObjectScoped rightObjectScoped continuation continuation_ih =>
-      rename_i rho' leftScope' rightScope' leftJoins' rightJoins'
-        leftContinuation rightContinuation
-        leftObject rightObject
-      rcases accepted with ⟨_ | fuel, accepted⟩
-      · simp [Local.checkAt, Local.eqv] at accepted
-      · change
+        · exact codeRelated_of_local_check continuation accepted.2.2.2.2.2
+  | del leftObjectScoped rightObjectScoped continuation =>
+      rename_i leftContinuation rightContinuation leftObject rightObject
+      cases fuel with
+      | zero => simp [Local.checkAt, Local.eqv] at accepted
+      | succ fuel =>
+        change
           (LCNF.AlphaEqv.eqvFVar leftObject rightObject <&&>
-            Local.eqv fuel leftContinuation rightContinuation).run rho' = true
+            Local.eqv fuel leftContinuation rightContinuation).run rho = true
             at accepted
         rw [reader_andM_run_eq_true_iff] at accepted
         apply CodeRelated.del
         · exact ⟨leftObjectScoped, rightObjectScoped, accepted.1⟩
-        · exact continuation_ih ⟨fuel, accepted.2⟩
+        · exact codeRelated_of_local_check continuation accepted.2
+termination_by (fuel, 0, 0)
+decreasing_by
+  all_goals exact Prod.Lex.left _ _ (by omega)
 
 /--
 The transparent parameter traversal exposes exactly the reader map under
@@ -600,14 +643,43 @@ theorem paramBodyRelated_of_local_check
     ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope
       leftParams rightParams leftCode rightCode := by
-  induction side with
+  cases side with
   | nil body =>
-      exact .nil (codeRelated_of_local_accepts body ⟨fuel, accepted⟩)
-  | cons leftFresh rightFresh rest rest_ih =>
+      exact .nil (codeRelated_of_local_check body accepted)
+  | cons leftFresh rightFresh rest =>
       simp only [Local.withParamListsUsing] at accepted
       rw [reader_andM_run_eq_true_iff] at accepted
       rw [withFVar_run] at accepted
-      exact .cons leftFresh rightFresh (rest_ih accepted.2)
+      exact .cons leftFresh rightFresh
+        (paramBodyRelated_of_local_check
+          (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rest accepted.2)
+termination_by
+  (fuel, 1, leftParams.length + rightParams.length)
+decreasing_by
+  · exact Prod.Lex.right fuel
+      (Prod.Lex.left 0 _ (by omega : (0 : Nat) < 1))
+  · apply Prod.Lex.right fuel
+    apply Prod.Lex.right 1
+    simp_all only [List.length_cons]
+    omega
+
+end
+
+/--
+For the code fragment represented by `CodeRelated`, transparent local
+acceptance plus the explicit side conditions constructs the declarative
+relation. This theorem is independent of the upstream correspondence axiom.
+-/
+theorem codeRelated_of_local_accepts
+    {leftJoins rightJoins : List FVarId}
+    (side : CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right)
+    (accepted : Local.AcceptsAt rho left right) :
+    CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right := by
+  rcases accepted with ⟨fuel, accepted⟩
+  exact codeRelated_of_local_check side accepted
 
 /--
 An accepting transparent comparison of ordered alternatives constructs the
@@ -670,7 +742,11 @@ theorem altsRelated_of_local_check_by_selector
       (Local.eqvAltListsUsing (Local.eqv fuel) left right).run rho = true) :
     AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope left right :=
-  altsRelated_of_local_check_by_selector_using ctorSound defaultSound
+  altsRelated_of_local_check_by_selector_using
+    (fun tag leftCode rightCode leftHas rightHas exactAccepted =>
+      ctorSound tag leftCode rightCode leftHas rightHas ⟨fuel, exactAccepted⟩)
+    (fun leftCode rightCode leftHas rightHas exactAccepted =>
+      defaultSound leftCode rightCode leftHas rightHas ⟨fuel, exactAccepted⟩)
     leftSubset rightSubset accepted
 
 /--

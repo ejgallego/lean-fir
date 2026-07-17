@@ -18,13 +18,25 @@ inductive TerminalCodeRelated (rho : FVarIdMap FVarId)
   | unreachable :
       TerminalCodeRelated rho leftScope rightScope (.unreach leftType) (.unreach rightType)
 
+/-- A jump target is in both active join scopes and follows the current renaming. -/
+abbrev ScopedJoinRelated (rho : FVarIdMap FVarId)
+    (leftJoins rightJoins : List FVarId) (left right : FVarId) : Prop :=
+  ScopedFVarRelated rho leftJoins rightJoins left right
+
+/-- A join binder is globally fresh with respect to the currently visible names. -/
+structure FreshJoinBinder (fvarId : FVarId)
+    (variables joins : List FVarId) : Prop where
+  variables : FreshForScope fvarId variables
+  joins : FreshForScope fvarId joins
+
 set_option linter.unusedVariables false in
 mutual
 
 /--
-The proof-facing code relation, covering terminal code, value bindings, and
-the sequential impure heap/ownership instructions. The recursive `let` case
-records the same scope extension performed by Lean's alpha-equivalence checker.
+The proof-facing code relation, covering terminal code, value bindings,
+join-point control flow, and the sequential impure heap/ownership instructions.
+Recursive binders record the same scope and renaming extensions performed by
+Lean's alpha-equivalence checker.
 -/
 inductive CodeRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
@@ -46,6 +58,29 @@ inductive CodeRelated :
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope
         (.let leftDecl leftContinuation) (.let rightDecl rightContinuation)
+  | jp
+      (leftFresh : FreshJoinBinder leftDecl.fvarId leftScope leftJoins)
+      (rightFresh : FreshJoinBinder rightDecl.fvarId rightScope rightJoins)
+      (body :
+        ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+          rho leftScope rightScope
+          leftDecl.params.toList rightDecl.params.toList
+          leftDecl.value rightDecl.value)
+      (continuation :
+        CodeRelated
+          (leftJoins := leftDecl.fvarId :: leftJoins)
+          (rightJoins := rightDecl.fvarId :: rightJoins)
+          (rho.insert rightDecl.fvarId leftDecl.fvarId)
+          leftScope rightScope leftContinuation rightContinuation) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        (.jp leftDecl leftContinuation) (.jp rightDecl rightContinuation)
+  | jmp
+      (target : ScopedJoinRelated rho leftJoins rightJoins leftTarget rightTarget)
+      (args : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        (.jmp leftTarget leftArgs) (.jmp rightTarget rightArgs)
   | cases
       (discr : ScopedFVarRelated rho leftScope rightScope
         leftCases.discr rightCases.discr)
@@ -122,6 +157,33 @@ inductive CodeRelated :
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope
         (.del leftObject leftContinuation) (.del rightObject rightContinuation)
+
+/--
+Related join/function bodies under their pointwise alpha-renamed parameters.
+The join binder itself is deliberately absent: Lean checks the body before it
+extends the renaming for the continuation.
+-/
+inductive ParamBodyRelated :
+    FVarIdMap FVarId → List FVarId → List FVarId →
+      {leftJoins rightJoins : List FVarId} →
+      List (LCNF.Param .impure) → List (LCNF.Param .impure) →
+      LCNF.Code .impure → LCNF.Code .impure → Prop where
+  | nil
+      (body : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftCode rightCode) :
+      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope [] [] leftCode rightCode
+  | cons
+      (leftFresh : FreshForScope leftParam.fvarId leftScope)
+      (rightFresh : FreshForScope rightParam.fvarId rightScope)
+      (rest : ParamBodyRelated
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        (rho.insert rightParam.fvarId leftParam.fvarId)
+        (leftParam.fvarId :: leftScope) (rightParam.fvarId :: rightScope)
+        leftRest rightRest leftCode rightCode) :
+      ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        (leftParam :: leftRest) (rightParam :: rightRest) leftCode rightCode
 
 /-- A case-table lookup either fails on both sides or selects related code. -/
 inductive CaseSelectionRelated :
@@ -630,8 +692,18 @@ theorem runtimeEffectResult_related
       }
 
 /--
-One interpreter step preserves the declarative machine relation for terminal
-code, `let`, and sequential impure effects. The three successful let actions
+The code heads covered by the current one-step simulation. Join installation
+and invocation are represented by `CodeRelated` but deliberately remain outside
+this predicate until active join environments are related semantically.
+-/
+def CoreStepSupported : LCNF.Code .impure → LCNF.Code .impure → Prop
+  | .jp .., .jp .. | .jmp .., .jmp .. => False
+  | _, _ => True
+
+/--
+One interpreter step preserves the declarative machine relation for the
+currently supported code heads: terminal code, `let`, cases, and sequential
+impure effects. The three successful let actions
 either extend the current environments immediately or save the same extension
 invariant in a pair of bind frames. Heap and ownership instructions run the
 same runtime effect on both sides before entering related continuations.
@@ -646,7 +718,8 @@ theorem coreStep_code_related
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
     (related : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
-      rho leftScope rightScope leftCode rightCode) :
+      rho leftScope rightScope leftCode rightCode)
+    (supported : CoreStepSupported leftCode rightCode) :
     CoreResultRelated
       (coreStep { leftState with control := .code leftCode })
       (coreStep { rightState with control := .code rightCode }) := by
@@ -800,6 +873,8 @@ theorem coreStep_code_related
                 control := .invokeValue function args
               }
               simpa [pushBindFrame] using CoreResultRelated.next nextRelated
+  | jp _ _ _ _ => simp [CoreStepSupported] at supported
+  | jmp _ _ => simp [CoreStepSupported] at supported
   | cases discr alternatives =>
       rename_i leftCases rightCases
       have discrEq := lookupValue_eq_of_scoped_related agree discr

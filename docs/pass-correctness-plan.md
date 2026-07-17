@@ -85,8 +85,9 @@ The following work is implemented and checked by the default build:
   recursive checker, including a proof-facing structural alternative traversal;
   `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
   declarative relation for terminal code, value bindings, sequential impure
-  effects, and recursively nested deterministic case tables under explicit
-  normalization, well-formedness, and runtime-metadata premises;
+  effects, recursively nested deterministic case tables, join declarations,
+  parameterized join bodies, and jumps under explicit normalization,
+  well-formedness, and runtime-metadata premises;
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
@@ -440,16 +441,28 @@ The declarative proof relations now distinguish lexical variable scope from
 active join scope. `CodeRelated`, branch selection, controls, and machine
 states carry paired left/right join-scope indices, and every already-proved
 constructor preserves them unchanged. Top-level trusted theorems and
-regressions instantiate both scopes with the empty list. This is a structural
-precondition for the next control-flow slice: `jp` will extend the join scopes
-only around its continuation, while `jmp` will require an alpha-related target
-present in those scopes. No runtime contract or trusted assumption changed.
+regressions instantiate both scopes with the empty list. `CodeRelated.jp` now
+relates the parameterized body before extending the renaming and extends only
+the continuation's active join scopes; `CodeRelated.jmp` requires an
+alpha-related target present in both active join scopes and related,
+variable-scoped arguments. `CodeSideConditions` records the matching freshness
+and scope facts.
+
+Local-checker soundness for this control-flow syntax is complete. The proof is
+a fuel- and phase-indexed mutual recursion: recursive code checks consume fuel,
+the empty parameter traversal enters code at the same fuel, and nonempty
+parameter traversals decrease their list length. The full regression constructs
+`CodeRelated` for an alpha-renamed `jp`, its normalized case body, a subsequent
+value binding, and the final `jmp`. `CoreStepSupported` deliberately excludes
+`jp` and `jmp` from `coreStep_code_related` until runtime join environments are
+related semantically; this is an explicit proof boundary, not a new axiom or a
+weakened runtime definition. No runtime contract or trusted assumption changed.
 
 The remaining bounded work is:
 
-1. lift the proved parameter-body relation through the outer `jp`/`jmp`
-   constructors, relate active join environments, and extend the declarative
-   state simulation through join installation and invocation;
+1. relate active join environments and extend the declarative state simulation
+   through join installation and invocation, then remove the `jp`/`jmp`
+   exclusions from `CoreStepSupported`;
 2. extend whole-state simulation through named/closure calls and the remaining
    yielded/apply/cache frame paths, reusing the existing related `fap`, `pap`,
    and free-variable call actions;
