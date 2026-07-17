@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
 import posixpath
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +36,12 @@ BACKEND_NAME_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789-_"
 RESERVED_PRODUCT_KIND = "product-manifest"
 RESERVED_BUILD_INPUT_KIND = "build-input-manifest"
 BUILD_INPUT_SCOPE = "reported-loaded"
+BUILD_FILE_ACCESS_RECORDER_KIND = "file-access-recorder"
+STRACE_OPEN_SYSCALLS = {"open", "openat", "openat2"}
+STRACE_EXEC_SYSCALLS = {"execve", "execveat"}
+O_ACCMODE = 0x3
+O_WRONLY = 0x1
+O_PATH = 0x200000
 RESERVED_PRODUCT_PATHS = {
     "stdout.jsonl",
     "stderr.log",
@@ -181,6 +189,138 @@ class ValidationArtifact:
 
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def parse_strace_string(value: str, context: str) -> str:
+    try:
+        parsed = ast.literal_eval(value)
+    except (SyntaxError, ValueError) as error:
+        raise ValidationError(f"{context}: malformed strace string") from error
+    if not isinstance(parsed, str):
+        raise ValidationError(f"{context}: malformed strace string")
+    return parsed
+
+
+def parse_build_file_access_trace(
+    content: bytes, context: str
+) -> dict[str, tuple[str, ...]]:
+    """Decode successful strace file reads and executable acquisitions."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValidationError(f"{context}: trace is not UTF-8") from error
+    accesses: dict[str, set[str]] = {}
+
+    def record(raw_path: str, access: str) -> None:
+        if not os.path.isabs(raw_path):
+            raise ValidationError(
+                f"{context}: traced {access} path is not absolute: {raw_path}"
+            )
+        path = os.path.normpath(raw_path)
+        accesses.setdefault(path, set()).add(access)
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line:
+            continue
+        resumed = re.match(
+            r"^\s*\d+\s+<\.\.\. "
+            r"(open|openat|openat2|execve|execveat) resumed>",
+            line,
+        )
+        if resumed is not None:
+            raise ValidationError(
+                f"{context}:{line_number}: resumed traced "
+                f"{resumed.group(1)} syscall is ambiguous"
+            )
+        match = re.match(
+            r"^\s*\d+\s+(open|openat|openat2|execve|execveat)\(",
+            line,
+        )
+        if match is None:
+            raise ValidationError(
+                f"{context}:{line_number}: unrecognized strace line"
+            )
+        syscall = match.group(1)
+        line_context = f"{context}:{line_number}"
+        if " = " not in line or line.endswith("<unfinished ...>"):
+            raise ValidationError(
+                f"{line_context}: incomplete traced {syscall} syscall"
+            )
+        if syscall in STRACE_OPEN_SYSCALLS:
+            result = re.search(r" = \d+<(.+)>$", line)
+            if result is None:
+                raise ValidationError(
+                    f"{line_context}: malformed traced {syscall} result"
+                )
+            call = line[: result.start()]
+            flag_match = re.search(
+                r"flags=(0x[0-9a-fA-F]+|[0-9]+)", call
+            )
+            if flag_match is None:
+                flag_match = re.search(
+                    r",\s*(0x[0-9a-fA-F]+|[0-9]+)"
+                    r"(?:,\s*(?:0x[0-9a-fA-F]+|[0-9]+))?\)$",
+                    call,
+                )
+                if flag_match is None:
+                    raise ValidationError(
+                        f"{line_context}: missing traced {syscall} flags"
+                    )
+                raw_flag = flag_match.group(1)
+            else:
+                raw_flag = flag_match.group(1)
+            flags = (
+                int(raw_flag, 16)
+                if raw_flag.lower().startswith("0x")
+                else int(raw_flag, 10)
+            )
+            if flags & O_PATH or flags & O_ACCMODE == O_WRONLY:
+                continue
+            record(result.group(1), "read")
+            continue
+
+        quoted = r'"(?:[^"\\]|\\.)*"'
+        if syscall == "execve":
+            if re.search(r" = 0$", line) is None:
+                raise ValidationError(
+                    f"{line_context}: traced execve did not succeed"
+                )
+            argument = re.search(rf"execve\(({quoted})", line)
+            if argument is None:
+                raise ValidationError(
+                    f"{line_context}: malformed traced execve path"
+                )
+            record(
+                parse_strace_string(argument.group(1), line_context),
+                "exec",
+            )
+            continue
+
+        if re.search(r" = 0$", line) is None:
+            raise ValidationError(
+                f"{line_context}: traced execveat did not succeed"
+            )
+        argument = re.search(
+            rf"execveat\([^<]*<([^>]+)>,\s*({quoted})", line
+        )
+        if argument is None:
+            raise ValidationError(
+                f"{line_context}: malformed traced execveat path"
+            )
+        base = argument.group(1)
+        executable = parse_strace_string(argument.group(2), line_context)
+        if os.path.isabs(executable):
+            record(executable, "exec")
+        elif executable:
+            record(os.path.join(base, executable), "exec")
+        else:
+            record(base, "exec")
+    if not accesses:
+        raise ValidationError(f"{context}: trace contains no file accesses")
+    return {
+        path: tuple(sorted(kinds))
+        for path, kinds in sorted(accesses.items())
+    }
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -1262,6 +1402,8 @@ def retain_validation_build_inputs(
 VALIDATION_ARTIFACT_KINDS = {
     "backend-result",
     "build-determinism",
+    "build-file-access",
+    "build-file-access-trace",
     "process-stdout",
     "process-stderr",
 }
@@ -1283,7 +1425,30 @@ def validation_artifact_scope(
         )
     parts = PurePosixPath(checked_name).parts
     case_id: str | None = None
-    if checked_kind == "build-determinism":
+    if checked_kind == "build-file-access":
+        if len(parts) != 2 or parts[1] != "build-file-access.json":
+            raise ValidationError(
+                "build-file-access artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-file-access"
+    elif checked_kind == "build-file-access-trace":
+        if (
+            len(parts) != 3
+            or parts[2] != "file-access.strace"
+            or not (
+                parts[1] == "build"
+                or (
+                    parts[1].startswith("build-")
+                    and parts[1][6:].isdigit()
+                    and int(parts[1][6:]) >= 2
+                )
+            )
+        ):
+            raise ValidationError(
+                "build-file-access-trace artifact has noncanonical name"
+            )
+        backend, scope = parts[0], parts[1]
+    elif checked_kind == "build-determinism":
         if len(parts) != 2 or parts[1] != "build-determinism.json":
             raise ValidationError(
                 "build-determinism artifact has noncanonical name"
@@ -1771,6 +1936,7 @@ class ExternalCommandAdapter:
     product_declarations: tuple[ProductDeclaration, ...] = ()
     product_manifest: str | None = None
     build_input_manifest: str | None = None
+    build_file_access_recorder: ToolDeclaration | None = None
     build_attempts: int = 1
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     build_tool_declarations: tuple[ToolDeclaration, ...] = ()
@@ -1781,6 +1947,9 @@ class ExternalCommandAdapter:
         default=None, init=False, repr=False, compare=False
     )
     _built_build_tools: tuple[ValidationTool, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_build_file_access_recorder: ValidationTool | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_build_inputs: tuple[ValidationBuildInput, ...] | None = field(
@@ -2064,24 +2233,232 @@ class ExternalCommandAdapter:
                     f"cannot clear {self.name} product staging: {error}"
                 ) from error
 
+    def run_build_attempt(
+        self,
+        context: BuildContext,
+        attempt: int,
+        destination: Path,
+        artifact_prefix: str,
+        environment: dict[str, str],
+    ) -> tuple[
+        subprocess.CompletedProcess[str],
+        tuple[ValidationArtifact, ...],
+        tuple[dict[str, object], dict[str, tuple[str, ...]]] | None,
+    ]:
+        command = list(self._built_build_command or ())
+        trace_path: Path | None = None
+        trace_identity: tuple[int, int] | None = None
+        trace_name: str | None = None
+        recorder = self._built_build_file_access_recorder
+        if recorder is not None:
+            if recorder.source_path is None:
+                raise ValidationError(
+                    f"{self.name} build file-access recorder has no source path"
+                )
+            trace_root = context.out_dir.resolve() / "build-file-access-traces"
+            if trace_root.is_symlink() or (
+                trace_root.exists() and not trace_root.is_dir()
+            ):
+                raise ValidationError(
+                    f"{self.name} build file-access trace root is not a directory"
+                )
+            trace_root.mkdir(parents=True, exist_ok=True)
+            try:
+                trace_fd, raw_trace_path = tempfile.mkstemp(
+                    prefix=f"{self.name}-{attempt}-",
+                    suffix=".strace",
+                    dir=trace_root,
+                )
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot create {self.name} build file-access trace: "
+                    f"{error}"
+                ) from error
+            try:
+                trace_stat = os.fstat(trace_fd)
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot identify {self.name} build file-access trace: "
+                    f"{error}"
+                ) from error
+            finally:
+                os.close(trace_fd)
+            trace_path = Path(raw_trace_path)
+            trace_identity = (trace_stat.st_dev, trace_stat.st_ino)
+            build_scope = "build" if attempt == 1 else f"build-{attempt}"
+            trace_name = f"{self.name}/{build_scope}/file-access.strace"
+            command = [
+                str(recorder.source_path),
+                "-f",
+                "-qq",
+                "--kill-on-exit",
+                "-s",
+                "0",
+                "-yy",
+                "-X",
+                "raw",
+                "-e",
+                "trace=open,openat,openat2,execve,execveat",
+                "-e",
+                "status=successful",
+                "-e",
+                "signal=none",
+                "-o",
+                str(trace_path),
+                "--",
+                *command,
+            ]
+        completed = run(
+            command,
+            context.root,
+            self.timeout_seconds,
+            environment,
+        )
+        artifacts = write_process_artifacts(
+            destination, completed, artifact_prefix
+        )
+        if recorder is None or completed.returncode != 0:
+            return completed, artifacts, None
+        if (
+            trace_path is None
+            or trace_name is None
+            or trace_identity is None
+        ):
+            raise ValidationError(
+                f"{self.name} build file-access recorder lost its trace path"
+            )
+        if trace_path.is_symlink() or not trace_path.is_file():
+            raise ValidationError(
+                f"{self.name} build file-access recorder produced no trace"
+            )
+        try:
+            trace_stat = trace_path.stat()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot stat {self.name} build file-access trace: {error}"
+            ) from error
+        if (trace_stat.st_dev, trace_stat.st_ino) != trace_identity:
+            raise ValidationError(
+                f"{self.name} build file-access trace was replaced"
+            )
+        try:
+            trace_content = trace_path.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read {self.name} build file-access trace: {error}"
+            ) from error
+        trace_sha256 = sha256_bytes(trace_content)
+        accesses = parse_build_file_access_trace(
+            trace_content,
+            f"{self.name} build file-access trace attempt {attempt}",
+        )
+        trace_artifact = ValidationArtifact(
+            "build-file-access-trace",
+            trace_name,
+            trace_sha256,
+            trace_content,
+        )
+        trace_record: dict[str, object] = {
+            "attempt": attempt,
+            "trace": {
+                "name": trace_name,
+                "sha256": trace_sha256,
+            },
+            "accesses": [
+                {"path": path, "accesses": list(kinds)}
+                for path, kinds in accesses.items()
+            ],
+            "accessCount": len(accesses),
+        }
+        return completed, (*artifacts, trace_artifact), (
+            trace_record,
+            accesses,
+        )
+
+    def bind_reported_inputs_to_file_accesses(
+        self,
+        attempt: int,
+        trace_record: dict[str, object],
+        accesses: dict[str, tuple[str, ...]],
+        build_inputs: tuple[ValidationBuildInput, ...],
+    ) -> dict[str, object]:
+        reported_inputs: list[dict[str, object]] = []
+        missing: list[str] = []
+        for item in build_inputs:
+            if item.source_path is None:
+                continue
+            path = os.path.normpath(str(item.source_path.resolve()))
+            observed = accesses.get(path)
+            if observed is None:
+                missing.append(f"{item.kind}:{item.name}")
+                continue
+            reported_inputs.append(
+                {
+                    **item.to_json(),
+                    "path": path,
+                    "accesses": list(observed),
+                }
+            )
+        if missing:
+            raise ValidationError(
+                f"{self.name} reported build inputs were not observed by "
+                f"the file-access recorder on attempt {attempt}: "
+                + ", ".join(missing)
+            )
+        return {
+            **trace_record,
+            "reportedInputs": reported_inputs,
+            "reportedInputCount": len(reported_inputs),
+        }
+
     def build(self, context: BuildContext) -> None:
         self._built_products = None
         self._built_tools = None
         self._built_build_tools = None
+        self._built_build_file_access_recorder = None
         self._built_build_inputs = None
         self._built_build_command = None
         self._built_run_command = None
         self._build_artifacts = ()
         self._build_findings = ()
+        file_access_attempts: list[dict[str, object]] = []
+        recorded_access: (
+            tuple[dict[str, object], dict[str, tuple[str, ...]]] | None
+        ) = None
         if not context.no_build and self.build_command:
-            self._built_build_tools = self.collect_tools(
+            command_build_tools = self.collect_tools(
                 self.build_tool_declarations
             )
+            if self.build_file_access_recorder is not None:
+                if (
+                    self.build_file_access_recorder.kind
+                    != BUILD_FILE_ACCESS_RECORDER_KIND
+                ):
+                    raise ValidationError(
+                        f"{self.name} build file-access recorder kind must be "
+                        f"{BUILD_FILE_ACCESS_RECORDER_KIND}"
+                    )
+                self._built_build_file_access_recorder = (
+                    validation_tool_from_declaration(
+                        self.name, self.build_file_access_recorder
+                    )
+                )
+                self._built_build_tools = tuple(
+                    sorted(
+                        (
+                            *command_build_tools,
+                            self._built_build_file_access_recorder,
+                        ),
+                        key=lambda tool: (tool.kind, tool.name),
+                    )
+                )
+            else:
+                self._built_build_tools = command_build_tools
             self._built_build_command = self.bind_command(
                 context.root,
                 self.build_command,
                 self.build_tool_declarations,
-                self._built_build_tools,
+                command_build_tools,
                 "build",
             )
         else:
@@ -2100,15 +2477,16 @@ class ExternalCommandAdapter:
             build_environment["FIR_VALIDATION_BUILD_TOOLS"] = (
                 self.tool_environment_value(self._built_build_tools)
             )
-            completed = run(
-                list(self._built_build_command),
-                context.root,
-                self.timeout_seconds,
-                build_environment,
+            completed, attempt_artifacts, recorded_access = (
+                self.run_build_attempt(
+                    context,
+                    1,
+                    destination,
+                    f"{self.name}/build",
+                    build_environment,
+                )
             )
-            self._build_artifacts = write_process_artifacts(
-                destination, completed, f"{self.name}/build"
-            )
+            self._build_artifacts = attempt_artifacts
             self.verify_captured_tools(
                 self._built_build_tools, "during build"
             )
@@ -2125,6 +2503,16 @@ class ExternalCommandAdapter:
             if not context.no_build
             else ()
         )
+        if recorded_access is not None:
+            trace_record, accesses = recorded_access
+            file_access_attempts.append(
+                self.bind_reported_inputs_to_file_accesses(
+                    1,
+                    trace_record,
+                    accesses,
+                    self._built_build_inputs,
+                )
+            )
         if (
             not context.no_build
             and self.build_command
@@ -2169,17 +2557,16 @@ class ExternalCommandAdapter:
                 build_environment["FIR_VALIDATION_BUILD_TOOLS"] = (
                     self.tool_environment_value(self._built_build_tools)
                 )
-                completed = run(
-                    list(self._built_build_command),
-                    context.root,
-                    self.timeout_seconds,
-                    build_environment,
+                completed, attempt_artifacts, recorded_access = (
+                    self.run_build_attempt(
+                        context,
+                        attempt,
+                        destination,
+                        f"{self.name}/build-{attempt}",
+                        build_environment,
+                    )
                 )
-                self._build_artifacts += write_process_artifacts(
-                    destination,
-                    completed,
-                    f"{self.name}/build-{attempt}",
-                )
+                self._build_artifacts += attempt_artifacts
                 self.verify_captured_tools(
                     self._built_build_tools,
                     f"during build attempt {attempt}",
@@ -2196,6 +2583,16 @@ class ExternalCommandAdapter:
                     )
                 products = self.collect_products(context.out_dir)
                 build_inputs = self.collect_build_inputs(context.out_dir)
+                if recorded_access is not None:
+                    trace_record, accesses = recorded_access
+                    file_access_attempts.append(
+                        self.bind_reported_inputs_to_file_accesses(
+                            attempt,
+                            trace_record,
+                            accesses,
+                            build_inputs,
+                        )
+                    )
                 attempts.append(
                     {
                         "attempt": attempt,
@@ -2247,6 +2644,43 @@ class ExternalCommandAdapter:
                 ),
             )
             self._build_findings = tuple(findings)
+        if file_access_attempts:
+            recorder = self._built_build_file_access_recorder
+            if recorder is None:
+                raise ValidationError(
+                    f"{self.name} build file-access report has no recorder"
+                )
+            report = {
+                "version": PROTOCOL_VERSION,
+                "backend": self.name,
+                "recorder": recorder.to_json(),
+                "accessSetsEqual": all(
+                    attempt["accesses"]
+                    == file_access_attempts[0]["accesses"]
+                    for attempt in file_access_attempts[1:]
+                ),
+                "reportedInputsEqual": all(
+                    attempt["reportedInputs"]
+                    == file_access_attempts[0]["reportedInputs"]
+                    for attempt in file_access_attempts[1:]
+                ),
+                "attempts": file_access_attempts,
+            }
+            report_content = (
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            report_path = (
+                context.out_dir / self.name / "build-file-access.json"
+            )
+            report_path.write_bytes(report_content)
+            self._build_artifacts += (
+                ValidationArtifact(
+                    "build-file-access",
+                    f"{self.name}/build-file-access.json",
+                    sha256_bytes(report_content),
+                    report_content,
+                ),
+            )
         self._built_tools = self.collect_tools(self.tool_declarations)
         self._built_run_command = self.bind_command(
             context.root,
@@ -2397,6 +2831,7 @@ def external_adapter_from_config(
         "products",
         "productManifest",
         "buildInputManifest",
+        "buildFileAccessRecorder",
         "tools",
         "buildTools",
     }
@@ -2572,6 +3007,11 @@ def external_adapter_from_config(
                     "path or command"
                 )
             kind = validate_backend_name(tool["kind"], tool_context)
+            if kind == BUILD_FILE_ACCESS_RECORDER_KIND:
+                raise ValidationError(
+                    f"{tool_context}: tool kind is reserved for "
+                    "buildFileAccessRecorder"
+                )
             tool_name = checked_relative_posix_path(
                 tool["name"], tool_context
             )
@@ -2657,6 +3097,54 @@ def external_adapter_from_config(
     build_tool_declarations = checked_tools(
         "buildTools", build_command, "buildCommand"
     )
+    raw_build_file_access_recorder = value.get(
+        "buildFileAccessRecorder"
+    )
+    build_file_access_recorder = None
+    if raw_build_file_access_recorder is not None:
+        recorder_context = (
+            f"adapter config {path}/buildFileAccessRecorder"
+        )
+        if (
+            not isinstance(raw_build_file_access_recorder, dict)
+            or set(raw_build_file_access_recorder)
+            != {"kind", "name", "command"}
+        ):
+            raise ValidationError(
+                f"{recorder_context}: expected kind, name, and command fields"
+            )
+        recorder_kind = validate_backend_name(
+            raw_build_file_access_recorder["kind"], recorder_context
+        )
+        if recorder_kind != BUILD_FILE_ACCESS_RECORDER_KIND:
+            raise ValidationError(
+                f"{recorder_context}: kind must be "
+                f"{BUILD_FILE_ACCESS_RECORDER_KIND}"
+            )
+        recorder_name = checked_relative_posix_path(
+            raw_build_file_access_recorder["name"], recorder_context
+        )
+        recorder_command = raw_build_file_access_recorder["command"]
+        if (
+            not isinstance(recorder_command, str)
+            or not recorder_command
+            or "\x00" in recorder_command
+            or "/" in recorder_command
+            or "\\" in recorder_command
+        ):
+            raise ValidationError(
+                f"{recorder_context}: command must be a bare PATH command"
+            )
+        if not build_command:
+            raise ValidationError(
+                f"adapter config {path}: buildFileAccessRecorder requires "
+                "buildCommand"
+            )
+        build_file_access_recorder = ToolDeclaration(
+            recorder_kind,
+            recorder_name,
+            command=recorder_command,
+        )
     duplicate_tool_keys = sorted(
         {
             (declaration.kind, declaration.name)
@@ -2673,6 +3161,38 @@ def external_adapter_from_config(
             f"adapter config {path}: duplicate tool across build and run: "
             f"{kind}:{tool_name}"
         )
+    if build_file_access_recorder is not None:
+        existing_declarations = (
+            *tool_declarations,
+            *build_tool_declarations,
+        )
+        recorder_key = (
+            build_file_access_recorder.kind,
+            build_file_access_recorder.name,
+        )
+        if recorder_key in {
+            (declaration.kind, declaration.name)
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate file-access recorder "
+                f"tool: {recorder_key[0]}:{recorder_key[1]}"
+            )
+        if (
+            "command",
+            str(build_file_access_recorder.command),
+        ) in {
+            (
+                ("path", str(declaration.path))
+                if declaration.path is not None
+                else ("command", str(declaration.command))
+            )
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate file-access recorder "
+                f"source: {build_file_access_recorder.command}"
+            )
     return ExternalCommandAdapter(
         name=name,
         run_command=run_command,
@@ -2687,6 +3207,7 @@ def external_adapter_from_config(
         ),
         product_manifest=product_manifest,
         build_input_manifest=build_input_manifest,
+        build_file_access_recorder=build_file_access_recorder,
         build_attempts=build_attempts,
         tool_declarations=tool_declarations,
         build_tool_declarations=build_tool_declarations,
@@ -3345,6 +3866,13 @@ def verify_matrix_artifact(
     result_records: dict[tuple[str, str], dict] = {}
     determinism_backends: set[str] = set()
     determinism_attempt_counts: dict[str, int] = {}
+    determinism_attempts: dict[
+        str, list[tuple[list[dict[str, str]], list[dict[str, str]]]]
+    ] = {}
+    file_access_reports: dict[str, dict] = {}
+    file_access_traces: dict[
+        tuple[str, str], ValidationArtifact
+    ] = {}
     stdout_scopes: set[tuple[str, str | None, str]] = set()
     stderr_scopes: set[tuple[str, str | None, str]] = set()
     for item in raw_artifacts:
@@ -3478,6 +4006,7 @@ def verify_matrix_artifact(
                     "build-determinism equality disagrees with attempts"
                 )
             determinism_attempt_counts[backend] = len(checked_attempts)
+            determinism_attempts[backend] = checked_attempts
             final_products = [
                 product.to_json()
                 for product in products
@@ -3495,6 +4024,31 @@ def verify_matrix_artifact(
                 raise ValidationError(
                     "build-determinism final attempt disagrees with matrix"
                 )
+        elif kind == "build-file-access":
+            if backend in file_access_reports:
+                raise ValidationError(
+                    "validation matrix has duplicate build file-access reports"
+                )
+            try:
+                report = json.loads(content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "build-file-access artifact is not JSON"
+                ) from error
+            if not isinstance(report, dict):
+                raise ValidationError(
+                    "build-file-access artifact is malformed"
+                )
+            file_access_reports[backend] = report
+        elif kind == "build-file-access-trace":
+            trace_key = (backend, scope)
+            if trace_key in file_access_traces:
+                raise ValidationError(
+                    "validation matrix has duplicate build file-access traces"
+                )
+            file_access_traces[trace_key] = ValidationArtifact(
+                kind, name, digest, content
+            )
         elif kind == "process-stdout":
             stdout_scopes.add((backend, case_id, scope))
         elif kind == "process-stderr":
@@ -3539,6 +4093,272 @@ def verify_matrix_artifact(
             raise ValidationError(
                 "build-determinism attempts disagree with process artifacts"
             )
+
+    expected_file_access_traces: set[tuple[str, str]] = set()
+    tool_records = [tool.to_json() for tool in tools]
+    recorder_tool_backends: list[str] = [
+        tool.backend
+        for tool in tools
+        if tool.kind == BUILD_FILE_ACCESS_RECORDER_KIND
+    ]
+    if (
+        len(set(recorder_tool_backends)) != len(recorder_tool_backends)
+        or set(recorder_tool_backends) != set(file_access_reports)
+    ):
+        raise ValidationError(
+            "build file-access recorder tools disagree with reports"
+        )
+    for backend, report in file_access_reports.items():
+        if (
+            set(report)
+            != {
+                "version",
+                "backend",
+                "recorder",
+                "accessSetsEqual",
+                "reportedInputsEqual",
+                "attempts",
+            }
+            or report.get("version") != PROTOCOL_VERSION
+            or isinstance(report.get("version"), bool)
+            or report.get("backend") != backend
+            or not isinstance(report.get("recorder"), dict)
+            or not isinstance(report.get("accessSetsEqual"), bool)
+            or not isinstance(report.get("reportedInputsEqual"), bool)
+            or not isinstance(report.get("attempts"), list)
+            or not report["attempts"]
+        ):
+            raise ValidationError(
+                "build-file-access artifact is malformed"
+            )
+        recorder = report["recorder"]
+        if (
+            set(recorder) != {"backend", "kind", "name", "sha256"}
+            or recorder.get("backend") != backend
+        ):
+            raise ValidationError(
+                "build-file-access recorder is malformed"
+            )
+        validate_backend_name(
+            recorder.get("kind"), "build-file-access recorder kind"
+        )
+        if recorder.get("kind") != BUILD_FILE_ACCESS_RECORDER_KIND:
+            raise ValidationError(
+                "build-file-access recorder kind is malformed"
+            )
+        checked_relative_posix_path(
+            recorder.get("name"), "build-file-access recorder name"
+        )
+        checked_sha256(
+            recorder.get("sha256"), "build-file-access recorder"
+        )
+        if recorder not in tool_records:
+            raise ValidationError(
+                "build-file-access recorder is absent from validation tools"
+            )
+        expected_attempt_count = determinism_attempt_counts.get(backend, 1)
+        if len(report["attempts"]) != expected_attempt_count:
+            raise ValidationError(
+                "build-file-access attempts disagree with build determinism"
+            )
+        for expected_attempt, attempt in enumerate(
+            report["attempts"], start=1
+        ):
+            if (
+                not isinstance(attempt, dict)
+                or set(attempt)
+                != {
+                    "attempt",
+                    "trace",
+                    "accesses",
+                    "accessCount",
+                    "reportedInputs",
+                    "reportedInputCount",
+                }
+                or attempt.get("attempt") != expected_attempt
+                or isinstance(attempt.get("attempt"), bool)
+                or not isinstance(attempt.get("trace"), dict)
+                or not isinstance(attempt.get("accesses"), list)
+                or not isinstance(attempt.get("accessCount"), int)
+                or isinstance(attempt.get("accessCount"), bool)
+                or not isinstance(attempt.get("reportedInputs"), list)
+                or not isinstance(attempt.get("reportedInputCount"), int)
+                or isinstance(attempt.get("reportedInputCount"), bool)
+            ):
+                raise ValidationError(
+                    "build-file-access attempt is malformed"
+                )
+            scope = (
+                "build"
+                if expected_attempt == 1
+                else f"build-{expected_attempt}"
+            )
+            expected_trace_name = (
+                f"{backend}/{scope}/file-access.strace"
+            )
+            trace = attempt["trace"]
+            if (
+                set(trace) != {"name", "sha256"}
+                or trace.get("name") != expected_trace_name
+            ):
+                raise ValidationError(
+                    "build-file-access trace reference is malformed"
+                )
+            trace_digest = checked_sha256(
+                trace.get("sha256"), "build-file-access trace"
+            )
+            trace_key = (backend, scope)
+            expected_file_access_traces.add(trace_key)
+            trace_artifact = file_access_traces.get(trace_key)
+            if (
+                trace_artifact is None
+                or trace_artifact.name != expected_trace_name
+                or trace_artifact.sha256 != trace_digest
+            ):
+                raise ValidationError(
+                    "build-file-access report disagrees with raw trace"
+                )
+            parsed_accesses = parse_build_file_access_trace(
+                trace_artifact.content,
+                f"retained {backend} build file-access trace "
+                f"attempt {expected_attempt}",
+            )
+            canonical_accesses = [
+                {"path": path, "accesses": list(kinds)}
+                for path, kinds in parsed_accesses.items()
+            ]
+            if attempt["accesses"] != canonical_accesses:
+                raise ValidationError(
+                    "build-file-access report disagrees with parsed trace"
+                )
+            if attempt["accessCount"] != len(canonical_accesses):
+                raise ValidationError(
+                    "build-file-access access count is malformed"
+                )
+            reported_records: list[dict[str, str]] = []
+            reported_keys: list[tuple[str, str]] = []
+            for item in attempt["reportedInputs"]:
+                if (
+                    not isinstance(item, dict)
+                    or set(item)
+                    != {
+                        "backend",
+                        "kind",
+                        "name",
+                        "sha256",
+                        "path",
+                        "accesses",
+                    }
+                    or item.get("backend") != backend
+                ):
+                    raise ValidationError(
+                        "build-file-access reported input is malformed"
+                    )
+                kind = validate_backend_name(
+                    item.get("kind"),
+                    "build-file-access reported input kind",
+                )
+                name = checked_relative_posix_path(
+                    item.get("name"),
+                    "build-file-access reported input name",
+                )
+                digest = checked_sha256(
+                    item.get("sha256"),
+                    "build-file-access reported input",
+                )
+                input_path = item.get("path")
+                if (
+                    not isinstance(input_path, str)
+                    or not os.path.isabs(input_path)
+                    or os.path.normpath(input_path) != input_path
+                    or item.get("accesses")
+                    != list(parsed_accesses.get(input_path, ()))
+                    or not item.get("accesses")
+                ):
+                    raise ValidationError(
+                        "build-file-access reported input was not observed"
+                    )
+                reported_records.append(
+                    {
+                        "backend": backend,
+                        "kind": kind,
+                        "name": name,
+                        "sha256": digest,
+                    }
+                )
+                reported_keys.append((kind, name))
+            if (
+                len(set(reported_keys)) != len(reported_keys)
+                or reported_keys != sorted(reported_keys)
+            ):
+                raise ValidationError(
+                    "build-file-access reported inputs are duplicate or unsorted"
+                )
+            if attempt["reportedInputCount"] != len(reported_records):
+                raise ValidationError(
+                    "build-file-access reported input count is malformed"
+                )
+            if backend in determinism_attempts:
+                expected_inputs = determinism_attempts[backend][
+                    expected_attempt - 1
+                ][1]
+            else:
+                expected_inputs = [
+                    item.to_json()
+                    for item in build_inputs
+                    if item.backend == backend
+                ]
+            expected_reported_inputs = [
+                item
+                for item in expected_inputs
+                if item["kind"] != RESERVED_BUILD_INPUT_KIND
+            ]
+            if reported_records != expected_reported_inputs:
+                raise ValidationError(
+                    "build-file-access reported inputs disagree with build inputs"
+                )
+        actual_access_sets_equal = all(
+            attempt["accesses"] == report["attempts"][0]["accesses"]
+            for attempt in report["attempts"][1:]
+        )
+        actual_reported_inputs_equal = all(
+            attempt["reportedInputs"]
+            == report["attempts"][0]["reportedInputs"]
+            for attempt in report["attempts"][1:]
+        )
+        if (
+            report["accessSetsEqual"] != actual_access_sets_equal
+            or report["reportedInputsEqual"]
+            != actual_reported_inputs_equal
+        ):
+            raise ValidationError(
+                "build-file-access equality disagrees with attempts"
+            )
+        expected_scopes = {
+            (
+                backend,
+                None,
+                "build" if attempt == 1 else f"build-{attempt}",
+            )
+            for attempt in range(1, expected_attempt_count + 1)
+        }
+        actual_scopes = {
+            item
+            for item in stdout_scopes
+            if item[0] == backend
+            and item[1] is None
+            and (
+                item[2] == "build" or item[2].startswith("build-")
+            )
+        }
+        if actual_scopes != expected_scopes:
+            raise ValidationError(
+                "build-file-access attempts disagree with process artifacts"
+            )
+    if set(file_access_traces) != expected_file_access_traces:
+        raise ValidationError(
+            "raw build file-access traces disagree with reports"
+        )
 
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:

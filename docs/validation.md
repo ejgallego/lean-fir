@@ -102,9 +102,10 @@ Existing blobs are reused only when their bytes agree; symlinks, non-regular
 files, and digest collisions fail closed.  The mutable original config, tool,
 product, result, log, or comparison path is therefore not needed to verify the
 completed report.  The sorted `artifacts` inventory includes every successfully
-parsed per-case backend result and the exact stdout/stderr pair from each
-current execution or external build.  It is assembled from bytes captured when
-the files are written, not by scanning a possibly stale output tree.
+parsed per-case backend result, the exact stdout/stderr pair from each current
+execution or external build, build-determinism and file-access reports, and
+every retained raw file-access trace.  It is assembled from bytes captured
+when the files are written, not by scanning a possibly stale output tree.
 
 Verification is read-only and does not execute any backend:
 
@@ -143,7 +144,9 @@ native–LCNF matrix run.
 
 The verifier strictly checks schema, names and paths, every retained byte,
 ordering and uniqueness, stdout/stderr pairing, summary counts, and both
-identities.  It parses retained backend results, checks their case/backend
+identities.  It reparses retained raw file-access traces when present and
+reconstructs their canonical reports.  It parses retained backend results,
+checks their case/backend
 labels, requires both results used by every comparison, and recomputes each
 reported equality from those retained observations.  Results and logs remain
 outside `identity.run`, so nondeterministic evidence can expose different bytes
@@ -220,6 +223,11 @@ JSON, and commands are argv arrays executed directly rather than shell text:
   "name": "v8",
   "buildCommand": ["node", "scripts/build-lean-wasm.mjs"],
   "buildAttempts": 2,
+  "buildFileAccessRecorder": {
+    "kind": "file-access-recorder",
+    "name": "strace",
+    "command": "strace"
+  },
   "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
@@ -273,6 +281,11 @@ that phase's command at index zero.  `path` is a normalized POSIX path resolved
 relative to the adapter config, may use leading `..`, and must resolve to
 exactly one later argument of the owning phase command under the project root.
 Duplicate identities and duplicate sources within a phase are rejected.
+`buildFileAccessRecorder` is a separate optional tool declaration with the
+reserved kind `file-access-recorder`; its identity and source must also be
+distinct from every build and execution tool.  It can record a trace without a
+`buildInputManifest`; when both are present the harness additionally enforces
+reported-closure coverage.
 
 `buildAttempts` is an optional positive integer with default `1`.  Values
 greater than one require declared products and mean total clean builds, not
@@ -350,6 +363,45 @@ member under `buildInputs`, retains exact member bytes under
 and reports `buildInputCount`.  Read-only verification reparses the retained
 canonical manifest and requires exact equality with the matrix closure.
 
+On Linux, an adapter can opt into observational build-closure validation with
+`buildFileAccessRecorder`.  The current recorder contract is the strace CLI:
+the harness captures and hashes the PATH-resolved recorder as a build tool,
+then wraps every build attempt with the captured binary using
+`-f -qq --kill-on-exit -s 0 -yy -X raw`, successful-status and no-signal
+filtering, and the `open`, `openat`, `openat2`, `execve`, and `execveat` syscall
+set.  It records
+successful read-capable opens and executable acquisitions, while excluding
+write-only and `O_PATH` opens.  Resolved descriptor annotations must produce
+absolute normalized paths; incomplete, resumed, relative, or otherwise
+ambiguous relevant records fail closed.
+The raw output path is randomized and pre-created privately; the harness
+requires the same device and inode after strace exits before reading it.
+
+Each successful attempt retains its raw `file-access.strace` plus one canonical
+`build-file-access.json` report.  The report binds the captured recorder, raw
+trace digest, sorted observed access set, and the machine-local path of each
+reported build-input member, with explicit counts and cross-attempt equality
+for both the full observed set and reported-input subset.  Full-set drift is
+evidence rather than a semantic finding because compiler temporary paths may
+legitimately differ; the stricter product and reported-input determinism checks
+remain authoritative.  Every path-bearing member of
+`buildInputManifest` must occur in the observed set on every attempt.  The
+read-only verifier reparses each retained raw trace, reconstructs the canonical
+access set, checks the recorder against the retained tool inventory, and
+requires the reported-input inventory to equal that attempt's build-input
+closure.  Repeat-build, process-log, trace, and report attempt numbers must
+agree exactly.  `--no-build` captures neither a recorder nor traces and makes
+no access claim.
+
+This evidence says that the traced build acquired a path through a
+read-capable open or execution.  It can overapproximate actual consumption and
+does not prove that the bytes later hashed by the harness were the exact bytes
+seen at open time.  Inherited descriptors, untraced acquisition mechanisms,
+and a path swap between acquisition and hashing remain outside the claim.  The
+next strengthening is sealed, content-addressed replay; the recorder report is
+designed to supply that future replay boundary without making the stronger
+claim today.
+
 `FirValidationWasm.lean` obtains this inventory from the same running Lean
 process that emits the Wasm: `IO.appPath` reports the compiler executable,
 `Environment.header.moduleNames` reports all direct and transitive imported
@@ -357,10 +409,11 @@ modules, and `Lean.findOLean` resolves the artifact loaded for each module.  On
 the current toolchain this is materially stronger than `lean --deps`, which
 reports only direct dependencies, and than Lake trace hashes, which are not
 cryptographic evidence identities.  The reported-loaded scope is intentionally
-honest: it does not prove that a file could not be swapped while Lean was
-loading it, nor does it discover arbitrary IO performed by command elaborators
-or the host dynamic loader.  Exact file-open provenance would require a future
-Lean recorder or execution from a sealed content-addressed snapshot.
+honest: without the optional strace recorder it does not independently observe
+arbitrary IO performed by command elaborators or the host dynamic loader.  With
+the recorder it gains process-level path-acquisition evidence, but a file could
+still be swapped between acquisition and later hashing.  Exact-byte replay
+requires execution from a sealed content-addressed snapshot.
 
 The build-input inventory is not copied into process environment variables;
 large Lean closures can exceed operating-system argv/environment limits.  It

@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -1327,6 +1328,68 @@ class HarnessTests(unittest.TestCase):
             with self.assertRaisesRegex(harness.ValidationError, "argv array"):
                 harness.external_adapter_from_config(path)
 
+    def test_strace_file_access_parser_is_strict_and_canonical(self) -> None:
+        trace = "\n".join(
+            [
+                '101 execve("/opt/bin/tool", ["tool"], 0x0) = 0',
+                '101 openat(0xffffff9c, "/opt/input", 0x80000) = 3</opt/input>',
+                '101 open("/opt/read-write", 0x2) = 4</opt/read-write>',
+                '101 open("/opt/default-flags", 0) = 9</opt/default-flags>',
+                '101 open("/opt/name = value", 0) = 10</opt/name = value>',
+                '101 openat2(0xffffff9c, "/opt/openat2", {flags=0, mode=0, resolve=0}, 0x18) = 11</opt/openat2>',
+                '101 openat(0xffffff9c, "/opt/output", 0x80241) = 5</opt/output>',
+                '101 openat(0xffffff9c, "/opt/metadata", 0x200000) = 6</opt/metadata>',
+                '102 execveat(7</opt/bin>, "helper", ["helper"], 0x0, 0x0) = 0',
+                '102 openat(0xffffff9c, "/opt/bin/tool", 0x0) = 8</opt/bin/tool>',
+            ]
+        ).encode("utf-8")
+        self.assertEqual(
+            core.parse_build_file_access_trace(trace, "fixture"),
+            {
+                "/opt/bin/helper": ("exec",),
+                "/opt/bin/tool": ("exec", "read"),
+                "/opt/default-flags": ("read",),
+                "/opt/input": ("read",),
+                "/opt/name = value": ("read",),
+                "/opt/openat2": ("read",),
+                "/opt/read-write": ("read",),
+            },
+        )
+        malformed_traces = [
+            (
+                b'101 execve("relative", ["relative"], 0x0) = 0',
+                "not absolute",
+            ),
+            (
+                b'101 openat(0xffffff9c, "/opt/input", 0x0) = 3',
+                "malformed traced openat result",
+            ),
+            (
+                b'101 openat(0xffffff9c, "/opt/input", 0x0 <unfinished ...>',
+                "incomplete traced openat syscall",
+            ),
+            (
+                b'101 <... openat resumed>) = 3</opt/input>',
+                "resumed traced openat syscall is ambiguous",
+            ),
+            (
+                b'101 execve("/opt/bin/tool", ["tool"], 0x0) = -1',
+                "traced execve did not succeed",
+            ),
+            (
+                b'101 --- SIGCHLD {si_signo=SIGCHLD} ---',
+                "unrecognized strace line",
+            ),
+        ]
+        for malformed, message in malformed_traces:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(
+                    harness.ValidationError, message
+                ):
+                    core.parse_build_file_access_trace(
+                        malformed, "fixture"
+                    )
+
     def test_external_adapter_tool_config_is_strict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "v8.json"
@@ -1533,6 +1596,122 @@ class HarnessTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(
                 harness.ValidationError, "duplicate tool across build and run"
+            ):
+                harness.external_adapter_from_config(path)
+
+    def test_external_adapter_file_access_recorder_config_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = {
+                "name": "v8",
+                "buildCommand": ["node", "build.mjs"],
+                "runCommand": ["node", "run.mjs"],
+                "resultDomain": "selected",
+                "buildInputManifest": "build-inputs.json",
+                "buildTools": [
+                    {
+                        "kind": "build-launcher",
+                        "name": "node-build",
+                        "command": "node",
+                    }
+                ],
+                "tools": [
+                    {"kind": "engine", "name": "node", "command": "node"}
+                ],
+                "buildFileAccessRecorder": {
+                    "kind": "file-access-recorder",
+                    "name": "strace",
+                    "command": "strace",
+                },
+            }
+            path.write_text(json.dumps(base), encoding="utf-8")
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(
+                adapter.build_file_access_recorder,
+                harness.ToolDeclaration(
+                    "file-access-recorder", "strace", command="strace"
+                ),
+            )
+
+            invalid = dict(base)
+            invalid["buildFileAccessRecorder"] = {}
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "expected kind, name, and command fields",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = dict(base)
+            invalid["buildFileAccessRecorder"] = {
+                "kind": "file-access-recorder",
+                "name": "strace",
+                "command": "./strace",
+            }
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "bare PATH command"
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = dict(base)
+            del invalid["buildInputManifest"]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            self.assertIsNotNone(
+                harness.external_adapter_from_config(
+                    path
+                ).build_file_access_recorder
+            )
+
+            invalid = dict(base)
+            del invalid["buildCommand"]
+            del invalid["buildTools"]
+            del invalid["buildInputManifest"]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "buildFileAccessRecorder requires buildCommand",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = dict(base)
+            invalid["buildFileAccessRecorder"] = {
+                "kind": "tracer",
+                "name": "strace",
+                "command": "strace",
+            }
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "kind must be file-access-recorder",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = dict(base)
+            invalid["buildTools"] = [
+                {
+                    "kind": "file-access-recorder",
+                    "name": "node-build",
+                    "command": "node",
+                }
+            ]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "tool kind is reserved for buildFileAccessRecorder",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = dict(base)
+            invalid["buildFileAccessRecorder"] = {
+                "kind": "file-access-recorder",
+                "name": "node-recorder",
+                "command": "node",
+            }
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "duplicate file-access recorder source",
             ):
                 harness.external_adapter_from_config(path)
 
@@ -1867,6 +2046,163 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(
                 [finding.phase for finding in backend_run.findings],
                 ["build-determinism"],
+            )
+
+    def test_build_file_access_recorder_covers_every_reported_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            source = root / "compiler.input"
+            source.write_bytes(b"compiler input")
+            module = out_dir / "v8" / "module.wasm"
+            manifest = out_dir / "v8" / "build-inputs.json"
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=["builder"],
+                run_command=["runner"],
+                result_domain="selected",
+                product_declarations=(
+                    harness.ProductDeclaration(
+                        "wasm-module", "module.wasm"
+                    ),
+                ),
+                build_input_manifest="build-inputs.json",
+                build_file_access_recorder=harness.ToolDeclaration(
+                    "file-access-recorder", "strace", command="strace"
+                ),
+                build_attempts=2,
+            )
+            attempts = 0
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+
+            def build_once(
+                command: list[str],
+                cwd: Path,
+                timeout: int,
+                environment: dict[str, str],
+            ) -> mock.Mock:
+                nonlocal attempts
+                attempts += 1
+                self.assertEqual(cwd, root)
+                self.assertEqual(timeout, adapter.timeout_seconds)
+                self.assertEqual(command[command.index("--") + 1 :], ["builder"])
+                build_tools = json.loads(
+                    environment["FIR_VALIDATION_BUILD_TOOLS"]
+                )
+                self.assertEqual(
+                    [
+                        (item["kind"], item["name"])
+                        for item in build_tools
+                    ],
+                    [("file-access-recorder", "strace")],
+                )
+                trace_path = Path(command[command.index("-o") + 1])
+                trace_path.write_text(
+                    "\n".join(
+                        [
+                            '100 execve("/usr/bin/builder", ["builder"], 0x0) = 0',
+                            f'100 openat(0xffffff9c, "{source}", 0x80000) = 3<{source}>',
+                            f'100 openat(0xffffff9c, "{module}", 0x80241) = 4<{module}>',
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                module.parent.mkdir(parents=True, exist_ok=True)
+                module.write_bytes(b"wasm")
+                manifest.write_text(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "scope": "reported-loaded",
+                            "inputs": [
+                                {
+                                    "kind": "fixture-source",
+                                    "name": "compiler.input",
+                                    "path": str(source),
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return completed
+
+            with mock.patch.object(core, "run", side_effect=build_once):
+                adapter.build(harness.BuildContext(root, out_dir, False))
+            self.assertEqual(attempts, 2)
+            self.assertEqual(
+                [tool.kind for tool in adapter._built_build_tools],
+                ["file-access-recorder"],
+            )
+            report = json.loads(
+                (out_dir / "v8" / "build-file-access.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(report["recorder"]["name"], "strace")
+            self.assertTrue(report["accessSetsEqual"])
+            self.assertTrue(report["reportedInputsEqual"])
+            self.assertEqual(
+                [attempt["attempt"] for attempt in report["attempts"]],
+                [1, 2],
+            )
+            for attempt in report["attempts"]:
+                self.assertEqual(attempt["accessCount"], 2)
+                self.assertEqual(attempt["reportedInputCount"], 1)
+                self.assertEqual(
+                    attempt["reportedInputs"],
+                    [
+                        {
+                            "backend": "v8",
+                            "kind": "fixture-source",
+                            "name": "compiler.input",
+                            "sha256": harness.sha256_bytes(
+                                source.read_bytes()
+                            ),
+                            "path": str(source),
+                            "accesses": ["read"],
+                        }
+                    ],
+                )
+            self.assertEqual(
+                [
+                    artifact.name
+                    for artifact in adapter._build_artifacts
+                    if artifact.kind == "build-file-access-trace"
+                ],
+                [
+                    "v8/build/file-access.strace",
+                    "v8/build-2/file-access.strace",
+                ],
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "reported build inputs were not observed",
+            ):
+                adapter.bind_reported_inputs_to_file_accesses(
+                    1,
+                    {"attempt": 1},
+                    {"/other": ("read",)},
+                    (
+                        harness.ValidationBuildInput(
+                            "v8",
+                            "fixture-source",
+                            "compiler.input",
+                            harness.sha256_bytes(source.read_bytes()),
+                            source.read_bytes(),
+                            source,
+                        ),
+                    ),
+                )
+            adapter.build(harness.BuildContext(root, out_dir, True))
+            self.assertEqual(adapter._built_build_tools, ())
+            self.assertEqual(adapter._built_build_inputs, ())
+            self.assertFalse(
+                any(
+                    artifact.kind.startswith("build-file-access")
+                    for artifact in adapter._build_artifacts
+                )
             )
 
     def test_build_input_manifest_is_strict_and_rejects_symlinks(self) -> None:
@@ -2258,6 +2594,12 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(adapter.build_input_manifest, "build-inputs.json")
         self.assertEqual(adapter.build_attempts, 2)
         self.assertEqual(
+            adapter.build_file_access_recorder,
+            harness.ToolDeclaration(
+                "file-access-recorder", "strace", command="strace"
+            ),
+        )
+        self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
                 ("engine", "node"),
@@ -2301,14 +2643,41 @@ class HarnessTests(unittest.TestCase):
             material_path = root / "compiler.input"
             material_bytes = b"exact compiler input"
             material_path.write_bytes(material_bytes)
+            recorder_path = root / "fake-strace"
+            recorder_path.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json,os,pathlib,subprocess,sys\n"
+                "args=sys.argv[1:]\n"
+                "trace=pathlib.Path(args[args.index('-o')+1])\n"
+                "command=args[args.index('--')+1:]\n"
+                "completed=subprocess.run(command,text=True,capture_output=True)\n"
+                "executable=str(pathlib.Path(command[0]).resolve())\n"
+                "lines=[f'{os.getpid()} execve({json.dumps(executable)}, [], 0x0) = 0']\n"
+                "if completed.returncode == 0:\n"
+                " manifest=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],'build-inputs.json')\n"
+                " for item in json.loads(manifest.read_text())['inputs']:\n"
+                "  path=item['path']\n"
+                "  lines.append(f'{os.getpid()} openat(-100</>, {json.dumps(path)}, 0x80000) = 3<{path}>')\n"
+                "trace.write_text('\\n'.join(lines)+'\\n')\n"
+                "sys.stdout.write(completed.stdout)\n"
+                "sys.stderr.write(completed.stderr)\n"
+                "raise SystemExit(completed.returncode)\n",
+                encoding="utf-8",
+            )
+            recorder_path.chmod(0o755)
+            recorder_sha256 = harness.sha256_bytes(
+                recorder_path.read_bytes()
+            )
             product_sha256 = harness.sha256_bytes(product_bytes)
             build_program = (
                 "import json,os,pathlib;"
                 "assert json.loads(os.environ['FIR_VALIDATION_CASES'])==['case'];"
                 "build_tools=json.loads(os.environ['FIR_VALIDATION_BUILD_TOOLS']);"
                 "assert [(tool['kind'],tool['name']) for tool in build_tools]"
-                "==[('build-launcher','python-build')];"
+                "==[('build-launcher','python-build'),"
+                "('file-access-recorder','fake-strace')];"
                 "assert pathlib.Path(os.environ['FIR_VALIDATION_CORPUS']).is_file();"
+                f"assert pathlib.Path({str(material_path)!r}).read_bytes()=={material_bytes!r};"
                 "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
                 "'modules','validation.wasm');"
                 "path.parent.mkdir(parents=True,exist_ok=True);"
@@ -2355,6 +2724,11 @@ class HarnessTests(unittest.TestCase):
                             build_program,
                         ],
                         "buildAttempts": 2,
+                        "buildFileAccessRecorder": {
+                            "kind": "file-access-recorder",
+                            "name": "fake-strace",
+                            "command": "fake-strace",
+                        },
                         "runCommand": [engine_command, str(runner_path)],
                         "resultDomain": "selected",
                         "products": [
@@ -2413,6 +2787,10 @@ class HarnessTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     harness, "corpus_manifest", return_value=[descriptor("case")]
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
                 ),
                 mock.patch.object(sys, "argv", argv),
                 contextlib.redirect_stdout(io.StringIO()) as stdout,
@@ -2482,6 +2860,13 @@ class HarnessTests(unittest.TestCase):
                     },
                     {
                         "backend": "v8",
+                        "kind": "file-access-recorder",
+                        "name": "fake-strace",
+                        "sha256": recorder_sha256,
+                        "artifact": f"evidence/tools/{recorder_sha256}",
+                    },
+                    {
+                        "backend": "v8",
                         "kind": "runner",
                         "name": "runner.py",
                         "sha256": runner_sha256,
@@ -2489,7 +2874,7 @@ class HarnessTests(unittest.TestCase):
                     },
                 ],
             )
-            self.assertEqual(matrix["summary"]["toolCount"], 3)
+            self.assertEqual(matrix["summary"]["toolCount"], 4)
             self.assertEqual(matrix["summary"]["buildInputCount"], 2)
             self.assertEqual(
                 [
@@ -2512,13 +2897,22 @@ class HarnessTests(unittest.TestCase):
                     "artifact": f"evidence/build-inputs/{material_sha256}",
                 },
             )
-            self.assertEqual(matrix["summary"]["artifactCount"], 9)
+            self.assertEqual(matrix["summary"]["artifactCount"], 12)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
                 [
                     ("backend-result", "case/native/result.json"),
                     ("backend-result", "case/v8/result.json"),
                     ("build-determinism", "v8/build-determinism.json"),
+                    ("build-file-access", "v8/build-file-access.json"),
+                    (
+                        "build-file-access-trace",
+                        "v8/build-2/file-access.strace",
+                    ),
+                    (
+                        "build-file-access-trace",
+                        "v8/build/file-access.strace",
+                    ),
                     ("process-stderr", "v8/build-2/stderr.log"),
                     ("process-stderr", "v8/build/stderr.log"),
                     ("process-stderr", "v8/stderr.log"),
@@ -2573,6 +2967,87 @@ class HarnessTests(unittest.TestCase):
                 matrix["identity"],
             )
 
+            access_item = next(
+                item
+                for item in matrix["artifacts"]
+                if item["kind"] == "build-file-access"
+            )
+            access_report = json.loads(
+                (out_dir / access_item["artifact"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(access_report["accessSetsEqual"])
+            self.assertTrue(access_report["reportedInputsEqual"])
+            self.assertEqual(
+                [attempt["reportedInputCount"] for attempt in access_report["attempts"]],
+                [1, 1],
+            )
+            tampered_access_report = json.loads(
+                json.dumps(access_report)
+            )
+            tampered_access_report["attempts"][0]["accesses"].pop()
+            tampered_access_content = (
+                json.dumps(
+                    tampered_access_report, indent=2, sort_keys=True
+                )
+                + "\n"
+            ).encode("utf-8")
+            tampered_access_sha256 = harness.sha256_bytes(
+                tampered_access_content
+            )
+            (
+                out_dir
+                / "evidence"
+                / "artifacts"
+                / tampered_access_sha256
+            ).write_bytes(tampered_access_content)
+            tampered_matrix = json.loads(original_matrix_bytes)
+            tampered_access_item = next(
+                item
+                for item in tampered_matrix["artifacts"]
+                if item["kind"] == "build-file-access"
+            )
+            tampered_access_item["sha256"] = tampered_access_sha256
+            tampered_access_item["artifact"] = (
+                f"evidence/artifacts/{tampered_access_sha256}"
+            )
+            matrix_path.write_text(
+                json.dumps(tampered_matrix, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "disagrees with parsed trace",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(original_matrix_bytes)
+
+            missing_access_matrix = json.loads(original_matrix_bytes)
+            missing_access_matrix["artifacts"] = [
+                item
+                for item in missing_access_matrix["artifacts"]
+                if item["kind"]
+                not in {
+                    "build-file-access",
+                    "build-file-access-trace",
+                }
+            ]
+            missing_access_matrix["summary"]["artifactCount"] -= 3
+            matrix_path.write_text(
+                json.dumps(
+                    missing_access_matrix, indent=2, sort_keys=True
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "recorder tools disagree with reports",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(original_matrix_bytes)
+
             tampered_matrix = json.loads(original_matrix_bytes)
             tampered_matrix["buildInputs"].pop()
             tampered_matrix["summary"]["buildInputCount"] -= 1
@@ -2591,10 +3066,11 @@ class HarnessTests(unittest.TestCase):
             adapter_path.unlink()
             runner_path.unlink()
             material_path.unlink()
+            recorder_path.unlink()
             product_path.unlink()
             (out_dir / "comparisons" / "native--v8.json").unlink()
             for item in matrix["artifacts"]:
-                (out_dir / item["name"]).unlink()
+                (out_dir / item["name"]).unlink(missing_ok=True)
             matrix_path.unlink()
             self.assertEqual(
                 harness.verify_evidence_manifest(evidence_path)["identity"],
