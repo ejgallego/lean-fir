@@ -193,6 +193,100 @@ theorem wp_objectProjection_let
     · apply wp_localSet_of_set hSet
       exact continued
 
+/-- Complete generated USize-projection `let`: load the object handle, call
+the semantic host, and bind the direct `i64` result. -/
+theorem wp_usizeProjection_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {objectIndex resultIndex : Nat}
+    (index : Nat) (objectHandle : Fir.Wasm.Handle)
+    (sourceObject : Fir.LeanIR.Impure.Value) (value : UInt64)
+    (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.usizeProj index)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (projected : Fir.LeanIR.Impure.getUSizeField initial.host.runtime
+      sourceObject index = .ok (.usize value))
+    (hSet : locals.set? resultIndex (.i64 value) = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets
+    (indices := [objectIndex]) (values := [.i32 objectHandle]) tail
+  · exact .cons hObject .nil
+  · apply wp_usizeProjection_call index objectHandle sourceObject value tail
+      hImp hSat hi hContract hParams hResults
+    · rfl
+    · exact decoded
+    · exact projected
+    · apply wp_localSet_of_set hSet
+      exact continued
+
+/-- Complete generated integer-scalar-projection `let`. -/
+theorem wp_scalarProjection_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {objectIndex resultIndex : Nat}
+    (width offset : Nat) (resultKind : Fir.Wasm.AbiKind)
+    (objectHandle : Fir.Wasm.Handle)
+    (sourceObject sourceValue : Fir.LeanIR.Impure.Value)
+    (physical : Wasm.Value) (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.scalarProj width offset resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (projected : Fir.LeanIR.Impure.getScalarField initial.host.runtime
+      sourceObject width offset = .ok sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (hSet : locals.set? resultIndex physical = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets
+    (indices := [objectIndex]) (values := [.i32 objectHandle]) tail
+  · exact .cons hObject .nil
+  · apply wp_scalarProjection_call width offset resultKind objectHandle
+      sourceObject sourceValue physical tail hImp hSat hi hContract hParams hResults
+    · rfl
+    · exact decoded
+    · exact projected
+    · exact encoded
+    · apply wp_localSet_of_set hSet
+      exact continued
+
 /-- A generated `i32.const` followed by the destination `local.set`. -/
 theorem wp_i32Const_let
     {Host : Type} {module : Wasm.Module} {env : Wasm.HostEnv Host}

@@ -60,6 +60,30 @@ def constructorAndProjectionHostsWork : Bool :=
 
 #guard constructorAndProjectionHostsWork
 
+def scalarProjectionHostsWork : Bool :=
+  let object : ConstructorObject := {
+    tag := 3
+    objectFields := #[]
+    usizeFields := #[77]
+    scalarFields := [{ width := 1, offset := 0, value := .uint32 4294967295 }] }
+  let sourceObject : Value := .object (.heap 0)
+  let runtime : RuntimeState := {
+    heap := [(0, { object := .ctor object })]
+    nextLocation := 1 }
+  let handles : HandleTable := { entries := [(1, sourceObject)], next := 2 }
+  let store := { emptyHostStore with host := { runtime, handles } }
+  match hostStep (.usizeProj 0) store [.i32 1] with
+  | .Return [.i64 value] store =>
+      value == 77 &&
+        match hostStep (.scalarProj 1 0 .uint32) store [.i32 1] with
+        | .Return [.i32 value] store =>
+            value == 4294967295 && store.host.runtime == runtime &&
+              store.host.handles == handles
+        | _ => false
+  | _ => false
+
+#guard scalarProjectionHostsWork
+
 def constructorTagHostWorks : Bool :=
   let allocate := HostOperation.allocCtor
     Fir.LeanIR.InterpreterExamples.trueInfo #[] .tagged

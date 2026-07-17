@@ -111,6 +111,16 @@ theorem encodeResults_object_singleton_of_encode
   simp [encodeResults, encodeValueList, encodeValue, encoded]
   rfl
 
+/-- A successful direct-value encoding lifts to the singleton result vector
+without making any assumptions about whether the ABI lane uses a handle. -/
+theorem encodeResults_singleton_of_encodeValue
+    {before after : HandleTable} {kind : AbiKind} {value : Value}
+    {physical : Wasm.Value}
+    (encoded : encodeValue before kind value = .ok (after, physical)) :
+    encodeResults before #[kind] #[value] = .ok (after, [physical]) := by
+  simp [encodeResults, encodeValueList, encoded]
+  rfl
+
 @[simp] theorem encodeResults_uint32_singleton (table : HandleTable) (value : UInt32) :
     encodeResults table #[.uint32] #[.scalar (.uint32 value)] =
       .ok (table, [.i32 value]) := by

@@ -115,6 +115,31 @@ theorem compileLetValue_objectProjection
   simp [compileLetValue, valueEq, resultEq, objectEq]
   rfl
 
+theorem compileLetValue_usizeProjection
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {index : Nat} {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {objectInstruction : Instruction}
+    (valueEq : decl.value = .uproj index objectId)
+    (resultEq : letValueKind decl = .ok .usize)
+    (objectEq : getLocal context objectId = .ok (objectInstruction, objectKind)) :
+    compileLetValue context decl =
+      .ok [objectInstruction, .call (.runtime (.usizeProj index))] := by
+  simp [compileLetValue, valueEq, resultEq, objectEq]
+  rfl
+
+theorem compileLetValue_scalarProjection
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {width offset : Nat} {objectId : Lean.FVarId}
+    {resultKind objectKind : AbiKind} {objectInstruction : Instruction}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (resultEq : letValueKind decl = .ok resultKind)
+    (objectEq : getLocal context objectId = .ok (objectInstruction, objectKind)) :
+    compileLetValue context decl =
+      .ok [objectInstruction,
+        .call (.runtime (.scalarProj width offset resultKind))] := by
+  simp [compileLetValue, valueEq, resultEq, objectEq]
+  rfl
+
 theorem compileCaseChain_constructor
     {context : Context} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
@@ -288,6 +313,64 @@ theorem objectProjection_host_simulates
     have decoded := decodeAs_of_encode invariant.coherent usesHandle encoded
     exact decodeValue_handle_of_decodeAs usesHandle decoded
   · exact handleTableInvariant_of_encode invariant usesHandle encoded
+
+/-- USize-field projection leaves both semantic runtime and handle table
+unchanged while returning the direct `i64` lane. -/
+theorem usizeProjection_host_simulates
+    (initial : Wasm.Store RuntimeHost) (index : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value) (value : UInt64)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (projected : getUSizeField initial.host.runtime sourceObject index =
+      .ok (.usize value)) :
+    ∃ final,
+      hostStep (.usizeProj index) initial physicalArgs =
+        .Return [.i64 value] final ∧
+      StepResultRelated initial.host.runtime (.usize value) .usize final
+        (.i64 value) ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_usizeProj_of_decode initial index physicalArgs sourceObject value
+      decodedArgs projected
+  · exact ⟨rfl, decodeValue_usize initial.host.handles value⟩
+  · exact invariant
+
+/-- Integer scalar-field projection also preserves the handle table. The
+explicit encode/decode facts state the dynamic type invariant connecting the
+declared result kind to the stored scalar value. -/
+theorem scalarProjection_host_simulates
+    (initial : Wasm.Store RuntimeHost) (width offset : Nat)
+    (resultKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (sourceObject sourceValue : Value) (physical : Wasm.Value)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (projected : getScalarField initial.host.runtime sourceObject width offset =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (decodedResult : DecodesValue initial.host.handles resultKind physical sourceValue) :
+    ∃ final,
+      hostStep (.scalarProj width offset resultKind) initial physicalArgs =
+        .Return [physical] final ∧
+      StepResultRelated initial.host.runtime sourceValue resultKind final physical ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_scalarProj_of_decode_encode initial width offset resultKind
+      physicalArgs sourceObject sourceValue physical decodedArgs projected encoded
+  · exact ⟨rfl, decodedResult⟩
+  · exact invariant
 
 /-- Constructor tag lookup preserves the source tag modulo the checked i32 lane. -/
 theorem getTag_host_simulates
@@ -720,6 +803,84 @@ theorem wp_objectProjection_call
   · simpa using hStack
   · exact hostStep_objectProj_of_decode_encode initial index resultKind
       [.i32 objectHandle] sourceObject sourceValue decoded projected usesHandle encoded
+  · simpa [hResults] using continued
+
+/-- Generated-stack rule for a USize projection. The object handle is
+replaced by the direct `i64` field and the operand tail is preserved. -/
+theorem wp_usizeProjection_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (index : Nat) (objectHandle : Handle) (sourceObject : Value)
+    (value : UInt64) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.usizeProj index)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = .i32 objectHandle :: tail)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (projected : getUSizeField initial.host.runtime sourceObject index =
+      .ok (.usize value))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i64 value :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [.i32 objectHandle]) (results := [.i64 value])
+    hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_usizeProj_of_decode initial index [.i32 objectHandle]
+      sourceObject value decoded projected
+  · simpa [hResults] using continued
+
+/-- Generated-stack rule for an integer scalar projection. The explicit
+successful encoding records the source-value/result-kind agreement. -/
+theorem wp_scalarProjection_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (width offset : Nat) (resultKind : AbiKind) (objectHandle : Handle)
+    (sourceObject sourceValue : Value) (physical : Wasm.Value)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.scalarProj width offset resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = .i32 objectHandle :: tail)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (projected : getScalarField initial.host.runtime sourceObject width offset =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := physical :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := [.i32 objectHandle]) (results := [physical])
+    hImp hSat hi hContract
+  · simpa using hParams
+  · simpa using hStack
+  · exact hostStep_scalarProj_of_decode_encode initial width offset resultKind
+      [.i32 objectHandle] sourceObject sourceValue physical decoded projected encoded
   · simpa [hResults] using continued
 
 end FirTalos.Correctness

@@ -194,6 +194,32 @@ def voidProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard supportedProgram voidProgram
 
+def supportedUSizeProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedUSizeProjection #[param p objType] usizeType (.code <|
+      .let (letDecl r usizeType (.uproj 0 p)) (.return r))] }
+
+#guard supportedProgram supportedUSizeProjectionProgram
+
+def supportedScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedScalarProjection #[param p objType] u64Type (.code <|
+      .let (letDecl r u64Type (.sproj 1 0 p)) (.return r))] }
+
+#guard supportedProgram supportedScalarProjectionProgram
+
+def malformedUSizeAsScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `malformedUSizeAsScalarProjection #[param p objType]
+      usizeType (.code <|
+        .let (letDecl r usizeType (.sproj 1 0 p)) (.return r))] }
+
+#guard !supportedProgram malformedUSizeAsScalarProjectionProgram
+
+def unsupportedFloatProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `unsupportedFloatProjection #[param p objType]
+      LCNF.ImpureType.float (.code <|
+        .let (letDecl r LCNF.ImpureType.float (.sproj 1 0 p)) (.return r))] }
+
+#guard !supportedProgram unsupportedFloatProjectionProgram
+
 def unsupportedTypeProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `unsupported #[param x unknownAbiType] unknownAbiType
     (.code (.return x))] }

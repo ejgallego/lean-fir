@@ -878,6 +878,260 @@ theorem codeWP_objectProjection_let
   simpa using
     codeWP_let (context := context) valueCompiled valueAdapted resultFound step continued
 
+/-- USize-projection instance of the reusable direct-`let` boundary. -/
+theorem letStepSimulates_usizeProjection
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {index : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject : Value} {value : UInt64}
+    (valueEq : decl.value = .uproj index objectId)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (projected : getUSizeField initial.host.runtime sourceObject index =
+      .ok (.usize value))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some .usize)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.usizeProj index)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (targetSet : locals.set? resultIndex (.i64 value) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      initial.host.runtime initial.host.runtime sourceEnv (.usize value) initial
+      (successfulHostStore initial initial.host.runtime initial.host.handles)
+      locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [objectLookup]
+    change ((fun result : Value =>
+      (initial.host.runtime, LetAction.value result)) <$>
+        getUSizeField initial.host.runtime sourceObject index) =
+      .ok (initial.host.runtime, .value (.usize value))
+    rw [projected]
+    rfl
+  · refine ⟨rfl, rfl, rfl, initialRelated.2.2.2.1, ?_⟩
+    exact EnvLocalsRelated.bind_direct initialRelated.2.2.2.2
+      resultFound kindAt (decodeValue_usize initial.host.handles value) targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_usizeProjection_let index objectHandle sourceObject value tail hObject
+        hImp hSat hi hContract hParams hResults decoded projected targetSet continued
+
+/-- Integer-scalar-projection instance. The encode/decode premises are the
+dynamic scalar-field typing invariant exposed by the source runtime. -/
+theorem letStepSimulates_scalarProjection
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {width offset : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject sourceValue : Value} {resultKind : AbiKind}
+    {physical : Wasm.Value}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (projected : getScalarField initial.host.runtime sourceObject width offset =
+      .ok sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some resultKind)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.scalarProj width offset resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decodedObject :
+      decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+        .ok #[sourceObject])
+    (encodedResult : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (decodedResult : DecodesValue initial.host.handles resultKind physical sourceValue)
+    (targetSet : locals.set? resultIndex physical = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      initial.host.runtime initial.host.runtime sourceEnv sourceValue initial
+      (successfulHostStore initial initial.host.runtime initial.host.handles)
+      locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [objectLookup]
+    change ((fun result : Value =>
+      (initial.host.runtime, LetAction.value result)) <$>
+        getScalarField initial.host.runtime sourceObject width offset) =
+      .ok (initial.host.runtime, .value sourceValue)
+    rw [projected]
+    rfl
+  · refine ⟨rfl, rfl, rfl, initialRelated.2.2.2.1, ?_⟩
+    exact EnvLocalsRelated.bind_direct initialRelated.2.2.2.2
+      resultFound kindAt decodedResult targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_scalarProjection_let width offset resultKind objectHandle sourceObject
+        sourceValue physical tail hObject hImp hSat hi hContract hParams hResults
+        decodedObject projected encodedResult targetSet continued
+
+/-- Recursive semantic rule for a USize-projection `let`. -/
+theorem codeWP_usizeProjection_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {index : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject : Value} {value : UInt64}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion RuntimeHost}
+    (valueEq : decl.value = .uproj index objectId)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet objectId, .call (.runtime (.usizeProj index))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.usizeProj index)) = some id)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (projected : getUSizeField initial.host.runtime sourceObject index =
+      .ok (.usize value))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some .usize)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.usizeProj index)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (targetSet : locals.set? resultIndex (.i64 value) = some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        initial.host.runtime (bind sourceEnv decl.fvarId (.usize value))
+        continuation targetRest
+        (successfulHostStore initial initial.host.runtime initial.host.handles)
+        updated tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.usizeProj index))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_usizeProjection (context := context)
+    valueEq objectLookup projected initialRelated resultFound kindAt hObject hImp
+    hSat hi hContract hParams hResults decoded targetSet
+  simpa using
+    codeWP_let (context := context) valueCompiled valueAdapted resultFound step continued
+
+/-- Recursive semantic rule for an integer scalar-projection `let`. -/
+theorem codeWP_scalarProjection_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {width offset : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle : Handle}
+    {sourceObject sourceValue : Value} {resultKind : AbiKind}
+    {physical : Wasm.Value} {targetRest : Wasm.Program}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet objectId,
+        .call (.runtime (.scalarProj width offset resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.scalarProj width offset resultKind)) = some id)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (projected : getScalarField initial.host.runtime sourceObject width offset =
+      .ok sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some resultKind)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.scalarProj width offset resultKind)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decodedObject :
+      decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+        .ok #[sourceObject])
+    (encodedResult : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical))
+    (decodedResult : DecodesValue initial.host.handles resultKind physical sourceValue)
+    (targetSet : locals.set? resultIndex physical = some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        initial.host.runtime (bind sourceEnv decl.fvarId sourceValue)
+        continuation targetRest
+        (successfulHostStore initial initial.host.runtime initial.host.handles)
+        updated tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.scalarProj width offset resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_scalarProjection (context := context)
+    valueEq objectLookup projected initialRelated resultFound kindAt hObject hImp
+    hSat hi hContract hParams hResults decodedObject encodedResult decodedResult targetSet
+  simpa using
+    codeWP_let (context := context) valueCompiled valueAdapted resultFound step continued
+
 /-- The empty constructor-test suffix executes its already adapted fallback. -/
 theorem caseChainWP_nil
     {context : Fir.Wasm.Context}

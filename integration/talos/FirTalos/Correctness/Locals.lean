@@ -213,4 +213,22 @@ theorem EnvLocalsRelated.bind_handle_of_encode
   exact decodeValue_handle_of_decodeAs usesHandle
     (decodeAs_of_encode invariant.coherent usesHandle encoded)
 
+/-- The direct scalar/usize result path: the codec table is unchanged and the
+checked destination write binds a physical value that already decodes to the
+source result. -/
+theorem EnvLocalsRelated.bind_direct
+    {bindings : List (Lean.FVarId × AbiKind)} {source : Env}
+    {handles : HandleTable} {target updated : Wasm.Locals}
+    {result : Lean.FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {sourceValue : Value} {physical : Wasm.Value}
+    (related : EnvLocalsRelated bindings source handles target)
+    (resultFound : findFVar? bindings result = some resultIndex)
+    (kindAt : bindings[resultIndex]?.map Prod.snd = some kind)
+    (decoded : DecodesValue handles kind physical sourceValue)
+    (targetSet : target.set? resultIndex physical = some updated) :
+    EnvLocalsRelated bindings (Fir.LeanIR.Impure.bind source result sourceValue)
+      handles updated := by
+  exact EnvLocalsRelated.bind related resultFound kindAt
+    (localUpdate_of_set? targetSet) (HandleTableExtends.refl handles) decoded
+
 end FirTalos.Correctness

@@ -97,6 +97,34 @@ def abiProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
 #guard relatedReachableHeapSize?
   (runDifferential abiCtorProjectionProgram `main #[]) 0
 
+def projectionInfo : LCNF.CtorInfo :=
+  { name := `Projection.mk, cidx := 3, size := 0, usize := 1, ssize := 8 }
+
+def abiUSizeProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] usizeType (.code <|
+      .let (letDecl p objType (.ctor projectionInfo #[])) <|
+      .let (letDecl r usizeType (.uproj 0 p)) <|
+      .return r)] }
+
+#guard supportedProgram abiUSizeProjectionProgram
+
+#guard relatedReturn? (runDifferential abiUSizeProjectionProgram `main #[])
+  (.usize 0)
+
+/-- Constructor allocation reserves scalar storage but does not initialize a
+typed scalar field. Until the W5 mutation slice supplies `sset`, this fixture
+checks that a compiler-shaped `sproj` source fault is reproduced exactly. -/
+def abiScalarProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl p objType (.ctor projectionInfo #[])) <|
+      .let (letDecl r u64Type (.sproj 1 0 p)) <|
+      .return r)] }
+
+#guard supportedProgram abiScalarProjectionFaultProgram
+
+#guard relatedSourceFault? (runDifferential abiScalarProjectionFaultProgram `main #[])
+  (.scalarFieldMissing 1 0)
+
 /-- The original fixture is intentionally rejected under the existing
 `FIR-BUG-wasm-none-object-nat-fixture` card after its source run is recorded. -/
 def malformedNatFixtureIsExplained : Bool :=

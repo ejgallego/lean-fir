@@ -6,8 +6,8 @@ open Lean
 open Lean.Compiler
 
 /--
-The first proof-oriented backend fragment: literals, erased values,
-constructors, object projections, constructor cases, returns, and
+The proof-oriented backend fragment: literals, erased values, constructors,
+object/usize/integer-scalar projections, constructor cases, returns, and
 unreachable code. Calls, joins, mutation, ownership operations, reuse,
 initializers-as-effects, and externals are deliberate later gates.
 -/
@@ -26,6 +26,13 @@ def abiValueKind? (type : Expr) : Option AbiKind :=
   match abiKind? type with
   | .ok kind? => kind?
   | .error _ => none
+
+/-- Scalar field values currently represented by the shared impure runtime.
+Float fields remain gated by `FIR-BUG-wasm-none-float-runtime-gap`; `USize`
+uses the distinct `uproj` instruction. -/
+def supportedScalarProjectionKind : AbiKind → Bool
+  | .uint8 | .uint16 | .uint32 | .uint64 => true
+  | _ => false
 
 def addSupportedParams? (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     Option LocalKinds :=
@@ -61,6 +68,19 @@ def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
   | .oproj _ objectId =>
       let objectKind ← findLocalKind? locals objectId
       if (objectKind == .object || objectKind == .tobject) && declared.isObjectField then
+        some declared
+      else
+        none
+  | .uproj _ objectId =>
+      let objectKind ← findLocalKind? locals objectId
+      if (objectKind == .object || objectKind == .tobject) && declared == .usize then
+        some declared
+      else
+        none
+  | .sproj _ _ objectId =>
+      let objectKind ← findLocalKind? locals objectId
+      if (objectKind == .object || objectKind == .tobject) &&
+          supportedScalarProjectionKind declared then
         some declared
       else
         none

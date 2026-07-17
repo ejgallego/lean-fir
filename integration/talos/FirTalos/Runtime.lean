@@ -14,6 +14,8 @@ inductive HostOperation where
   | allocCtor (info : Lean.Compiler.LCNF.CtorInfo) (fields : Array AbiKind)
       (result : AbiKind)
   | objectProj (index : Nat) (result : AbiKind)
+  | usizeProj (index : Nat)
+  | scalarProj (width offset : Nat) (result : AbiKind)
   | getTag
   deriving Inhabited, BEq
 
@@ -22,6 +24,8 @@ def HostOperation.runtimeOp : HostOperation → RuntimeOp
   | .stringLiteral value result => .literal (.str value) result
   | .allocCtor info fields result => .allocCtor info fields result
   | .objectProj index result => .objectProj index result
+  | .usizeProj index => .usizeProj index
+  | .scalarProj width offset result => .scalarProj width offset result
   | .getTag => .getTag
 
 def HostOperation.signature (operation : HostOperation) : Signature :=
@@ -32,6 +36,8 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .literal (.str value) result => some (.stringLiteral value result)
   | .allocCtor info fields result => some (.allocCtor info fields result)
   | .objectProj index result => some (.objectProj index result)
+  | .usizeProj index => some (.usizeProj index)
+  | .scalarProj width offset result => some (.scalarProj width offset result)
   | .getTag => some .getTag
   | _ => none
 
@@ -69,6 +75,20 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       match args[0]? with
       | some object =>
           match getObjectField runtime object index with
+          | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .usizeProj index =>
+      match args[0]? with
+      | some object =>
+          match getUSizeField runtime object index with
+          | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .scalarProj width offset _ =>
+      match args[0]? with
+      | some object =>
+          match getScalarField runtime object width offset with
           | .ok value => .ok (runtime, #[value])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
@@ -177,6 +197,45 @@ theorem hostStep_objectProj_of_decode_encode
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     HostOperation.runtimeOp, RuntimeOp.signature, decoded, projected,
     encodeResults_handle_singleton_of_encode usesHandle encoded]
+
+theorem hostStep_usizeProj_of_decode
+    (initial : Wasm.Store RuntimeHost) (index : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value) (value : UInt64)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (projected : getUSizeField initial.host.runtime sourceObject index =
+      .ok (.usize value)) :
+    hostStep (.usizeProj index) initial physicalArgs =
+      .Return [.i64 value] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, projected,
+    encodeResults_singleton_of_encodeValue (by rfl :
+      encodeValue initial.host.handles .usize (.usize value) =
+        .ok (initial.host.handles, .i64 value))]
+
+theorem hostStep_scalarProj_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (width offset : Nat)
+    (resultKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (sourceObject sourceValue : Value) (physical : Wasm.Value)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (projected : getScalarField initial.host.runtime sourceObject width offset =
+      .ok sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (initial.host.handles, physical)) :
+    hostStep (.scalarProj width offset resultKind) initial physicalArgs =
+      .Return [physical] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, projected,
+    encodeResults_singleton_of_encodeValue encoded]
 
 theorem hostStep_getTag_of_decode
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)

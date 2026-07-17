@@ -517,6 +517,24 @@ Each slice includes runtime functions, contracts, differential examples, and
 an extension of the supported-fragment theorem. Do not mark ownership or
 reuse complete using an observational no-op runtime.
 
+W5.1 is complete. `usizeProj` and `scalarProj` now resolve to semantic host
+operations, reproduce the source projection operations and structured faults,
+and preserve the runtime and opaque-handle table on success. Exact host-step,
+instruction-stack, destination-local, `LetStepSimulates`, and recursive
+`CodeWP` rules cover both operations. The scalar rule exposes the required
+dynamic invariant explicitly: the stored `ScalarValue` must encode and decode
+at the declaration's result kind; the layout `width` is not a type width.
+
+The executable supported gate accepts `uproj` only at `USize` and accepts
+`sproj` only at the four integer scalar kinds represented by the shared
+runtime. Float projection remains tracked by
+`FIR-BUG-wasm-none-float-runtime-gap`. Regressions cover a successful
+compiler-shaped USize projection, exact scalar missing-field agreement, and a
+successful pre-populated UInt32 scalar host projection. A closed successful
+compiler-shaped scalar differential fixture will arrive with W5.3, because
+constructor allocation reserves scalar storage but `sset` initializes its
+typed value.
+
 ### A0: emit the first host-backed Wasm artifact
 
 A0 is an independently assignable artifact lane. It can run in parallel with
