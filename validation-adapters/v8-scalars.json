@@ -2,6 +2,11 @@
   "name": "v8",
   "buildCommand": ["lake", "lean", "FirValidationWasm.lean"],
   "buildAttempts": 2,
+  "buildFileAccessRecorder": {
+    "kind": "file-access-recorder",
+    "name": "strace",
+    "command": "strace"
+  },
   "runCommand": ["node", "scripts/run_validation_v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
