@@ -207,10 +207,32 @@ theorem abiCaseHostsMatch :
   unfold HostsMatch
   native_decide
 
+/-- Checked whole-pipeline package for the explicit constructor-case export. -/
+def abiCaseSupportedExport :
+    SupportedExport abiCaseProgram abiCaseContext abiCaseCode
+      abiCaseSourceModule abiCaseSourceFunction abiCaseAdaptedModule
+      abiCaseResolvedHosts "main" :=
+  { programSupported := by
+      unfold Fir.Wasm.WasmSupported
+      native_decide
+    contextProgram := rfl
+    lowered := abiCaseSourceModule_lowered
+    sourceFunctionIndex := 0
+    sourceFunctionFound := abiCaseSourceFunction_found
+    adapted := abiCaseAdaptedModule_adapted
+    hostsResolved := abiCaseResolvedHosts_resolved
+    hostsMatch := abiCaseHostsMatch
+    targetFunctionIndex := 4
+    targetFunction := abiCaseMainFunction
+    exported := abiCaseMain_exported
+    notImport := abiCaseMain_notImport
+    targetFunctionFound := abiCaseMain_found
+    singleResult := abiCaseMain_resultCount }
+
 theorem abiCaseHostsSatisfy :
     abiCaseResolvedHosts.env.Satisfies abiCaseAdaptedModule.wasmModule
       abiCaseResolvedHosts.spec :=
-  resolvedHosts_satisfy_adapted abiCaseAdaptedModule_adapted abiCaseHostsMatch
+  abiCaseSupportedExport.hostsSatisfy
 
 def abiCaseTrueValue : Value :=
   .object (.tagged (UInt64.ofNat 1))
@@ -633,9 +655,8 @@ theorem abiCaseMain_export_correct :
       abiCaseAdaptedModule.wasmModule "main" abiCaseInitialStore []
       (RelatedPost #[.tobject]
         (ReturnedObservation {} abiCaseTrueValue)) := by
-  apply CodeWP.toExportTerminatesWithRelated_of_return
-    abiCaseMain_exported abiCaseMain_notImport abiCaseMain_found rfl
-    abiCaseMain_resultCount abiCaseObservation_related
-  simpa [abiCaseInitialStore] using abiCaseMain_codeWP
+  apply abiCaseSupportedExport.terminatesWithRelated_of_return
+    abiCaseObservation_related
+  simpa [abiCaseSupportedExport, abiCaseInitialStore] using abiCaseMain_codeWP
 
 end FirTalos.Correctness

@@ -1,4 +1,4 @@
-import FirTalos.Correctness.Function
+import FirTalos.Correctness.SupportedExport
 import Fir.Wasm.Examples
 
 namespace FirTalos.Correctness
@@ -178,10 +178,32 @@ theorem abiLiteralHostsMatch :
   unfold HostsMatch
   native_decide
 
+/-- The checked whole-pipeline package for the representative literal export. -/
+def abiLiteralSupportedExport :
+    SupportedExport abiLiteralProgram abiLiteralContext abiLiteralCode
+      abiLiteralSourceModule abiLiteralSourceFunction abiLiteralAdaptedModule
+      abiLiteralResolvedHosts "main" :=
+  { programSupported := by
+      unfold Fir.Wasm.WasmSupported
+      native_decide
+    contextProgram := rfl
+    lowered := abiLiteralSourceModule_lowered
+    sourceFunctionIndex := 0
+    sourceFunctionFound := abiLiteralSourceFunction_found
+    adapted := abiLiteralAdaptedModule_adapted
+    hostsResolved := abiLiteralResolvedHosts_resolved
+    hostsMatch := abiLiteralHostsMatch
+    targetFunctionIndex := 1
+    targetFunction := abiLiteralMainFunction
+    exported := abiLiteralMain_exported
+    notImport := abiLiteralMain_notImport
+    targetFunctionFound := abiLiteralMain_found
+    singleResult := abiLiteralMain_resultCount }
+
 theorem abiLiteralHostsSatisfy :
     abiLiteralResolvedHosts.env.Satisfies abiLiteralAdaptedModule.wasmModule
       abiLiteralResolvedHosts.spec :=
-  resolvedHosts_satisfy_adapted abiLiteralAdaptedModule_adapted abiLiteralHostsMatch
+  abiLiteralSupportedExport.hostsSatisfy
 
 theorem abiLiteralResolvedHosts_operations :
     abiLiteralResolvedHosts.operations = [.naturalLiteral 42 .tobject] := by
@@ -278,12 +300,10 @@ facts are discharged for `abiLiteralProgram`; the remaining premise is exactly
 its local `CodeWP` body proof.
 -/
 theorem abiLiteralMain_export_correct_of_codeWP
-    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
-    {code : Lean.Compiler.LCNF.Code .impure}
     (correct :
-      CodeWP context abiLiteralSourceModule sourceFunction []
+      CodeWP abiLiteralContext abiLiteralSourceModule abiLiteralSourceFunction []
         abiLiteralAdaptedModule.wasmModule abiLiteralResolvedHosts.env
-        {} [] code abiLiteralMainFunction.body
+        {} [] abiLiteralCode abiLiteralMainFunction.body
         (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost))
         (abiLiteralMainFunction.toLocals []) []
         (ReturnPost {} (.object (.tagged (UInt64.ofNat 42))) .tobject [])) :
@@ -292,10 +312,8 @@ theorem abiLiteralMain_export_correct_of_codeWP
       (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost)) []
       (RelatedPost #[.tobject]
         (ReturnedObservation {} (.object (.tagged (UInt64.ofNat 42))))) := by
-  apply CodeWP.toExportTerminatesWithRelated_of_return
-    abiLiteralMain_exported abiLiteralMain_notImport abiLiteralMain_found rfl
-    abiLiteralMain_resultCount abiLiteralObservation_related
-  simpa using correct
+  exact abiLiteralSupportedExport.terminatesWithRelated_of_return
+    abiLiteralObservation_related correct
 
 /--
 End-to-end W3/W4 theorem for the generated natural-literal fixture: invoking

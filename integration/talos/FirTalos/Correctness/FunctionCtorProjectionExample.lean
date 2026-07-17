@@ -197,12 +197,34 @@ theorem abiCtorProjectionHostsMatch :
   unfold HostsMatch
   native_decide
 
+/-- Checked whole-pipeline package for constructor allocation and projection. -/
+def abiCtorProjectionSupportedExport :
+    SupportedExport abiCtorProjectionProgram abiCtorProjectionContext
+      abiCtorProjectionCode abiCtorProjectionSourceModule
+      abiCtorProjectionSourceFunction abiCtorProjectionAdaptedModule
+      abiCtorProjectionResolvedHosts "main" :=
+  { programSupported := by
+      unfold Fir.Wasm.WasmSupported
+      native_decide
+    contextProgram := rfl
+    lowered := abiCtorProjectionSourceModule_lowered
+    sourceFunctionIndex := 0
+    sourceFunctionFound := abiCtorProjectionSourceFunction_found
+    adapted := abiCtorProjectionAdaptedModule_adapted
+    hostsResolved := abiCtorProjectionResolvedHosts_resolved
+    hostsMatch := abiCtorProjectionHostsMatch
+    targetFunctionIndex := 4
+    targetFunction := abiCtorProjectionMainFunction
+    exported := abiCtorProjectionMain_exported
+    notImport := abiCtorProjectionMain_notImport
+    targetFunctionFound := abiCtorProjectionMain_found
+    singleResult := abiCtorProjectionMain_resultCount }
+
 theorem abiCtorProjectionHostsSatisfy :
     abiCtorProjectionResolvedHosts.env.Satisfies
       abiCtorProjectionAdaptedModule.wasmModule
       abiCtorProjectionResolvedHosts.spec :=
-  resolvedHosts_satisfy_adapted abiCtorProjectionAdaptedModule_adapted
-    abiCtorProjectionHostsMatch
+  abiCtorProjectionSupportedExport.hostsSatisfy
 
 def abiCtorProjectionValue7 : Value :=
   .object (.tagged (UInt64.ofNat 7))
@@ -805,10 +827,9 @@ theorem abiCtorProjectionMain_export_correct :
       (RelatedPost #[.tobject]
         (ReturnedObservation abiCtorProjectionRuntime
           abiCtorProjectionValue7)) := by
-  apply CodeWP.toExportTerminatesWithRelated_of_return
-    abiCtorProjectionMain_exported abiCtorProjectionMain_notImport
-    abiCtorProjectionMain_found rfl abiCtorProjectionMain_resultCount
+  apply abiCtorProjectionSupportedExport.terminatesWithRelated_of_return
     abiCtorProjectionObservation_related
-  simpa [abiCtorProjectionInitialStore] using abiCtorProjectionMain_codeWP
+  simpa [abiCtorProjectionSupportedExport, abiCtorProjectionInitialStore] using
+    abiCtorProjectionMain_codeWP
 
 end FirTalos.Correctness

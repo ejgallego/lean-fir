@@ -149,10 +149,19 @@ production heap layout.
   fallback; the generated `Bool.false` test misses and resumes that fallback,
   producing the premise-free `abiDefaultCaseMain_export_correct` theorem.
 
-All four representative exports are now closed. The next W4 slice factors
-their repeated module/export packaging into the supported-fragment induction
-and states the common theorem independently of fixture-specific checked
-layouts. The adapter still rejects initializers and closures.
+All four representative exports are now closed.
+`FirTalos/Correctness/SupportedExport.lean` factors their repeated
+whole-pipeline packaging into one reusable witness and theorem, independently
+of fixture-specific checked layouts. A witness records `WasmSupported`, the
+actual `lowerSupported` result, source-function lookup, adaptation, resolved
+hosts, export/function lookup, and the single-result ABI. Given the local
+semantic `CodeWP` induction and an observation-policy fact, the common theorem
+yields total exported correctness; partial correctness is an immediate
+corollary. All four fixtures instantiate this API. The next W4 slice is the
+program-level semantic induction that produces the local `CodeWP` premise from
+supported source evaluation, starting with closed declarations in the current
+literal/constructor/projection/case fragment. The adapter still rejects
+initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -444,24 +453,22 @@ Proof layers:
 5. the local result lifts to exported functions and program observations.
 
 Layers 1--3 and the fuel-free executable-to-observation bridge are checked in
-`FirTalos/Correctness/`. Layer 4 now covers lowering and host steps for the
-whole initial fragment, provides their common instruction-level host-call
-lifting, instantiates constructor/projection stack shapes, and proves one
-complete source-related constructor-case test. A separate composition module
-now packages local loads, destination stores, complete initial-fragment let
-sequences, and adapter concatenation. Its active proof obligation is the
-recursive constructor-case rule for `CodeAdapted`. The compiler now exposes
-proof equations through its `partial_fixpoint` core, while
+`FirTalos/Correctness/`. Layer 4 covers lowering and host steps for the whole
+initial fragment, provides their common instruction-level host-call lifting,
+and packages local loads, destination stores, complete initial-fragment let
+sequences, adapter concatenation, and recursive constructor-case chains. The
+compiler exposes proof equations through its `partial_fixpoint` core, while
 `FirTalos/Correctness/Locals.lean` provides the source-environment/local
 relation, checked-write preservation, and handle-allocation chaining needed at
-each recursive boundary. The structural relation now also follows the actual
-compiler through default selection and recursive constructor-case chains. Its
-semantic induction now has a common related-state/`CodeWP` judgment, a generic
-direct-`let` rule, closed natural/string literal-to-return instances, and
-recursive constructor/projection instances. Its active proof obligation is to
-instantiate the completed path-sensitive constructor-case induction for the
-initial fragment and then lift it through the observation bridge. Layer 5 can
-instantiate that bridge without mentioning runner fuel in the public theorem.
+each recursive boundary. The semantic layer has a common related-state/
+`CodeWP` judgment, a generic direct-`let` rule, closed natural/string
+literal-to-return instances, recursive constructor/projection instances, and
+path-sensitive constructor/default-case composition. Layer 5 is now factored
+through `SupportedExport`: the four generated fixtures share one checked
+lowering/adaptation/host/export package and one fuel-free exported-correctness
+theorem. The active proof obligation is to replace the fixture-specific local
+`CodeWP` scripts with a program-level induction driven by supported source
+evaluation.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an

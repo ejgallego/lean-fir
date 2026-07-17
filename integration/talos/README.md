@@ -97,9 +97,14 @@ actual nested `Bool.false`/`Bool.true` tests and proves the premise-free
 arm while retaining structural lowering evidence for the missed arm.
 `FirTalos/Correctness/FunctionDefaultCaseExample.lean` completes the initial
 four-program corpus: the false test misses into the separately compiled
-default fallback and yields `abiDefaultCaseMain_export_correct`. The next W4
-step is to factor the repeated fixture packaging into the general
-supported-fragment/export theorem.
+default fallback and yields `abiDefaultCaseMain_export_correct`.
+`FirTalos/Correctness/SupportedExport.lean` now factors the shared boundary:
+one witness certifies fragment admission, lowering, adaptation, host
+resolution, export/function lookup, and the single-result ABI, while its
+common theorem turns the local `CodeWP` induction into total or partial
+correctness for the named export. All four fixtures use this API. The next W4
+step is a program-level induction that derives the remaining local `CodeWP`
+premise from supported source evaluation.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

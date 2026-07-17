@@ -199,11 +199,33 @@ theorem abiDefaultCaseHostsMatch :
   unfold HostsMatch
   native_decide
 
+/-- Checked whole-pipeline package for the default-case export. -/
+def abiDefaultCaseSupportedExport :
+    SupportedExport abiDefaultCaseProgram abiDefaultCaseContext
+      abiDefaultCaseCode abiDefaultCaseSourceModule
+      abiDefaultCaseSourceFunction abiDefaultCaseAdaptedModule
+      abiDefaultCaseResolvedHosts "main" :=
+  { programSupported := by
+      unfold Fir.Wasm.WasmSupported
+      native_decide
+    contextProgram := rfl
+    lowered := abiDefaultCaseSourceModule_lowered
+    sourceFunctionIndex := 0
+    sourceFunctionFound := abiDefaultCaseSourceFunction_found
+    adapted := abiDefaultCaseAdaptedModule_adapted
+    hostsResolved := abiDefaultCaseResolvedHosts_resolved
+    hostsMatch := abiDefaultCaseHostsMatch
+    targetFunctionIndex := 4
+    targetFunction := abiDefaultCaseMainFunction
+    exported := abiDefaultCaseMain_exported
+    notImport := abiDefaultCaseMain_notImport
+    targetFunctionFound := abiDefaultCaseMain_found
+    singleResult := abiDefaultCaseMain_resultCount }
+
 theorem abiDefaultCaseHostsSatisfy :
     abiDefaultCaseResolvedHosts.env.Satisfies
       abiDefaultCaseAdaptedModule.wasmModule abiDefaultCaseResolvedHosts.spec :=
-  resolvedHosts_satisfy_adapted abiDefaultCaseAdaptedModule_adapted
-    abiDefaultCaseHostsMatch
+  abiDefaultCaseSupportedExport.hostsSatisfy
 
 def abiDefaultCaseTrueValue : Value :=
   .object (.tagged (UInt64.ofNat 1))
@@ -616,10 +638,9 @@ theorem abiDefaultCaseMain_export_correct :
       abiDefaultCaseInitialStore []
       (RelatedPost #[.tobject]
         (ReturnedObservation {} abiDefaultCaseValue5)) := by
-  apply CodeWP.toExportTerminatesWithRelated_of_return
-    abiDefaultCaseMain_exported abiDefaultCaseMain_notImport
-    abiDefaultCaseMain_found rfl abiDefaultCaseMain_resultCount
+  apply abiDefaultCaseSupportedExport.terminatesWithRelated_of_return
     abiDefaultCaseObservation_related
-  simpa [abiDefaultCaseInitialStore] using abiDefaultCaseMain_codeWP
+  simpa [abiDefaultCaseSupportedExport, abiDefaultCaseInitialStore] using
+    abiDefaultCaseMain_codeWP
 
 end FirTalos.Correctness
