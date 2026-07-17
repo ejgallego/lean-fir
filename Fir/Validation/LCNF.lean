@@ -541,6 +541,10 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       if value == 0 then return .bool false
       else if value == 1 then return .bool true
       else throw s!"invalid Bool tag {value}"
+  | .bool, .scalar (.uint8 value) =>
+      if value == 0 then return .bool false
+      else if value == 1 then return .bool true
+      else throw s!"invalid scalar Bool value {value}"
   | .nat, .object (.tagged value) => return .nat value.toNat
   | .nat, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))

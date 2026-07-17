@@ -103,6 +103,11 @@ def classifyNatList (xs : List Nat) : UInt64 :=
   | [] => 0
   | _ :: _ => 1
 
+def hasNatListElements (xs : List Nat) : Bool :=
+  match xs with
+  | [] => false
+  | _ :: _ => true
+
 def idString (value : String) : String :=
   value
 
@@ -620,6 +625,16 @@ def cases : Array Case := #[
     requiredLcnfForms := #["cases", "lit", "return"]
     requiredExecutedLcnfForms := #["cases", "lit", "return"]
     provenance := firProvenance "Nonempty constructor case over an initial heap graph" },
+  { id := "nat-list-nonempty-bool"
+    entry := ``Source.hasNatListElements
+    args := #[natListDatum [0, Source.largeNat, 42]]
+    argSchemas := #[.seq .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.hasNatListElements [0, Source.largeNat, 42])
+    tags := #["quick", "constructor", "control-flow", "boundary", "heap", "bool"]
+    requiredLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    provenance := firProvenance "Boolean result from a nonempty initial heap graph" },
   { id := "unicode-string-roundtrip"
     entry := ``Source.idString
     args := #[.string "hello α_world_β"]
