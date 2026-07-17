@@ -1,7 +1,7 @@
 {
   "version": 1,
   "adapterConfigs": [
-    "../validation-adapters/v8-uint64.json"
+    "../validation-adapters/v8-scalars.json"
   ],
   "pairs": [
     {

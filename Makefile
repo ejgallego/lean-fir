@@ -17,8 +17,10 @@ validate:
 	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
 
 validate-v8:
-	python3 scripts/validate_interpreters.py --case uint64-max \
-		--plan validation-plans/native-v8-uint64.json \
+	python3 scripts/validate_interpreters.py \
+		--case uint8-max --case uint16-max --case uint32-max \
+		--case uint64-max --case usize-max \
+		--plan validation-plans/native-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json

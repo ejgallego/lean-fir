@@ -18,7 +18,7 @@ Run the quick corpus with:
 make validate
 ```
 
-Run the initial source-to-real-V8 case with:
+Run the closed-scalar source-to-real-V8 cases with:
 
 ```sh
 make validate-v8
@@ -155,7 +155,7 @@ immutable manifest preserves multiple executions with the same run identity.
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
 `validation-plans/native-lcnf.json`, while `make validate-v8` uses
-`validation-plans/native-v8-uint64.json`.  A later combined plan can add Talos
+`validation-plans/native-v8-scalars.json`.  A later combined plan can add Talos
 without changing the harness:
 
 ```json
@@ -495,17 +495,18 @@ both external-name obligations.
 The initial Wasm validation slice consumes the compiler track exclusively
 through its public `lowerSupported` and binary `encode` APIs.  The
 integration-owned `FirValidationWasm.lean` driver asks `compileClosed` to
-compile the corpus entry `uint64-max` through `LCNF.main`, emits deterministic
-`.wasm` and ABI-manifest products, and checks that this deliberately host-free
-case has no imports and exactly exports the source entry.  It does not modify
-or add policy to `Fir/Wasm`.
+compile the closed `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` boundary
+entries through `LCNF.main`, emits deterministic `.wasm` and ABI-manifest
+products for each case, and checks that these deliberately host-free cases have
+no imports and exactly export their source entries.  It does not modify or add
+policy to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
 `WebAssembly` engine, verifies the compiler manifest against the corpus ABI,
 invokes the corpus-named export, converts V8's signed `i64` result back to
 unsigned `UInt64` bits, and emits the shared backend protocol.  The runner
-receipts both products and rejects any selection other than `uint64-max`, so broader
-coverage cannot silently collapse to this seed case.  Native Lean remains the
+receipts both per-case products and rejects any other selection, so broader
+coverage cannot silently collapse to this scalar slice.  Native Lean remains the
 source oracle.  Talos can subsequently consume the exact same module and
 inputs, with V8 as the reference Wasm engine:
 

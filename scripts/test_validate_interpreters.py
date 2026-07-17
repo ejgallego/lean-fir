@@ -1608,14 +1608,14 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(plan.adapter_configs, ())
         self.assertEqual(plan.pairs, (("native", "lcnf"),))
 
-    def test_checked_native_v8_plan_uses_real_engine_adapter(self) -> None:
+    def test_checked_native_v8_scalar_plan_uses_real_engine_adapter(self) -> None:
         adapter_path = (
-            harness.ROOT / "validation-adapters" / "v8-uint64.json"
+            harness.ROOT / "validation-adapters" / "v8-scalars.json"
         )
         plan = harness.validation_plan_from_config(
             harness.ROOT
             / "validation-plans"
-            / "native-v8-uint64.json"
+            / "native-v8-scalars.json"
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
         self.assertEqual(plan.pairs, (("native", "v8"),))
@@ -1631,13 +1631,26 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             adapter.product_declarations,
-            (
-                harness.ProductDeclaration(
-                    "wasm-manifest", "modules/uint64-max.wasm.json"
-                ),
-                harness.ProductDeclaration(
-                    "wasm-module", "modules/uint64-max.wasm"
-                ),
+            tuple(
+                sorted(
+                    (
+                        harness.ProductDeclaration(
+                            kind, f"modules/{case_id}.wasm{suffix}"
+                        )
+                        for kind, suffix in (
+                            ("wasm-manifest", ".json"),
+                            ("wasm-module", ""),
+                        )
+                        for case_id in (
+                            "uint8-max",
+                            "uint16-max",
+                            "uint32-max",
+                            "uint64-max",
+                            "usize-max",
+                        )
+                    ),
+                    key=lambda product: (product.kind, product.path),
+                )
             ),
         )
         self.assertEqual(
