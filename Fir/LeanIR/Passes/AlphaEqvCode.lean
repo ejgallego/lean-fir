@@ -209,10 +209,11 @@ end
 /--
 Semantic relation for the runtime join-point stacks. `empty` intentionally
 permits arbitrary dormant runtime entries when no join is visible through the
-proof index. `join` records the declaration body at installation time, while
-`variable` transports the same stack across a fresh ordinary binder without
-confusing the independent variable and join namespaces in the shared renaming
-map.
+proof index. `join` records the declaration body at installation time, `bind`
+transports the same stack across a fresh ordinary binder, and `ignored` retains
+dormant runtime prefixes while exposing a declaration's historical scope.
+Together they keep the variable and join namespaces distinct in the shared
+renaming map.
 -/
 inductive JoinEnvsRelated :
     FVarIdMap FVarId → List FVarId → List FVarId →
@@ -221,6 +222,8 @@ inductive JoinEnvsRelated :
   | join
       (prior : JoinEnvsRelated rho leftScope rightScope
         leftJoins rightJoins leftTail rightTail)
+      (renamingScoped : RenamingScoped rho leftScope rightScope)
+      (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
       (leftFresh : FreshJoinBinder leftDecl.fvarId leftScope leftJoins)
       (rightFresh : FreshJoinBinder rightDecl.fvarId rightScope rightJoins)
       (body : ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
@@ -232,9 +235,11 @@ inductive JoinEnvsRelated :
         (leftDecl.fvarId :: leftJoins) (rightDecl.fvarId :: rightJoins)
         ((leftDecl.fvarId, leftDecl) :: leftTail)
         ((rightDecl.fvarId, rightDecl) :: rightTail)
-  | variable
+  | bind
       (prior : JoinEnvsRelated rho leftScope rightScope
         leftJoins rightJoins left right)
+      (renamingScoped : RenamingScoped rho leftScope rightScope)
+      (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
       (leftFresh : FreshForScope leftId leftScope)
       (rightFresh : FreshForScope rightId rightScope)
       (leftJoinFresh : FreshForScope leftId leftJoins)
@@ -242,6 +247,302 @@ inductive JoinEnvsRelated :
       JoinEnvsRelated (rho.insert rightId leftId)
         (leftId :: leftScope) (rightId :: rightScope)
         leftJoins rightJoins left right
+  | ignored
+      (leftFresh : FreshForScope leftId leftJoins)
+      (rightFresh : FreshForScope rightId rightJoins)
+      (prior : JoinEnvsRelated rho leftScope rightScope
+        leftJoins rightJoins leftTail rightTail) :
+      JoinEnvsRelated rho leftScope rightScope leftJoins rightJoins
+        ((leftId, leftDecl) :: leftTail) ((rightId, rightDecl) :: rightTail)
+
+/-- Every identifier visible in the smaller scope remains visible in the larger one. -/
+def ScopeSubset (smaller larger : List FVarId) : Prop :=
+  ∀ fvarId, smaller.contains fvarId = true → larger.contains fvarId = true
+
+theorem scopeSubset_cons_right : ScopeSubset scope (fvarId :: scope) := by
+  unfold ScopeSubset
+  intro candidate member
+  simp [member]
+
+theorem scopeSubset_trans
+    (first : ScopeSubset small middle) (second : ScopeSubset middle large) :
+    ScopeSubset small large := by
+  unfold ScopeSubset at *
+  intro candidate member
+  exact second candidate (first candidate member)
+
+theorem freshForScope_of_subset
+    (fresh : FreshForScope fvarId large) (subset : ScopeSubset small large) :
+    FreshForScope fvarId small := by
+  intro old oldScoped
+  exact fresh old (subset old oldScoped)
+
+/-- Recover agreement before a fresh renaming insertion on unchanged scopes. -/
+theorem envsAgree_before_fresh_insert
+    (agree : EnvsAgree (rho.insert rightId leftId)
+      leftScope rightScope leftEnv rightEnv)
+    (rightFresh : FreshForScope rightId rightScope) :
+    EnvsAgree rho leftScope rightScope leftEnv rightEnv := by
+  intro candidateLeft candidateLeftScoped candidateRight candidateRightScoped related
+  have different := rightFresh candidateRight candidateRightScoped
+  exact agree candidateLeft candidateLeftScoped candidateRight candidateRightScoped
+    ((fVarRelated_insert_of_name_ne
+      rho leftId rightId candidateLeft candidateRight different).mpr related)
+
+/-- Recover old-scope agreement after binding a fresh ordinary variable. -/
+theorem envsAgree_before_variable_insert
+    (agree : EnvsAgree (rho.insert rightId leftId)
+      (leftId :: leftScope) (rightId :: rightScope) leftEnv rightEnv)
+    (rightFresh : FreshForScope rightId rightScope) :
+    EnvsAgree rho leftScope rightScope leftEnv rightEnv := by
+  intro candidateLeft candidateLeftScoped candidateRight candidateRightScoped related
+  have different := rightFresh candidateRight candidateRightScoped
+  apply agree candidateLeft (by simp [candidateLeftScoped])
+    candidateRight (by simp [candidateRightScoped])
+  exact (fVarRelated_insert_of_name_ne
+    rho leftId rightId candidateLeft candidateRight different).mpr related
+
+/-- Bind a list of parameter declarations to an equally long list of values. -/
+def bindParamValues (env : Env) (params : List (LCNF.Param .impure))
+    (values : List Value) : Env :=
+  (params.zip values).foldl
+    (fun current pair => bind current pair.fst.fvarId pair.snd) env
+
+private theorem listMapM_length_of_ok
+    {input output error : Type} (items : List input)
+    (action : input → Except error output) (results : List output)
+    (found : items.mapM action = Except.ok results) :
+    results.length = items.length := by
+  induction items generalizing results with
+  | nil =>
+      change Except.ok [] = Except.ok results at found
+      have resultsEq : ([] : List output) = results := Except.ok.inj found
+      subst results
+      rfl
+  | cons item items ih =>
+      rw [List.mapM_cons] at found
+      cases itemResult : action item with
+      | error fault =>
+          rw [itemResult] at found
+          change Except.error fault = Except.ok results at found
+          contradiction
+      | ok value =>
+          rw [itemResult] at found
+          cases restResult : items.mapM action with
+          | error fault =>
+              rw [restResult] at found
+              change Except.error fault = Except.ok results at found
+              contradiction
+          | ok rest =>
+              rw [restResult] at found
+              change Except.ok (value :: rest) = Except.ok results at found
+              have resultsEq : value :: rest = results := Except.ok.inj found
+              subst results
+              simp [ih rest restResult]
+
+/-- Successful argument evaluation preserves the source array length. -/
+theorem evalArgs_size_of_ok
+    (found : evalArgs env args = .ok values) : values.size = args.size := by
+  unfold evalArgs at found
+  rw [Array.mapM_eq_mapM_toList] at found
+  cases listResult : args.toList.mapM (evalArg env) with
+  | error fault =>
+      rw [listResult] at found
+      change Except.error fault = Except.ok values at found
+      contradiction
+  | ok results =>
+      rw [listResult] at found
+      change Except.ok results.toArray = Except.ok values at found
+      have valuesEq : results.toArray = values := Except.ok.inj found
+      subst values
+      simpa using listMapM_length_of_ok args.toList (evalArg env) results listResult
+
+/-- Pointwise-related argument arrays have the same length. -/
+private theorem listRel_length_eq_code
+    (related : ListRel relation left right) : left.length = right.length := by
+  induction related with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
+
+theorem ArgsRelated.size_eq
+    (related : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
+    leftArgs.size = rightArgs.size := by
+  simpa using listRel_length_eq_code related
+
+/-- Related parameter bodies introduce equally many parameters. -/
+theorem ParamBodyRelated.length_eq
+    (related : ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope leftParams rightParams leftCode rightCode) :
+    leftParams.length = rightParams.length := by
+  induction leftParams generalizing rho leftScope rightScope rightParams with
+  | nil =>
+      cases related
+      rfl
+  | cons leftParam leftRest ih =>
+      cases related with
+      | cons _ _ _ _ rest => simpa using ih rest
+
+/--
+Binding equal values to related parameter lists produces related environments
+and exposes the declaration bodies under the final accumulated renaming.
+-/
+theorem paramBody_bind_values_related
+    (body : ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope leftParams rightParams leftCode rightCode)
+    (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
+    (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
+    (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftRuntime rightRuntime)
+    (valuesLength : values.length = leftParams.length) :
+    ∃ finalRho finalLeftScope finalRightScope leftBound rightBound,
+      bindParamValues leftEnv leftParams values = leftBound ∧
+      bindParamValues rightEnv rightParams values = rightBound ∧
+      EnvsAgree finalRho finalLeftScope finalRightScope leftBound rightBound ∧
+      RenamingScoped finalRho finalLeftScope finalRightScope ∧
+      RenamingScoped finalRho leftJoins rightJoins ∧
+      JoinEnvsRelated finalRho finalLeftScope finalRightScope
+        leftJoins rightJoins leftRuntime rightRuntime ∧
+      CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        finalRho finalLeftScope finalRightScope leftCode rightCode := by
+  cases body with
+  | nil code =>
+      have valuesNil : values = [] :=
+        List.eq_nil_of_length_eq_zero (by simpa using valuesLength)
+      subst values
+      exact ⟨rho, leftScope, rightScope, leftEnv, rightEnv,
+        rfl, rfl, agree, renamingScoped, joinRenamingScoped, joinEnvs, code⟩
+  | cons leftFresh rightFresh leftJoinFresh rightJoinFresh rest =>
+      rename_i leftRest rightRest leftParam rightParam
+      cases values with
+      | nil => simp at valuesLength
+      | cons value values =>
+          have restLength : values.length = leftRest.length := by
+            simpa using valuesLength
+          rcases paramBody_bind_values_related
+              (leftEnv := bind leftEnv leftParam.fvarId value)
+              (rightEnv := bind rightEnv rightParam.fvarId value)
+              (values := values) rest
+              (envsAgree_bind agree renamingScoped leftFresh rightFresh)
+              (renamingScoped_insert renamingScoped rightFresh)
+              (renamingScoped_insert_preserve joinRenamingScoped rightJoinFresh)
+              (.bind joinEnvs renamingScoped joinRenamingScoped
+                leftFresh rightFresh leftJoinFresh rightJoinFresh)
+              restLength with
+            ⟨finalRho, finalLeftScope, finalRightScope, leftBound, rightBound,
+              leftFold, rightFold, finalAgree, finalRenaming,
+              finalJoinRenaming, finalJoins, finalCode⟩
+          exact ⟨finalRho, finalLeftScope, finalRightScope, leftBound, rightBound,
+            by simpa [bindParamValues] using leftFold,
+            by simpa [bindParamValues] using rightFold,
+            finalAgree, finalRenaming, finalJoinRenaming, finalJoins, finalCode⟩
+termination_by leftParams.length
+
+/--
+The semantic payload recovered by looking up a related active join target.
+The existential base context is the one in which the declaration body was
+checked, and `joins` relates the complete current runtime stacks while exposing
+only the joins that were active in that body.
+-/
+inductive JoinLookupRelated
+    (currentLeftJoins currentRightJoins : List FVarId)
+    (leftTarget rightTarget : FVarId)
+    (leftRuntime rightRuntime : JoinEnv)
+    (leftEnv rightEnv : Env) : Prop where
+  | intro
+      (baseRho : FVarIdMap FVarId)
+      (baseLeftScope baseRightScope : List FVarId)
+      (baseLeftJoins baseRightJoins : List FVarId)
+      (leftDecl rightDecl : LCNF.FunDecl .impure)
+      (leftFound : findJoinPoint? leftRuntime leftTarget = some leftDecl)
+      (rightFound : findJoinPoint? rightRuntime rightTarget = some rightDecl)
+      (body : ParamBodyRelated
+        (leftJoins := baseLeftJoins) (rightJoins := baseRightJoins)
+        baseRho baseLeftScope baseRightScope
+        leftDecl.params.toList rightDecl.params.toList
+        leftDecl.value rightDecl.value)
+      (joins : JoinEnvsRelated baseRho baseLeftScope baseRightScope
+        baseLeftJoins baseRightJoins leftRuntime rightRuntime)
+      (envs : EnvsAgree baseRho baseLeftScope baseRightScope leftEnv rightEnv)
+      (renamingScoped : RenamingScoped baseRho baseLeftScope baseRightScope)
+      (joinRenamingScoped : RenamingScoped baseRho baseLeftJoins baseRightJoins)
+      (leftSubset : ScopeSubset baseLeftJoins currentLeftJoins)
+      (rightSubset : ScopeSubset baseRightJoins currentRightJoins) :
+      JoinLookupRelated currentLeftJoins currentRightJoins
+        leftTarget rightTarget leftRuntime rightRuntime leftEnv rightEnv
+
+/-- Related active targets resolve to declarations with related bodies. -/
+theorem JoinEnvsRelated.lookup
+    (related : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftRuntime rightRuntime)
+    (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
+    (target : ScopedJoinRelated rho leftJoins rightJoins leftTarget rightTarget) :
+    JoinLookupRelated leftJoins rightJoins leftTarget rightTarget
+      leftRuntime rightRuntime leftEnv rightEnv := by
+  induction related with
+  | empty => simp [ScopedJoinRelated, ScopedFVarRelated] at target
+  | @join rho leftScope rightScope leftJoins rightJoins leftTail rightTail
+      leftDecl rightDecl prior oldRenaming oldJoinRenaming leftFresh rightFresh
+      body ih =>
+      have oldAgree := envsAgree_before_fresh_insert agree rightFresh.variables
+      rcases fVarRelated_insert_classify oldJoinRenaming rightFresh.joins
+          target.2.1 target.2.2 with newTarget | oldTarget
+      · rcases newTarget with ⟨rfl, rfl⟩
+        exact .intro rho leftScope rightScope leftJoins rightJoins
+          leftDecl rightDecl
+          (by simp [findJoinPoint?]) (by simp [findJoinPoint?]) body
+          (.ignored leftFresh.joins rightFresh.joins prior)
+          oldAgree oldRenaming oldJoinRenaming
+          scopeSubset_cons_right scopeSubset_cons_right
+      · rcases oldTarget with ⟨leftScoped, rightScoped, oldRelated⟩
+        rcases ih oldAgree ⟨leftScoped, rightScoped, oldRelated⟩ with
+          ⟨baseRho, baseLeftScope, baseRightScope, baseLeftJoins,
+            baseRightJoins, foundLeftDecl, foundRightDecl, leftFound,
+            rightFound, foundBody, foundJoins, foundEnvs, foundRenaming,
+            foundJoinRenaming, leftSubset, rightSubset⟩
+        have leftDifferent := leftFresh.joins leftTarget leftScoped
+        have rightDifferent := rightFresh.joins rightTarget rightScoped
+        exact .intro baseRho baseLeftScope baseRightScope
+          baseLeftJoins baseRightJoins foundLeftDecl foundRightDecl
+          (by simpa [findJoinPoint?, leftDifferent] using leftFound)
+          (by simpa [findJoinPoint?, rightDifferent] using rightFound)
+          foundBody
+          (.ignored
+            (freshForScope_of_subset leftFresh.joins leftSubset)
+            (freshForScope_of_subset rightFresh.joins rightSubset)
+            foundJoins)
+          foundEnvs foundRenaming foundJoinRenaming
+          (scopeSubset_trans leftSubset scopeSubset_cons_right)
+          (scopeSubset_trans rightSubset scopeSubset_cons_right)
+  | @bind rho leftScope rightScope leftJoins rightJoins leftRuntime rightRuntime
+      leftId rightId prior oldRenaming oldJoinRenaming leftFresh rightFresh
+      leftJoinFresh rightJoinFresh ih =>
+      have oldAgree := envsAgree_before_variable_insert agree rightFresh
+      have different := rightJoinFresh rightTarget target.2.1
+      have oldTarget : ScopedJoinRelated rho leftJoins rightJoins
+          leftTarget rightTarget := ⟨target.1, target.2.1,
+        (fVarRelated_insert_of_name_ne
+          rho leftId rightId leftTarget rightTarget different).mp target.2.2⟩
+      exact ih oldAgree oldTarget
+  | @ignored rho leftScope rightScope leftJoins rightJoins leftTail rightTail
+      leftId rightId leftDecl rightDecl leftFresh rightFresh prior ih =>
+      rcases ih agree target with
+        ⟨baseRho, baseLeftScope, baseRightScope, baseLeftJoins,
+          baseRightJoins, foundLeftDecl, foundRightDecl, leftFound,
+          rightFound, foundBody, foundJoins, foundEnvs, foundRenaming,
+          foundJoinRenaming, leftSubset, rightSubset⟩
+      have leftDifferent := leftFresh leftTarget target.1
+      have rightDifferent := rightFresh rightTarget target.2.1
+      exact .intro baseRho baseLeftScope baseRightScope
+        baseLeftJoins baseRightJoins foundLeftDecl foundRightDecl
+        (by simpa [findJoinPoint?, leftDifferent] using leftFound)
+        (by simpa [findJoinPoint?, rightDifferent] using rightFound)
+        foundBody
+        (.ignored
+          (freshForScope_of_subset leftFresh leftSubset)
+          (freshForScope_of_subset rightFresh rightSubset)
+          foundJoins)
+        foundEnvs foundRenaming foundJoinRenaming leftSubset rightSubset
 
 /-- Impure alternatives agree on their selector and have related bodies. -/
 inductive AltRelated (rho : FVarIdMap FVarId)
@@ -746,19 +1047,12 @@ theorem runtimeEffectResult_related
         control := .code continuation
       }
 
-/--
-The code heads covered by the current one-step simulation. Join installation
-is supported; invocation remains outside this predicate until parameter
-binding into a selected related join body is proved.
--/
-def CoreStepSupported : LCNF.Code .impure → LCNF.Code .impure → Prop
-  | .jmp .., .jmp .. => False
-  | _, _ => True
+/-- Every code head represented by `CodeRelated` has a one-step simulation. -/
+def CoreStepSupported (_ _ : LCNF.Code .impure) : Prop := True
 
 /--
-One interpreter step preserves the declarative machine relation for the
-currently supported code heads: terminal code, `let`, cases, and sequential
-impure effects. The three successful let actions
+One interpreter step preserves the declarative machine relation for every
+code head, including join installation and invocation. The three successful let actions
 either extend the current environments immediately or save the same extension
 invariant in a pair of bind frames. Heap and ownership instructions run the
 same runtime effect on both sides before entering related continuations.
@@ -860,8 +1154,8 @@ theorem coreStep_code_related
                       control := .code rightContinuation } := {
                 program_eq := programEq
                 runtime_eq := rfl
-                joins := .variable joinEnvs leftFresh rightFresh
-                  leftJoinFresh rightJoinFresh
+                joins := .bind joinEnvs renamingScoped joinRenamingScoped
+                  leftFresh rightFresh leftJoinFresh rightJoinFresh
                 frames := framesRelated
                 envs := envsAgree_bind agree renamingScoped leftFresh rightFresh
                 renaming_scoped := renamingScoped_insert renamingScoped rightFresh
@@ -950,7 +1244,8 @@ theorem coreStep_code_related
               control := .code rightContinuation } := {
         program_eq := programEq
         runtime_eq := runtimeEq
-        joins := .join joinEnvs leftFresh rightFresh body
+        joins := .join joinEnvs renamingScoped joinRenamingScoped
+          leftFresh rightFresh body
         frames := framesRelated
         envs := envsAgree_insert_preserve agree rightFresh.variables
         renaming_scoped :=
@@ -960,7 +1255,87 @@ theorem coreStep_code_related
         control := .code continuation
       }
       simpa [coreStep] using CoreResultRelated.next nextRelated
-  | jmp _ _ => simp [CoreStepSupported] at supported
+  | jmp target args =>
+      rename_i leftTarget rightTarget leftArgs rightArgs
+      rcases joinEnvs.lookup agree target with
+        ⟨baseRho, baseLeftScope, baseRightScope, baseLeftJoins,
+          baseRightJoins, leftDecl, rightDecl, leftFound, rightFound,
+          body, historicalJoins, historicalAgree, historicalRenaming,
+          historicalJoinRenaming, leftSubset, rightSubset⟩
+      have evaluations := evalArgs_eq_of_related agree args
+      have paramSizes : leftDecl.params.size = rightDecl.params.size := by
+        simpa using body.length_eq
+      simp only [coreStep]
+      rw [leftFound, rightFound, evaluations]
+      generalize rightEvaluation :
+        evalArgs rightState.env rightArgs = argumentResult
+      cases argumentResult with
+      | error fault =>
+          simp only [fail]
+          rw [observe_eq_of_runtime_eq
+            (left :=
+              { leftState with control := .code (.jmp leftTarget leftArgs) })
+            (right :=
+              { rightState with control := .code (.jmp rightTarget rightArgs) })
+            runtimeEq (.fault fault)]
+          exact .done _
+      | ok values =>
+          simp only
+          by_cases leftArity : leftDecl.params.size = values.size
+          · have rightArity : rightDecl.params.size = values.size := by
+              rw [← paramSizes]
+              exact leftArity
+            have valuesLength :
+                values.toList.length = leftDecl.params.toList.length := by
+              simpa using leftArity.symm
+            rcases paramBody_bind_values_related body historicalAgree
+                historicalRenaming historicalJoinRenaming historicalJoins
+                valuesLength with
+              ⟨finalRho, finalLeftScope, finalRightScope, leftBound,
+                rightBound, leftFold, rightFold, finalAgree, finalRenaming,
+                finalJoinRenaming, finalJoins, finalCode⟩
+            have leftBind :
+                bindParamsOver leftState.env leftDecl.params values =
+                  .ok leftBound := by
+              simp [bindParamsOver, leftArity]
+              simpa only [bindParamValues] using leftFold
+            have rightBind :
+                bindParamsOver rightState.env rightDecl.params values =
+                  .ok rightBound := by
+              simp [bindParamsOver, rightArity]
+              simpa only [bindParamValues] using rightFold
+            rw [leftBind, rightBind]
+            exact .next {
+              program_eq := programEq
+              runtime_eq := runtimeEq
+              joins := finalJoins
+              frames := framesRelated
+              envs := finalAgree
+              renaming_scoped := finalRenaming
+              join_renaming_scoped := finalJoinRenaming
+              control := .code finalCode
+            }
+          · have rightArity : rightDecl.params.size ≠ values.size := by
+              intro rightArity
+              exact leftArity (paramSizes.trans rightArity)
+            have leftBind :
+                bindParamsOver leftState.env leftDecl.params values =
+                  .error (.arityMismatch leftDecl.params.size values.size) := by
+              simp [bindParamsOver, leftArity]
+            have rightBind :
+                bindParamsOver rightState.env rightDecl.params values =
+                  .error (.arityMismatch leftDecl.params.size values.size) := by
+              simp [bindParamsOver, rightArity, paramSizes]
+            rw [leftBind, rightBind]
+            simp only [fail]
+            rw [observe_eq_of_runtime_eq
+              (left :=
+                { leftState with control := .code (.jmp leftTarget leftArgs) })
+              (right :=
+                { rightState with control := .code (.jmp rightTarget rightArgs) })
+              runtimeEq
+              (.fault (.arityMismatch leftDecl.params.size values.size))]
+            exact .done _
   | cases discr alternatives =>
       rename_i leftCases rightCases
       have discrEq := lookupValue_eq_of_scoped_related agree discr
@@ -1315,7 +1690,8 @@ theorem coreStep_yielded_bind_related
           frames := rightFrames } := {
     program_eq := programEq
     runtime_eq := runtimeEq
-    joins := .variable joinEnvs leftFresh rightFresh leftJoinFresh rightJoinFresh
+    joins := .bind joinEnvs renamingScoped joinRenamingScoped
+      leftFresh rightFresh leftJoinFresh rightJoinFresh
     frames := restFrames
     envs := envsAgree_bind agree renamingScoped leftFresh rightFresh
     renaming_scoped := renamingScoped_insert renamingScoped rightFresh

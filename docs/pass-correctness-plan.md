@@ -455,37 +455,37 @@ parameter traversals decrease their list length. The full regression constructs
 `CodeRelated` for an alpha-renamed `jp`, its normalized case body, a subsequent
 value binding, and the final `jmp`.
 
-Runtime join installation is now part of the simulation. `JoinEnvsRelated`
-tracks alpha-renamed join stacks, their declaration bodies, and transport
-across ordinary variable binders; `MachineStateRelated` carries separate
-renaming-scope facts for variables and joins, and saved bind frames retain the
-paired join stacks they captured. `coreStep_code_related` proves the `jp` step,
-and a regression executes that theorem on the full alpha-renamed join fixture.
-The proof interface now states the compiler's global-freshness consequence
-that variable and parameter binders cannot shadow active join identifiers.
-`CoreStepSupported` deliberately excludes only `jmp` until lookup and
-parameter binding into the selected related body are proved. This is an
-explicit proof boundary, not a new axiom or a weakened runtime definition. No
-runtime contract or trusted assumption changed.
+Runtime join installation and invocation are now part of the simulation.
+`JoinEnvsRelated` tracks alpha-renamed join stacks, their declaration bodies,
+transport across ordinary variable binders, and dormant prefixes accumulated
+after a declaration was installed. Related target lookup recovers the
+declaration's historical variable/join scopes while retaining a certificate
+for the complete current runtime stacks. Pointwise parameter binding then
+extends both environments, both scope indices, and the renaming in lockstep.
+`coreStep_code_related` proves both the `jp` and `jmp` steps, including equal
+argument-evaluation faults, successful jumps into related bodies, and matching
+arity-mismatch observations. Regressions execute both steps on the full
+alpha-renamed join fixture. `CoreStepSupported` consequently covers every code
+head represented by `CodeRelated`. The proof interface still states the
+compiler's global-freshness consequence that variable and parameter binders
+cannot shadow active join identifiers. No runtime contract or trusted
+assumption changed.
 
 The remaining bounded work is:
 
-1. prove related lookup and parameter binding for active join environments,
-   extend state simulation through `jmp`, and remove its remaining exclusion
-   from `CoreStepSupported`;
-2. extend whole-state simulation through named/closure calls and the remaining
+1. extend whole-state simulation through named/closure calls and the remaining
    yielded/apply/cache frame paths, reusing the existing related `fap`, `pap`,
    and free-variable call actions;
-3. prove the transparent local checker sound for each newly added declarative
+2. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-5. lift the resulting theorem through recursive code, declarations, and program
+4. lift the resulting theorem through recursive code, declarations, and program
    entry evaluation;
-6. expand the compiler-generated conformance corpus around the whole pass;
-7. in parallel, continue the Talos runtime work and run
+5. expand the compiler-generated conformance corpus around the whole pass;
+6. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first

@@ -349,15 +349,21 @@ def joinRightBodyCases : LCNF.Cases .impure :=
     .default (.unreach objType),
     .ctorAlt falseInfo (.return joinRightParam)]
 
+def joinLeftDecl : LCNF.FunDecl .impure :=
+  .mk joinLeftId `joinLeft #[param joinLeftParam] objType
+    (.cases joinLeftBodyCases)
+
+def joinRightDecl : LCNF.FunDecl .impure :=
+  .mk joinRightId `joinRight #[param joinRightParam] objType
+    (.cases joinRightBodyCases)
+
 def joinAlphaLeft : LCNF.Code .impure :=
-  .jp (.mk joinLeftId `joinLeft #[param joinLeftParam] objType
-      (.cases joinLeftBodyCases)) <|
+  .jp joinLeftDecl <|
     .let (letDecl joinLeftArg objType (.lit (.nat 41))) <|
       .jmp joinLeftId #[.fvar joinLeftArg]
 
 def joinAlphaRight : LCNF.Code .impure :=
-  .jp (.mk joinRightId `joinRight #[param joinRightParam] objType
-      (.cases joinRightBodyCases)) <|
+  .jp joinRightDecl <|
     .let (letDecl joinRightArg objType (.lit (.nat 41))) <|
       .jmp joinRightId #[.fvar joinRightArg]
 
@@ -545,6 +551,103 @@ theorem joinInstallationCoreStepRelated :
   · exact renamingScoped_empty []
   · exact renamingScoped_empty []
   · exact joinLocalCodeRelated
+  · trivial
+
+def joinJumpLeftState : MachineState := {
+  program := { decls := #[] }
+  control := .code (.jmp joinLeftId #[.fvar joinLeftArg])
+  env := bind [] joinLeftArg .erased
+  joins := [(joinLeftId, joinLeftDecl)]
+}
+
+def joinJumpRightState : MachineState := {
+  program := { decls := #[] }
+  control := .code (.jmp joinRightId #[.fvar joinRightArg])
+  env := bind [] joinRightArg .erased
+  joins := [(joinRightId, joinRightDecl)]
+}
+
+/-- Invoking the installed alpha-renamed joins binds their parameters alike. -/
+theorem joinInvocationCoreStepRelated :
+    CoreResultRelated
+      (coreStep joinJumpLeftState)
+      (coreStep joinJumpRightState) := by
+  let joinRho := ({} : FVarIdMap FVarId).insert joinRightId joinLeftId
+  let finalRho := joinRho.insert joinRightArg joinLeftArg
+  have leftJoinFresh : FreshJoinBinder joinLeftId [] [] := by
+    constructor <;> intro old oldScoped <;> simp at oldScoped
+  have rightJoinFresh : FreshJoinBinder joinRightId [] [] := by
+    constructor <;> intro old oldScoped <;> simp at oldScoped
+  have leftArgFresh : FreshForScope joinLeftArg [] := by
+    intro old oldScoped
+    simp at oldScoped
+  have rightArgFresh : FreshForScope joinRightArg [] := by
+    intro old oldScoped
+    simp at oldScoped
+  have leftArgJoinFresh : FreshForScope joinLeftArg [joinLeftId] := by
+    intro old oldScoped
+    simp at oldScoped
+    have oldEq := fvar_eq_of_beq oldScoped
+    subst old
+    native_decide
+  have rightArgJoinFresh : FreshForScope joinRightArg [joinRightId] := by
+    intro old oldScoped
+    simp at oldScoped
+    have oldEq := fvar_eq_of_beq oldScoped
+    subst old
+    native_decide
+  have emptyAgree : EnvsAgree ({} : FVarIdMap FVarId) [] [] [] [] := by
+    intro left leftScoped
+    simp at leftScoped
+  have emptyRenaming := renamingScoped_empty ([] : List FVarId)
+  have joinedAgree : EnvsAgree joinRho [] [] [] [] :=
+    envsAgree_insert_preserve (leftId := joinLeftId)
+      emptyAgree rightJoinFresh.variables
+  have joinedVariableRenaming : RenamingScoped joinRho [] [] :=
+    renamingScoped_insert_preserve (leftId := joinLeftId)
+      emptyRenaming rightJoinFresh.variables
+  have joinedJoinRenaming :
+      RenamingScoped joinRho [joinLeftId] [joinRightId] :=
+    renamingScoped_insert emptyRenaming rightJoinFresh.joins
+  have installedJoins :
+      JoinEnvsRelated joinRho [] [] [joinLeftId] [joinRightId]
+        [(joinLeftId, joinLeftDecl)] [(joinRightId, joinRightDecl)] :=
+    JoinEnvsRelated.join (leftDecl := joinLeftDecl) (rightDecl := joinRightDecl)
+      .empty emptyRenaming emptyRenaming leftJoinFresh rightJoinFresh
+      joinParamBodyRelated
+  have jump :
+      CodeRelated (leftJoins := [joinLeftId]) (rightJoins := [joinRightId])
+        finalRho [joinLeftArg] [joinRightArg]
+        (.jmp joinLeftId #[.fvar joinLeftArg])
+        (.jmp joinRightId #[.fvar joinRightArg]) := by
+    apply CodeRelated.jmp
+    · refine ⟨by native_decide, by native_decide, ?_⟩
+      change FVarRelated finalRho joinLeftId joinRightId
+      apply (fVarRelated_insert_of_name_ne joinRho
+        joinLeftArg joinRightArg joinLeftId joinRightId (by native_decide)).mpr
+      exact fVarRelated_insert_self ({} : FVarIdMap FVarId)
+        joinLeftId joinRightId
+    · apply ListRel.cons
+      · refine ⟨by native_decide, by native_decide, ?_⟩
+        change FVarRelated finalRho joinLeftArg joinRightArg
+        exact fVarRelated_insert_self joinRho joinLeftArg joinRightArg
+      · exact .nil
+  apply coreStep_code_related
+    (rho := finalRho)
+    (leftScope := [joinLeftArg]) (rightScope := [joinRightArg])
+    (leftJoins := [joinLeftId]) (rightJoins := [joinRightId])
+    (leftState := joinJumpLeftState)
+    (rightState := joinJumpRightState)
+  · rfl
+  · rfl
+  · exact .bind installedJoins joinedVariableRenaming joinedJoinRenaming
+      leftArgFresh rightArgFresh leftArgJoinFresh rightArgJoinFresh
+  · exact .nil
+  · exact envsAgree_bind joinedAgree joinedVariableRenaming
+      leftArgFresh rightArgFresh
+  · exact renamingScoped_insert joinedVariableRenaming rightArgFresh
+  · exact renamingScoped_insert_preserve joinedJoinRenaming rightArgJoinFresh
+  · exact jump
   · trivial
 
 #guard Local.check 8 joinAlphaLeft joinAlphaRight
