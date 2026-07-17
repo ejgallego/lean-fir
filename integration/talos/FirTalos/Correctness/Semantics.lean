@@ -1351,6 +1351,138 @@ theorem letStepSimulates_isShared
       wp_isShared_let objectHandle sourceObject shared tail hObject hImp hSat hi
         hContract hParams hResults decodedObject evaluated targetSet continued
 
+/-- Reset instance of the reusable direct-`let` boundary. -/
+theorem letStepSimulates_reset
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {objectFields : Nat}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectHandle tokenHandle : Handle}
+    {sourceObject sourceToken : Value} {sourceRuntime : RuntimeState}
+    {after : HandleTable}
+    (valueEq : decl.value = .reset objectFields objectId)
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (resetResult : Fir.LeanIR.Impure.reset initial.host.runtime objectFields
+      sourceObject = .ok (sourceRuntime, sourceToken))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound : findFVar? (functionBindings sourceFunction) decl.fvarId =
+      some resultIndex)
+    (kindAt : (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+      some .reuseToken)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.reset objectFields)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (encoded : initial.host.handles.encode .reuseToken sourceToken =
+      .ok (after, tokenHandle))
+    (targetSet : locals.set? resultIndex (.i32 tokenHandle) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      initial.host.runtime sourceRuntime sourceEnv sourceToken initial
+      (successfulHostStore initial sourceRuntime after) locals updated resultIndex := by
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [objectLookup]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        Fir.LeanIR.Impure.reset initial.host.runtime objectFields sourceObject) =
+      .ok (sourceRuntime, .value sourceToken)
+    rw [resetResult]
+    rfl
+  · refine ⟨rfl, rfl, rfl, ?_, ?_⟩
+    · exact handleTableInvariant_of_encode initialRelated.2.2.2.1 (by rfl) encoded
+    · exact EnvLocalsRelated.bind_handle_of_encode
+        initialRelated.2.2.2.2 initialRelated.2.2.2.1 resultFound kindAt
+        (by rfl) encoded targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore] using
+      wp_reset_let objectFields objectHandle sourceObject sourceRuntime
+        sourceToken after tokenHandle tail hObject hImp hSat hi hContract hParams
+        hResults decoded resetResult encoded targetSet continued
+
+/-- Reuse instance of the reusable direct-`let` boundary. -/
+theorem letStepSimulates_reuse
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {tokenId : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {initial : Wasm.Store RuntimeHost} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {sourceToken sourceValue : Value}
+    {sourceFields semanticArgs : Array Value} {sourceRuntime : RuntimeState}
+    {after : HandleTable} {resultHandle : Handle}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (tokenLookup : lookupValue sourceEnv tokenId = .ok sourceToken)
+    (argumentsEvaluated : evalArgs sourceEnv args = .ok sourceFields)
+    (reused : Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+      updateHeader sourceFields = .ok (sourceRuntime, sourceValue))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (resultFound : findFVar? (functionBindings sourceFunction) decl.fvarId =
+      some resultIndex)
+    (kindAt : (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+      some resultKind)
+    (hGets : List.Forall₂ (fun index value => locals.get index = some value)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.reuse info updateHeader fieldKinds resultKind)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles (#[.reuseToken] ++ fieldKinds)
+      physicalArgs = .ok semanticArgs)
+    (tokenHead : semanticArgs[0]? = some sourceToken)
+    (fieldsTail : semanticArgs.extract 1 semanticArgs.size = sourceFields)
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, resultHandle))
+    (targetSet : locals.set? resultIndex (.i32 resultHandle) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      (indices.map Wasm.Instruction.localGet ++ [.call id])
+      initial.host.runtime sourceRuntime sourceEnv sourceValue initial
+      (successfulHostStore initial sourceRuntime after) locals updated resultIndex := by
+  have hostReused : Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+      updateHeader (semanticArgs.extract 1 semanticArgs.size) =
+        .ok (sourceRuntime, sourceValue) := by
+    rw [fieldsTail]
+    exact reused
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold SourceLetResult
+    simp [evalLetValue, valueEq]
+    rw [tokenLookup, argumentsEvaluated]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+          updateHeader sourceFields) = .ok (sourceRuntime, .value sourceValue)
+    rw [reused]
+    rfl
+  · refine ⟨rfl, rfl, rfl, ?_, ?_⟩
+    · exact handleTableInvariant_of_encode initialRelated.2.2.2.1 usesHandle encoded
+    · exact EnvLocalsRelated.bind_handle_of_encode
+        initialRelated.2.2.2.2 initialRelated.2.2.2.1 resultFound kindAt
+        usesHandle encoded targetSet
+  · intro rest Q tail continued
+    simpa [successfulHostStore, List.append_assoc] using
+      wp_reuse_let info updateHeader fieldKinds resultKind semanticArgs sourceToken
+        sourceRuntime sourceValue after resultHandle tail hGets hImp hSat hi
+        hContract hParams hResults decoded tokenHead hostReused usesHandle encoded
+        targetSet continued
+
 /-- Generic unary semantic-host instance of the no-result effect boundary. -/
 theorem effectStepSimulates_unaryHost
     {context : Fir.Wasm.Context}

@@ -582,6 +582,20 @@ case. Differential regressions cover an increment/decrement round trip,
 persistent elision, and deletion followed by the exact `deadObject` source
 fault. No new bug card was required.
 
+W5.5 is complete. Reset returns an opaque `reuseToken` handle after performing
+the source runtime's uniqueness check, released-field decrements, and slot
+clearing. Reuse decodes that token plus replacement object fields and either
+updates the unique constructor location or allocates a fresh constructor when
+the token is empty. Result handles preserve heap aliases without exposing FIR
+locations in the physical ABI.
+
+Exact host-step and handle-invariant simulations cover both operations;
+compiler equations, stack/local composition, and `LetStepSimulates` rules bind
+tokens and reused objects through the existing recursive program theorem.
+Differential regressions cover both the unique in-place path and the shared
+fallback-allocation path, including header replacement. No semantic mismatch
+or new bug card was found.
+
 ### A0: emit the first host-backed Wasm artifact
 
 A0 is an independently assignable artifact lane. It can run in parallel with

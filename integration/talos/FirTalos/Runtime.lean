@@ -19,6 +19,9 @@ inductive HostOperation where
   | box (scalar result : AbiKind)
   | unbox (scalar : AbiKind)
   | isShared
+  | reset (objectFields : Nat)
+  | reuse (info : Lean.Compiler.LCNF.CtorInfo) (updateHeader : Bool)
+      (fields : Array AbiKind) (result : AbiKind)
   | objectSet (index : Nat) (field : AbiKind)
   | usizeSet (index : Nat)
   | scalarSet (width offset : Nat) (field : AbiKind)
@@ -39,6 +42,9 @@ def HostOperation.runtimeOp : HostOperation → RuntimeOp
   | .box scalar result => .box scalar result
   | .unbox scalar => .unbox scalar
   | .isShared => .isShared
+  | .reset objectFields => .reset objectFields
+  | .reuse info updateHeader fields result =>
+      .reuse info updateHeader fields result
   | .objectSet index field => .objectSet index field
   | .usizeSet index => .usizeSet index
   | .scalarSet width offset field => .scalarSet width offset field
@@ -61,6 +67,9 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
+  | .reset objectFields => some (.reset objectFields)
+  | .reuse info updateHeader fields result =>
+      some (.reuse info updateHeader fields result)
   | .objectSet index field => some (.objectSet index field)
   | .usizeSet index => some (.usizeSet index)
   | .scalarSet width offset field => some (.scalarSet width offset field)
@@ -154,6 +163,21 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       | some object =>
           match Fir.LeanIR.Impure.isShared runtime object with
           | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .reset objectFields =>
+      match args[0]? with
+      | some object =>
+          match Fir.LeanIR.Impure.reset runtime objectFields object with
+          | .ok result => .ok (result.1, #[result.2])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .reuse info updateHeader _ _ =>
+      match args[0]? with
+      | some token =>
+          match Fir.LeanIR.Impure.reuse runtime token info updateHeader
+              (args.extract 1 args.size) with
+          | .ok result => .ok (result.1, #[result.2])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
   | .objectSet index _ =>
@@ -414,6 +438,56 @@ theorem hostStep_isShared_of_decode
     encodeResults_singleton_of_encodeValue (by rfl :
       encodeValue initial.host.handles .uint8 (.scalar (.uint8 shared)) =
         .ok (initial.host.handles, .i32 (UInt32.ofNat shared.toNat)))]
+
+theorem hostStep_reset_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (objectFields : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState) (sourceToken : Value)
+    {after : HandleTable} {handle : Handle}
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (resetResult : Fir.LeanIR.Impure.reset initial.host.runtime objectFields
+      sourceObject = .ok (sourceRuntime, sourceToken))
+    (encoded : initial.host.handles.encode .reuseToken sourceToken =
+      .ok (after, handle)) :
+    hostStep (.reset objectFields) initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, resetResult,
+    encodeResults_handle_singleton_of_encode (by rfl) encoded]
+
+theorem hostStep_reuse_of_decode_encode
+    (initial : Wasm.Store RuntimeHost) (info : Lean.Compiler.LCNF.CtorInfo)
+    (updateHeader : Bool) (fieldKinds : Array AbiKind) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (semanticArgs : Array Value)
+    (sourceToken : Value) (sourceRuntime : RuntimeState) (sourceValue : Value)
+    {after : HandleTable} {handle : Handle}
+    (decoded : decodeArgs initial.host.handles (#[.reuseToken] ++ fieldKinds)
+      physicalArgs = .ok semanticArgs)
+    (tokenHead : semanticArgs[0]? = some sourceToken)
+    (reused : Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+      updateHeader (semanticArgs.extract 1 semanticArgs.size) =
+        .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    hostStep (.reuse info updateHeader fieldKinds resultKind) initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, tokenHead, reused,
+    encodeResults_handle_singleton_of_encode usesHandle encoded]
 
 theorem hostStep_objectSet_of_decode
     (initial : Wasm.Store RuntimeHost) (index : Nat) (fieldKind : AbiKind)

@@ -181,6 +181,34 @@ theorem compileLetValue_isShared
   simp [compileLetValue, valueEq, resultEq, objectEq]
   rfl
 
+theorem compileLetValue_reset
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {count : Nat} {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {objectInstruction : Instruction}
+    (valueEq : decl.value = .reset count objectId)
+    (resultEq : letValueKind decl = .ok .reuseToken)
+    (objectEq : getLocal context objectId = .ok (objectInstruction, objectKind)) :
+    compileLetValue context decl =
+      .ok [objectInstruction, .call (.runtime (.reset count))] := by
+  simp [compileLetValue, valueEq, resultEq, objectEq]
+  rfl
+
+theorem compileLetValue_reuse
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {tokenId : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {tokenKind resultKind : AbiKind} {tokenInstruction : Instruction}
+    {argumentCode : List Instruction} {fieldKinds : Array AbiKind}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (resultEq : letValueKind decl = .ok resultKind)
+    (tokenEq : getLocal context tokenId = .ok (tokenInstruction, tokenKind))
+    (argumentsEq : compileArgs context args = .ok (argumentCode, fieldKinds)) :
+    compileLetValue context decl =
+      .ok (tokenInstruction :: argumentCode ++
+        [.call (.runtime (.reuse info updateHeader fieldKinds resultKind))]) := by
+  simp [compileLetValue, valueEq, resultEq, tokenEq, argumentsEq]
+  rfl
+
 theorem compileCaseChain_constructor
     {context : Context} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
@@ -505,6 +533,75 @@ theorem isShared_host_simulates
       decodedArgs evaluated
   · exact ⟨rfl, decodeValue_uint8 initial.host.handles shared⟩
   · exact invariant
+
+/-- Reset returns an opaque reuse-token handle while threading the exact source
+runtime update. -/
+theorem reset_host_simulates
+    (initial : Wasm.Store RuntimeHost) (objectFields : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState) (sourceToken : Value)
+    {after : HandleTable} {handle : Handle}
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (resetResult : Fir.LeanIR.Impure.reset initial.host.runtime objectFields
+      sourceObject = .ok (sourceRuntime, sourceToken))
+    (encoded : initial.host.handles.encode .reuseToken sourceToken =
+      .ok (after, handle)) :
+    ∃ final,
+      hostStep (.reset objectFields) initial physicalArgs =
+        .Return [.i32 handle] final ∧
+      StepResultRelated sourceRuntime sourceToken .reuseToken final (.i32 handle) ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      handles := after
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_reset_of_decode_encode initial objectFields physicalArgs
+      sourceObject sourceRuntime sourceToken decodedArgs resetResult encoded
+  · exact ⟨rfl, decodeValue_handle_of_decodeAs (by rfl)
+      (decodeAs_of_encode invariant.coherent (by rfl) encoded)⟩
+  · exact handleTableInvariant_of_encode invariant (by rfl) encoded
+
+theorem reuse_host_simulates
+    (initial : Wasm.Store RuntimeHost) (info : Lean.Compiler.LCNF.CtorInfo)
+    (updateHeader : Bool) (fieldKinds : Array AbiKind) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (semanticArgs : Array Value)
+    (sourceToken : Value) (sourceRuntime : RuntimeState) (sourceValue : Value)
+    {after : HandleTable} {handle : Handle}
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles (#[.reuseToken] ++ fieldKinds)
+      physicalArgs = .ok semanticArgs)
+    (tokenHead : semanticArgs[0]? = some sourceToken)
+    (reused : Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+      updateHeader (semanticArgs.extract 1 semanticArgs.size) =
+        .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, handle)) :
+    ∃ final,
+      hostStep (.reuse info updateHeader fieldKinds resultKind) initial physicalArgs =
+        .Return [.i32 handle] final ∧
+      StepResultRelated sourceRuntime sourceValue resultKind final (.i32 handle) ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      handles := after
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, ?_, ?_⟩
+  · exact hostStep_reuse_of_decode_encode initial info updateHeader fieldKinds
+      resultKind physicalArgs semanticArgs sourceToken sourceRuntime sourceValue
+      decodedArgs tokenHead reused usesHandle encoded
+  · exact ⟨rfl, decodeValue_handle_of_decodeAs usesHandle
+      (decodeAs_of_encode invariant.coherent usesHandle encoded)⟩
+  · exact handleTableInvariant_of_encode invariant usesHandle encoded
 
 /-- Object-field mutation changes only the semantic runtime. Existing handles
 continue to denote the same object references. -/

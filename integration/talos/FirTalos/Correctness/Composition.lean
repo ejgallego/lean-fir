@@ -376,6 +376,114 @@ theorem wp_box_let
     · apply wp_localSet_of_set hSet
       exact continued
 
+/-- Complete generated reset `let`: return and bind an opaque reuse token. -/
+theorem wp_reset_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {objectIndex resultIndex : Nat}
+    (objectFields : Nat) (objectHandle : Fir.Wasm.Handle)
+    (sourceObject : Fir.LeanIR.Impure.Value)
+    (sourceRuntime : Fir.LeanIR.Impure.RuntimeState)
+    (sourceToken : Fir.LeanIR.Impure.Value) (after : Fir.Wasm.HandleTable)
+    (tokenHandle : Fir.Wasm.Handle) (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.reset objectFields)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject])
+    (resetResult : Fir.LeanIR.Impure.reset initial.host.runtime objectFields
+      sourceObject = .ok (sourceRuntime, sourceToken))
+    (encoded : initial.host.handles.encode .reuseToken sourceToken =
+      .ok (after, tokenHandle))
+    (hSet : locals.set? resultIndex (.i32 tokenHandle) = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets
+    (indices := [objectIndex]) (values := [.i32 objectHandle]) tail
+  · exact .cons hObject .nil
+  · apply wp_host_call_on_stack_of_return
+      (physicalArgs := [.i32 objectHandle]) hImp hSat hi hContract hParams
+    · rfl
+    · exact hostStep_reset_of_decode_encode initial objectFields
+        [.i32 objectHandle] sourceObject sourceRuntime sourceToken decoded
+        resetResult encoded
+    · simpa [hResults] using wp_localSet_of_set hSet continued
+
+/-- Complete generated reuse `let`: load the token and replacement fields,
+call the semantic runtime, and bind the resulting object handle. -/
+theorem wp_reuse_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {resultIndex : Nat}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    (info : Lean.Compiler.LCNF.CtorInfo) (updateHeader : Bool)
+    (fieldKinds : Array Fir.Wasm.AbiKind) (resultKind : Fir.Wasm.AbiKind)
+    (semanticArgs : Array Fir.LeanIR.Impure.Value)
+    (sourceToken : Fir.LeanIR.Impure.Value)
+    (sourceRuntime : Fir.LeanIR.Impure.RuntimeState)
+    (sourceValue : Fir.LeanIR.Impure.Value) (after : Fir.Wasm.HandleTable)
+    (resultHandle : Fir.Wasm.Handle) (tail : List Wasm.Value)
+    (hGets : List.Forall₂ (fun index value => locals.get index = some value)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.reuse info updateHeader fieldKinds resultKind)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (decoded : decodeArgs initial.host.handles (#[.reuseToken] ++ fieldKinds)
+      physicalArgs = .ok semanticArgs)
+    (tokenHead : semanticArgs[0]? = some sourceToken)
+    (reused : Fir.LeanIR.Impure.reuse initial.host.runtime sourceToken info
+      updateHeader (semanticArgs.extract 1 semanticArgs.size) =
+        .ok (sourceRuntime, sourceValue))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind sourceValue =
+      .ok (after, resultHandle))
+    (hSet : locals.set? resultIndex (.i32 resultHandle) = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_host_call_on_stack_of_return hImp hSat hi hContract hParams
+  · rfl
+  · exact hostStep_reuse_of_decode_encode initial info updateHeader fieldKinds
+      resultKind physicalArgs semanticArgs sourceToken sourceRuntime sourceValue
+      decoded tokenHead reused usesHandle encoded
+  · simpa [hResults] using wp_localSet_of_set hSet continued
+
 /-- Complete generated unboxing `let`. -/
 theorem wp_unbox_let
     {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}

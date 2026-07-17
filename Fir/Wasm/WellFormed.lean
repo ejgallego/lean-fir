@@ -107,6 +107,18 @@ def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
         some declared
       else
         none
+  | .reset _ objectId =>
+      let objectKind ← findLocalKind? locals objectId
+      if objectKind.isObjectLike then some .reuseToken else none
+  | .reuse tokenId info _ args =>
+      let tokenKind ← findLocalKind? locals tokenId
+      let kinds ← args.mapM (supportedArgKind? locals)
+      if tokenKind == .reuseToken && constructorTagFitsI32 info &&
+          info.size == args.size && kinds.all AbiKind.isObjectField &&
+          (constructorKind info).refines declared then
+        some declared
+      else
+        none
   | value => if supportedLetValue value then some declared else none
 
 def resultKindRefines (actual expected : Option AbiKind) : Bool :=

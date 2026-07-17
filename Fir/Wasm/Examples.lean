@@ -328,6 +328,28 @@ def abiTagMutationProgram : Fir.LeanIR.ImpureProgram :=
         .default
           (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u))]))] }
 
+def abiResetReuseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 70))) <|
+      .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .let (letDecl r objType (.reset 1 p)) <|
+      .let (letDecl y tobjectType (.lit (.nat 71))) <|
+      .let (letDecl z objType
+        (.reuse r { pairInfo with size := 1 } false #[.fvar y])) <|
+      .let (letDecl s tobjectType (.oproj 0 z)) <|
+      .return s)] }
+
+def abiSharedResetProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 80))) <|
+      .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .inc p 1 false false <|
+      .let (letDecl r objType (.reset 1 p)) <|
+      .let (letDecl y tobjectType (.lit (.nat 81))) <|
+      .let (letDecl z objType (.reuse r changedTagInfo true #[.fvar y])) <|
+      .let (letDecl s tobjectType (.oproj 0 z)) <|
+      .return s)] }
+
 def oversizedTagInfo : LCNF.CtorInfo :=
   { name := `Oversized.tag, cidx := UInt32.size, size := 1, usize := 0, ssize := 0 }
 
@@ -373,6 +395,8 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram rcProgram
 #guard supportedProgram persistentRcProgram
 #guard supportedProgram deletedProgram
+#guard supportedProgram abiResetReuseProgram
+#guard supportedProgram abiSharedResetProgram
 #guard !supportedProgram externalProgram
 
 #guard match lowerSupported abiCaseProgram with
