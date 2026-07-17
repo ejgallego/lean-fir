@@ -693,4 +693,20 @@ theorem abiDefaultCaseMain_source_evaluates :
       abiDefaultCaseValue5 :=
   abiDefaultCaseMain_correct.1
 
+/-- Executable-source and exported-target correctness from one certificate. -/
+theorem abiDefaultCaseMain_exec_correct (externals : ExternalImpl) :
+    ExecEvaluates externals
+        (sourceCodeState abiDefaultCaseContext {} [] abiDefaultCaseCode)
+        (ReturnedObservation {} abiDefaultCaseValue5) ∧
+      ExportTerminatesWith abiDefaultCaseResolvedHosts.env
+        abiDefaultCaseAdaptedModule.wasmModule "main"
+        abiDefaultCaseInitialStore []
+        (RelatedPost #[.tobject]
+          (ReturnedObservation {} abiDefaultCaseValue5)) := by
+  apply abiDefaultCaseSupportedExport.execCorrect_of_simulation
+    abiDefaultCaseObservation_related
+  · simpa [abiDefaultCaseSupportedExport, abiDefaultCaseInitialStore] using
+      abiDefaultCaseMain_simulation
+  · simp [abiDefaultCaseSupportedExport]
+
 end FirTalos.Correctness

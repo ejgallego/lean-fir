@@ -771,4 +771,22 @@ theorem abiCtorProjectionMain_source_evaluates :
       abiCtorProjectionRuntime abiCtorProjectionValue7 :=
   abiCtorProjectionMain_correct.1
 
+/-- Executable-source and exported-target correctness from one certificate. -/
+theorem abiCtorProjectionMain_exec_correct (externals : ExternalImpl) :
+    ExecEvaluates externals
+        (sourceCodeState abiCtorProjectionContext {} [] abiCtorProjectionCode)
+        (ReturnedObservation abiCtorProjectionRuntime
+          abiCtorProjectionValue7) ∧
+      ExportTerminatesWith abiCtorProjectionResolvedHosts.env
+        abiCtorProjectionAdaptedModule.wasmModule "main"
+        abiCtorProjectionInitialStore []
+        (RelatedPost #[.tobject]
+          (ReturnedObservation abiCtorProjectionRuntime
+            abiCtorProjectionValue7)) := by
+  apply abiCtorProjectionSupportedExport.execCorrect_of_simulation
+    abiCtorProjectionObservation_related
+  · simpa [abiCtorProjectionSupportedExport, abiCtorProjectionInitialStore] using
+      abiCtorProjectionMain_simulation
+  · simp [abiCtorProjectionSupportedExport]
+
 end FirTalos.Correctness

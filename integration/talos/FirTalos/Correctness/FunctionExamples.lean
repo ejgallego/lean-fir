@@ -368,4 +368,17 @@ theorem abiLiteralMain_source_evaluates :
   (abiLiteralSupportedExport.correct_of_simulation
     abiLiteralObservation_related abiLiteralMain_simulation rfl).1
 
+/-- Executable-source and exported-target correctness from one certificate. -/
+theorem abiLiteralMain_exec_correct (externals : ExternalImpl) :
+    ExecEvaluates externals
+        (sourceCodeState abiLiteralContext {} [] abiLiteralCode)
+        (ReturnedObservation {} (.object (.tagged (UInt64.ofNat 42)))) ∧
+      ExportTerminatesWith abiLiteralResolvedHosts.env
+        abiLiteralAdaptedModule.wasmModule "main"
+        (abiLiteralAdaptedModule.wasmModule.initialStore (α := RuntimeHost)) []
+        (RelatedPost #[.tobject]
+          (ReturnedObservation {} (.object (.tagged (UInt64.ofNat 42))))) :=
+  abiLiteralSupportedExport.execCorrect_of_simulation
+    abiLiteralObservation_related abiLiteralMain_simulation rfl externals
+
 end FirTalos.Correctness
