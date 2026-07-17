@@ -19,6 +19,7 @@ source_artifacts=(
   source-uint32-id
   source-uint64-id
   source-string-input
+  source-nat-list-case
 )
 for source in "${source_artifacts[@]}"; do
   test -s "_build/$source.wasm"
@@ -46,8 +47,30 @@ node --input-type=module -e '
     [process.argv[5], "uint32", ["uint32"], 0xffffffffn],
     [process.argv[6], "uint64", ["uint64"], 0xffffffffffffffffn],
     [process.argv[7], "uint64", ["object"], 0xffffffffffffffffn, "hello α_world_β"],
+    [process.argv[8], "uint64", ["tobject"], 1n, undefined,
+      [0n, 18446744073709551616n, 42n]],
   ];
-  for (const [path, kind, params, expected, initialString] of cases) {
+  function decodeNat(host, value) {
+    if (value.kind === "tagged") return value.payload;
+    assert.equal(value.kind, "heap");
+    const object = host.liveCell(value.location).object;
+    assert.equal(object.kind, "natural");
+    return object.value;
+  }
+  function decodeNatList(host, value) {
+    const result = [];
+    while (value.kind !== "tagged" || value.payload !== 0n) {
+      assert.equal(value.kind, "heap");
+      const object = host.liveCell(value.location).object;
+      assert.equal(object.kind, "ctor");
+      assert.equal(object.tag, 1n);
+      assert.equal(object.objectFields.length, 2);
+      result.push(decodeNat(host, object.objectFields[0]));
+      value = object.objectFields[1];
+    }
+    return result;
+  }
+  for (const [path, kind, params, expected, initialString, initialNatList] of cases) {
     const bytes = fs.readFileSync(path);
     const manifest = JSON.parse(fs.readFileSync(path + ".json", "utf8"));
     assert.ok(WebAssembly.validate(bytes), `${path} failed WebAssembly validation`);
@@ -60,6 +83,10 @@ node --input-type=module -e '
       assert.equal(argument.kind, "heap");
       assert.deepStrictEqual(host.liveCell(argument.location).object,
         { kind: "string", value: initialString });
+    }
+    if (initialNatList !== undefined) {
+      assert.deepStrictEqual(
+        decodeNatList(host, manifestValue(manifest.arguments[0])), initialNatList);
     }
     const args = manifest.params.map((kind, index) =>
       host.encode(kind, manifestValue(manifest.arguments[index])));
@@ -76,7 +103,8 @@ node --input-type=module -e '
   _build/source-uint16-id.wasm \
   _build/source-uint32-id.wasm \
   _build/source-uint64-id.wasm \
-  _build/source-string-input.wasm
+  _build/source-string-input.wasm \
+  _build/source-nat-list-case.wasm
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"

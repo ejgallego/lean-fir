@@ -64,3 +64,7 @@ Compiler-produced source artifacts may also carry an `initialRuntime` manifest
 object. The V8 host reconstructs its FIR heap before turning semantic object
 arguments into opaque `i32` handles; this currently covers a real string input,
 while string identity awaits the W4 ownership-operation gate.
+Structured source invocation also covers `List Nat` constructor graphs. The
+fixture includes a natural beyond the tagged-immediate range, checks the full
+reconstructed list, and executes a compiler-produced constructor case through
+the semantic `getTag` import in V8.

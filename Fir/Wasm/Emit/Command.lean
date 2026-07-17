@@ -15,13 +15,18 @@ syntax "uint32" "(" num ")" : firWasmArg
 syntax "uint64" "(" num ")" : firWasmArg
 syntax "usize" "(" num ")" : firWasmArg
 syntax "string" "(" str ")" : firWasmArg
+syntax "natList" "(" "[" num,* "]" ")" : firWasmArg
 syntax (name := firWasmEmitWith)
   "#fir_wasm_emit " ident " with " "[" firWasmArg,* "]" " to " str : command
 
-private def checkedNat (kind : String) (literal : TSyntax `num) (max : Nat) :
-    CommandElabM Nat := do
+private def naturalLiteral (literal : TSyntax `num) : CommandElabM Nat := do
   let some value := literal.raw.isNatLit? |
     throwErrorAt literal "expected a natural-number literal"
+  return value
+
+private def checkedNat (kind : String) (literal : TSyntax `num) (max : Nat) :
+    CommandElabM Nat := do
+  let value ← naturalLiteral literal
   unless value ≤ max do
     throwErrorAt literal "{kind} argument exceeds {max}"
   return value
@@ -51,6 +56,17 @@ private def elabArgument (runtime : Fir.LeanIR.Impure.RuntimeState) :
         throwErrorAt value "expected a string literal"
       let (runtime, reference) := Fir.LeanIR.Impure.alloc runtime (.string value)
       pure (runtime, .object reference)
+  | `(firWasmArg| natList([$[$values],*])) => do
+      values.foldrM (init := (runtime, .object (.tagged 0)))
+        fun literal (runtime, tail) => do
+          let (runtime, head) := Fir.LeanIR.Impure.literal runtime
+            (.nat (← naturalLiteral literal))
+          match Fir.LeanIR.Impure.allocCtor runtime {
+              name := ``List.cons, cidx := 1, size := 2, «usize» := 0, ssize := 0 }
+              #[head, tail] with
+          | .ok result => pure result
+          | .error fault =>
+              throwErrorAt literal "failed to allocate Nat list argument: {repr fault}"
   | stx => throwErrorAt stx "unsupported Wasm semantic argument"
 
 private def writeArtifact (stx entry output : Syntax)

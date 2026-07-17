@@ -97,6 +97,7 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 | 2026-07-17 | A0 parameterized source emission | W4 and integration owners | landed | Source capture/lowering now produces a reusable module artifact before a checked semantic invocation is attached. `#fir_wasm_emit` accepts range-checked integer and tagged argument syntax; the compiler-produced `idUSize : USize → USize` fixture carries its `usize` schema and argument through the manifest and returns `42` in V8. No shared ABI or supported-fragment contract changed. |
 | 2026-07-17 | A0 scalar source arguments | W4 and integration owners | ready | Compiler-produced identity declarations for `UInt8`, `UInt16`, `UInt32`, and `UInt64` now execute at maximum-width inputs in V8. Arguments come from the checked manifest, and target `i32` results are normalized to their declared unsigned source widths. No shared contract changed. |
 | 2026-07-17 | A0 heap-backed source arguments | W4 and integration owners | ready | Source manifests can now carry a checked `initialRuntime` heap, and `#fir_wasm_emit` accepts string literals by allocating them in that runtime. V8 reconstructs the heap and passes an opaque handle to a compiler-produced `String → UInt64` fixture. The full `idString : String → String` capture is intentionally deferred: Lean 4.32 emits `inc[ref] value; return value`, and ownership operations remain in the W4-owned supported-fragment lane. No shared contract changed. |
+| 2026-07-17 | A0 structured source arguments | W4 and integration owners | ready | `#fir_wasm_emit` now accepts `natList([...])` and builds the corresponding FIR constructor graph, including heap naturals beyond the tagged-immediate range. A compiler-produced `List Nat → UInt64` fixture executes `cases` through the imported `getTag` host operation in V8 and distinguishes the nonempty constructor. The test reconstructs and checks the entire input list before invocation. No shared contract changed. |
 
 No shared semantic contract was changed by these A0 slices. Once W4 repairs
 and proves the natural-literal invariant, A0 should replace the rejection
@@ -106,8 +107,8 @@ unsigned integer and `USize` parameter kinds with explicit ABI schemas. Its
 initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
 vocabulary as the W3 observation oracle. Its next heap-returning source slice
 depends on W4 admitting and proving the compiler-produced ownership operation;
-independent A0 work can next exercise structured constructor arguments or
-package source invocation as a corpus-driven command.
+independent A0 work can next package source invocation as a corpus-driven
+command instead of adding one command-syntax form per validation datum.
 
 ## Architecture decisions
 
