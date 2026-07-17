@@ -84,6 +84,27 @@ def differentialCorpus : List Fir.LeanIR.ImpureProgram := [
 #guard relatedReturn? (runDifferential abiSharedResetProgram `main #[])
   (.object (.tagged 81))
 
+#guard supportedProgram externalProgram
+
+def relatedExternalState? (result : DifferentialResult) : Bool :=
+  match result with
+  | .related source (.returned target runtime) =>
+      source.outcome == .returned (.scalar (.uint64 90)) &&
+        target == .scalar (.uint64 90) &&
+        source.world == 1 && runtime.world == 1 &&
+        source.trace.size == 1 && source.trace == runtime.trace &&
+        source.trace[0]?.any fun event =>
+          event.name == `external &&
+            event.args == #[.scalar (.uint64 90)] &&
+            event.result == .scalar (.uint64 90)
+  | _ => false
+
+#guard relatedExternalState?
+  (runDifferential externalProgram `main #[] (externals := echoExternal))
+
+#guard relatedSourceFault? (runDifferential externalProgram `main #[])
+  (.externalFailure `external "no external implementation installed")
+
 def abiStringProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] objType (.code <|
       .let (letDecl x objType (.lit (.str "reachable"))) (.return x))] }

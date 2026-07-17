@@ -14,9 +14,10 @@ through the W3 FIR/Talos differential oracle and writes its comparable observati
 the artifacts. The Node runner compares V8 directly with those live W3 results; no expected
 semantic observations are frozen in the emitter.
 
-World and trace observations remain empty in this corpus because the current
-`lowerSupported` contract deliberately excludes external declarations. Add an
-effect-producing fixture only after that supported-domain change lands through W4.
+World and trace observations remain empty in this artifact corpus. The W5
+semantic Talos backend now accepts external declarations and tests their
+world/trace behavior, but this independent emitter/Node lane has not yet added
+an effect-producing artifact fixture and host manifest entry.
 Compiler-produced source fixtures also cover heap-backed string and `List Nat`
 arguments through the explicit initial-runtime manifest. The semantic host is
 shared with the repository's native↔V8 validation adapter.

@@ -168,6 +168,15 @@ structure PhysicalSignature where
   results : Array ValueType
   deriving Inhabited, BEq
 
+/-- The source-level types carried by an external declaration.  Keeping this
+metadata at the symbolic boundary lets the semantic host reconstruct exactly
+the `ExternalRequest` seen by the LCNF interpreter, rather than guessing from
+the coarser physical Wasm lanes. -/
+structure ExternalTypes where
+  params : Array Expr
+  result : Expr
+  deriving Inhabited, BEq
+
 def Signature.physical (signature : Signature) : PhysicalSignature :=
   { params := signature.params.map AbiKind.valueType
     results := signature.results.map AbiKind.valueType }
@@ -276,6 +285,7 @@ structure Import where
   moduleName : String
   itemName : String
   signature : Signature
+  externalTypes? : Option ExternalTypes := none
   deriving Inhabited, BEq
 
 def Import.operation? (import_ : Import) : Option RuntimeOp :=
@@ -295,16 +305,23 @@ def runtimeImport (index : Nat) (operation : RuntimeOp) : Import :=
     itemName := s!"{operation.stem}_{index}"
     signature := operation.signature }
 
-def externalImport (decl : LCNF.Decl .impure) : Except AbiError Import := do
-  let params ← decl.params.foldlM (init := #[]) fun params param => do
-    match ← abiKind? param.type with
+def ExternalTypes.signature (types : ExternalTypes) : Except AbiError Signature := do
+  let params ← types.params.foldlM (init := #[]) fun params type => do
+    match ← abiKind? type with
     | some kind => return params.push kind
     | none => return params
-  let results ← resultKinds decl.type
+  return { params, results := ← resultKinds types.result }
+
+def externalImport (decl : LCNF.Decl .impure) : Except AbiError Import := do
+  let externalTypes : ExternalTypes := {
+    params := decl.params.map (·.type)
+    result := decl.type }
+  let signature ← externalTypes.signature
   return {
     key := .external decl.name
     moduleName := "lean.extern"
     itemName := decl.name.toString
-    signature := { params, results } }
+    signature
+    externalTypes? := some externalTypes }
 
 end Fir.Wasm

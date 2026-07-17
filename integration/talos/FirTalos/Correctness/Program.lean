@@ -160,6 +160,46 @@ theorem CodeEvaluates.execEvaluates
         .step (by simpa [sourceCodeState] using sourceStep externals) steps,
         done⟩
 
+private theorem execSteps_compose
+    {externals : ExternalImpl} {prefixCount suffixCount : Nat}
+    {first middle last : MachineState}
+    (firstSteps : ExecSteps externals prefixCount first middle)
+    (lastSteps : ExecSteps externals suffixCount middle last) :
+    ∃ count, ExecSteps externals count first last := by
+  induction firstSteps with
+  | refl => exact ⟨suffixCount, lastSteps⟩
+  | step head _ ih =>
+      obtain ⟨count, steps⟩ := ih lastSteps
+      exact ⟨count + 1, .step head steps⟩
+
+/-- An exact external-let prefix followed by a call-free `CodeEvaluates`
+continuation yields a real executable source run under the same installed
+external implementation. -/
+theorem SourceExternalLetResult.thenCodeEvaluates
+    {context : Fir.Wasm.Context} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceValue resultValue : Value}
+    (sourceStep : SourceExternalLetResult context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) continuation resultRuntime
+      resultValue) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+      (ReturnedObservation resultRuntime resultValue) := by
+  have externalSteps :
+      ExecSteps externals 3
+        (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+        (sourceCodeState context nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation) := by
+    unfold SourceExternalLetResult at sourceStep
+    simpa [sourceCodeState] using sourceStep
+  rcases continued.execEvaluates externals with
+    ⟨suffixCount, final, suffix, done⟩
+  obtain ⟨count, steps⟩ := execSteps_compose externalSteps suffix
+  exact ⟨count, final, steps, done⟩
+
 /--
 The case-specific W4 boundary. It records the source-selected branch and a
 transformer that installs any proof of that branch beneath the generated case
@@ -396,5 +436,46 @@ theorem SupportedExport.execCorrect_of_simulation
   obtain ⟨source, targetCorrect⟩ :=
     spec.correct_of_simulation related simulation canonicalLocals
   exact ⟨source.execEvaluates externals, targetCorrect⟩
+
+/-- Whole-export W5.6 theorem for one checked external-call prefix followed by
+the existing call-free program fragment.  The same implementation is read
+from the initial `RuntimeHost` by both the source execution and the semantic
+target host. -/
+theorem SupportedExport.execCorrect_of_externalLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts} {exportName : String}
+    (spec : SupportedExport program context (.let decl continuation)
+      sourceModule sourceFunction target hosts exportName)
+    {initialRuntime nextRuntime resultRuntime : RuntimeState}
+    {initial : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {sourceValue resultValue : Value} {resultKind : AbiKind}
+    (related :
+      compareObservations (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime) =
+        .related (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime))
+    (sourceStep : SourceExternalLetResult context initial.host.externals
+      initialRuntime [] decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind [] decl.fvarId sourceValue) continuation resultRuntime resultValue)
+    (correct :
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+        initialRuntime [] (.let decl continuation) spec.targetFunction.body
+        initial targetLocals []
+        (ReturnPost resultRuntime resultValue resultKind []))
+    (canonicalLocals : targetLocals = spec.targetFunction.toLocals []) :
+    ExecEvaluates initial.host.externals
+        (sourceCodeState context initialRuntime [] (.let decl continuation))
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ExportTerminatesWith hosts.env target.wasmModule exportName initial []
+        (RelatedPost #[resultKind]
+          (ReturnedObservation resultRuntime resultValue)) := by
+  constructor
+  · exact sourceStep.thenCodeEvaluates continued
+  · apply spec.terminatesWithRelated_of_return related
+    simpa [canonicalLocals] using correct
 
 end FirTalos.Correctness

@@ -186,8 +186,8 @@ private def resolverErrorMessage : ResolverError → String
   | .malformedRuntimeImport index => s!"malformed runtime import at index {index}"
   | .unsupportedRuntimeImport index operation =>
       s!"unsupported runtime import at index {index}: {operation.stem}"
-  | .externalImport index declaration =>
-      s!"unsupported external import at index {index}: {declaration}"
+  | .malformedExternalImport index declaration =>
+      s!"malformed external import at index {index}: {declaration}"
 
 def observeTarget (results : Array AbiKind) :
     Wasm.Result RuntimeHost → TargetObservation
@@ -257,8 +257,9 @@ Run final impure LCNF and its generated Talos module from the same entry and
 semantic arguments, then compare outcome, world, trace, and reachable heap.
 -/
 def runDifferential (program : Fir.LeanIR.ImpureProgram) (entry : Lean.Name)
-    (args : Array Value) : DifferentialResult :=
-  match Fir.LeanIR.Impure.runProgram sourceFuel rejectExternals program entry args with
+    (args : Array Value) (externals : ExternalImpl := rejectExternals) :
+    DifferentialResult :=
+  match Fir.LeanIR.Impure.runProgram sourceFuel externals program entry args with
   | .outOfFuel _ => .sourceOutOfFuel
   | .done sourceObservation =>
       if args.any requiresInitialHeap then
@@ -295,7 +296,8 @@ def runDifferential (program : Fir.LeanIR.ImpureProgram) (entry : Lean.Name)
                                   s!"{repr failure}"
                             | .ok (handles, physicalArgs) =>
                                 let initial := adapted.wasmModule.initialStore (α := RuntimeHost)
-                                let initial := { initial with host := { handles } }
+                                let initial := {
+                                  initial with host := { handles, externals } }
                                 let targetResult := Wasm.run targetFuel adapted.wasmModule
                                   (sourceModule.imports.size + functionIndex) initial
                                   physicalArgs.reverse hosts.env

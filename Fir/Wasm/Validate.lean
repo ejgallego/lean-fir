@@ -20,6 +20,7 @@ inductive SymbolicError where
   | runtimeOperationOrder
   | invalidRuntimeOperation (index : Nat)
   | invalidRuntimeImport (index : Nat)
+  | invalidExternalImport (index : Nat)
   | nonExternalImport (index : Nat)
   | unsupportedClosure (index : Nat)
   | duplicateExport (name : Name)
@@ -81,8 +82,16 @@ def validateImportPrefix : List Import → List Import → Nat → Except Symbol
       let rec go : List Import → Nat → Except SymbolicError Unit
         | [], _ => pure ()
         | import_ :: rest, index => do
-            unless import_.key matches .external _ do
-              throw (.nonExternalImport index)
+            match import_.key with
+            | .runtime _ => throw (.nonExternalImport index)
+            | .external _ =>
+                let some types := import_.externalTypes? |
+                  throw (.invalidExternalImport index)
+                match types.signature with
+                | .error _ => throw (.invalidExternalImport index)
+                | .ok signature =>
+                    unless signature == import_.signature do
+                      throw (.invalidExternalImport index)
             go rest (index + 1)
       go actual index
   | _ :: _, [], index => throw (.invalidRuntimeImport index)

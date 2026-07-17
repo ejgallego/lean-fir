@@ -596,6 +596,28 @@ Differential regressions cover both the unique in-place path and the shared
 fallback-allocation path, including header replacement. No semantic mismatch
 or new bug card was found.
 
+W5.6 is complete. Symbolic external imports retain their original Lean
+parameter and result types alongside the semantic ABI, and validation rejects
+missing or inconsistent metadata. The Talos resolver now installs a
+first-class external host operation instead of rejecting the import. Each run
+selects an `ExternalImpl` in `RuntimeHost`; successful calls decode arguments,
+reuse the source interpreter's `resumeExternal` transition, encode the result,
+and therefore preserve the exact heap, next-location, world, and trace policy.
+External failures remain structured FIR source faults.
+
+The supported gate admits only exact calls to declared externals with
+compatible non-void argument and singleton result kinds; internal direct calls
+remain reserved for the closure/dispatch slice. The proof boundary includes
+an exact host-step equation, a generated-stack call rule, a complete
+argument-load/call/local-bind composition rule, the source interpreter's
+three-step external-let judgment, and `ExternalLetStepSimulates`. Differential
+`codeWP_externalLet` composes that step with an arbitrary proved continuation,
+and `SupportedExport.execCorrect_of_externalLet` lifts one checked external
+prefix plus the existing call-free fragment to executable source and fuel-free
+target correctness. Regressions cover both a successful echo call—including
+world and trace—and the reject-by-default fault path. No semantic mismatch or
+new bug card was found.
+
 ### A0: emit the first host-backed Wasm artifact
 
 A0 is an independently assignable artifact lane. It can run in parallel with

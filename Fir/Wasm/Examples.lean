@@ -138,7 +138,10 @@ def externalModule? : Option Module :=
 
 #guard externalModule?.any fun module =>
   module.functions.size == 1 &&
-  module.imports.any (·.declaration? == some `external)
+  module.imports.any fun import_ =>
+    import_.declaration? == some `external &&
+      import_.externalTypes?.any fun types =>
+        types.params == #[u64Type] && types.result == u64Type
 
 def scalarIdProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `scalarId #[param x u64Type] u64Type (.code (.return x))] }
@@ -397,7 +400,7 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram deletedProgram
 #guard supportedProgram abiResetReuseProgram
 #guard supportedProgram abiSharedResetProgram
-#guard !supportedProgram externalProgram
+#guard supportedProgram externalProgram
 
 #guard match lowerSupported abiCaseProgram with
   | .ok _ => true
@@ -580,6 +583,13 @@ def ctorProjectionModule? : Option Module :=
 #guard externalModule?.any fun module =>
   match validateModule { module with imports := module.imports ++ module.imports } with
   | .error .duplicateImportKey => true
+  | _ => false
+
+#guard externalModule?.any fun module =>
+  let imports := module.imports.map fun import_ =>
+    { import_ with externalTypes? := none }
+  match validateModule { module with imports } with
+  | .error (.invalidExternalImport 0) => true
   | _ => false
 
 #guard literalModule?.any fun module =>

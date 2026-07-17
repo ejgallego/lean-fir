@@ -109,9 +109,12 @@ certificate derives the local `CodeWP`, a successful source evaluation, and a
 real FIR `ExecEvaluates` run; `SupportedExport.execCorrect_of_simulation`
 combines that run with fuel-free correctness of the generated named export.
 All four fixtures use this API without fixture-specific `CodeWP` recursion.
-W5 begins with scalar and `usize` projections, followed by the mutation,
-ownership, external-call, initialization, closure, and recursion slices listed
-in the plan.
+W5.1–W5.6 now cover scalar/`usize` projections, boxing and sharing, mutation,
+ownership, reset/reuse, and semantic external calls. External imports retain
+their source types, execute through the same response-resumption policy as the
+LCNF interpreter, and have differential coverage for successful world/trace
+updates and structured rejection. Initialization/global caching and then
+closures/indirect dispatch/recursion are the remaining W5 slices.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

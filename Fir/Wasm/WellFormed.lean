@@ -8,8 +8,9 @@ open Lean.Compiler
 /--
 The proof-oriented backend fragment: literals, erased values, constructors,
 object/usize/integer-scalar projections, boxing, object mutation, constructor
-cases, ownership operations, returns, and unreachable code. Calls, joins,
-reuse, initializers-as-effects, and externals are deliberate later gates.
+cases, ownership operations, reset/reuse, exact external calls, returns, and
+unreachable code. Internal calls, joins, initializers-as-effects, closures, and
+recursion remain deliberate later gates.
 -/
 def supportedLetValue : LCNF.LetValue .impure → Bool
   | .lit _ | .erased | .ctor _ _ | .oproj _ _ => true
@@ -52,7 +53,22 @@ def supportedArgKind? (locals : LocalKinds) : LCNF.Arg .impure → Option AbiKin
   | .fvar fvarId => findLocalKind? locals fvarId
   | .type _ h => nomatch h
 
-def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
+def supportedExternalCall (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (declared : AbiKind) (name : Name)
+    (args : Array (LCNF.Arg .impure)) : Bool :=
+  match program.findDecl? name with
+  | none => false
+  | some target =>
+      match target.value, abiValueKind? target.type,
+          target.params.mapM (fun param => abiValueKind? param.type),
+          args.mapM (supportedArgKind? locals) with
+      | .extern _, some result, some paramKinds, some argKinds =>
+          declared == result && argKinds.size == paramKinds.size &&
+            (argKinds.zip paramKinds).all fun pair => pair.fst.refines pair.snd
+      | _, _, _, _ => false
+
+def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
     Option AbiKind := do
   let declared ← abiValueKind? decl.type
   match decl.value with
@@ -119,6 +135,11 @@ def supportedLetDeclKind? (locals : LocalKinds) (decl : LCNF.LetDecl .impure) :
         some declared
       else
         none
+  | .fap name args =>
+      if supportedExternalCall program locals declared name args then
+        some declared
+      else
+        none
   | value => if supportedLetValue value then some declared else none
 
 def resultKindRefines (actual expected : Option AbiKind) : Bool :=
@@ -129,11 +150,13 @@ def resultKindRefines (actual expected : Option AbiKind) : Bool :=
 
 mutual
 
-partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind) :
+partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (expectedResult : Option AbiKind) :
     LCNF.Code .impure → Bool
   | .let decl continuation =>
-      match supportedLetDeclKind? locals decl with
-      | some kind => supportedCode (insertLocal locals decl.fvarId kind) expectedResult continuation
+      match supportedLetDeclKind? program locals decl with
+      | some kind => supportedCode program (insertLocal locals decl.fvarId kind)
+          expectedResult continuation
       | none => false
   | .fun _ _ h => nomatch h
   | .cases cases =>
@@ -142,7 +165,7 @@ partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind
         (findLocalKind? locals cases.discr).any AbiKind.isObjectLike
       resultKnown && discrSupported &&
         resultKindRefines (abiValueKind? cases.resultType) expectedResult &&
-        cases.alts.all (supportedAlt locals expectedResult)
+        cases.alts.all (supportedAlt program locals expectedResult)
   | .return fvarId =>
       match findLocalKind? locals fvarId, expectedResult with
       | some actual, some expected => actual.refines expected
@@ -152,56 +175,62 @@ partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind
   | .oset objectId _ arg continuation =>
       match findLocalKind? locals objectId, supportedArgKind? locals arg with
       | some .object, some fieldKind =>
-          fieldKind.isObjectField && supportedCode locals expectedResult continuation
+          fieldKind.isObjectField &&
+            supportedCode program locals expectedResult continuation
       | _, _ => false
   | .uset objectId _ fieldId continuation =>
       findLocalKind? locals objectId == some .object &&
         findLocalKind? locals fieldId == some .usize &&
-        supportedCode locals expectedResult continuation
+        supportedCode program locals expectedResult continuation
   | .sset objectId _ _ fieldId type continuation =>
       match findLocalKind? locals objectId, findLocalKind? locals fieldId,
           abiValueKind? type with
       | some .object, some fieldKind, some annotationKind =>
           fieldKind == annotationKind && supportedScalarProjectionKind fieldKind &&
-            supportedCode locals expectedResult continuation
+            supportedCode program locals expectedResult continuation
       | _, _, _ => false
   | .setTag objectId _ continuation =>
       findLocalKind? locals objectId == some .object &&
-        supportedCode locals expectedResult continuation
+        supportedCode program locals expectedResult continuation
   | .inc objectId _ _ persistent continuation =>
       if persistent then
-        supportedCode locals expectedResult continuation
+        supportedCode program locals expectedResult continuation
       else
         (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
-          supportedCode locals expectedResult continuation
+          supportedCode program locals expectedResult continuation
   | .dec objectId _ _ persistent _ continuation =>
       if persistent then
-        supportedCode locals expectedResult continuation
+        supportedCode program locals expectedResult continuation
       else
         (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
-          supportedCode locals expectedResult continuation
+          supportedCode program locals expectedResult continuation
   | .del objectId continuation =>
       findLocalKind? locals objectId == some .object &&
-        supportedCode locals expectedResult continuation
+        supportedCode program locals expectedResult continuation
   | .jp .. | .jmp .. => false
 
-partial def supportedAlt (locals : LocalKinds) (expectedResult : Option AbiKind) :
+partial def supportedAlt (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (expectedResult : Option AbiKind) :
     LCNF.Alt .impure → Bool
   | .ctorAlt info code =>
-      constructorTagFitsI32 info && supportedCode locals expectedResult code
-  | .default code => supportedCode locals expectedResult code
+      constructorTagFitsI32 info &&
+        supportedCode program locals expectedResult code
+  | .default code => supportedCode program locals expectedResult code
   | .alt _ _ _ h => nomatch h
 
 end
 
-def supportedDecl (decl : LCNF.Decl .impure) : Bool :=
+def supportedDecl (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) : Bool :=
   !decl.recursive && abiTypeKnown decl.type &&
     match addSupportedParams? [] decl.params, decl.value with
-    | some locals, .code code => supportedCode locals (abiValueKind? decl.type) code
+    | some _, .extern _ => true
+    | some locals, .code code =>
+        supportedCode program locals (abiValueKind? decl.type) code
     | _, _ => false
 
 def supportedProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=
-  program.decls.all supportedDecl
+  program.decls.all (supportedDecl program)
 
 /-- Proposition used as the domain of the initial lowering theorem. -/
 def WasmSupported (program : Fir.LeanIR.ImpureProgram) : Prop :=
@@ -213,17 +242,20 @@ inductive ValidationError where
   | unsupportedCode (name : Name)
   deriving Inhabited, BEq, Repr
 
-def validateSupportedDecl (decl : LCNF.Decl .impure) : Except ValidationError Unit := do
+def validateSupportedDecl (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) : Except ValidationError Unit := do
   if decl.recursive then
     throw (.recursiveDeclaration decl.name)
   match decl.value with
-  | .extern _ => throw (.externalDeclaration decl.name)
+  | .extern _ =>
+      unless supportedDecl program decl do
+        throw (.externalDeclaration decl.name)
   | .code _ =>
-      unless supportedDecl decl do
+      unless supportedDecl program decl do
         throw (.unsupportedCode decl.name)
 
 def validateSupported (program : Fir.LeanIR.ImpureProgram) : Except ValidationError Unit :=
-  program.decls.forM validateSupportedDecl
+  program.decls.forM (validateSupportedDecl program)
 
 inductive SupportedLoweringError where
   | validation (error : ValidationError)

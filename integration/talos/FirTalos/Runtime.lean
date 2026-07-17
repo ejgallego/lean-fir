@@ -1,11 +1,20 @@
 import FirTalos.Adapter
 import FirTalos.Codec
+import Fir.LeanIR.Interpreter
 import Interpreter.Wasm.Host
 
 namespace FirTalos
 
 open Fir.Wasm
 open Fir.LeanIR.Impure
+
+/-- Source-level identity and ABI metadata for one imported Lean declaration. -/
+structure ExternalOperation where
+  name : Lean.Name
+  paramTypes : Array Lean.Expr
+  resultType : Lean.Expr
+  signature : Signature
+  deriving Inhabited, BEq
 
 /-- The deliberately small semantic-runtime fragment enabled by W2. -/
 inductive HostOperation where
@@ -30,32 +39,35 @@ inductive HostOperation where
   | dec (amount : Nat) (check : Bool) (objectFields? : Option Nat)
   | delete
   | getTag
+  | external (operation : ExternalOperation)
   deriving Inhabited, BEq
 
-def HostOperation.runtimeOp : HostOperation → RuntimeOp
-  | .naturalLiteral value result => .literal (.nat value) result
-  | .stringLiteral value result => .literal (.str value) result
-  | .allocCtor info fields result => .allocCtor info fields result
-  | .objectProj index result => .objectProj index result
-  | .usizeProj index => .usizeProj index
-  | .scalarProj width offset result => .scalarProj width offset result
-  | .box scalar result => .box scalar result
-  | .unbox scalar => .unbox scalar
-  | .isShared => .isShared
-  | .reset objectFields => .reset objectFields
+def HostOperation.runtimeOp : HostOperation → Option RuntimeOp
+  | .naturalLiteral value result => some (.literal (.nat value) result)
+  | .stringLiteral value result => some (.literal (.str value) result)
+  | .allocCtor info fields result => some (.allocCtor info fields result)
+  | .objectProj index result => some (.objectProj index result)
+  | .usizeProj index => some (.usizeProj index)
+  | .scalarProj width offset result => some (.scalarProj width offset result)
+  | .box scalar result => some (.box scalar result)
+  | .unbox scalar => some (.unbox scalar)
+  | .isShared => some .isShared
+  | .reset objectFields => some (.reset objectFields)
   | .reuse info updateHeader fields result =>
-      .reuse info updateHeader fields result
-  | .objectSet index field => .objectSet index field
-  | .usizeSet index => .usizeSet index
-  | .scalarSet width offset field => .scalarSet width offset field
-  | .setTag tag => .setTag tag
-  | .inc amount check => .inc amount check
-  | .dec amount check objectFields? => .dec amount check objectFields?
-  | .delete => .delete
-  | .getTag => .getTag
+      some (.reuse info updateHeader fields result)
+  | .objectSet index field => some (.objectSet index field)
+  | .usizeSet index => some (.usizeSet index)
+  | .scalarSet width offset field => some (.scalarSet width offset field)
+  | .setTag tag => some (.setTag tag)
+  | .inc amount check => some (.inc amount check)
+  | .dec amount check objectFields? => some (.dec amount check objectFields?)
+  | .delete => some .delete
+  | .getTag => some .getTag
+  | .external _ => none
 
-def HostOperation.signature (operation : HostOperation) : Signature :=
-  operation.runtimeOp.signature
+def HostOperation.signature : HostOperation → Signature
+  | .external operation => operation.signature
+  | operation => operation.runtimeOp.getD .getTag |>.signature
 
 def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .literal (.nat value) result => some (.naturalLiteral value result)
@@ -95,6 +107,23 @@ def structuredTrapMessage : StructuredTrap → String
   | .source fault => s!"FIR source fault: {repr fault}"
   | .target failure => s!"FIR target failure: {repr failure}"
 
+def ExternalOperation.request (operation : ExternalOperation)
+    (args : Array Value) : ExternalRequest := {
+  name := operation.name
+  paramTypes := operation.paramTypes
+  resultType := operation.resultType
+  args }
+
+/-- Apply a successful foreign response exactly as `resumeExternal` does on
+the source interpreter side. -/
+def applyExternalResponse (request : ExternalRequest) (runtime : RuntimeState)
+    (response : ExternalResponse) : RuntimeState :=
+  let waiting : MachineState := {
+    program := { decls := #[] }
+    control := .yielded .erased
+    runtime }
+  (resumeExternal request waiting response).runtime
+
 private def clearTrapState (store : Wasm.Store RuntimeHost) : Wasm.Store RuntimeHost :=
   { store with host := { store.host with fault? := none, targetFailure? := none } }
 
@@ -109,7 +138,8 @@ private def targetTrap (store : Wasm.Store RuntimeHost) (failure : TargetFailure
   .Trap store (structuredTrapMessage (.target failure))
 
 private def evaluate (operation : HostOperation) (runtime : RuntimeState)
-    (args : Array Value) : Except StructuredTrap (RuntimeState × Array Value) :=
+    (externals : ExternalImpl) (args : Array Value) :
+    Except StructuredTrap (RuntimeState × Array Value) :=
   match operation with
   | .naturalLiteral value _ =>
       let (runtime, value) := literal runtime (.nat value)
@@ -236,6 +266,16 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
           | .ok tag => .ok (runtime, #[.scalar (.uint32 (UInt32.ofNat tag))])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
+  | .external operation =>
+      let request := operation.request args
+      match externals.call request runtime with
+      | .error fault => .error (.source fault)
+      | .ok response =>
+          let runtime := applyExternalResponse request runtime response
+          match operation.signature.results.size with
+          | 0 => .ok (runtime, #[])
+          | 1 => .ok (runtime, #[response.value])
+          | count => .error (.target (.arityMismatch 1 count))
 
 /-- The semantic host step, factored independently from Talos's `HostFn` record. -/
 def hostStep (operation : HostOperation) (initial : Wasm.Store RuntimeHost)
@@ -244,7 +284,7 @@ def hostStep (operation : HostOperation) (initial : Wasm.Store RuntimeHost)
   match decodeArgs initial.host.handles operation.signature.params physicalArgs with
   | .error failure => targetTrap initial failure
   | .ok args =>
-      match evaluate operation initial.host.runtime args with
+      match evaluate operation initial.host.runtime initial.host.externals args with
       | .error (.source fault) => sourceTrap initial fault
       | .error (.target failure) => targetTrap initial failure
       | .ok (runtime, results) =>
@@ -253,6 +293,32 @@ def hostStep (operation : HostOperation) (initial : Wasm.Store RuntimeHost)
           | .error failure => targetTrap evaluated failure
           | .ok (handles, results) =>
               .Return results { evaluated with host := { evaluated.host with handles } }
+
+theorem hostStep_external_singleton_of_decode_call_encode
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (semanticArgs : Array Value) (response : ExternalResponse)
+    {after : HandleTable} {physicalResult : Wasm.Value}
+    (resultSignature : operation.signature.results = #[resultKind])
+    (decoded :
+      decodeArgs initial.host.handles operation.signature.params physicalArgs =
+        .ok semanticArgs)
+    (called : initial.host.externals.call (operation.request semanticArgs)
+      initial.host.runtime = .ok response)
+    (encoded : encodeValue initial.host.handles resultKind response.value =
+      .ok (after, physicalResult)) :
+    hostStep (.external operation) initial physicalArgs =
+      .Return [physicalResult] {
+        initial with host := {
+          initial.host with
+          runtime := applyExternalResponse (operation.request semanticArgs)
+            initial.host.runtime response
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    resultSignature, decoded, called,
+    encodeResults_singleton_of_encodeValue encoded]
 
 theorem hostStep_naturalLiteral_of_encode
     (initial : Wasm.Store RuntimeHost) (value : Nat) {after : HandleTable}
@@ -647,7 +713,7 @@ inductive ResolverError where
   | invalidModule (error : SymbolicError)
   | malformedRuntimeImport (index : Nat)
   | unsupportedRuntimeImport (index : Nat) (operation : RuntimeOp)
-  | externalImport (index : Nat) (declaration : Lean.Name)
+  | malformedExternalImport (index : Nat) (declaration : Lean.Name)
   deriving Inhabited, BEq
 
 structure ResolvedHosts where
@@ -671,7 +737,14 @@ private def resolveImports (index : Nat) :
             let some operation := HostOperation.ofRuntime? operation |
               throw (.unsupportedRuntimeImport index operation)
             pure operation
-        | .external declaration => throw (.externalImport index declaration)
+        | .external declaration =>
+            let some types := sourceImport.externalTypes? |
+              throw (.malformedExternalImport index declaration)
+            pure (.external {
+              name := declaration
+              paramTypes := types.params
+              resultType := types.result
+              signature := sourceImport.signature })
       return operation :: (← resolveImports (index + 1) imports)
 
 /-- Resolve every FIR import exactly once, preserving declaration order. -/

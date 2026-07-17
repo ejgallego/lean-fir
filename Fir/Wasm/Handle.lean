@@ -76,9 +76,13 @@ structure HandleTable where
 structure RuntimeHost where
   runtime : RuntimeState := {}
   handles : HandleTable := {}
+  /-- Foreign-call behavior installed for this execution.  It is configuration
+  rather than observable FIR state; observations continue to compare the
+  `runtime` field, including world and trace. -/
+  externals : ExternalImpl := rejectExternals
   fault? : Option RuntimeFault := none
   targetFailure? : Option TargetFailure := none
-  deriving Inhabited, BEq
+  deriving Inhabited
 
 /-- Recover the structured cause behind the latest host trap, independently of its message. -/
 def RuntimeHost.trap? (host : RuntimeHost) : Option StructuredTrap :=

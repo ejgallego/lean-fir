@@ -94,6 +94,64 @@ theorem wp_effect_localGets
   · exact step
   · exact continued
 
+/-- Complete generated external-call `let`: load the ABI arguments, execute
+the semantic external host, bind its singleton result, and resume with the
+original operand tail. -/
+theorem wp_external_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat}
+    {imp : Wasm.ImportDecl} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals updated : Wasm.Locals} {resultIndex : Nat}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    (operation : ExternalOperation) (resultKind : Fir.Wasm.AbiKind)
+    (semanticArgs : Array Fir.LeanIR.Impure.Value)
+    (response : Fir.LeanIR.Impure.ExternalResponse)
+    (after : Fir.Wasm.HandleTable) (physicalResult : Wasm.Value)
+    (tail : List Wasm.Value)
+    (hGets : List.Forall₂ (fun index value => locals.get index = some value)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.external operation)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (resultSignature : operation.signature.results = #[resultKind])
+    (decoded : decodeArgs initial.host.handles operation.signature.params
+      physicalArgs = .ok semanticArgs)
+    (called : initial.host.externals.call (operation.request semanticArgs)
+      initial.host.runtime = .ok response)
+    (encoded : encodeValue initial.host.handles resultKind response.value =
+      .ok (after, physicalResult))
+    (hSet : locals.set? resultIndex physicalResult = some updated)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := applyExternalResponse (operation.request semanticArgs)
+              initial.host.runtime response
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_external_call operation resultKind physicalArgs semanticArgs response
+    after physicalResult tail hImp hSat hi hContract hParams hResults
+  · rfl
+  · exact resultSignature
+  · exact decoded
+  · exact called
+  · exact encoded
+  · apply wp_localSet_of_set hSet
+    exact continued
+
 /--
 Complete generated constructor `let` sequence: load every field local, call
 the semantic constructor host with the reversed physical stack prefix, and

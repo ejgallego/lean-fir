@@ -176,7 +176,7 @@ def RuntimeFixture.importsResolveExactly (fixture : RuntimeFixture) : Bool :=
     fixture.target.imports.length == fixture.hosts.env.funcs.length &&
     fixture.hosts.env.funcs.length == fixture.hosts.spec.contracts.length &&
     (fixture.source.imports.toList.zip fixture.hosts.operations).all fun pair =>
-      pair.fst.key == .runtime pair.snd.runtimeOp &&
+      pair.snd.runtimeOp == pair.fst.operation? &&
         pair.fst.signature == pair.snd.signature &&
         (hostFn pair.snd).params == pair.fst.signature.params.toList.map abiKind &&
         (hostFn pair.snd).results == pair.fst.signature.results.toList.map abiKind
@@ -207,7 +207,13 @@ def fixtureRunsAs? (program : Fir.LeanIR.ImpureProgram) (kind : AbiKind)
 
 #guard Fir.Wasm.externalModule?.any fun source =>
   match resolveHosts source with
-  | .error (.externalImport 0 `external) => true
+  | .ok hosts =>
+      hosts.operations.length == 1 &&
+        match hosts.operations[0]? with
+        | some (HostOperation.external operation) =>
+            operation.name == `external &&
+              operation.signature == source.imports[0]!.signature
+        | _ => false
   | _ => false
 
 end FirTalos

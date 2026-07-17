@@ -1423,4 +1423,51 @@ theorem wp_isShared_call
       decoded evaluated
   · simpa [hResults] using continued
 
+/-- Generated-stack rule for a successful singleton-result external call.
+Unlike runtime primitives, the exact host step is driven by the
+`ExternalImpl` installed in the initial `RuntimeHost`; the resulting runtime
+therefore carries the same heap, world, and trace transition as the source
+interpreter. -/
+theorem wp_external_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (semanticArgs : Array Value)
+    (response : ExternalResponse) (after : HandleTable)
+    (physicalResult : Wasm.Value) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.external operation)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (resultSignature : operation.signature.results = #[resultKind])
+    (decoded : decodeArgs initial.host.handles operation.signature.params
+      physicalArgs = .ok semanticArgs)
+    (called : initial.host.externals.call (operation.request semanticArgs)
+      initial.host.runtime = .ok response)
+    (encoded : encodeValue initial.host.handles resultKind response.value =
+      .ok (after, physicalResult))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := applyExternalResponse (operation.request semanticArgs)
+              initial.host.runtime response
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := physicalResult :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [physicalResult])
+    hImp hSat hi hContract hParams hStack
+  · exact hostStep_external_singleton_of_decode_call_encode operation resultKind
+      initial physicalArgs semanticArgs response resultSignature decoded called encoded
+  · simpa [hResults] using continued
+
 end FirTalos.Correctness

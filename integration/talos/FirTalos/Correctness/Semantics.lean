@@ -111,6 +111,25 @@ def SourceLetResult (context : Fir.Wasm.Context) (sourceRuntime : RuntimeState)
     runtime := sourceRuntime }
   evalLetValue state decl = .ok (nextRuntime, .value sourceValue)
 
+/-- Exact executable source behavior of an external `let`.  A direct foreign
+call takes three interpreter steps: stage the named invocation, perform and
+resume the external request, then consume the binding frame and enter the
+continuation. -/
+def SourceExternalLetResult (context : Fir.Wasm.Context)
+    (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) : Prop :=
+  ExecSteps externals 3 {
+      program := context.program
+      control := .code (.let decl continuation)
+      env := sourceEnv
+      runtime := sourceRuntime } {
+      program := context.program
+      control := .code continuation
+      env := bind sourceEnv decl.fvarId sourceValue
+      runtime := nextRuntime }
+
 /-- One successful non-binding source instruction step. Quantifying over the
 external implementation records that admitted mutation and ownership nodes are
 internal runtime effects, not external calls. -/
@@ -162,6 +181,90 @@ def LetStepSimulates (context : Fir.Wasm.Context)
       Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
       Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
         targetStore { targetLocals with values := tail } hostEnv
+
+/-- Semantic interface for one generated external-call `let`.  It mirrors
+`LetStepSimulates`, but its source premise uses the installed deterministic
+external implementation and the interpreter's complete three-step call
+protocol. -/
+def ExternalLetStepSimulates (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store RuntimeHost)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat) : Prop :=
+  SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion RuntimeHost)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+theorem externalLetStepSimulates_of_call
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (semanticArgs : Array Value) (response : ExternalResponse)
+    (after : HandleTable) (physicalResult : Wasm.Value)
+    (sourceStep : SourceExternalLetResult context targetStore.host.externals
+      sourceRuntime sourceEnv decl continuation nextRuntime sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals)
+    (hGets : List.Forall₂
+      (fun index value => targetLocals.get index = some value)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.external operation)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (resultSignature : operation.signature.results = #[resultKind])
+    (decoded : decodeArgs targetStore.host.handles operation.signature.params
+      physicalArgs = .ok semanticArgs)
+    (called : targetStore.host.externals.call (operation.request semanticArgs)
+      targetStore.host.runtime = .ok response)
+    (encoded : encodeValue targetStore.host.handles resultKind response.value =
+      .ok (after, physicalResult))
+    (hSet : targetLocals.set? resultIndex physicalResult = some nextLocals)
+    (nextStoreEq : nextStore = {
+      targetStore with host := {
+        targetStore.host with
+        runtime := applyExternalResponse (operation.request semanticArgs)
+          targetStore.host.runtime response
+        handles := after
+        fault? := none
+        targetFailure? := none } })
+    (nextStateRelated : StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals) :
+    ExternalLetStepSimulates context sourceFunction module hostEnv
+      targetStore.host.externals decl continuation
+      (indices.map Wasm.Instruction.localGet ++ [.call id])
+      sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+      targetLocals nextLocals resultIndex := by
+  refine ⟨sourceStep, stateRelated, nextStateRelated, ?_⟩
+  intro rest Q tail continued
+  subst nextStore
+  simpa [List.append_assoc] using
+    (wp_external_let operation resultKind semanticArgs response after
+      physicalResult tail hGets hImp hSat hi hContract hParams hResults
+      resultSignature decoded called encoded hSet continued)
 
 /-- Semantic interface for one generated no-result effect prefix. It packages
 the real compiler/adapter witness, the exact source step, preservation of the
@@ -300,6 +403,46 @@ theorem codeWP_let
       targetStore targetLocals tail Q := by
   rcases step with ⟨sourceStep, initialRelated, nextRelated, stepWP⟩
   rcases continued with ⟨continuationAdapted, continuedRelated, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
+/-- Recursive `CodeWP` rule for an external-call `let`.  The target
+composition is identical to an internal value binding, while the source
+component is the explicit three-step external protocol carried by
+`ExternalLetStepSimulates`. -/
+theorem codeWP_externalLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step :
+      ExternalLetStepSimulates context sourceFunction module hostEnv externals
+        decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+        sourceValue targetStore nextStore targetLocals nextLocals resultIndex)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+        nextStore nextLocals tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
   refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
       continuationAdapted, initialRelated, ?_⟩
   exact stepWP targetRest Q tail continuedWP
