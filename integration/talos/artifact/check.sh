@@ -9,7 +9,7 @@ trap 'rm -rf "$first" "$second"' EXIT
 cd "$here"
 lake build
 lake -d .. build FirTalos.Differential
-lake -d ../../.. build Fir.Wasm.Emit.SourceExamples
+lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
 source_artifacts=(
   source-uint64
