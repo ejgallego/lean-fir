@@ -415,10 +415,12 @@ theorem abiCaseFallbackCompiled :
   rw [noDefault]
   rfl
 
-theorem abiCaseStateC_related :
-    StateRelated abiCaseSourceFunction {} abiCaseEnvC abiCaseStoreC
-      abiCaseLocalsC := by
-  have step := letStepSimulates_constructor
+theorem abiCaseCtorStep :
+    LetStepSimulates abiCaseContext abiCaseSourceFunction
+      abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env abiCaseDeclC
+      [.call 0] {} {} [] abiCaseTrueValue abiCaseInitialStore abiCaseStoreC
+      (abiCaseMainFunction.toLocals []) abiCaseLocalsC 0 := by
+  apply letStepSimulates_constructor
     (context := abiCaseContext)
     (sourceFunction := abiCaseSourceFunction)
     (module := abiCaseAdaptedModule.wasmModule)
@@ -438,7 +440,12 @@ theorem abiCaseStateC_related :
     abiCaseImport0_found abiCaseHostsSatisfy (by native_decide)
     (by simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations])
     (by native_decide) (by native_decide) rfl rfl abiCaseEncodeC abiCaseSetC
-  simpa [abiCaseEnvC, abiCaseStoreC, abiCaseDeclC, letDecl] using step.2.2.1
+
+theorem abiCaseStateC_related :
+    StateRelated abiCaseSourceFunction {} abiCaseEnvC abiCaseStoreC
+      abiCaseLocalsC := by
+  simpa [abiCaseEnvC, abiCaseStoreC, abiCaseDeclC, letDecl] using
+    abiCaseCtorStep.2.2.1
 
 theorem abiCaseFalseBranch_adapted :
     CodeAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
@@ -460,172 +467,188 @@ theorem abiCaseFalseBranch_adapted :
       (by simpa [functionBindings, abiCaseDeclFalse, letDecl] using abiCaseR_found)
       returned
 
+theorem abiCaseTrueBranch_simulation :
+    CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+      abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+      {} abiCaseEnvC abiCaseTrueCode
+      [.call 3, .localSet 1, .localGet 1, .ret]
+      abiCaseStoreC abiCaseLocalsC {} abiCaseTrueValue .tobject := by
+  have valueAdapted :
+      instructions abiCaseSourceModule abiCaseSourceFunction []
+          [.call (.runtime (.literal (.nat 1) .tobject))] =
+        .ok [.call 3] := by
+    simp [instructions, instruction, abiCaseLiteral1Call_found]
+    rfl
+  have step := letStepSimulates_naturalLiteral
+    (context := abiCaseContext) (sourceFunction := abiCaseSourceFunction)
+    (module := abiCaseAdaptedModule.wasmModule)
+    (hostEnv := abiCaseResolvedHosts.env)
+    (spec := abiCaseResolvedHosts.spec)
+    (id := 3) (imp := abiCaseImport 3)
+    (decl := abiCaseDeclTrue) (resultIndex := 1) (value := 1)
+    (after := abiCaseHandlesC) (handle := 1) (updated := abiCaseLocalsR)
+    rfl abiCaseStateC_related (by native_decide) (by native_decide)
+    abiCaseImport3_found abiCaseHostsSatisfy (by native_decide)
+    (by simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations])
+    (by native_decide) (by native_decide)
+    (by simpa [abiCaseTrueValue, literal, maxTaggedPayload] using abiCaseEncodeR)
+    abiCaseSetR
+  simp only [abiCaseTrueCode]
+  apply CodeSimulation.letValue abiCaseCompileTrue valueAdapted
+    (by native_decide) step
+  apply CodeSimulation.ret abiCaseGetR (by native_decide) (by native_decide)
+    (lookup_bind_self abiCaseEnvC r abiCaseTrueValue)
+  simpa [abiCaseDeclTrue, letDecl, abiCaseTrueValue, literal,
+    maxTaggedPayload, successfulHostStore, abiCaseStoreC] using step.2.2.1
+
 theorem abiCaseTrueBranch_codeWP :
     CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} abiCaseEnvC abiCaseTrueCode
       [.call 3, .localSet 1, .localGet 1, .ret]
       abiCaseStoreC abiCaseLocalsC []
-      (ReturnPost {} abiCaseTrueValue .tobject []) := by
-  apply codeWP_naturalLiteral_return
-    (spec := abiCaseResolvedHosts.spec)
-    (id := 3) (imp := abiCaseImport 3)
-    (decl := abiCaseDeclTrue) (resultIndex := 1) (value := 1)
-    (after := abiCaseHandlesC) (handle := 1) (updated := abiCaseLocalsR)
-  · rfl
-  · exact abiCaseCompileTrue
-  · exact abiCaseGetR
-  · native_decide
-  · native_decide
-  · native_decide
-  · exact abiCaseStateC_related
-  · exact abiCaseImport3_found
-  · exact abiCaseHostsSatisfy
-  · native_decide
-  · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
-  · native_decide
-  · native_decide
-  · simpa [abiCaseTrueValue, literal, maxTaggedPayload] using abiCaseEncodeR
-  · exact abiCaseSetR
+      (ReturnPost {} abiCaseTrueValue .tobject []) :=
+  abiCaseTrueBranch_simulation.toCodeWP
 
-/-- Local W4 proof for allocation followed by the generated two-test case chain. -/
+/-- Path-sensitive transformer for the source-selected `Bool.true` branch. -/
+theorem abiCaseCasesStep :
+    CasesStepSimulates abiCaseContext abiCaseSourceModule abiCaseSourceFunction
+      [] abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+      {} abiCaseEnvC abiCaseCases abiCaseTrueCode
+      [.localGet 0, .call 1, .const 0, .eq,
+        .iff 0 0
+          [.call 2, .localSet 1, .localGet 1, .ret]
+          [.localGet 0, .call 1, .const 1, .eq,
+            .iff 0 0
+              [.call 3, .localSet 1, .localGet 1, .ret]
+              [.unreachable]]]
+      [.call 3, .localSet 1, .localGet 1, .ret]
+      abiCaseStoreC abiCaseLocalsC {} abiCaseTrueValue .tobject := by
+  constructor
+  · refine ⟨abiCaseTrueValue, 1, ?_, abiCaseTagC, ?_⟩
+    · have sameName : c.name = abiCaseCases.discr.name := by
+        native_decide
+      simp [lookupValue, abiCaseEnvC, Fir.LeanIR.Impure.bind, lookup,
+        sameName]
+    · rfl
+  · intro selectedCorrect
+    let Q : Wasm.Assertion RuntimeHost :=
+      ReturnPost {} abiCaseTrueValue .tobject []
+    have trueBranch :
+        CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+          abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+          {} abiCaseEnvC abiCaseTrueCode
+          [.call 3, .localSet 1, .localGet 1, .ret]
+          abiCaseStoreC abiCaseLocalsC []
+          (CaseResumePost abiCaseAdaptedModule.wasmModule
+            abiCaseResolvedHosts.env []
+            (CaseResumePost abiCaseAdaptedModule.wasmModule
+              abiCaseResolvedHosts.env [] Q []) []) := by
+      apply selectedCorrect.conseq
+      intro continuation returned
+      rcases returned with ⟨store, physical, rfl, runtimeEq, decoded⟩
+      exact ⟨store, physical, rfl, runtimeEq, decoded⟩
+    have fallbackAdapted :
+        CaseChainAdapted abiCaseContext abiCaseSourceModule
+          abiCaseSourceFunction [] c [] [.unreachable] [.unreachable] := by
+      apply caseChainAdapted_nil
+      simp [instructions, instruction]
+      rfl
+    have trueChain :
+        CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+          abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+          {} abiCaseEnvC c
+          [.ctorAlt trueInfo abiCaseTrueCode] [.unreachable]
+          [.localGet 0, .call 1, .const 1, .eq,
+            .iff 0 0
+              [.call 3, .localSet 1, .localGet 1, .ret]
+              [.unreachable]]
+          abiCaseStoreC abiCaseLocalsC []
+          (CaseResumePost abiCaseAdaptedModule.wasmModule
+            abiCaseResolvedHosts.env [] Q []) := by
+      apply caseChainWP_constructor_hit
+        (spec := abiCaseResolvedHosts.spec)
+        (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
+        (actualTag := 1) (handle := 1)
+      · native_decide
+      · exact trueBranch
+      · exact fallbackAdapted
+      · rfl
+      · native_decide
+      · native_decide
+      · native_decide
+      · exact abiCaseImport1_found
+      · exact abiCaseHostsSatisfy
+      · native_decide
+      · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
+      · native_decide
+      · native_decide
+      · exact abiCaseDecodedC
+      · exact abiCaseTagC
+      · native_decide
+      · native_decide
+    have wholeChain :
+        CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+          abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+          {} abiCaseEnvC c abiCaseCases.alts.toList [.unreachable]
+          [.localGet 0, .call 1, .const 0, .eq,
+            .iff 0 0
+              [.call 2, .localSet 1, .localGet 1, .ret]
+              [.localGet 0, .call 1, .const 1, .eq,
+                .iff 0 0
+                  [.call 3, .localSet 1, .localGet 1, .ret]
+                  [.unreachable]]]
+          abiCaseStoreC abiCaseLocalsC [] Q := by
+      apply caseChainWP_constructor_miss
+        (spec := abiCaseResolvedHosts.spec)
+        (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
+        (actualTag := 1) (handle := 1)
+      · native_decide
+      · exact abiCaseFalseBranch_adapted
+      · simpa [abiCaseCases] using trueChain
+      · native_decide
+      · native_decide
+      · native_decide
+      · native_decide
+      · exact abiCaseImport1_found
+      · exact abiCaseHostsSatisfy
+      · native_decide
+      · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
+      · native_decide
+      · native_decide
+      · exact abiCaseDecodedC
+      · exact abiCaseTagC
+      · native_decide
+      · native_decide
+    exact codeWP_cases abiCaseFallbackCompiled wholeChain
+
+/-- Program-level W4 simulation for allocation and explicit constructor cases. -/
+theorem abiCaseMain_simulation :
+    CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
+      abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
+      {} [] abiCaseCode abiCaseMainFunction.body abiCaseInitialStore
+      (abiCaseMainFunction.toLocals []) {} abiCaseTrueValue .tobject := by
+  have valueAdapted :
+      instructions abiCaseSourceModule abiCaseSourceFunction []
+          [.call (.runtime (.allocCtor trueInfo #[] .tagged))] =
+        .ok [.call 0] := by
+    simp [instructions, instruction, abiCaseAllocCall_found]
+    rfl
+  rw [abiCaseMain_body]
+  simp only [abiCaseCode]
+  apply CodeSimulation.letValue abiCaseCompileC valueAdapted
+    (by native_decide) abiCaseCtorStep
+  apply CodeSimulation.caseOf abiCaseCasesStep
+  exact abiCaseTrueBranch_simulation
+
+/-- The local judgment is a corollary of the program-level induction. -/
 theorem abiCaseMain_codeWP :
     CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
       {} [] abiCaseCode abiCaseMainFunction.body abiCaseInitialStore
       (abiCaseMainFunction.toLocals []) []
-      (ReturnPost {} abiCaseTrueValue .tobject []) := by
-  let Q : Wasm.Assertion RuntimeHost := ReturnPost {} abiCaseTrueValue .tobject []
-  have trueBranch :
-      CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
-        abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-        {} abiCaseEnvC abiCaseTrueCode
-        [.call 3, .localSet 1, .localGet 1, .ret]
-        abiCaseStoreC abiCaseLocalsC []
-        (CaseResumePost abiCaseAdaptedModule.wasmModule
-          abiCaseResolvedHosts.env []
-          (CaseResumePost abiCaseAdaptedModule.wasmModule
-            abiCaseResolvedHosts.env [] Q []) []) := by
-    apply abiCaseTrueBranch_codeWP.conseq
-    intro continuation returned
-    rcases returned with ⟨store, physical, rfl, runtimeEq, decoded⟩
-    exact ⟨store, physical, rfl, runtimeEq, decoded⟩
-  have fallbackAdapted :
-      CaseChainAdapted abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
-        c [] [.unreachable] [.unreachable] := by
-    apply caseChainAdapted_nil
-    simp [instructions, instruction]
-    rfl
-  have trueChain :
-      CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
-        abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-        {} abiCaseEnvC c
-        [.ctorAlt trueInfo abiCaseTrueCode] [.unreachable]
-        [.localGet 0, .call 1, .const 1, .eq,
-          .iff 0 0
-            [.call 3, .localSet 1, .localGet 1, .ret]
-            [.unreachable]]
-        abiCaseStoreC abiCaseLocalsC []
-        (CaseResumePost abiCaseAdaptedModule.wasmModule
-          abiCaseResolvedHosts.env [] Q []) := by
-    apply caseChainWP_constructor_hit
-      (spec := abiCaseResolvedHosts.spec)
-      (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
-      (actualTag := 1) (handle := 1)
-    · native_decide
-    · exact trueBranch
-    · exact fallbackAdapted
-    · rfl
-    · native_decide
-    · native_decide
-    · native_decide
-    · exact abiCaseImport1_found
-    · exact abiCaseHostsSatisfy
-    · native_decide
-    · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
-    · native_decide
-    · native_decide
-    · exact abiCaseDecodedC
-    · exact abiCaseTagC
-    · native_decide
-    · native_decide
-  have wholeChain :
-      CaseChainWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
-        abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-        {} abiCaseEnvC c abiCaseCases.alts.toList [.unreachable]
-        [.localGet 0, .call 1, .const 0, .eq,
-          .iff 0 0
-            [.call 2, .localSet 1, .localGet 1, .ret]
-            [.localGet 0, .call 1, .const 1, .eq,
-              .iff 0 0
-                [.call 3, .localSet 1, .localGet 1, .ret]
-                [.unreachable]]]
-        abiCaseStoreC abiCaseLocalsC [] Q := by
-    apply caseChainWP_constructor_miss
-      (spec := abiCaseResolvedHosts.spec)
-      (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
-      (actualTag := 1) (handle := 1)
-    · native_decide
-    · exact abiCaseFalseBranch_adapted
-    · simpa [abiCaseCases] using trueChain
-    · native_decide
-    · native_decide
-    · native_decide
-    · native_decide
-    · exact abiCaseImport1_found
-    · exact abiCaseHostsSatisfy
-    · native_decide
-    · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
-    · native_decide
-    · native_decide
-    · exact abiCaseDecodedC
-    · exact abiCaseTagC
-    · native_decide
-    · native_decide
-  have casesCorrect :
-      CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
-        abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-        {} abiCaseEnvC (.cases abiCaseCases)
-        [.localGet 0, .call 1, .const 0, .eq,
-          .iff 0 0
-            [.call 2, .localSet 1, .localGet 1, .ret]
-            [.localGet 0, .call 1, .const 1, .eq,
-              .iff 0 0
-                [.call 3, .localSet 1, .localGet 1, .ret]
-                [.unreachable]]]
-        abiCaseStoreC abiCaseLocalsC [] Q :=
-    codeWP_cases abiCaseFallbackCompiled wholeChain
-  rw [abiCaseMain_body]
-  apply codeWP_constructor_let
-    (spec := abiCaseResolvedHosts.spec)
-    (id := 0) (imp := abiCaseImport 0) (info := trueInfo) (args := #[])
-    (fvarIds := []) (indices := []) (physicalArgs := [])
-    (semanticArgs := #[]) (nextRuntime := {})
-    (sourceValue := abiCaseTrueValue) (resultIndex := 0)
-    (fieldKinds := #[]) (resultKind := .tagged)
-    (after := abiCaseHandlesC) (handle := 1)
-  · rfl
-  · exact abiCaseCompileC
-  · native_decide
-  · native_decide
-  · exact abiCaseArgumentsEvaluated
-  · exact abiCaseAllocated
-  · exact abiCaseInitialState_related
-  · native_decide
-  · native_decide
-  · native_decide
-  · exact abiCaseImport0_found
-  · exact abiCaseHostsSatisfy
-  · native_decide
-  · simp [ResolvedHosts.spec, abiCaseResolvedHosts_operations]
-  · native_decide
-  · native_decide
-  · rfl
-  · rfl
-  · exact abiCaseEncodeC
-  · exact abiCaseSetC
-  · simpa [abiCaseCode, abiCaseEnvC, abiCaseStoreC, abiCaseDeclC, letDecl]
-      using casesCorrect
+      (ReturnPost {} abiCaseTrueValue .tobject []) :=
+  abiCaseMain_simulation.toCodeWP
 
 theorem abiCaseObservation_related :
     compareObservations
@@ -649,14 +672,29 @@ theorem abiCaseObservation_related :
   rw [noDifferences]
   rfl
 
+/-- The generic W4 theorem closes source evaluation and the selected target case. -/
+theorem abiCaseMain_correct :
+    CodeEvaluates abiCaseContext {} [] abiCaseCode {} abiCaseTrueValue ∧
+      ExportTerminatesWith abiCaseResolvedHosts.env
+        abiCaseAdaptedModule.wasmModule "main" abiCaseInitialStore []
+        (RelatedPost #[.tobject]
+          (ReturnedObservation {} abiCaseTrueValue)) := by
+  apply abiCaseSupportedExport.correct_of_simulation abiCaseObservation_related
+  · simpa [abiCaseSupportedExport, abiCaseInitialStore] using
+      abiCaseMain_simulation
+  · simp [abiCaseSupportedExport]
+
 /-- End-to-end W3/W4 theorem for the generated explicit constructor case. -/
 theorem abiCaseMain_export_correct :
     ExportTerminatesWith abiCaseResolvedHosts.env
       abiCaseAdaptedModule.wasmModule "main" abiCaseInitialStore []
       (RelatedPost #[.tobject]
-        (ReturnedObservation {} abiCaseTrueValue)) := by
-  apply abiCaseSupportedExport.terminatesWithRelated_of_return
-    abiCaseObservation_related
-  simpa [abiCaseSupportedExport, abiCaseInitialStore] using abiCaseMain_codeWP
+        (ReturnedObservation {} abiCaseTrueValue)) :=
+  abiCaseMain_correct.2
+
+/-- Successful source evaluation is provided by the same case induction. -/
+theorem abiCaseMain_source_evaluates :
+    CodeEvaluates abiCaseContext {} [] abiCaseCode {} abiCaseTrueValue :=
+  abiCaseMain_correct.1
 
 end FirTalos.Correctness
