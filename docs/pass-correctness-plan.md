@@ -484,16 +484,37 @@ a named call and a heap closure.
 Declaration entry adds one deliberate phase premise: `ProgramBodiesRelated`
 says that every reachable internal declaration is reflexively related beneath
 its parameter binders. This is not a new axiom; call proofs accept it as an
-ordinary proposition. The next phase-boundary task is to derive it from the
-checked impure program's global hygiene invariant and the transparent local
-checker.
+ordinary proposition. Attempting to derive it exposed a FIR proof-interface
+bug: `ImpureHygiene.codeScoped`, its alternative/declaration helpers, and the
+global binder traversals are opaque `partial def`s. The kernel cannot invert
+even an accepted `.return` check, so the checked impure program boundary cannot
+yet supply the scope and freshness facts required by `ProgramBodiesRelated`.
+`FIR-BUG-impure-none-opaque-hygiene` records the minimal failure and the
+required transparent-total refactor. The semantic proof keeps the exact
+ordinary premise instead of adding another axiom or weakening its invariant.
+
+The simulation now crosses the relational small-step boundary. A complete
+case proof shows that every `coreStep` result preserves the immutable program;
+the result is lifted through internal steps, external waiting/resumption, and
+finite executions. `step_forward` matches one left step with one right step,
+using the same external response after transporting equal runtimes.
+`steps_forward` composes this into a same-length execution while transporting
+`ProgramBodiesRelated` across successor states. `evaluatesState_forward` then
+reproduces every terminating observation, and `diverges_forward` reproduces
+arbitrarily long executions. The declaration-entry fixture exercises the
+execution-level interface. `StatesBisimilar` packages independently indexed
+simulations in both alpha-renaming directions; from it,
+`evaluatesState_iff_of_bisimilar` proves observational equivalence for every
+terminating result and `diverges_iff_of_bisimilar` proves divergence
+equivalence. This slice adds no trusted assumption.
 
 The remaining bounded work is:
 
-1. derive `ProgramBodiesRelated` from `CheckedImpureProgram`/`ImpureHygienic`,
-   making declaration entry available from the public phase boundary;
-2. lift `CoreResultRelated` through internal/external steps and evaluation,
-   including related external responses and resumed waiting states;
+1. refactor FIR's opaque hygiene/binder traversals into transparent total
+   definitions with equation lemmas, then derive `ProgramBodiesRelated` from
+   `CheckedImpureProgram`/`ImpureHygienic`;
+2. construct both directions of `StatesBisimilar` from checker acceptance and
+   the two orientations of the phase side conditions;
 3. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream

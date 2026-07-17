@@ -747,6 +747,12 @@ inductive CoreResultRelated : CoreResult → CoreResult → Prop where
   | done (observation : Observation) :
       CoreResultRelated (.done observation) (.done observation)
 
+theorem CoreResultRelated.done_right
+    (related : CoreResultRelated (.done observation) rightResult) :
+    rightResult = .done observation := by
+  cases related
+  rfl
+
 /-- Successful constructor lookup identifies a matching table member. -/
 theorem hasCtorAlt_of_findCtorAlt_eq_some
     (found : findCtorAlt tag alts = some code) : HasCtorAlt tag code alts := by
@@ -2117,6 +2123,409 @@ theorem coreStep_machine_related
       simpa only [coreStep] using
         invokeClosure_related leftMachine rightMachine programEq runtimeEq
           joinEnvs framesRelated agree renamingScoped joinRenamingScoped bodies
+
+/-- Existential closure of the indexed machine relation for step-level use. -/
+def StatesRelated (left right : MachineState) : Prop :=
+  ∃ rho leftScope rightScope leftJoins rightJoins,
+    MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right
+
+theorem StatesRelated.program_eq (related : StatesRelated left right) :
+    left.program = right.program := by
+  rcases related with
+    ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
+  exact indexed.program_eq
+
+/-- A proof-facing bisimulation packages simulations in both alpha-renaming
+directions; each direction may use its own renaming and scope indices. -/
+structure StatesBisimilar (left right : MachineState) : Prop where
+  forward : StatesRelated left right
+  backward : StatesRelated right left
+
+/-- A core result never changes the program stored in its successor/waiter. -/
+def CoreResult.PreservesProgram (program : ImpureProgram) : CoreResult → Prop
+  | .next state => state.program = program
+  | .external _ waiting => waiting.program = program
+  | .done _ => True
+
+theorem invokeDecl_preserves_program (state : MachineState) (name : Name)
+    (args : Array Value) :
+    CoreResult.PreservesProgram state.program (invokeDecl state name args) := by
+  unfold invokeDecl
+  generalize found : state.program.findDecl? name = declaration
+  cases declaration with
+  | none => trivial
+  | some decl =>
+      by_cases tooFew : args.size < decl.params.size
+      · simp only [tooFew, ↓reduceIte]
+        rfl
+      · simp only [tooFew, ↓reduceIte]
+        let callArgs := args.extract 0 decl.params.size
+        generalize binding : bindParams decl.params callArgs = bound
+        cases bound with
+        | error fault => trivial
+        | ok env =>
+            simp only
+            cases decl.value <;> rfl
+
+theorem invokeClosure_preserves_program (state : MachineState)
+    (function : Value) (args : Array Value) :
+    CoreResult.PreservesProgram state.program
+      (invokeClosure state function args) := by
+  unfold invokeClosure
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp only
+          trivial
+      | heap location =>
+          simp only
+          generalize cellRead : getLiveCell state.runtime location = result
+          cases result with
+          | error fault => trivial
+          | ok cell =>
+              simp only
+              cases cell.object with
+              | closure name arity fixed =>
+                  exact invokeDecl_preserves_program state name (fixed ++ args)
+              | ctor object => trivial
+              | boxed type value => trivial
+              | string value => trivial
+              | natural value => trivial
+              | integer value => trivial
+              | byteArray value => trivial
+              | «opaque» typeName => trivial
+  | usize value =>
+      simp only
+      trivial
+  | scalar value =>
+      simp only
+      trivial
+  | erased =>
+      simp only
+      trivial
+  | reuseToken location =>
+      simp only
+      trivial
+
+theorem coreStep_preserves_program (state : MachineState) :
+    CoreResult.PreservesProgram state.program (coreStep state) := by
+  cases state with
+  | mk program control env joins frames runtime =>
+      cases control with
+      | yielded value =>
+          cases frames with
+          | nil => trivial
+          | cons frame rest =>
+              cases frame <;> rfl
+      | invokeName name args =>
+          by_cases argsEmpty : args.isEmpty
+          · simp only [coreStep, argsEmpty, ↓reduceIte]
+            generalize globalRead : findGlobal? runtime.globals name = global
+            cases global with
+            | some value => rfl
+            | none =>
+                exact invokeDecl_preserves_program
+                  { program, control := .invokeName name args, env, joins,
+                    frames, runtime } name args
+          · simp only [coreStep, argsEmpty]
+            exact invokeDecl_preserves_program
+              { program, control := .invokeName name args, env, joins,
+                frames, runtime } name args
+      | invokeValue function args =>
+          exact invokeClosure_preserves_program
+            { program, control := .invokeValue function args, env, joins,
+              frames, runtime } function args
+      | code code =>
+          cases code with
+          | «let» decl continuation =>
+              simp only [coreStep]
+              generalize evaluation :
+                evalLetValue
+                  { program, control := .code (.let decl continuation), env,
+                    joins, frames, runtime } decl = result
+              cases result with
+              | error fault => trivial
+              | ok evaluated =>
+                  rcases evaluated with ⟨nextRuntime, action⟩
+                  cases action <;> rfl
+          | «fun» decl continuation impossible => contradiction
+          | jp decl continuation => rfl
+          | jmp target args =>
+              simp only [coreStep]
+              generalize joinRead : findJoinPoint? joins target = found
+              cases found with
+              | none => trivial
+              | some decl =>
+                  simp only
+                  generalize evaluation : evalArgs env args = result
+                  cases result with
+                  | error fault => trivial
+                  | ok values =>
+                      simp only
+                      generalize binding : bindParamsOver env decl.params values = bound
+                      cases bound <;> simp only <;> trivial
+          | «cases» caseInfo =>
+              simp only [coreStep]
+              generalize discrRead : lookupValue env caseInfo.discr = discrResult
+              cases discrResult with
+              | error fault => trivial
+              | ok discr =>
+                  simp only
+                  generalize tagRead : getTag runtime discr = tagResult
+                  cases tagResult with
+                  | error fault =>
+                      simp only
+                      trivial
+                  | ok tag =>
+                      simp only
+                      generalize selected : chooseAlt tag caseInfo.alts.toList = branch
+                      cases branch <;> simp only <;> trivial
+          | «return» result =>
+              simp only [coreStep]
+              generalize valueRead : lookupValue env result = valueResult
+              cases valueResult <;> trivial
+          | unreach type => trivial
+          | oset object index field continuation =>
+              simp only [coreStep]
+              generalize objectRead : lookupValue env object = objectResult
+              generalize fieldRead : evalArg env field = fieldResult
+              cases objectResult <;> cases fieldResult
+              all_goals try trivial
+              rename_i objectValue fieldValue
+              simp only
+              generalize effect :
+                setObjectField runtime objectValue index fieldValue = effectResult
+              cases effectResult <;> simp only <;> trivial
+          | uset object index field continuation =>
+              simp only [coreStep]
+              generalize objectRead : lookupValue env object = objectResult
+              generalize fieldRead : lookupValue env field = fieldResult
+              cases objectResult <;> cases fieldResult
+              all_goals try trivial
+              rename_i objectValue fieldValue
+              simp only
+              generalize effect :
+                setUSizeField runtime objectValue index fieldValue = effectResult
+              cases effectResult <;> simp only <;> trivial
+          | sset object width offset field type continuation =>
+              simp only [coreStep]
+              generalize objectRead : lookupValue env object = objectResult
+              generalize fieldRead : lookupValue env field = fieldResult
+              cases objectResult <;> cases fieldResult
+              all_goals try trivial
+              rename_i objectValue fieldValue
+              simp only
+              generalize effect :
+                setScalarField runtime objectValue width offset fieldValue = effectResult
+              cases effectResult <;> simp only <;> trivial
+          | setTag object tag continuation =>
+              simp only [coreStep]
+              generalize objectRead : lookupValue env object = objectResult
+              cases objectResult with
+              | error fault => trivial
+              | ok objectValue =>
+                  simp only
+                  generalize effect : setTag runtime objectValue tag = effectResult
+                  cases effectResult <;> simp only <;> trivial
+          | inc object amount check persistent continuation =>
+              cases persistent with
+              | true => rfl
+              | false =>
+                  simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+                  generalize objectRead : lookupValue env object = objectResult
+                  cases objectResult with
+                  | error fault => trivial
+                  | ok objectValue =>
+                      simp only
+                      generalize effect :
+                        incValue runtime objectValue amount check = effectResult
+                      cases effectResult <;> simp only <;> trivial
+          | dec object amount check persistent objects continuation =>
+              cases persistent with
+              | true => rfl
+              | false =>
+                  simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+                  generalize objectRead : lookupValue env object = objectResult
+                  cases objectResult with
+                  | error fault => trivial
+                  | ok objectValue =>
+                      simp only
+                      generalize effect :
+                        decValue runtime objectValue amount check = effectResult
+                      cases effectResult <;> simp only <;> trivial
+          | del object continuation =>
+              simp only [coreStep]
+              generalize objectRead : lookupValue env object = objectResult
+              cases objectResult with
+              | error fault => trivial
+              | ok objectValue =>
+                  simp only
+                  generalize effect : deleteValue runtime objectValue = effectResult
+                  cases effectResult <;> simp only <;> trivial
+
+theorem coreStep_next_program
+    (transition : coreStep before = .next after) :
+    after.program = before.program := by
+  have preserved := coreStep_preserves_program before
+  rw [transition] at preserved
+  exact preserved
+
+theorem coreStep_external_program
+    (transition : coreStep before = .external request waiting) :
+    waiting.program = before.program := by
+  have preserved := coreStep_preserves_program before
+  rw [transition] at preserved
+  exact preserved
+
+/-- Semantic steps preserve the immutable program component. -/
+theorem step_preserves_program (step : Step externals before after) :
+    after.program = before.program := by
+  cases step with
+  | internal transition => exact coreStep_next_program transition
+  | external transition external =>
+      simpa [resumeExternal, MachineState.withValue] using
+        coreStep_external_program transition
+
+/-- A finite semantic execution preserves the immutable program component. -/
+theorem steps_preserve_program (steps : Steps externals count before after) :
+    after.program = before.program := by
+  induction steps with
+  | refl state => rfl
+  | step head tail ih => exact ih.trans (step_preserves_program head)
+
+/-- Resuming the same external response preserves a related waiting state. -/
+theorem resumeExternal_related
+    {leftJoins rightJoins : List FVarId}
+    (related : MachineStateRelated (leftJoins := leftJoins)
+      (rightJoins := rightJoins) rho leftScope rightScope leftWaiting rightWaiting) :
+    MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
+      (resumeExternal request leftWaiting response)
+      (resumeExternal request rightWaiting response) := by
+  rcases related with
+    ⟨programEq, runtimeEq, joinEnvs, framesRelated, agree,
+      renamingScoped, joinRenamingScoped, control⟩
+  exact {
+    program_eq := programEq
+    runtime_eq := by
+      simp [resumeExternal, MachineState.withValue, runtimeEq]
+    joins := joinEnvs
+    frames := framesRelated
+    envs := agree
+    renaming_scoped := renamingScoped
+    join_renaming_scoped := joinRenamingScoped
+    control := .yielded response.value
+  }
+
+/-- One left semantic step can be matched by one right semantic step. -/
+theorem step_forward
+    {leftJoins rightJoins : List FVarId}
+    (related : MachineStateRelated (leftJoins := leftJoins)
+      (rightJoins := rightJoins) rho leftScope rightScope leftBefore rightBefore)
+    (bodies : ProgramBodiesRelated rightBefore.program)
+    (step : Step externals leftBefore leftAfter) :
+    ∃ rightAfter, Step externals rightBefore rightAfter ∧
+      StatesRelated leftAfter rightAfter := by
+  have results := coreStep_machine_related related bodies
+  generalize rightTransition : coreStep rightBefore = rightResult at results
+  cases step with
+  | internal transition =>
+      rw [transition] at results
+      cases results with
+      | next nextRelated =>
+          exact ⟨_, .internal rightTransition,
+            ⟨_, _, _, _, _, nextRelated⟩⟩
+  | external transition external =>
+      rw [transition] at results
+      cases results with
+      | external request waitingRelated =>
+          have rightExternal := external
+          rw [related.runtime_eq] at rightExternal
+          exact ⟨_, .external rightTransition rightExternal,
+            ⟨_, _, _, _, _, resumeExternal_related waitingRelated⟩⟩
+
+/-- Every finite left execution has a same-length related right execution. -/
+theorem steps_forward
+    (related : StatesRelated leftBefore rightBefore)
+    (bodies : ProgramBodiesRelated rightBefore.program)
+    (steps : Steps externals count leftBefore leftAfter) :
+    ∃ rightAfter, Steps externals count rightBefore rightAfter ∧
+      StatesRelated leftAfter rightAfter := by
+  induction steps generalizing rightBefore with
+  | refl state => exact ⟨rightBefore, .refl rightBefore, related⟩
+  | step head tail ih =>
+      rcases related with
+        ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
+      rcases step_forward indexed bodies head with
+        ⟨rightSecond, rightHead, secondRelated⟩
+      have rightProgram : rightSecond.program = rightBefore.program :=
+        step_preserves_program rightHead
+      have secondBodies : ProgramBodiesRelated rightSecond.program := by
+        rw [rightProgram]
+        exact bodies
+      rcases ih secondRelated secondBodies with
+        ⟨rightAfter, rightTail, finalRelated⟩
+      exact ⟨rightAfter, .step rightHead rightTail, finalRelated⟩
+
+/-- Terminating observations of a related left state are reproduced on the
+right with the same number of semantic steps. -/
+theorem evaluatesState_forward
+    (related : StatesRelated leftBefore rightBefore)
+    (bodies : ProgramBodiesRelated rightBefore.program) :
+    EvaluatesState externals leftBefore observation →
+      EvaluatesState externals rightBefore observation := by
+  rintro ⟨count, leftFinal, leftSteps, leftDone⟩
+  rcases steps_forward related bodies leftSteps with
+    ⟨rightFinal, rightSteps, finalRelated⟩
+  rcases finalRelated with
+    ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
+  have rightProgram : rightFinal.program = rightBefore.program :=
+    steps_preserve_program rightSteps
+  have finalBodies : ProgramBodiesRelated rightFinal.program := by
+    rw [rightProgram]
+    exact bodies
+  have finalResults :
+      CoreResultRelated (.done observation) (coreStep rightFinal) := by
+    simpa only [leftDone] using coreStep_machine_related indexed finalBodies
+  exact ⟨count, rightFinal, rightSteps, finalResults.done_right⟩
+
+/-- Divergence of a related left state is reproduced on the right. -/
+theorem diverges_forward
+    (related : StatesRelated leftBefore rightBefore)
+    (bodies : ProgramBodiesRelated rightBefore.program)
+    (diverges : Diverges externals leftBefore) :
+    Diverges externals rightBefore := by
+  intro count
+  rcases diverges count with ⟨leftAfter, leftSteps⟩
+  rcases steps_forward related bodies leftSteps with
+    ⟨rightAfter, rightSteps, finalRelated⟩
+  exact ⟨rightAfter, rightSteps⟩
+
+/-- A bidirectional state relation gives observational equivalence for every
+terminating observation. -/
+theorem evaluatesState_iff_of_bisimilar
+    (related : StatesBisimilar left right)
+    (bodies : ProgramBodiesRelated right.program) :
+    EvaluatesState externals left observation ↔
+      EvaluatesState externals right observation := by
+  have leftBodies : ProgramBodiesRelated left.program := by
+    rw [related.forward.program_eq]
+    exact bodies
+  exact ⟨evaluatesState_forward related.forward bodies,
+    evaluatesState_forward related.backward leftBodies⟩
+
+/-- The same bidirectional relation preserves and reflects divergence. -/
+theorem diverges_iff_of_bisimilar
+    (related : StatesBisimilar left right)
+    (bodies : ProgramBodiesRelated right.program) :
+    Diverges externals left ↔ Diverges externals right := by
+  have leftBodies : ProgramBodiesRelated left.program := by
+    rw [related.forward.program_eq]
+    exact bodies
+  exact ⟨diverges_forward related.forward bodies,
+    diverges_forward related.backward leftBodies⟩
 
 /-- The matching immediate outcomes of two related terminal instructions. -/
 inductive TerminalResultRelated (leftEnv rightEnv : Env) (state : MachineState) :

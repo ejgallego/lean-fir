@@ -11,6 +11,7 @@ open Lean.Compiler
 open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
+open Fir.LeanIR.Passes.SimpCase
 
 def selectedBranch : LCNF.Code .impure :=
   .return x
@@ -682,25 +683,50 @@ def namedCallProofState : MachineState := {
   control := .invokeName `id #[.erased]
 }
 
+theorem namedCallMachineRelated :
+    MachineStateRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      namedCallProofState namedCallProofState := {
+  program_eq := rfl
+  runtime_eq := rfl
+  joins := .empty
+  frames := .nil
+  envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
+  renaming_scoped := renamingScoped_empty []
+  join_renaming_scoped := renamingScoped_empty []
+  control := .invokeName `id #[.erased]
+}
+
+theorem namedCallStatesRelated :
+    StatesRelated namedCallProofState namedCallProofState :=
+  ⟨_, _, _, _, _, namedCallMachineRelated⟩
+
+theorem namedCallStatesBisimilar :
+    StatesBisimilar namedCallProofState namedCallProofState :=
+  ⟨namedCallStatesRelated, namedCallStatesRelated⟩
+
 /-- Named declaration entry is covered by the full control-step simulation. -/
 theorem namedCallCoreStepRelated :
     CoreResultRelated
       (coreStep namedCallProofState) (coreStep namedCallProofState) := by
-  apply coreStep_machine_related
-    (rho := ({} : FVarIdMap FVarId))
-    (leftScope := []) (rightScope := [])
-    (leftJoins := []) (rightJoins := [])
-  · exact {
-      program_eq := rfl
-      runtime_eq := rfl
-      joins := .empty
-      frames := .nil
-      envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
-      renaming_scoped := renamingScoped_empty []
-      join_renaming_scoped := renamingScoped_empty []
-      control := .invokeName `id #[.erased]
-    }
-  · exact callProofProgramBodiesRelated
+  exact coreStep_machine_related namedCallMachineRelated
+    callProofProgramBodiesRelated
+
+/-- The execution-level API composes declaration entry through arbitrarily
+many internal or external steps. -/
+theorem namedCallEvaluatesForward
+    (evaluation : EvaluatesState externals namedCallProofState observation) :
+    EvaluatesState externals namedCallProofState observation :=
+  evaluatesState_forward namedCallStatesRelated
+    callProofProgramBodiesRelated evaluation
+
+/-- The bidirectional execution boundary yields observational equivalence. -/
+theorem namedCallEvaluatesIff :
+    EvaluatesState externals namedCallProofState observation ↔
+      EvaluatesState externals namedCallProofState observation :=
+  evaluatesState_iff_of_bisimilar namedCallStatesBisimilar
+    callProofProgramBodiesRelated
 
 def closureProofRuntime : RuntimeState := {
   heap := [(0, { object := .closure `id 1 #[] })]
