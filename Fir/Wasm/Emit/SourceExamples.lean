@@ -68,5 +68,13 @@ run_cmd do
         throwError "unexpected argument-schema rejection: {message}"
   | .error error => throwError "unexpected parameterized source failure: {repr error}"
   | .ok _ => throwError "parameterized source accepted the wrong semantic argument kind"
+  match moduleArtifact.withValidationInvocation
+      "id-usize-wrong-result" ``Fir.Validation.Corpus.Source.idUSize
+      ``Fir.Validation.Corpus.Source.idUSize #[.usize] #[.usize 42] (.bits 64) with
+  | .error (.manifest message) =>
+      unless message.contains "result schema" do
+        throwError "unexpected result-schema rejection: {message}"
+  | .error error => throwError "unexpected validation invocation failure: {repr error}"
+  | .ok _ => throwError "validation invocation accepted the wrong result schema"
 
 end Fir.Wasm.Emit.SourceExamples

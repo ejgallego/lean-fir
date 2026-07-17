@@ -597,15 +597,17 @@ both external-name obligations.
 ## WebAssembly integration
 
 The initial Wasm validation slice consumes the compiler track exclusively
-through its public `compileModule` and `withInvocation` APIs.  The
-integration-owned `FirValidationWasm.lean` driver compiles each selected source
-entry through `LCNF.main`, encodes its corpus arguments into the compiler's
-semantic ABI values, and attaches that checked invocation to the reusable
-module.  It emits deterministic `.wasm` and ABI-manifest products only for that
-ordered selection, and checks that the current deliberately host-free cases
-have no imports and exactly export their source entries.  Heap-backed
-invocations are rejected until an initial-runtime manifest exists.  The driver
-does not modify or add policy to `Fir/Wasm`.
+through its public `compileValidationInvocation` API.  The integration-owned
+`FirValidationWasm.lean` driver compiles each selected source entry through
+`LCNF.main`; the shared API encodes corpus schemas and datums into semantic ABI
+values, checks the result schema against the emitted result lane, and attaches
+the invocation to the reusable module.  It emits deterministic `.wasm` and
+ABI-manifest products only for that ordered selection, and checks that the
+current deliberately host-free cases have no imports and exactly export their
+source entries.  Although the emitter now supports explicit initial-runtime
+manifests, this validation adapter retains its scalar-only guard until its V8
+runner consumes the semantic host.  The driver does not modify or add policy
+to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
 `WebAssembly` engine.  A registry keyed by compiler ABI kind—not corpus case

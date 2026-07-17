@@ -54,25 +54,21 @@ def elabFirValidationWasm : CommandElab := fun _ => do
   for caseId in selected do
     let some validationCase := Corpus.findCase? caseId
       | throwError "unknown validation case: {caseId}"
-    let (initialRuntime, args) ←
+    let (initialRuntime, _) ←
       match Lcnf.encodeArgs validationCase.argSchemas validationCase.args with
       | .ok invocation => pure invocation
       | .error error => throwError "cannot encode Wasm invocation for {caseId}: {error}"
     unless initialRuntime == {} do
       throwError "{caseId} requires a heap-backed Wasm invocation"
     let result ← liftCoreM <|
-      Fir.Wasm.Emit.Source.compileModule
-        validationCase.entry validationCase.dependencies
-    let moduleArtifact ←
+      Fir.Wasm.Emit.Source.compileValidationInvocation validationCase.id validationCase.entry
+        validationCase.argSchemas validationCase.args validationCase.resultSchema
+        validationCase.dependencies
+    let artifact ←
       match result with
       | .ok artifact => pure artifact
       | .error error =>
           throwError "Wasm compilation failed for {caseId}: {repr error}"
-    let artifact ←
-      match moduleArtifact.withInvocation caseId validationCase.entry validationCase.entry args with
-      | .ok artifact => pure artifact
-      | .error error =>
-          throwError "Wasm invocation failed for {caseId}: {repr error}"
     unless artifact.module.imports.isEmpty do
       throwError "{caseId} unexpectedly requires Wasm imports"
     unless artifact.module.exports == #[validationCase.entry] do

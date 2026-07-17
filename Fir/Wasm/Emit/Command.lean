@@ -6,6 +6,7 @@ namespace Fir.Wasm.Emit.Source
 open Lean Elab Command
 
 syntax (name := firWasmEmit) "#fir_wasm_emit " ident " to " str : command
+syntax (name := firWasmEmitCase) "#fir_wasm_emit_case " str " to " str : command
 declare_syntax_cat firWasmArg
 syntax "erased" : firWasmArg
 syntax "tagged" "(" num ")" : firWasmArg
@@ -69,20 +70,24 @@ private def elabArgument (runtime : Fir.LeanIR.Impure.RuntimeState) :
               throwErrorAt literal "failed to allocate Nat list argument: {repr fault}"
   | stx => throwErrorAt stx "unsupported Wasm semantic argument"
 
+private def writeCompiledArtifact (stx errorAt output : Syntax) (label : String)
+    (result : CoreM (Except CompileError Artifact)) : CommandElabM Unit := do
+  let some outputPath := output.isStrLit? |
+    throwErrorAt output "expected an output path"
+  let result ← liftCoreM result
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwErrorAt errorAt "failed to emit {label}: {repr error}"
+  artifact.write outputPath
+  logInfoAt stx s!"wrote {artifact.bytes.size} bytes to {outputPath}"
+
 private def writeArtifact (stx entry output : Syntax)
     (runtime : Fir.LeanIR.Impure.RuntimeState)
     (args : Array Fir.LeanIR.Impure.Value) : CommandElabM Unit := do
   let entryName ← resolveGlobalConstNoOverload entry
-  let some outputPath := output.isStrLit? |
-    throwErrorAt output "expected an output path"
-  let result ← liftCoreM <|
+  writeCompiledArtifact stx entry output entryName.toString <|
     if runtime.heap.isEmpty then compile entryName args
     else compileWithRuntime entryName runtime args
-  let artifact ← match result with
-    | .ok artifact => pure artifact
-    | .error error => throwErrorAt entry "failed to emit {entryName}: {repr error}"
-  artifact.write outputPath
-  logInfoAt stx s!"wrote {artifact.bytes.size} bytes to {outputPath}"
 
 @[command_elab firWasmEmit]
 def elabFirWasmEmit : CommandElab
@@ -98,6 +103,19 @@ def elabFirWasmEmitWith : CommandElab
           let (runtime, value) ← elabArgument runtime argument
           return (runtime, values.push value)
       writeArtifact stx entry output runtime args
+  | _ => throwUnsupportedSyntax
+
+@[command_elab firWasmEmitCase]
+def elabFirWasmEmitCase : CommandElab
+  | stx@`(#fir_wasm_emit_case $caseId:str to $output:str) => do
+      let some caseIdValue := caseId.raw.isStrLit? |
+        throwErrorAt caseId "expected a validation case ID"
+      let some validationCase := Fir.Validation.Corpus.findCase? caseIdValue |
+        throwErrorAt caseId "unknown validation case: {caseIdValue}"
+      writeCompiledArtifact stx caseId output s!"validation case {caseIdValue}" <|
+        compileValidationInvocation validationCase.id validationCase.entry
+          validationCase.argSchemas validationCase.args validationCase.resultSchema
+          validationCase.dependencies
   | _ => throwUnsupportedSyntax
 
 end Fir.Wasm.Emit.Source

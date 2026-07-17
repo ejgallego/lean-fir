@@ -70,6 +70,44 @@ def ModuleArtifact.withRuntimeInvocation (artifact : ModuleArtifact) (artifactNa
     formattedLcnf := artifact.formattedLcnf
     manifest }
 
+/-- Check that a backend-neutral validation result schema agrees with the emitted ABI lane. -/
+def validationSchemaAcceptsAbiKind : Fir.Validation.ValidationSchema → Fir.Wasm.AbiKind → Bool
+  | .usize, .usize => true
+  | .bits 8, .uint8 => true
+  | .bits 16, .uint16 => true
+  | .bits 32, .uint32 => true
+  | .bits 64, .uint64 => true
+  | .unit, kind
+  | .bool, kind
+  | .nat, kind
+  | .int, kind
+  | .string, kind
+  | .bytes, kind
+  | .seq _, kind
+  | .ctor .., kind => kind.isObjectLike
+  | _, _ => false
+
+/--
+Attach an invocation encoded from the validation protocol. This is the common
+boundary for corpus-driven emitters: schemas check both the source arguments
+and the emitted result lane, while validation datums construct the initial FIR
+runtime and semantic argument values.
+-/
+def ModuleArtifact.withValidationInvocation (artifact : ModuleArtifact)
+    (artifactName : String) (sourceEntry entry : Name)
+    (argSchemas : Array Fir.Validation.ValidationSchema)
+    (data : Array Fir.Validation.ValidationDatum)
+    (resultSchema : Fir.Validation.ValidationSchema) : Except CompileError Artifact := do
+  let function ← Manifest.entryFunction artifact.module entry |>.mapError .manifest
+  let resultKind ← Manifest.entryResultKind entry function |>.mapError .manifest
+  unless validationSchemaAcceptsAbiKind resultSchema resultKind do
+    throw (.manifest s!"result schema {repr resultSchema} does not match ABI kind {repr resultKind}")
+  let (runtime, args) ← Fir.Validation.Lcnf.encodeArgs argSchemas data |>.mapError .manifest
+  if runtime.heap.isEmpty then
+    artifact.withInvocation artifactName sourceEntry entry args
+  else
+    artifact.withRuntimeInvocation artifactName sourceEntry entry runtime args
+
 /--
 Compile a Lean declaration and attach one checked semantic invocation. The
 arguments affect only the manifest, never capture, lowering, or Wasm bytes.
@@ -86,6 +124,16 @@ def compileWithRuntime (entry : Name) (runtime : RuntimeState) (args : Array Val
   let result ← compileModule entry dependencies
   return result.bind fun artifact =>
     artifact.withRuntimeInvocation entry.toString entry entry runtime args
+
+/-- Compile a source declaration and attach one validation-protocol invocation. -/
+def compileValidationInvocation (artifactName : String) (entry : Name)
+    (argSchemas : Array Fir.Validation.ValidationSchema)
+    (data : Array Fir.Validation.ValidationDatum)
+    (resultSchema : Fir.Validation.ValidationSchema)
+    (dependencies : Array Name := #[]) : CoreM (Except CompileError Artifact) := do
+  let result ← compileModule entry dependencies
+  return result.bind fun artifact =>
+    artifact.withValidationInvocation artifactName entry entry argSchemas data resultSchema
 
 /-- Compile a zero-argument Lean declaration and record its closed invocation. -/
 def compileClosed (entry : Name) (dependencies : Array Name := #[]) :
