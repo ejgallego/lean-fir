@@ -586,6 +586,25 @@ therefore requires the planned typed-entry/runtime invariant; it should not be
 hidden by weakening the simulation or by silently restricting
 `SamePhaseCorrect`.
 
+`NonLockstep.Structural` now factors the fixture's reusable shape out of the
+example. A caller supplies the relation on code bodies; FIR lifts it through
+top-level declarations with identical ABIs, arbitrary-length ordered programs,
+join declarations, saved bind continuations, control states, and finally the
+whole machine. Pointwise program relatedness proves that every named lookup
+returns related declarations, and it relates all initial machine states
+without repeating entry plumbing. A concrete two-declaration regression pairs
+the transformed `main` with an unchanged `helper` and checks both lookup and
+arbitrary entry-state construction.
+
+The same module introduces `SamePhaseCorrectOn`, `InitialInvariantOn`, and
+`MachineRelatedWith`. Together they express the missing typed boundary without
+changing the existing unrestricted correctness contract: admissible entry
+arguments establish a relational machine invariant, the future non-lockstep
+proof preserves it, and the generic lifting theorem returns correctness for
+exactly those arguments. The next slice is to define the recursive
+`simpCase` code relation and prove its core-step closure using this structural
+machine relation.
+
 The remaining bounded work is:
 
 1. refactor FIR's opaque hygiene/binder traversals into transparent total

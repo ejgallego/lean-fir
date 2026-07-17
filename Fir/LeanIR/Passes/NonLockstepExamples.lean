@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.NonLockstep
+import Fir.LeanIR.Passes.Structural
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
 
@@ -11,6 +11,7 @@ open Fir.LeanIR
 open Fir.LeanIR.Impure
 open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Passes.NonLockstep
+open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCase
 
 /-!
@@ -39,6 +40,50 @@ def sourceProgram : ImpureProgram :=
 
 def targetProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code targetBody)] }
+
+def structuralMainDeclaration : LCNF.Decl .impure :=
+  decl `main #[] objType (.code sourceBody)
+
+def helperBody : LCNF.Code .impure :=
+  .unreach objType
+
+def structuralHelperDeclaration : LCNF.Decl .impure :=
+  decl `helper #[] objType (.code helperBody)
+
+def multiSourceProgram : ImpureProgram :=
+  { decls := #[
+      { structuralMainDeclaration with value := .code sourceBody },
+      { structuralHelperDeclaration with value := .code helperBody }] }
+
+def multiTargetProgram : ImpureProgram :=
+  { decls := #[
+      { structuralMainDeclaration with value := .code targetBody },
+      { structuralHelperDeclaration with value := .code helperBody }] }
+
+inductive FixtureCodeRel :
+    LCNF.Code .impure → LCNF.Code .impure → Prop where
+  | transformed : FixtureCodeRel sourceBody targetBody
+  | helper : FixtureCodeRel helperBody helperBody
+
+theorem multiProgramsRelated :
+    ProgramRelated FixtureCodeRel multiSourceProgram multiTargetProgram := by
+  simpa [multiSourceProgram, multiTargetProgram] using
+    two_code_declarations_related
+      (firstDeclaration := structuralMainDeclaration)
+      (secondDeclaration := structuralHelperDeclaration)
+      FixtureCodeRel.transformed FixtureCodeRel.helper
+
+theorem multiHelperLookupRelated :
+    OptionalRel (DeclRelated FixtureCodeRel)
+      (multiSourceProgram.findDecl? `helper)
+      (multiTargetProgram.findDecl? `helper) :=
+  multiProgramsRelated.findDecl? `helper
+
+theorem multiInitialStateRelated (entry : Name) (args : Array Value) :
+    MachineRelated FixtureCodeRel
+      (initialState multiSourceProgram entry args)
+      (initialState multiTargetProgram entry args) :=
+  initialState_related multiProgramsRelated
 
 def entryFrames (args : Array Value) : List Frame :=
   if args.isEmpty then [.cache `main] else [.apply args]
