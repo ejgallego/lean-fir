@@ -548,6 +548,26 @@ statement and the required public graph/equation interface. FIR retains the
 proved specification plus actual-pass regression without duplicating the
 effectful compiler or adding another axiom.
 
+The execution relation now also supports passes whose machines do not advance
+in lockstep. `NonLockstep.Reaches` existentially hides a finite target step
+count, and `StutteringSimulation` allows one source step to match zero or more
+target steps while preserving a user-chosen relation between machine states.
+Its soundness proof inducts over the source execution, and its composition law
+transports the first pass's matching path through the second pass. Two such
+simulations form a `StutteringBisimulation`, which proves equivalence of every
+terminating observation without requiring equal programs or equal step counts.
+`InitialStatesRelated` and `samePhaseCorrect_of_stuttering` isolate the remaining
+pass obligation: relate the two programs' entry states.
+
+`InternalPrefixOrEq` is the first genuinely non-lockstep regression. It relates
+a state to itself or to the state after one deterministic internal step. In the
+forward proof, that internal source step is matched by zero target steps; the
+reverse proof replays it. The selected-arm case rewrite instantiates this
+relation at a real `simpCase` boundary, proving the original case state and its
+chosen branch observationally equivalent. The next proof slice should replace
+this local one-step witness with a relation spanning the transformed program's
+recursive traversal and declarations.
+
 The remaining bounded work is:
 
 1. refactor FIR's opaque hygiene/binder traversals into transparent total
