@@ -18,12 +18,15 @@ run_cmd do
 run_cmd do
   let result ← liftCoreM <|
     compileClosed ``Fir.Validation.Corpus.Source.litNat
-  match result with
-  | .error (.lowering (.validation (.unsupportedCode name))) =>
-      unless name == ``Fir.Validation.Corpus.Source.litNat do
-        throwError "unexpected unsupported declaration: {name}"
-  | .error error => throwError "unexpected source literal failure: {repr error}"
-  | .ok _ => throwError "remove FIR-BUG-wasm-none-compiler-nat-literal-kind"
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "source Nat literal did not compile: {repr error}"
+  unless artifact.source.externalNames.isEmpty do
+    throwError "source Nat literal unexpectedly retained externals"
+  unless artifact.module.exports == #[``Fir.Validation.Corpus.Source.litNat] do
+    throwError "source Nat literal export mismatch: {repr artifact.module.exports}"
+  unless artifact.bytes.size > Fir.Wasm.Emit.header.size do
+    throwError "source Nat literal did not produce a complete Wasm module"
 
 run_cmd do
   let result ← liftCoreM <|

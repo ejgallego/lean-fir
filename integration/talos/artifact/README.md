@@ -78,11 +78,9 @@ for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` at their boundary values.
 The Node runner derives every physical argument from the manifest and
 normalizes signed WebAssembly `i32` results back to the declared unsigned
 source width before comparison.
-The source checks additionally reconstruct a Unicode string and a list
-containing a natural above the tagged-immediate range, then execute the latter
-through the semantic `getTag` import.
-
-Lean 4.32's compiler-produced small `Nat` literal currently exposes a shared
-supported-domain mismatch tracked by
-`FIR-BUG-wasm-none-compiler-nat-literal-kind`; the bridge rejects that program
-without rewriting its final-impure types.
+The source checks additionally execute Lean 4.32's compiler-produced small
+`Nat` literal, reconstruct a Unicode string and a list containing a natural
+above the tagged-immediate range, then execute the list classifier through the
+semantic `getTag` import. The natural-literal regression emits the captured
+`tagged` binding without rewriting its final-impure types and returns `42` in
+Node/V8.

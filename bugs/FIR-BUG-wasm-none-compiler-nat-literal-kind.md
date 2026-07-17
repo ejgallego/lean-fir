@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-compiler-nat-literal-kind
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -46,7 +46,10 @@ This is a Wasm-adapter domain mismatch, not evidence that Lean evaluates the lit
 
 ## Workaround
 
-The source-emission smoke test uses the compiler-produced closed `UInt64` literal. The bridge does not normalize the captured `Nat` program or weaken the frozen supported-domain check.
+No workaround remains. The supported-domain invariant now accepts the precise
+`tagged` representation emitted for a small compiler-produced `Nat`, while the
+broader `object` compatibility exception remains isolated to the lowerer and
+tracked by `FIR-BUG-wasm-none-object-nat-fixture`.
 
 ## Upstream tracking
 
@@ -54,4 +57,9 @@ none
 
 ## Resolution and regression
 
-unresolved
+`AbiKind.acceptsLiteralInvariant` now admits `tagged` or `tobject` for natural
+literals, and `acceptsLiteral_of_acceptsLiteralInvariant` proves that every
+invariant-accepted annotation is accepted by lowering. The regression in
+`Fir/Wasm/Emit/SourceExamples.lean` compiles the real Lean 4.32 declaration,
+and `integration/talos/artifact/check.sh` emits it reproducibly and executes it
+in Node/V8, where it returns the tagged natural `42`.

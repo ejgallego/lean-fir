@@ -102,9 +102,16 @@ default fallback and yields `abiDefaultCaseMain_export_correct`.
 one witness certifies fragment admission, lowering, adaptation, host
 resolution, export/function lookup, and the single-result ABI, while its
 common theorem turns the local `CodeWP` induction into total or partial
-correctness for the named export. All four fixtures use this API. The next W4
-step is a program-level induction that derives the remaining local `CodeWP`
-premise from supported source evaluation.
+correctness for the named export. `FirTalos/Correctness/Program.lean` completes
+W4's program-level induction for the certified call-free
+literal/constructor/projection/case fragment. Its syntax-directed simulation
+certificate derives the local `CodeWP`, a successful source evaluation, and a
+real FIR `ExecEvaluates` run; `SupportedExport.execCorrect_of_simulation`
+combines that run with fuel-free correctness of the generated named export.
+All four fixtures use this API without fixture-specific `CodeWP` recursion.
+W5 begins with scalar and `usize` projections, followed by the mutation,
+ownership, external-call, initialization, closure, and recursion slices listed
+in the plan.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

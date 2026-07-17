@@ -93,7 +93,7 @@ production heap layout.
   selection, the generated unreachable fallback, skipped defaults, recursive
   constructor alternatives, and the final Talos `if` explicitly through
   `CaseFallbackAdapted`, `CaseChainAdapted`, and `CasesAdapted`.
-- W4 semantic composition has started in
+- W4 semantic composition is factored in
   `FirTalos/Correctness/Semantics.lean`. `StateRelated` joins the retained
   source runtime, clear target-failure channels, the handle invariant, and
   compiler-resolved related locals. `CodeWP` combines that invariant with the
@@ -149,19 +149,23 @@ production heap layout.
   fallback; the generated `Bool.false` test misses and resumes that fallback,
   producing the premise-free `abiDefaultCaseMain_export_correct` theorem.
 
-All four representative exports are now closed.
+All four representative exports are now closed, and W4 is complete for the
+certified call-free literal/constructor/projection/case fragment.
 `FirTalos/Correctness/SupportedExport.lean` factors their repeated
 whole-pipeline packaging into one reusable witness and theorem, independently
 of fixture-specific checked layouts. A witness records `WasmSupported`, the
 actual `lowerSupported` result, source-function lookup, adaptation, resolved
 hosts, export/function lookup, and the single-result ABI. Given the local
-semantic `CodeWP` induction and an observation-policy fact, the common theorem
-yields total exported correctness; partial correctness is an immediate
-corollary. All four fixtures instantiate this API. The next W4 slice is the
-program-level semantic induction that produces the local `CodeWP` premise from
-supported source evaluation, starting with closed declarations in the current
-literal/constructor/projection/case fragment. The adapter still rejects
-initializers and closures.
+semantic certificate and an observation-policy fact, the common theorem yields
+both FIR `ExecEvaluates` and Talos `ExportTerminatesWith`; partial correctness
+is an immediate corollary. `FirTalos/Correctness/Program.lean` supplies the
+syntax-directed `CodeSimulation` induction, its `CodeWP` corollary, successful
+source evaluation, and the proof that this evaluation executes in the shared
+FIR interpreter. All four fixtures instantiate this API without their former
+fixture-specific `CodeWP` recursion. Target resource availability remains an
+explicit simulation premise because the finite opaque-handle table can be
+exhausted. The adapter still rejects initializers and closures; those are W5
+extensions rather than gaps in the initial theorem domain.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed
@@ -176,8 +180,8 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 
 | Date | Producer | Consumer | Status | Item |
 |---|---|---|---|---|
-| 2026-07-17 | A0 source emission | W4 ABI/validation proofs | action required | Rebase on `main` at or after `4841a09`, then resolve `FIR-BUG-wasm-none-compiler-nat-literal-kind`. Lean 4.32 emits the literal in `def litNat : Nat := 42` with local ABI kind `tagged`, but `AbiKind.acceptsLiteralInvariant` classifies every natural literal as `tobject`; the lowerer's existing `acceptsLiteral` relation already admits natural literals at `tagged`, `object`, and `tobject`. The fix and its invariant proof belong in the W4-owned ABI/validation contract, not in A0. |
-| 2026-07-17 | A0 source emission | W4 and integration owners | landed | `4841a09` adds `#fir_wasm_emit`, which captures an actual Lean 4.32 final-impure declaration and deterministically emits `.wasm`, `.wasm.json`, and `.wasm.lcnf`. The external-engine smoke test currently uses a closed `UInt64` declaration; the rejected compiler-produced `Nat` declaration remains an exact regression and is not normalized or silently accepted. |
+| 2026-07-17 | A0 source emission | W4 ABI/validation proofs | resolved | `FIR-BUG-wasm-none-compiler-nat-literal-kind` is fixed: the compiler invariant admits `tagged` or `tobject` natural literals, a theorem proves invariant acceptance implies lowering acceptance, and the captured Lean 4.32 `litNat` module emits reproducibly and returns `42` in Node/V8. The separate hand-built `object` compatibility exception was not folded into the compiler invariant. |
+| 2026-07-17 | A0 source emission | W4 and integration owners | landed | `4841a09` adds `#fir_wasm_emit`, which captures an actual Lean 4.32 final-impure declaration and deterministically emits `.wasm`, `.wasm.json`, and `.wasm.lcnf`. The original smoke test used a closed `UInt64` declaration; W4's invariant repair now also emits and executes the compiler-produced `Nat` declaration without normalizing its captured LCNF. |
 | 2026-07-17 | A0 parameterized source emission | W4 and integration owners | landed | Source capture/lowering now produces a reusable module artifact before a checked semantic invocation is attached. `#fir_wasm_emit` accepts range-checked integer and tagged argument syntax; the compiler-produced `idUSize : USize → USize` fixture carries its `usize` schema and argument through the manifest and returns `42` in V8. No shared ABI or supported-fragment contract changed. |
 | 2026-07-17 | A0 scalar source arguments | W4 and integration owners | ready | Compiler-produced identity declarations for `UInt8`, `UInt16`, `UInt32`, and `UInt64` now execute at maximum-width inputs in V8. Arguments come from the checked manifest, and target `i32` results are normalized to their declared unsigned source widths. No shared contract changed. |
 | 2026-07-17 | A0 heap-backed source arguments | W4 and integration owners | ready | Source manifests can now carry a checked `initialRuntime` heap, and `#fir_wasm_emit` accepts string literals by allocating them in that runtime. V8 reconstructs the heap and passes an opaque handle to a compiler-produced `String → UInt64` fixture. The full `idString : String → String` capture is intentionally deferred: Lean 4.32 emits `inc[ref] value; return value`, and ownership operations remain in the W4-owned supported-fragment lane. No shared contract changed. |
@@ -189,9 +193,9 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 Shared-contract changes in these A0 slices are the additive common
 `nat-list-nonempty` case in `09d3c06` and the scalar-Boolean observation
 boundary plus regression case in `f9cdeb2`. The runtime step semantics and
-`AbiKind` vocabulary are unchanged. Once W4 repairs and proves the
-natural-literal invariant, A0 should replace the rejection regression with a
-successful source-to-engine test and close the bug card.
+`AbiKind` vocabulary are unchanged. W4 has repaired and proved the
+natural-literal invariant; A0's former rejection regression is now a successful
+source-to-engine test and the bug card is fixed.
 A0 has now separated module generation from fixture invocation and covers all
 unsigned integer and `USize` parameter kinds with explicit ABI schemas. Its
 initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
@@ -466,20 +470,31 @@ literal-to-return instances, recursive constructor/projection instances, and
 path-sensitive constructor/default-case composition. Layer 5 is now factored
 through `SupportedExport`: the four generated fixtures share one checked
 lowering/adaptation/host/export package and one fuel-free exported-correctness
-theorem. The active proof obligation is to replace the fixture-specific local
-`CodeWP` scripts with a program-level induction driven by supported source
-evaluation.
+theorem. `FirTalos/Correctness/Program.lean` completes the program-level
+induction: one `CodeSimulation` certificate recursively composes direct lets,
+selected constructor/default cases, and returns; derives the local `CodeWP`;
+and derives `CodeEvaluates`. A separate soundness induction connects that
+proof-facing source relation to the repository's executable `ExecEvaluates`
+semantics. `SupportedExport.execCorrect_of_simulation` packages both the
+executable FIR run and fuel-free correctness of the named Talos export. The
+literal, constructor/projection, explicit-case, and default-case fixtures all
+derive their final results through this API rather than fixture-specific
+`CodeWP` recursion.
+
+W4 is complete for this initial theorem domain. The next semantic proof slices
+belong to W5.
 
 The initial theorem excludes closures, external declarations, recursion,
 ownership operations, and initialization. These exclusions must appear in an
 executable supported-fragment predicate, not remain comments.
 
-A suitable theorem shape is:
+A suitable theorem shape, now realized by
+`SupportedExport.execCorrect_of_simulation`, is:
 
 ```text
-source evaluation terminates with observation O
-  -> generated Talos execution TerminatesWith observation W
-  -> source/target observations are related
+syntax-directed simulation certificate
+  -> FIR ExecEvaluates observation O
+  /\ generated Talos export TerminatesWith an observation related to O
 ```
 
 For programs whose termination is not yet proved, use `PartiallyMeets` rather

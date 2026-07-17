@@ -14,6 +14,8 @@ end Fir.Wasm.Emit.SourceFixture
 
 #fir_wasm_emit Fir.Validation.Corpus.Source.maxUInt64 to "_build/source-uint64.wasm"
 
+#fir_wasm_emit Fir.Validation.Corpus.Source.litNat to "_build/source-nat.wasm"
+
 #fir_wasm_emit_case "usize-roundtrip"
   to "_build/source-usize-id.wasm"
 

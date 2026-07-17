@@ -114,10 +114,6 @@ def literalKind : LCNF.LitValue → AbiKind
   | .uint64 _ => .uint64
   | .usize _ => .usize
 
-/-- The invariant expected of compiler-produced final impure LCNF. -/
-def AbiKind.acceptsLiteralInvariant (kind : AbiKind) (literal : LCNF.LitValue) : Bool :=
-  (literalKind literal).refines kind
-
 def constructorKind (info : LCNF.CtorInfo) : AbiKind :=
   if info.size == 0 && info.usize == 0 && info.ssize == 0 then .tagged else .object
 
@@ -136,6 +132,31 @@ def AbiKind.acceptsLiteral (kind : AbiKind) (literal : LCNF.LitValue) : Bool :=
   | .nat _ => kind == .object || kind == .tagged || kind == .tobject
   | .str _ => kind == .object || kind == .tobject
   | literal => kind == literalKind literal
+
+/--
+The invariant expected of compiler-produced final impure LCNF. Small natural
+literals may receive Lean's precise `tagged` representation; otherwise a
+natural literal retains the representation-polymorphic `tobject` kind.
+-/
+def AbiKind.acceptsLiteralInvariant (kind : AbiKind)
+    (literal : LCNF.LitValue) : Bool :=
+  match literal with
+  | .nat _ => kind == .tagged || kind == .tobject
+  | literal => kind.acceptsLiteral literal
+
+/-- Every compiler-invariant literal annotation is accepted by lowering. -/
+theorem AbiKind.acceptsLiteral_of_acceptsLiteralInvariant
+    {kind : AbiKind} {literal : LCNF.LitValue}
+    (accepted : kind.acceptsLiteralInvariant literal = true) :
+    kind.acceptsLiteral literal = true := by
+  cases literal with
+  | nat =>
+      simp only [AbiKind.acceptsLiteralInvariant, AbiKind.acceptsLiteral,
+        Bool.or_eq_true] at accepted ⊢
+      rcases accepted with tagged | tobject
+      · exact .inl (.inr tagged)
+      · exact .inr tobject
+  | str | uint8 | uint16 | uint32 | uint64 | usize => exact accepted
 
 structure Signature where
   params : Array AbiKind

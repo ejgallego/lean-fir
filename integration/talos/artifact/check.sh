@@ -13,6 +13,7 @@ lake -d ../../.. build Fir.Wasm.Emit.SourceExamples
 lake -d ../../.. env lean FirWasmSourceExample.lean
 source_artifacts=(
   source-uint64
+  source-nat
   source-usize-id
   source-uint8-id
   source-uint16-id
@@ -41,13 +42,14 @@ node --input-type=module -e '
   import { SemanticHost, manifestValue } from "../../../scripts/wasm_semantic_host.mjs";
   const cases = [
     [process.argv[1], "uint64", [], 0xffffffffffffffffn],
-    [process.argv[2], "usize", ["usize"], 42n],
-    [process.argv[3], "uint8", ["uint8"], 0xffn],
-    [process.argv[4], "uint16", ["uint16"], 0xffffn],
-    [process.argv[5], "uint32", ["uint32"], 0xffffffffn],
-    [process.argv[6], "uint64", ["uint64"], 0xffffffffffffffffn],
-    [process.argv[7], "uint64", ["object"], 0xffffffffffffffffn, "hello α_world_β"],
-    [process.argv[8], "uint64", ["tobject"], 1n, undefined,
+    [process.argv[2], "tobject", [], 42n],
+    [process.argv[3], "usize", ["usize"], 42n],
+    [process.argv[4], "uint8", ["uint8"], 0xffn],
+    [process.argv[5], "uint16", ["uint16"], 0xffffn],
+    [process.argv[6], "uint32", ["uint32"], 0xffffffffn],
+    [process.argv[7], "uint64", ["uint64"], 0xffffffffffffffffn],
+    [process.argv[8], "uint64", ["object"], 0xffffffffffffffffn, "hello α_world_β"],
+    [process.argv[9], "uint64", ["tobject"], 1n, undefined,
       [0n, 18446744073709551616n, 42n]],
   ];
   function decodeNat(host, value) {
@@ -93,11 +95,13 @@ node --input-type=module -e '
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     const result = instance.exports[manifest.entry](...args);
     const decoded = host.decode(manifest.result, result);
-    assert.equal(decoded.value, expected);
+    const actual = decoded.kind === "tagged" ? decoded.payload : decoded.value;
+    assert.equal(actual, expected);
     console.log(`PASS source ${manifest.entry}`);
   }
 ' \
   _build/source-uint64.wasm \
+  _build/source-nat.wasm \
   _build/source-usize-id.wasm \
   _build/source-uint8-id.wasm \
   _build/source-uint16-id.wasm \
