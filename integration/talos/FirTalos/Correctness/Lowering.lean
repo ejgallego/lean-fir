@@ -26,6 +26,20 @@ def StepResultRelated (sourceRuntime : RuntimeState) (sourceValue : Value)
     compileLiteral result (.str value) =
       [.call (.runtime (.literal (.str value) result))] := rfl
 
+@[simp] theorem checkedAbiKind_tagged :
+    checkedAbiKind Lean.Compiler.LCNF.ImpureType.tagged = .ok .tagged := by
+  have taggedNotObject :
+      (Lean.Compiler.LCNF.ImpureType.tagged ==
+        Lean.Compiler.LCNF.ImpureType.object) = false := by
+    native_decide
+  have taggedSelf :
+      (Lean.Compiler.LCNF.ImpureType.tagged ==
+        Lean.Compiler.LCNF.ImpureType.tagged) = true := by
+    native_decide
+  simp [checkedAbiKind, Fir.Wasm.abiKind, Fir.Wasm.abiKind?,
+    taggedNotObject, taggedSelf]
+  rfl
+
 @[simp] theorem checkedAbiKind_object :
     checkedAbiKind Lean.Compiler.LCNF.ImpureType.object = .ok .object := by
   have objectSelf :

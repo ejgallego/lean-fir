@@ -138,11 +138,17 @@ production heap layout.
   initial and returned source runtimes, so the premise-free theorem retains
   the constructor heap created during execution instead of assuming the
   source runtime is unchanged.
+- `FirTalos/Correctness/FunctionCaseExample.lean` now closes the explicit
+  constructor-case fixture. It follows the generated nested tag tests: the
+  `Bool.false` arm is structurally adapted and missed, the `Bool.true` arm is
+  selected, and only that arm receives the path-sensitive semantic proof.
+  The final `abiCaseMain_export_correct` theorem covers the real four-import,
+  two-local adapted export without runner fuel or unselected-arm execution.
 
-The next W4 slice extends the exported theorem from the now-closed literal
-and constructor/projection cases across the supported case fixtures, then
-factors their repeated module/export packaging into the supported-fragment
-induction. The adapter still rejects initializers and closures.
+The next W4 slice closes the remaining default-case fixture, then factors the
+repeated module/export packaging of all four representatives into the
+supported-fragment induction. The adapter still rejects initializers and
+closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

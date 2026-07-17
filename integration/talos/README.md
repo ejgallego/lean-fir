@@ -91,7 +91,11 @@ one: it composes the actual two-literal, pair-allocation, projection, and
 return body and proves `abiCtorProjectionMain_export_correct`. This fixture
 also generalizes the exported-return bridge to distinguish the initial source
 runtime from the returned runtime, which is required once execution allocates
-a heap object. Constructor-case fixtures remain next.
+a heap object. `FirTalos/Correctness/FunctionCaseExample.lean` follows the
+actual nested `Bool.false`/`Bool.true` tests and proves the premise-free
+`abiCaseMain_export_correct`; its path-sensitive proof executes only the true
+arm while retaining structural lowering evidence for the missed arm. The
+default-case fixture remains next.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
