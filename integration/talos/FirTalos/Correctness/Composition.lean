@@ -63,6 +63,37 @@ theorem wp_localGets
       apply ih (tail := value :: tail)
       simpa [List.reverse_cons, List.append_assoc] using continued
 
+/-- Complete generated no-result effect prefix: load its arguments, execute
+the semantic host call, and resume with the original operand tail. -/
+theorem wp_effect_localGets
+    {module : Wasm.Module} {env : Wasm.HostEnv Fir.Wasm.RuntimeHost}
+    {spec : Wasm.HostSpec Fir.Wasm.RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {operation : HostOperation} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Fir.Wasm.RuntimeHost}
+    {initial final : Wasm.Store Fir.Wasm.RuntimeHost}
+    {locals : Wasm.Locals} {indices : List Nat}
+    {physicalArgs tail : List Wasm.Value}
+    (hGets :
+      List.Forall₂ (fun index value => locals.get index = some value)
+        indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract operation))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 0)
+    (step : hostStep operation initial physicalArgs = .Return [] final)
+    (continued :
+      Wasm.wp module rest Q final { locals with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++ .call id :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_host_effect_call hImp hSat hi hContract hParams hResults
+  · rfl
+  · exact step
+  · exact continued
+
 /--
 Complete generated constructor `let` sequence: load every field local, call
 the semantic constructor host with the reversed physical stack prefix, and
@@ -881,5 +912,121 @@ theorem codeAdapted_let
   · exact Fir.Wasm.compileCode_let valueCompiled restCompiled
   · simpa [List.append_assoc] using
       instructions_let_sequence valueAdapted resultFound restAdapted
+
+/-- Structural compiler/adapter rule for object-field mutation. -/
+theorem codeAdapted_oset
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId} {index : Nat}
+    {arg : Lean.Compiler.LCNF.Arg .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {fieldCode : List Fir.Wasm.Instruction} {targetField targetRest : Wasm.Program}
+    {objectKind fieldKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (fieldCompiled : Fir.Wasm.compileArg context arg = .ok (fieldCode, fieldKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (fieldAdapted :
+      instructions sourceModule sourceFunction labels fieldCode = .ok targetField)
+    (callFound : callIndex? sourceModule
+      (.runtime (.objectSet index fieldKind)) = some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.oset objectId index arg continuation)
+      (.localGet objectIndex :: targetField ++ .call callIndex :: targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨.localGet objectId :: fieldCode ++
+      [.call (.runtime (.objectSet index fieldKind))] ++ restCode,
+    Fir.Wasm.compileCode_oset objectCompiled fieldCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, instructions_append, objectFound,
+    fieldAdapted, callFound, restAdapted, List.append_assoc]
+  rfl
+
+theorem codeAdapted_uset
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind fieldKind : Fir.Wasm.AbiKind} {objectIndex fieldIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (fieldFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) fieldId =
+      some fieldIndex)
+    (callFound : callIndex? sourceModule (.runtime (.usizeSet index)) =
+      some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.uset objectId index fieldId continuation)
+      ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId, .localGet fieldId,
+      .call (.runtime (.usizeSet index))] ++ restCode,
+    Fir.Wasm.compileCode_uset objectCompiled fieldCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, fieldFound, callFound, restAdapted]
+
+theorem codeAdapted_sset
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId fieldId : Lean.FVarId}
+    {width offset : Nat} {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind fieldKind : Fir.Wasm.AbiKind} {objectIndex fieldIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (fieldFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) fieldId =
+      some fieldIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.scalarSet width offset fieldKind)) = some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.sset objectId width offset fieldId type continuation)
+      ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId, .localGet fieldId,
+      .call (.runtime (.scalarSet width offset fieldKind))] ++ restCode,
+    Fir.Wasm.compileCode_sset objectCompiled fieldCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, fieldFound, callFound, restAdapted]
+
+theorem codeAdapted_setTag
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.setTag tag)) = some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.setTag objectId tag continuation)
+      ([.localGet objectIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId, .call (.runtime (.setTag tag))] ++ restCode,
+    Fir.Wasm.compileCode_setTag objectCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, callFound, restAdapted]
 
 end FirTalos.Correctness

@@ -430,6 +430,98 @@ theorem compileCode_return
   rw [compileCodeCore.eq_def]
   rfl
 
+theorem compileCode_oset
+    {context : Context} {objectId : FVarId} {index : Nat}
+    {arg : LCNF.Arg .impure} {continuation : LCNF.Code .impure}
+    {objectInstruction : Instruction} {objectKind fieldKind : AbiKind}
+    {fieldCode restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (fieldCompiled : compileArg context arg = .ok (fieldCode, fieldKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.oset objectId index arg continuation) =
+      .ok (objectInstruction :: fieldCode ++
+        [.call (.runtime (.objectSet index fieldKind))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [objectCompiled, fieldCompiled, restCore]
+  change some (Except.ok (objectInstruction :: fieldCode ++
+    [.call (.runtime (.objectSet index fieldKind))] ++ restCode)) = _
+  rfl
+
+theorem compileCode_uset
+    {context : Context} {objectId fieldId : FVarId} {index : Nat}
+    {continuation : LCNF.Code .impure}
+    {objectInstruction fieldInstruction : Instruction}
+    {objectKind fieldKind : AbiKind} {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (fieldCompiled :
+      getLocal context fieldId = .ok (fieldInstruction, fieldKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.uset objectId index fieldId continuation) =
+      .ok ([objectInstruction, fieldInstruction,
+        .call (.runtime (.usizeSet index))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [objectCompiled, fieldCompiled, restCore]
+  change some (Except.ok ([objectInstruction, fieldInstruction,
+    .call (.runtime (.usizeSet index))] ++ restCode)) = _
+  rfl
+
+theorem compileCode_sset
+    {context : Context} {objectId fieldId : FVarId} {width offset : Nat}
+    {type : Expr} {continuation : LCNF.Code .impure}
+    {objectInstruction fieldInstruction : Instruction}
+    {objectKind fieldKind : AbiKind} {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (fieldCompiled :
+      getLocal context fieldId = .ok (fieldInstruction, fieldKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.sset objectId width offset fieldId type continuation) =
+      .ok ([objectInstruction, fieldInstruction,
+        .call (.runtime (.scalarSet width offset fieldKind))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [objectCompiled, fieldCompiled, restCore]
+  change some (Except.ok ([objectInstruction, fieldInstruction,
+    .call (.runtime (.scalarSet width offset fieldKind))] ++ restCode)) = _
+  rfl
+
+theorem compileCode_setTag
+    {context : Context} {objectId : FVarId} {tag : Nat}
+    {continuation : LCNF.Code .impure}
+    {objectInstruction : Instruction} {objectKind : AbiKind}
+    {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.setTag objectId tag continuation) =
+      .ok ([objectInstruction, .call (.runtime (.setTag tag))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [objectCompiled, restCore]
+  change some (Except.ok ([objectInstruction,
+    .call (.runtime (.setTag tag))] ++ restCode)) = _
+  rfl
+
 def compileCaseChain (context : Context) (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) :=

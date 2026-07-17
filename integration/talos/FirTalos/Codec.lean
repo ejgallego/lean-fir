@@ -89,6 +89,10 @@ def encodeResults (table : HandleTable) (kinds : Array AbiKind) (values : Array 
     decodeArgs table #[] [] = .ok #[] := by
   rfl
 
+@[simp] theorem encodeResults_empty (table : HandleTable) :
+    encodeResults table #[] #[] = .ok (table, []) := by
+  rfl
+
 theorem encodeResults_handle_singleton_of_encode
     {before after : HandleTable} {kind : AbiKind} {value : Value} {handle : Handle}
     (usesHandle : kind.usesHandle = true)

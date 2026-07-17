@@ -530,10 +530,9 @@ The executable supported gate accepts `uproj` only at `USize` and accepts
 runtime. Float projection remains tracked by
 `FIR-BUG-wasm-none-float-runtime-gap`. Regressions cover a successful
 compiler-shaped USize projection, exact scalar missing-field agreement, and a
-successful pre-populated UInt32 scalar host projection. A closed successful
-compiler-shaped scalar differential fixture will arrive with W5.3, because
-constructor allocation reserves scalar storage but `sset` initializes its
-typed value.
+successful pre-populated UInt32 scalar host projection. W5.3 now supplies the
+closed successful compiler-shaped scalar fixture: constructor allocation
+reserves scalar storage and `sset` initializes its typed value before `sproj`.
 
 W5.2 is complete. Boxing reconstructs the exact canonical impure integer or
 `USize` type from the ABI kind, so large heap boxes retain the same observable
@@ -551,6 +550,23 @@ scalar case discriminants continue through `getTag`. This resolves
 small tagged and maximum-width heap boxing, round-trip unboxing, reachable
 boxed heap evidence, and both tagged/shared and unique-heap `isShared`
 results. Floating-point boxing remains gated by the shared runtime gap.
+
+W5.3 is complete. `objectSet`, `usizeSet`, `scalarSet`, and `setTag` resolve to
+semantic host operations, mutate the same FIR runtime state as the source
+interpreter, return no physical values, and preserve the opaque-handle table.
+The supported gate requires an exact heap-object lane for mutation targets,
+checks object-field/refined scalar kinds, and verifies that the `sset` type
+annotation agrees with the stored scalar lane.
+
+The proof stack adds transparent recursive-compiler equations, exact host-step
+and host-contract simulations, compiler/adapter composition rules, and a
+no-result stack transformer. `SourceEffectResult`, `EffectStepSimulates`, and
+`CodeSimulation.effect` extend the shared program induction without encoding
+mutation as a fake `let`; operation-specific rules cover all four effects.
+Differential regressions exercise a compiler-shaped layout containing object,
+`USize`, and UInt64 fields, a projected object-field overwrite, and tag
+mutation followed by case selection. No semantic discrepancy or new bug card
+was found in this slice.
 
 ### A0: emit the first host-backed Wasm artifact
 

@@ -506,6 +506,102 @@ theorem isShared_host_simulates
   · exact ⟨rfl, decodeValue_uint8 initial.host.handles shared⟩
   · exact invariant
 
+/-- Object-field mutation changes only the semantic runtime. Existing handles
+continue to denote the same object references. -/
+theorem objectSet_host_simulates
+    (initial : Wasm.Store RuntimeHost) (index : Nat) (fieldKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceField : Value)
+    (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.object, fieldKind] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setObjectField initial.host.runtime sourceObject index sourceField =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.objectSet index fieldKind) initial physicalArgs =
+        .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_objectSet_of_decode initial index fieldKind physicalArgs
+    sourceObject sourceField sourceRuntime decodedArgs mutated
+
+theorem usizeSet_host_simulates
+    (initial : Wasm.Store RuntimeHost) (index : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceField : Value)
+    (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.object, .usize] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setUSizeField initial.host.runtime sourceObject index sourceField =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.usizeSet index) initial physicalArgs = .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_usizeSet_of_decode initial index physicalArgs sourceObject
+    sourceField sourceRuntime decodedArgs mutated
+
+theorem scalarSet_host_simulates
+    (initial : Wasm.Store RuntimeHost) (width offset : Nat)
+    (fieldKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (sourceObject sourceField : Value) (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.object, fieldKind] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setScalarField initial.host.runtime sourceObject width offset sourceField =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.scalarSet width offset fieldKind) initial physicalArgs =
+        .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_scalarSet_of_decode initial width offset fieldKind physicalArgs
+    sourceObject sourceField sourceRuntime decodedArgs mutated
+
+theorem setTag_host_simulates
+    (initial : Wasm.Store RuntimeHost) (tag : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.object] physicalArgs =
+      .ok #[sourceObject])
+    (mutated : Fir.LeanIR.Impure.setTag initial.host.runtime sourceObject tag =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.setTag tag) initial physicalArgs = .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_setTag_of_decode initial tag physicalArgs sourceObject
+    sourceRuntime decodedArgs mutated
+
 /-- Constructor tag lookup preserves the source tag modulo the checked i32 lane. -/
 theorem getTag_host_simulates
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
@@ -597,6 +693,28 @@ theorem wp_host_call_on_stack_of_return
     simp
   · exact step
   · simpa [hStack, hParams] using continued
+
+/-- A successful no-result semantic host call consumes its arguments, updates
+the host state, and resumes with the untouched operand tail. -/
+theorem wp_host_effect_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {operation : HostOperation} {rest : Wasm.Program}
+    {Q : Wasm.Assertion RuntimeHost} {initial final : Wasm.Store RuntimeHost}
+    {locals : Wasm.Locals} {physicalArgs tail : List Wasm.Value}
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract operation))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 0)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (step : hostStep operation initial physicalArgs = .Return [] final)
+    (continued :
+      Wasm.wp module rest Q final { locals with values := tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return hImp hSat hi hContract hParams hStack step
+  simpa [hResults] using continued
 
 /--
 Instruction-level lifting for a natural-literal import. The premise about the

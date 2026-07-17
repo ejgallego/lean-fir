@@ -294,6 +294,40 @@ def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt falseInfo
           (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u))]))] }
 
+def abiMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 1))) <|
+      .let (letDecl y tobjectType (.lit (.nat 2))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl u usizeType (.lit (.usize 55))) <|
+      .uset p 0 u <|
+      .let (letDecl s u64Type (.lit (.uint64 66))) <|
+      .sset p 1 0 s u64Type <|
+      .oset p 0 (.fvar y) <|
+      .setTag p 4 <|
+      .let (letDecl r u64Type (.sproj 1 0 p)) <|
+      .return r)] }
+
+def abiObjectMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 1))) <|
+      .let (letDecl y tobjectType (.lit (.nat 88))) <|
+      .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .oset p 0 (.fvar y) <|
+      .let (letDecl r tobjectType (.oproj 0 p)) <|
+      .return r)] }
+
+def abiTagMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .setTag p 9 <|
+      .cases (.mk `Changed tobjectType p #[
+        .ctorAlt changedTagInfo
+          (.let (letDecl r tobjectType (.lit (.nat 99))) (.return r)),
+        .default
+          (.let (letDecl u tobjectType (.lit (.nat 0))) (.return u))]))] }
+
 def oversizedTagInfo : LCNF.CtorInfo :=
   { name := `Oversized.tag, cidx := UInt32.size, size := 1, usize := 0, ssize := 0 }
 
@@ -333,6 +367,9 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
 #guard !supportedProgram mutationProgram
+#guard supportedProgram abiMutationProgram
+#guard supportedProgram abiObjectMutationProgram
+#guard supportedProgram abiTagMutationProgram
 #guard !supportedProgram externalProgram
 
 #guard match lowerSupported abiCaseProgram with

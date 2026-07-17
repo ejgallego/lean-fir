@@ -7,9 +7,9 @@ open Lean.Compiler
 
 /--
 The proof-oriented backend fragment: literals, erased values, constructors,
-object/usize/integer-scalar projections, constructor cases, returns, and
-unreachable code. Calls, joins, mutation, ownership operations, reuse,
-initializers-as-effects, and externals are deliberate later gates.
+object/usize/integer-scalar projections, boxing, object mutation, constructor
+cases, returns, and unreachable code. Calls, joins, ownership operations,
+reuse, initializers-as-effects, and externals are deliberate later gates.
 -/
 def supportedLetValue : LCNF.LetValue .impure → Bool
   | .lit _ | .erased | .ctor _ _ | .oproj _ _ => true
@@ -137,8 +137,26 @@ partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind
       | _, _ => false
   | .unreach type =>
       abiTypeKnown type && resultKindRefines (abiValueKind? type) expectedResult
-  | .jp .. | .jmp .. | .oset .. | .uset .. | .sset .. | .setTag ..
-  | .inc .. | .dec .. | .del .. => false
+  | .oset objectId _ arg continuation =>
+      match findLocalKind? locals objectId, supportedArgKind? locals arg with
+      | some .object, some fieldKind =>
+          fieldKind.isObjectField && supportedCode locals expectedResult continuation
+      | _, _ => false
+  | .uset objectId _ fieldId continuation =>
+      findLocalKind? locals objectId == some .object &&
+        findLocalKind? locals fieldId == some .usize &&
+        supportedCode locals expectedResult continuation
+  | .sset objectId _ _ fieldId type continuation =>
+      match findLocalKind? locals objectId, findLocalKind? locals fieldId,
+          abiValueKind? type with
+      | some .object, some fieldKind, some annotationKind =>
+          fieldKind == annotationKind && supportedScalarProjectionKind fieldKind &&
+            supportedCode locals expectedResult continuation
+      | _, _, _ => false
+  | .setTag objectId _ continuation =>
+      findLocalKind? locals objectId == some .object &&
+        supportedCode locals expectedResult continuation
+  | .jp .. | .jmp .. | .inc .. | .dec .. | .del .. => false
 
 partial def supportedAlt (locals : LocalKinds) (expectedResult : Option AbiKind) :
     LCNF.Alt .impure → Bool

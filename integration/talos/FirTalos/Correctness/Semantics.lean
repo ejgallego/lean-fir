@@ -111,6 +111,24 @@ def SourceLetResult (context : Fir.Wasm.Context) (sourceRuntime : RuntimeState)
     runtime := sourceRuntime }
   evalLetValue state decl = .ok (nextRuntime, .value sourceValue)
 
+/-- One successful non-binding source instruction step. Quantifying over the
+external implementation records that admitted mutation and ownership nodes are
+internal runtime effects, not external calls. -/
+def SourceEffectResult (context : Fir.Wasm.Context)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (code continuation : Lean.Compiler.LCNF.Code .impure) : Prop :=
+  ∀ externals,
+    executeStep externals {
+        program := context.program
+        control := .code code
+        env := sourceEnv
+        runtime := sourceRuntime } =
+      .next {
+        program := context.program
+        control := .code continuation
+        env := sourceEnv
+        runtime := nextRuntime }
+
 /-- Target store after one successful semantic host operation. -/
 def successfulHostStore (initial : Wasm.Store RuntimeHost)
     (runtime : RuntimeState) (handles : HandleTable) : Wasm.Store RuntimeHost :=
@@ -144,6 +162,28 @@ def LetStepSimulates (context : Fir.Wasm.Context)
       Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
       Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
         targetStore { targetLocals with values := tail } hostEnv
+
+/-- Semantic interface for one generated no-result effect prefix. It packages
+the real compiler/adapter witness, the exact source step, preservation of the
+state relation, and a continuation-polymorphic Talos WP transformer. -/
+def EffectStepSimulates (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (code continuation : Lean.Compiler.LCNF.Code .impure)
+    (target targetRest : Wasm.Program)
+    (targetStore nextStore : Wasm.Store RuntimeHost)
+    (targetLocals : Wasm.Locals) : Prop :=
+  SourceEffectResult context sourceRuntime nextRuntime sourceEnv code continuation ∧
+    CodeAdapted context sourceModule sourceFunction labels code target ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
+    StateRelated sourceFunction nextRuntime sourceEnv nextStore targetLocals ∧
+    ∀ (Q : Wasm.Assertion RuntimeHost) (tail : List Wasm.Value),
+      Wasm.wp module targetRest Q nextStore
+          { targetLocals with values := tail } hostEnv →
+        Wasm.wp module target Q targetStore
+          { targetLocals with values := tail } hostEnv
 
 /-- Resolve one related source binding at an already known adapter slot/kind. -/
 theorem StateRelated.resolve
@@ -1310,6 +1350,272 @@ theorem letStepSimulates_isShared
     simpa [successfulHostStore] using
       wp_isShared_let objectHandle sourceObject shared tail hObject hImp hSat hi
         hContract hParams hResults decodedObject evaluated targetSet continued
+
+/-- USize-field mutation instance of the reusable no-result effect boundary. -/
+theorem effectStepSimulates_usizeSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {objectHandle : Handle} {fieldValue : UInt64}
+    {sourceObject : Value} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize fieldValue))
+    (mutated : setUSizeField initial.host.runtime sourceObject index
+      (.usize fieldValue) = .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, .usize))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (callFound : callIndex? sourceModule (.runtime (.usizeSet index)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hField : locals.get fieldIndex = some (.i64 fieldValue))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.usizeSet index)))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.object, .usize]
+      [.i32 objectHandle, .i64 fieldValue] =
+        .ok #[sourceObject, .usize fieldValue]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation) continuation
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  refine ⟨?_, ?_, initialRelated, ?_, ?_⟩
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, fieldLookup, mutated]
+  · exact codeAdapted_uset objectCompiled fieldCompiled objectFound fieldFound
+      callFound continuationAdapted
+  · exact ⟨rfl, rfl, rfl, initialRelated.2.2.2.1,
+      initialRelated.2.2.2.2⟩
+  · intro Q tail continued
+    simpa [successfulHostStore] using
+      wp_effect_localGets
+        (indices := [objectIndex, fieldIndex])
+        (physicalArgs := [.i32 objectHandle, .i64 fieldValue])
+        (operation := HostOperation.usizeSet index) (tail := tail)
+        (.cons hObject (.cons hField .nil)) hImp hSat hi hContract hParams
+        hResults
+        (hostStep_usizeSet_of_decode initial index
+          [.i32 objectHandle, .i64 fieldValue] sourceObject (.usize fieldValue)
+          sourceRuntime decoded mutated)
+        continued
+
+/-- Integer-scalar field mutation instance of the reusable effect boundary. -/
+theorem effectStepSimulates_scalarSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {width offset : Nat} {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {objectHandle : Handle}
+    {fieldKind : AbiKind} {physicalField : Wasm.Value}
+    {sourceObject sourceField : Value} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok sourceField)
+    (mutated : setScalarField initial.host.runtime sourceObject width offset sourceField =
+      .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.scalarSet width offset fieldKind)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hField : locals.get fieldIndex = some physicalField)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.scalarSet width offset fieldKind)))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.object, fieldKind]
+      [.i32 objectHandle, physicalField] = .ok #[sourceObject, sourceField]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.sset objectId width offset fieldId type continuation) continuation
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  refine ⟨?_, ?_, initialRelated, ?_, ?_⟩
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, fieldLookup, mutated]
+  · exact codeAdapted_sset objectCompiled fieldCompiled objectFound fieldFound
+      callFound continuationAdapted
+  · exact ⟨rfl, rfl, rfl, initialRelated.2.2.2.1,
+      initialRelated.2.2.2.2⟩
+  · intro Q tail continued
+    simpa [successfulHostStore] using
+      wp_effect_localGets
+        (indices := [objectIndex, fieldIndex])
+        (physicalArgs := [.i32 objectHandle, physicalField])
+        (operation := HostOperation.scalarSet width offset fieldKind) (tail := tail)
+        (.cons hObject (.cons hField .nil)) hImp hSat hi hContract hParams
+        hResults
+        (hostStep_scalarSet_of_decode initial width offset fieldKind
+          [.i32 objectHandle, physicalField] sourceObject sourceField sourceRuntime
+          decoded mutated)
+        continued
+
+/-- Constructor-tag mutation instance of the reusable effect boundary. -/
+theorem effectStepSimulates_setTag
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex : Nat} {objectHandle : Handle} {sourceObject : Value}
+    {sourceRuntime : RuntimeState} {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (mutated : Fir.LeanIR.Impure.setTag initial.host.runtime sourceObject tag =
+      .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.setTag tag)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.setTag tag)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.object] [.i32 objectHandle] =
+      .ok #[sourceObject]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.setTag objectId tag continuation) continuation
+      ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  refine ⟨?_, ?_, initialRelated, ?_, ?_⟩
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, mutated]
+  · exact codeAdapted_setTag objectCompiled objectFound callFound
+      continuationAdapted
+  · exact ⟨rfl, rfl, rfl, initialRelated.2.2.2.1,
+      initialRelated.2.2.2.2⟩
+  · intro Q tail continued
+    simpa [successfulHostStore] using
+      wp_effect_localGets
+        (indices := [objectIndex]) (physicalArgs := [.i32 objectHandle])
+        (operation := HostOperation.setTag tag) (tail := tail)
+        (.cons hObject .nil) hImp hSat hi hContract hParams hResults
+        (hostStep_setTag_of_decode initial tag [.i32 objectHandle] sourceObject
+          sourceRuntime decoded mutated)
+        continued
+
+/-- FVar object-field mutation instance of the reusable effect boundary. -/
+theorem effectStepSimulates_objectSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {objectHandle : Handle}
+    {fieldKind : AbiKind} {physicalField : Wasm.Value}
+    {sourceObject sourceField : Value} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok sourceField)
+    (mutated : setObjectField initial.host.runtime sourceObject index sourceField =
+      .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.compileArg context (.fvar fieldId) =
+      .ok ([.localGet fieldId], fieldKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.objectSet index fieldKind)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hField : locals.get fieldIndex = some physicalField)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.objectSet index fieldKind)))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.object, fieldKind]
+      [.i32 objectHandle, physicalField] = .ok #[sourceObject, sourceField]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation) continuation
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  refine ⟨?_, ?_, initialRelated, ?_, ?_⟩
+  · intro externals
+    change evalArg sourceEnv (.fvar fieldId) = .ok sourceField at fieldLookup
+    simp [executeStep, coreStep, objectLookup, fieldLookup, mutated]
+  · apply codeAdapted_oset (targetField := [.localGet fieldIndex])
+      objectCompiled fieldCompiled objectFound
+    · apply instructions_localGets (fvarIds := [fieldId])
+        (indices := [fieldIndex])
+      exact .cons (by simpa [functionBindings] using fieldFound) .nil
+    · exact callFound
+    · exact continuationAdapted
+  · exact ⟨rfl, rfl, rfl, initialRelated.2.2.2.1,
+      initialRelated.2.2.2.2⟩
+  · intro Q tail continued
+    simpa [successfulHostStore] using
+      wp_effect_localGets
+        (indices := [objectIndex, fieldIndex])
+        (physicalArgs := [.i32 objectHandle, physicalField])
+        (operation := HostOperation.objectSet index fieldKind) (tail := tail)
+        (.cons hObject (.cons hField .nil)) hImp hSat hi hContract hParams
+        hResults
+        (hostStep_objectSet_of_decode initial index fieldKind
+          [.i32 objectHandle, physicalField] sourceObject sourceField sourceRuntime
+          decoded mutated)
+        continued
 
 /-- The empty constructor-test suffix executes its already adapted fallback. -/
 theorem caseChainWP_nil

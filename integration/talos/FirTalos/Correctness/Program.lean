@@ -44,6 +44,14 @@ inductive CodeEvaluates (context : Fir.Wasm.Context) :
           resultRuntime resultValue) :
       CodeEvaluates context sourceRuntime sourceEnv (.cases cases)
         resultRuntime resultValue
+  | effect
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        CodeEvaluates context nextRuntime sourceEnv continuation
+          resultRuntime resultValue) :
+      CodeEvaluates context sourceRuntime sourceEnv code resultRuntime resultValue
 
 /-- Canonical executable-interpreter state for a W4 source-code node. -/
 def sourceCodeState (context : Fir.Wasm.Context) (runtime : RuntimeState)
@@ -146,6 +154,11 @@ theorem CodeEvaluates.execEvaluates
         .step (executeStep_source_cases externals context _ _ _ _ sourceStep)
           steps,
         done⟩
+  | effect sourceStep _ ih =>
+      rcases ih with ⟨count, final, steps, done⟩
+      exact ⟨count + 1, final,
+        .step (by simpa [sourceCodeState] using sourceStep externals) steps,
+        done⟩
 
 /--
 The case-specific W4 boundary. It records the source-selected branch and a
@@ -234,6 +247,18 @@ inductive CodeSimulation
       CodeSimulation context sourceModule sourceFunction labels module hostEnv
         sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals
         resultRuntime resultValue resultKind
+  | effect
+      (step :
+        EffectStepSimulates context sourceModule sourceFunction labels module
+          hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+          targetRest targetStore nextStore targetLocals)
+      (continued :
+        CodeSimulation context sourceModule sourceFunction labels module hostEnv
+          nextRuntime sourceEnv continuation targetRest nextStore targetLocals
+          resultRuntime resultValue resultKind) :
+      CodeSimulation context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals
+        resultRuntime resultValue resultKind
 
 /-- The shared program-level induction produces the local semantic judgment. -/
 theorem CodeSimulation.toCodeWP
@@ -260,6 +285,9 @@ theorem CodeSimulation.toCodeWP
       exact codeWP_let valueCompiled valueAdapted resultFound step ih
   | caseOf step continued ih =>
       exact step.2 ih
+  | effect step continued ih =>
+      exact ⟨step.2.1, step.2.2.1,
+        step.2.2.2.2 _ [] ih.2.2⟩
 
 /-- The same induction also yields successful source evaluation. -/
 theorem CodeSimulation.sourceEvaluates
@@ -280,6 +308,7 @@ theorem CodeSimulation.sourceEvaluates
   | ret _ _ _ sourceLookup _ => exact .ret sourceLookup
   | letValue _ _ _ step _ ih => exact .letValue step.1 ih
   | caseOf step _ ih => exact .caseOf step.1 ih
+  | effect step _ ih => exact .effect step.1 ih
 
 /-- A simulation certificate also yields an executable source run. -/
 theorem CodeSimulation.execEvaluates

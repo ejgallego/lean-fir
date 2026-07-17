@@ -19,6 +19,10 @@ inductive HostOperation where
   | box (scalar result : AbiKind)
   | unbox (scalar : AbiKind)
   | isShared
+  | objectSet (index : Nat) (field : AbiKind)
+  | usizeSet (index : Nat)
+  | scalarSet (width offset : Nat) (field : AbiKind)
+  | setTag (tag : Nat)
   | getTag
   deriving Inhabited, BEq
 
@@ -32,6 +36,10 @@ def HostOperation.runtimeOp : HostOperation → RuntimeOp
   | .box scalar result => .box scalar result
   | .unbox scalar => .unbox scalar
   | .isShared => .isShared
+  | .objectSet index field => .objectSet index field
+  | .usizeSet index => .usizeSet index
+  | .scalarSet width offset field => .scalarSet width offset field
+  | .setTag tag => .setTag tag
   | .getTag => .getTag
 
 def HostOperation.signature (operation : HostOperation) : Signature :=
@@ -47,6 +55,10 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
+  | .objectSet index field => some (.objectSet index field)
+  | .usizeSet index => some (.usizeSet index)
+  | .scalarSet width offset field => some (.scalarSet width offset field)
+  | .setTag tag => some (.setTag tag)
   | .getTag => some .getTag
   | _ => none
 
@@ -133,6 +145,34 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       | some object =>
           match Fir.LeanIR.Impure.isShared runtime object with
           | .ok value => .ok (runtime, #[value])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .objectSet index _ =>
+      match args[0]?, args[1]? with
+      | some object, some field =>
+          match setObjectField runtime object index field with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | _, _ => .error (.target (.arityMismatch 2 args.size))
+  | .usizeSet index =>
+      match args[0]?, args[1]? with
+      | some object, some field =>
+          match setUSizeField runtime object index field with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | _, _ => .error (.target (.arityMismatch 2 args.size))
+  | .scalarSet width offset _ =>
+      match args[0]?, args[1]? with
+      | some object, some field =>
+          match setScalarField runtime object width offset field with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | _, _ => .error (.target (.arityMismatch 2 args.size))
+  | .setTag tag =>
+      match args[0]? with
+      | some object =>
+          match Fir.LeanIR.Impure.setTag runtime object tag with
+          | .ok runtime => .ok (runtime, #[])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
   | .getTag =>
@@ -344,6 +384,78 @@ theorem hostStep_isShared_of_decode
     encodeResults_singleton_of_encodeValue (by rfl :
       encodeValue initial.host.handles .uint8 (.scalar (.uint8 shared)) =
         .ok (initial.host.handles, .i32 (UInt32.ofNat shared.toNat)))]
+
+theorem hostStep_objectSet_of_decode
+    (initial : Wasm.Store RuntimeHost) (index : Nat) (fieldKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceField : Value)
+    (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.object, fieldKind] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setObjectField initial.host.runtime sourceObject index sourceField =
+      .ok sourceRuntime) :
+    hostStep (.objectSet index fieldKind) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, mutated]
+
+theorem hostStep_usizeSet_of_decode
+    (initial : Wasm.Store RuntimeHost) (index : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject sourceField : Value)
+    (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.object, .usize] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setUSizeField initial.host.runtime sourceObject index sourceField =
+      .ok sourceRuntime) :
+    hostStep (.usizeSet index) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, mutated]
+
+theorem hostStep_scalarSet_of_decode
+    (initial : Wasm.Store RuntimeHost) (width offset : Nat)
+    (fieldKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (sourceObject sourceField : Value) (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.object, fieldKind] physicalArgs =
+      .ok #[sourceObject, sourceField])
+    (mutated : setScalarField initial.host.runtime sourceObject width offset sourceField =
+      .ok sourceRuntime) :
+    hostStep (.scalarSet width offset fieldKind) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, mutated]
+
+theorem hostStep_setTag_of_decode
+    (initial : Wasm.Store RuntimeHost) (tag : Nat)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.object] physicalArgs =
+      .ok #[sourceObject])
+    (mutated : Fir.LeanIR.Impure.setTag initial.host.runtime sourceObject tag =
+      .ok sourceRuntime) :
+    hostStep (.setTag tag) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, mutated]
 
 theorem hostStep_getTag_of_decode
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
