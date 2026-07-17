@@ -98,6 +98,11 @@ def largeNat : Nat :=
 def idNatList (xs : List Nat) : List Nat :=
   xs
 
+def classifyNatList (xs : List Nat) : UInt64 :=
+  match xs with
+  | [] => 0
+  | _ :: _ => 1
+
 def idString (value : String) : String :=
   value
 
@@ -605,6 +610,16 @@ def cases : Array Case := #[
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "Recursive value round-trip containing a heap natural" },
+  { id := "nat-list-nonempty"
+    entry := ``Source.classifyNatList
+    args := #[natListDatum [0, Source.largeNat, 42]]
+    argSchemas := #[.seq .nat]
+    resultSchema := .bits 64
+    native := fun _ => .bits 64 (Source.classifyNatList [0, Source.largeNat, 42])
+    tags := #["quick", "constructor", "control-flow", "boundary", "heap"]
+    requiredLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    provenance := firProvenance "Nonempty constructor case over an initial heap graph" },
   { id := "unicode-string-roundtrip"
     entry := ``Source.idString
     args := #[.string "hello α_world_β"]
