@@ -92,6 +92,10 @@ theorem alphaCodeSideConditions :
     simp at oldScoped
   · intro old oldScoped
     simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
   · apply CodeSideConditions.ret
     · native_decide
     · native_decide
@@ -446,6 +450,10 @@ theorem joinParamBodySideConditions :
     simp at oldScoped
   · intro old oldScoped
     simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
   · exact .nil joinBodyCodeSideConditions
 
 /--
@@ -490,6 +498,16 @@ theorem joinCodeSideConditions :
       simp at oldScoped
     · intro old oldScoped
       simp at oldScoped
+    · intro old oldScoped
+      simp at oldScoped
+      have oldEq := fvar_eq_of_beq oldScoped
+      subst old
+      native_decide
+    · intro old oldScoped
+      simp at oldScoped
+      have oldEq := fvar_eq_of_beq oldScoped
+      subst old
+      native_decide
     · apply CodeSideConditions.jmp <;> native_decide
 
 /--
@@ -501,6 +519,33 @@ theorem joinLocalCodeRelated :
       ({} : FVarIdMap FVarId) [] [] joinAlphaLeft joinAlphaRight :=
   codeRelated_of_local_accepts joinCodeSideConditions
     ⟨8, by native_decide⟩
+
+def joinProofState (code : LCNF.Code .impure) : MachineState := {
+  program := { decls := #[] }
+  control := .code code
+}
+
+/-- Installing alpha-renamed join declarations preserves the machine relation. -/
+theorem joinInstallationCoreStepRelated :
+    CoreResultRelated
+      (coreStep (joinProofState joinAlphaLeft))
+      (coreStep (joinProofState joinAlphaRight)) := by
+  apply coreStep_code_related
+    (rho := ({} : FVarIdMap FVarId))
+    (leftScope := []) (rightScope := [])
+    (leftJoins := []) (rightJoins := [])
+    (leftState := joinProofState joinAlphaLeft)
+    (rightState := joinProofState joinAlphaRight)
+  · rfl
+  · rfl
+  · exact .empty
+  · exact .nil
+  · intro left leftScoped
+    simp at leftScoped
+  · exact renamingScoped_empty []
+  · exact renamingScoped_empty []
+  · exact joinLocalCodeRelated
+  · trivial
 
 #guard Local.check 8 joinAlphaLeft joinAlphaRight
 #guard !Local.check 8 joinAlphaLeft joinBodyMismatch

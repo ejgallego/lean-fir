@@ -119,7 +119,7 @@ private theorem fvar_beq_self (fvarId : FVarId) : (fvarId == fvarId) = true := b
       change (name == name) = true
       exact Name.beq_iff_eq.mpr rfl
 
-private theorem fvar_eq_of_beq {left right : FVarId}
+theorem fvar_eq_of_beq {left right : FVarId}
     (equal : (left == right) = true) : left = right := by
   cases left with
   | mk leftName =>
@@ -209,6 +209,38 @@ theorem renamingScoped_insert
     exact Or.inl (fvar_beq_self candidateLeft)
   · simp only [List.contains_cons, Bool.or_eq_true]
     exact Or.inr oldPair.1
+
+/--
+Inserting a binder whose right-hand name is fresh for a scope preserves every
+renaming already visible in that scope. Unlike `renamingScoped_insert`, this
+lemma does not add the binder to the indexed scope; join installation uses it
+to preserve the independent variable-scope invariant, and variable binding
+uses it to preserve the independent join-scope invariant.
+-/
+theorem renamingScoped_insert_preserve
+    {rho : FVarIdMap FVarId} {leftScope rightScope : List FVarId}
+    {leftId rightId : FVarId}
+    (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (rightFresh : FreshForScope rightId rightScope) :
+    RenamingScoped (rho.insert rightId leftId) leftScope rightScope := by
+  intro candidateLeft candidateRight candidateRightScoped related
+  have different := rightFresh candidateRight candidateRightScoped
+  have oldRelated := (fVarRelated_insert_of_name_ne
+    rho leftId rightId candidateLeft candidateRight different).mp related
+  exact renamingScoped candidateLeft candidateRight candidateRightScoped oldRelated
+
+/-- A fresh insertion preserves environment agreement on an unchanged scope. -/
+theorem envsAgree_insert_preserve
+    {rho : FVarIdMap FVarId} {leftScope rightScope : List FVarId}
+    {leftId rightId : FVarId}
+    (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
+    (rightFresh : FreshForScope rightId rightScope) :
+    EnvsAgree (rho.insert rightId leftId) leftScope rightScope leftEnv rightEnv := by
+  intro candidateLeft candidateLeftScoped candidateRight candidateRightScoped related
+  have different := rightFresh candidateRight candidateRightScoped
+  have oldRelated := (fVarRelated_insert_of_name_ne
+    rho leftId rightId candidateLeft candidateRight different).mp related
+  exact agree candidateLeft candidateLeftScoped candidateRight candidateRightScoped oldRelated
 
 theorem withFVar_run (rho : FVarIdMap FVarId) (left right : FVarId)
     (x : LCNF.AlphaEqv.EqvM α) :

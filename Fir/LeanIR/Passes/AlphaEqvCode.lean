@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
+import Fir.LeanIR.Passes.AlphaEqvBind
 import Fir.LeanIR.Passes.AlphaEqvLocal
 import Fir.LeanIR.Passes.QSortPerm
 
@@ -50,6 +51,8 @@ inductive CodeRelated :
       (declaration : LetDeclValueRelated rho leftScope rightScope leftDecl rightDecl)
       (leftFresh : FreshForScope leftDecl.fvarId leftScope)
       (rightFresh : FreshForScope rightDecl.fvarId rightScope)
+      (leftJoinFresh : FreshForScope leftDecl.fvarId leftJoins)
+      (rightJoinFresh : FreshForScope rightDecl.fvarId rightJoins)
       (continuation :
         CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
           (rho.insert rightDecl.fvarId leftDecl.fvarId)
@@ -176,6 +179,8 @@ inductive ParamBodyRelated :
   | cons
       (leftFresh : FreshForScope leftParam.fvarId leftScope)
       (rightFresh : FreshForScope rightParam.fvarId rightScope)
+      (leftJoinFresh : FreshForScope leftParam.fvarId leftJoins)
+      (rightJoinFresh : FreshForScope rightParam.fvarId rightJoins)
       (rest : ParamBodyRelated
         (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightParam.fvarId leftParam.fvarId)
@@ -200,6 +205,43 @@ inductive CaseSelectionRelated :
         (some leftCode) (some rightCode)
 
 end
+
+/--
+Semantic relation for the runtime join-point stacks. `empty` intentionally
+permits arbitrary dormant runtime entries when no join is visible through the
+proof index. `join` records the declaration body at installation time, while
+`variable` transports the same stack across a fresh ordinary binder without
+confusing the independent variable and join namespaces in the shared renaming
+map.
+-/
+inductive JoinEnvsRelated :
+    FVarIdMap FVarId → List FVarId → List FVarId →
+      List FVarId → List FVarId → JoinEnv → JoinEnv → Prop where
+  | empty : JoinEnvsRelated rho leftScope rightScope [] [] left right
+  | join
+      (prior : JoinEnvsRelated rho leftScope rightScope
+        leftJoins rightJoins leftTail rightTail)
+      (leftFresh : FreshJoinBinder leftDecl.fvarId leftScope leftJoins)
+      (rightFresh : FreshJoinBinder rightDecl.fvarId rightScope rightJoins)
+      (body : ParamBodyRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope
+        leftDecl.params.toList rightDecl.params.toList
+        leftDecl.value rightDecl.value) :
+      JoinEnvsRelated (rho.insert rightDecl.fvarId leftDecl.fvarId)
+        leftScope rightScope
+        (leftDecl.fvarId :: leftJoins) (rightDecl.fvarId :: rightJoins)
+        ((leftDecl.fvarId, leftDecl) :: leftTail)
+        ((rightDecl.fvarId, rightDecl) :: rightTail)
+  | variable
+      (prior : JoinEnvsRelated rho leftScope rightScope
+        leftJoins rightJoins left right)
+      (leftFresh : FreshForScope leftId leftScope)
+      (rightFresh : FreshForScope rightId rightScope)
+      (leftJoinFresh : FreshForScope leftId leftJoins)
+      (rightJoinFresh : FreshForScope rightId rightJoins) :
+      JoinEnvsRelated (rho.insert rightId leftId)
+        (leftId :: leftScope) (rightId :: rightScope)
+        leftJoins rightJoins left right
 
 /-- Impure alternatives agree on their selector and have related bodies. -/
 inductive AltRelated (rho : FVarIdMap FVarId)
@@ -271,16 +313,21 @@ inductive FrameRelated : Frame → Frame → Prop where
       {leftJoins rightJoins : List FVarId}
       (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
       (renamingScoped : RenamingScoped rho leftScope rightScope)
+      (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
+      (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+        leftJoins rightJoins leftJoinEnv rightJoinEnv)
       (leftFresh : FreshForScope leftId leftScope)
       (rightFresh : FreshForScope rightId rightScope)
+      (leftJoinFresh : FreshForScope leftId leftJoins)
+      (rightJoinFresh : FreshForScope rightId rightJoins)
       (continuation :
         CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
           (rho.insert rightId leftId)
           (leftId :: leftScope) (rightId :: rightScope)
           leftContinuation rightContinuation) :
       FrameRelated
-        (.bind leftId leftContinuation leftEnv joins)
-        (.bind rightId rightContinuation rightEnv joins)
+        (.bind leftId leftContinuation leftEnv leftJoinEnv)
+        (.bind rightId rightContinuation rightEnv rightJoinEnv)
   | apply (args : Array Value) :
       FrameRelated (.apply args) (.apply args)
   | cache (name : Name) :
@@ -310,9 +357,9 @@ inductive ControlRelated (rho : FVarIdMap FVarId)
         (.invokeValue function args) (.invokeValue function args)
 
 /--
-The state invariant used by the declarative simulation. Program, runtime, and
-join-point state are currently shared literally; environments, frames, and
-code are related structurally.
+The state invariant used by the declarative simulation. Program and runtime
+state are shared literally; variable environments, join-point environments,
+frames, and code are related structurally.
 -/
 structure MachineStateRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
@@ -320,10 +367,12 @@ structure MachineStateRelated (rho : FVarIdMap FVarId)
     (left right : MachineState) : Prop where
   program_eq : left.program = right.program
   runtime_eq : left.runtime = right.runtime
-  joins_eq : left.joins = right.joins
+  joins : JoinEnvsRelated rho leftScope rightScope
+    leftJoins rightJoins left.joins right.joins
   frames : FramesRelated left.frames right.frames
   envs : EnvsAgree rho leftScope rightScope left.env right.env
   renaming_scoped : RenamingScoped rho leftScope rightScope
+  join_renaming_scoped : RenamingScoped rho leftJoins rightJoins
   control : ControlRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
     rho leftScope rightScope left.control right.control
 
@@ -628,10 +677,12 @@ theorem continuationResult_related
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
-    (joinsEq : leftState.joins = rightState.joins)
+    (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftState.joins rightState.joins)
     (framesRelated : FramesRelated leftState.frames rightState.frames)
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
     (continuation :
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope leftContinuation rightContinuation) :
@@ -641,10 +692,11 @@ theorem continuationResult_related
   .next {
     program_eq := programEq
     runtime_eq := runtimeEq
-    joins_eq := joinsEq
+    joins := joinEnvs
     frames := framesRelated
     envs := agree
     renaming_scoped := renamingScoped
+    join_renaming_scoped := joinRenamingScoped
     control := .code continuation
   }
 
@@ -654,10 +706,12 @@ theorem runtimeEffectResult_related
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
-    (joinsEq : leftState.joins = rightState.joins)
+    (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftState.joins rightState.joins)
     (framesRelated : FramesRelated leftState.frames rightState.frames)
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
     (continuation :
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         rho leftScope rightScope leftContinuation rightContinuation)
@@ -684,20 +738,21 @@ theorem runtimeEffectResult_related
       exact .next {
         program_eq := programEq
         runtime_eq := rfl
-        joins_eq := joinsEq
+        joins := joinEnvs
         frames := framesRelated
         envs := agree
         renaming_scoped := renamingScoped
+        join_renaming_scoped := joinRenamingScoped
         control := .code continuation
       }
 
 /--
 The code heads covered by the current one-step simulation. Join installation
-and invocation are represented by `CodeRelated` but deliberately remain outside
-this predicate until active join environments are related semantically.
+is supported; invocation remains outside this predicate until parameter
+binding into a selected related join body is proved.
 -/
 def CoreStepSupported : LCNF.Code .impure → LCNF.Code .impure → Prop
-  | .jp .., .jp .. | .jmp .., .jmp .. => False
+  | .jmp .., .jmp .. => False
   | _, _ => True
 
 /--
@@ -713,10 +768,12 @@ theorem coreStep_code_related
     (leftState rightState : MachineState)
     (programEq : leftState.program = rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
-    (joinsEq : leftState.joins = rightState.joins)
+    (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftState.joins rightState.joins)
     (framesRelated : FramesRelated leftState.frames rightState.frames)
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
     (related : CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope leftCode rightCode)
     (supported : CoreStepSupported leftCode rightCode) :
@@ -737,10 +794,11 @@ theorem coreStep_code_related
                 { rightState with control := .yielded value } := {
             program_eq := programEq
             runtime_eq := runtimeEq
-            joins_eq := joinsEq
+            joins := joinEnvs
             frames := framesRelated
             envs := agree
             renaming_scoped := renamingScoped
+            join_renaming_scoped := joinRenamingScoped
             control := .yielded value
           }
           simpa [coreStep, lookupValue, leftFound, rightFound] using
@@ -755,7 +813,7 @@ theorem coreStep_code_related
             (.done (observe rightState (.fault .unreachable)))
           rw [observed]
           exact .done _
-  | letE declaration leftFresh rightFresh continuation =>
+  | letE declaration leftFresh rightFresh leftJoinFresh rightJoinFresh continuation =>
       rename_i leftDecl rightDecl leftContinuation rightContinuation
       have evaluated :
           evalLetValue
@@ -802,10 +860,13 @@ theorem coreStep_code_related
                       control := .code rightContinuation } := {
                 program_eq := programEq
                 runtime_eq := rfl
-                joins_eq := joinsEq
+                joins := .variable joinEnvs leftFresh rightFresh
+                  leftJoinFresh rightJoinFresh
                 frames := framesRelated
                 envs := envsAgree_bind agree renamingScoped leftFresh rightFresh
                 renaming_scoped := renamingScoped_insert renamingScoped rightFresh
+                join_renaming_scoped :=
+                  renamingScoped_insert_preserve joinRenamingScoped rightJoinFresh
                 control := .code continuation
               }
               exact CoreResultRelated.next nextRelated
@@ -815,9 +876,9 @@ theorem coreStep_code_related
                     (.bind leftDecl.fvarId leftContinuation
                       leftState.env leftState.joins)
                     (.bind rightDecl.fvarId rightContinuation
-                      rightState.env rightState.joins) := by
-                rw [joinsEq]
-                exact .bind agree renamingScoped leftFresh rightFresh continuation
+                      rightState.env rightState.joins) :=
+                .bind agree renamingScoped joinRenamingScoped joinEnvs
+                  leftFresh rightFresh leftJoinFresh rightJoinFresh continuation
               have nextRelated :
                   MachineStateRelated
                     (leftJoins := leftJoins) (rightJoins := rightJoins)
@@ -834,10 +895,11 @@ theorem coreStep_code_related
                       control := .invokeName name args } := {
                 program_eq := programEq
                 runtime_eq := rfl
-                joins_eq := joinsEq
+                joins := joinEnvs
                 frames := .cons bindFrameRelated framesRelated
                 envs := agree
                 renaming_scoped := renamingScoped
+                join_renaming_scoped := joinRenamingScoped
                 control := .invokeName name args
               }
               simpa [pushBindFrame] using CoreResultRelated.next nextRelated
@@ -847,9 +909,9 @@ theorem coreStep_code_related
                     (.bind leftDecl.fvarId leftContinuation
                       leftState.env leftState.joins)
                     (.bind rightDecl.fvarId rightContinuation
-                      rightState.env rightState.joins) := by
-                rw [joinsEq]
-                exact .bind agree renamingScoped leftFresh rightFresh continuation
+                      rightState.env rightState.joins) :=
+                .bind agree renamingScoped joinRenamingScoped joinEnvs
+                  leftFresh rightFresh leftJoinFresh rightJoinFresh continuation
               have nextRelated :
                   MachineStateRelated
                     (leftJoins := leftJoins) (rightJoins := rightJoins)
@@ -866,14 +928,38 @@ theorem coreStep_code_related
                       control := .invokeValue function args } := {
                 program_eq := programEq
                 runtime_eq := rfl
-                joins_eq := joinsEq
+                joins := joinEnvs
                 frames := .cons bindFrameRelated framesRelated
                 envs := agree
                 renaming_scoped := renamingScoped
+                join_renaming_scoped := joinRenamingScoped
                 control := .invokeValue function args
               }
               simpa [pushBindFrame] using CoreResultRelated.next nextRelated
-  | jp _ _ _ _ => simp [CoreStepSupported] at supported
+  | jp leftFresh rightFresh body continuation =>
+      rename_i leftContinuation rightContinuation leftDecl rightDecl
+      have nextRelated :
+          MachineStateRelated
+            (rho.insert rightDecl.fvarId leftDecl.fvarId)
+            leftScope rightScope
+            { leftState with
+              joins := (leftDecl.fvarId, leftDecl) :: leftState.joins
+              control := .code leftContinuation }
+            { rightState with
+              joins := (rightDecl.fvarId, rightDecl) :: rightState.joins
+              control := .code rightContinuation } := {
+        program_eq := programEq
+        runtime_eq := runtimeEq
+        joins := .join joinEnvs leftFresh rightFresh body
+        frames := framesRelated
+        envs := envsAgree_insert_preserve agree rightFresh.variables
+        renaming_scoped :=
+          renamingScoped_insert_preserve renamingScoped rightFresh.variables
+        join_renaming_scoped :=
+          renamingScoped_insert joinRenamingScoped rightFresh.joins
+        control := .code continuation
+      }
+      simpa [coreStep] using CoreResultRelated.next nextRelated
   | jmp _ _ => simp [CoreStepSupported] at supported
   | cases discr alternatives =>
       rename_i leftCases rightCases
@@ -949,8 +1035,8 @@ theorem coreStep_code_related
                       | some branch =>
                           simpa only [leftChoice, rightChoice] using
                             continuationResult_related leftState rightState
-                              programEq runtimeEq joinsEq framesRelated agree
-                              renamingScoped branch
+                              programEq runtimeEq joinEnvs framesRelated agree
+                              renamingScoped joinRenamingScoped branch
   | oset object field continuation =>
       rename_i leftObject rightObject leftField rightField
         leftContinuation rightContinuation index
@@ -964,15 +1050,15 @@ theorem coreStep_code_related
       | error fault =>
           simp only
           simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation (.error fault)
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation (.error fault)
       | ok objectValue =>
           cases fieldResult with
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok fieldValue =>
               simp
               generalize effectEq :
@@ -981,13 +1067,13 @@ theorem coreStep_code_related
               | error fault =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.error fault)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.error fault)
               | ok nextRuntime =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.ok nextRuntime)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
   | uset object field continuation =>
       rename_i leftObject rightObject leftField rightField
         leftContinuation rightContinuation index
@@ -1001,15 +1087,15 @@ theorem coreStep_code_related
       | error fault =>
           simp only
           simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation (.error fault)
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation (.error fault)
       | ok objectValue =>
           cases fieldResult with
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok fieldValue =>
               simp
               generalize effectEq :
@@ -1018,13 +1104,13 @@ theorem coreStep_code_related
               | error fault =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.error fault)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.error fault)
               | ok nextRuntime =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.ok nextRuntime)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
   | sset object field continuation =>
       rename_i leftObject rightObject leftField rightField
         leftContinuation rightContinuation width offset leftType rightType
@@ -1038,15 +1124,15 @@ theorem coreStep_code_related
       | error fault =>
           simp only
           simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation (.error fault)
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation (.error fault)
       | ok objectValue =>
           cases fieldResult with
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok fieldValue =>
               simp
               generalize effectEq :
@@ -1055,13 +1141,13 @@ theorem coreStep_code_related
               | error fault =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.error fault)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.error fault)
               | ok nextRuntime =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.ok nextRuntime)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
   | setTag object continuation =>
       rename_i leftObject rightObject leftContinuation rightContinuation tag
       have objectEq := lookupValue_eq_of_scoped_related agree object
@@ -1072,8 +1158,8 @@ theorem coreStep_code_related
       | error fault =>
           simp only
           simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation (.error fault)
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation (.error fault)
       | ok objectValue =>
           simp
           generalize effectEq : setTag rightState.runtime objectValue tag = effect
@@ -1081,13 +1167,13 @@ theorem coreStep_code_related
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok nextRuntime =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.ok nextRuntime)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
   | inc object continuation =>
       rename_i leftObject rightObject leftContinuation rightContinuation
         amount check persistent
@@ -1101,8 +1187,8 @@ theorem coreStep_code_related
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok objectValue =>
               simp
               generalize effectEq :
@@ -1111,17 +1197,17 @@ theorem coreStep_code_related
               | error fault =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.error fault)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.error fault)
               | ok nextRuntime =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.ok nextRuntime)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
       | true =>
           simpa [coreStep] using continuationResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation
   | dec object continuation =>
       rename_i leftObject rightObject leftContinuation rightContinuation
         amount check persistent objects
@@ -1135,8 +1221,8 @@ theorem coreStep_code_related
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok objectValue =>
               simp
               generalize effectEq :
@@ -1145,17 +1231,17 @@ theorem coreStep_code_related
               | error fault =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.error fault)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.error fault)
               | ok nextRuntime =>
                   simp only
                   simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                    leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                    renamingScoped continuation (.ok nextRuntime)
+                    leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                    renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
       | true =>
           simpa [coreStep] using continuationResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation
   | del object continuation =>
       rename_i leftObject rightObject leftContinuation rightContinuation
       have objectEq := lookupValue_eq_of_scoped_related agree object
@@ -1166,8 +1252,8 @@ theorem coreStep_code_related
       | error fault =>
           simp only
           simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-            leftState rightState programEq runtimeEq joinsEq framesRelated agree
-            renamingScoped continuation (.error fault)
+            leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+            renamingScoped joinRenamingScoped continuation (.error fault)
       | ok objectValue =>
           simp
           generalize effectEq : deleteValue rightState.runtime objectValue = effect
@@ -1175,13 +1261,13 @@ theorem coreStep_code_related
           | error fault =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.error fault)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.error fault)
           | ok nextRuntime =>
               simp only
               simpa [fail, observe, runtimeEq] using runtimeEffectResult_related
-                leftState rightState programEq runtimeEq joinsEq framesRelated agree
-                renamingScoped continuation (.ok nextRuntime)
+                leftState rightState programEq runtimeEq joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped continuation (.ok nextRuntime)
 
 /-- A related pair of saved bind continuations resumes under the new binders. -/
 theorem coreStep_yielded_bind_related
@@ -1192,8 +1278,13 @@ theorem coreStep_yielded_bind_related
     (restFrames : FramesRelated leftFrames rightFrames)
     (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
+    (joinEnvs : JoinEnvsRelated rho leftScope rightScope
+      leftJoins rightJoins leftJoinEnv rightJoinEnv)
     (leftFresh : FreshForScope leftId leftScope)
     (rightFresh : FreshForScope rightId rightScope)
+    (leftJoinFresh : FreshForScope leftId leftJoins)
+    (rightJoinFresh : FreshForScope rightId rightJoins)
     (continuation :
       CodeRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightId leftId)
@@ -1203,11 +1294,11 @@ theorem coreStep_yielded_bind_related
       (coreStep
         { leftState with
           control := .yielded value
-          frames := .bind leftId leftContinuation leftEnv joins :: leftFrames })
+          frames := .bind leftId leftContinuation leftEnv leftJoinEnv :: leftFrames })
       (coreStep
         { rightState with
           control := .yielded value
-          frames := .bind rightId rightContinuation rightEnv joins :: rightFrames }) := by
+          frames := .bind rightId rightContinuation rightEnv rightJoinEnv :: rightFrames }) := by
   have nextRelated :
       MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightId leftId)
@@ -1215,19 +1306,21 @@ theorem coreStep_yielded_bind_related
         { leftState with
           control := .code leftContinuation
           env := bind leftEnv leftId value
-          joins := joins
+          joins := leftJoinEnv
           frames := leftFrames }
         { rightState with
           control := .code rightContinuation
           env := bind rightEnv rightId value
-          joins := joins
+          joins := rightJoinEnv
           frames := rightFrames } := {
     program_eq := programEq
     runtime_eq := runtimeEq
-    joins_eq := rfl
+    joins := .variable joinEnvs leftFresh rightFresh leftJoinFresh rightJoinFresh
     frames := restFrames
     envs := envsAgree_bind agree renamingScoped leftFresh rightFresh
     renaming_scoped := renamingScoped_insert renamingScoped rightFresh
+    join_renaming_scoped :=
+      renamingScoped_insert_preserve joinRenamingScoped rightJoinFresh
     control := .code continuation
   }
   simpa [coreStep] using CoreResultRelated.next nextRelated

@@ -453,16 +453,26 @@ a fuel- and phase-indexed mutual recursion: recursive code checks consume fuel,
 the empty parameter traversal enters code at the same fuel, and nonempty
 parameter traversals decrease their list length. The full regression constructs
 `CodeRelated` for an alpha-renamed `jp`, its normalized case body, a subsequent
-value binding, and the final `jmp`. `CoreStepSupported` deliberately excludes
-`jp` and `jmp` from `coreStep_code_related` until runtime join environments are
-related semantically; this is an explicit proof boundary, not a new axiom or a
-weakened runtime definition. No runtime contract or trusted assumption changed.
+value binding, and the final `jmp`.
+
+Runtime join installation is now part of the simulation. `JoinEnvsRelated`
+tracks alpha-renamed join stacks, their declaration bodies, and transport
+across ordinary variable binders; `MachineStateRelated` carries separate
+renaming-scope facts for variables and joins, and saved bind frames retain the
+paired join stacks they captured. `coreStep_code_related` proves the `jp` step,
+and a regression executes that theorem on the full alpha-renamed join fixture.
+The proof interface now states the compiler's global-freshness consequence
+that variable and parameter binders cannot shadow active join identifiers.
+`CoreStepSupported` deliberately excludes only `jmp` until lookup and
+parameter binding into the selected related body are proved. This is an
+explicit proof boundary, not a new axiom or a weakened runtime definition. No
+runtime contract or trusted assumption changed.
 
 The remaining bounded work is:
 
-1. relate active join environments and extend the declarative state simulation
-   through join installation and invocation, then remove the `jp`/`jmp`
-   exclusions from `CoreStepSupported`;
+1. prove related lookup and parameter binding for active join environments,
+   extend state simulation through `jmp`, and remove its remaining exclusion
+   from `CoreStepSupported`;
 2. extend whole-state simulation through named/closure calls and the remaining
    yielded/apply/cache frame paths, reusing the existing related `fap`, `pap`,
    and free-variable call actions;

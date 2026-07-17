@@ -36,6 +36,8 @@ inductive CodeSideConditions :
       (boxTypesEq : LetValueBoxTypesEq leftDecl.value rightDecl.value)
       (leftFresh : FreshForScope leftDecl.fvarId leftScope)
       (rightFresh : FreshForScope rightDecl.fvarId rightScope)
+      (leftJoinFresh : FreshForScope leftDecl.fvarId leftJoins)
+      (rightJoinFresh : FreshForScope rightDecl.fvarId rightJoins)
       (continuation :
         CodeSideConditions (leftJoins := leftJoins) (rightJoins := rightJoins)
           (rho.insert rightDecl.fvarId leftDecl.fvarId)
@@ -188,6 +190,8 @@ inductive ParamBodySideConditions :
   | cons
       (leftFresh : FreshForScope leftParam.fvarId leftScope)
       (rightFresh : FreshForScope rightParam.fvarId rightScope)
+      (leftJoinFresh : FreshForScope leftParam.fvarId leftJoins)
+      (rightJoinFresh : FreshForScope rightParam.fvarId rightJoins)
       (rest : ParamBodySideConditions
         (leftJoins := leftJoins) (rightJoins := rightJoins)
         (rho.insert rightParam.fvarId leftParam.fvarId)
@@ -368,7 +372,7 @@ private theorem codeRelated_of_local_check
         (terminalCodeRelated_of_local_return leftScoped rightScoped ⟨fuel, accepted⟩)
   | unreachable => exact .terminal .unreachable
   | letE typeEq leftValueScoped rightValueScoped boxTypesEq
-      leftFresh rightFresh continuation =>
+      leftFresh rightFresh leftJoinFresh rightJoinFresh continuation =>
       rename_i leftContinuation rightContinuation leftDecl rightDecl
       cases fuel with
       | zero => simp [Local.checkAt, Local.eqv] at accepted
@@ -387,6 +391,8 @@ private theorem codeRelated_of_local_check
             leftValueScoped rightValueScoped boxTypesEq accepted.2.1
         · exact leftFresh
         · exact rightFresh
+        · exact leftJoinFresh
+        · exact rightJoinFresh
         · exact codeRelated_of_local_check continuation accepted.2.2
   | jp leftFresh rightFresh body continuation =>
       rename_i leftContinuation rightContinuation leftDecl rightDecl
@@ -646,11 +652,11 @@ theorem paramBodyRelated_of_local_check
   cases side with
   | nil body =>
       exact .nil (codeRelated_of_local_check body accepted)
-  | cons leftFresh rightFresh rest =>
+  | cons leftFresh rightFresh leftJoinFresh rightJoinFresh rest =>
       simp only [Local.withParamListsUsing] at accepted
       rw [reader_andM_run_eq_true_iff] at accepted
       rw [withFVar_run] at accepted
-      exact .cons leftFresh rightFresh
+      exact .cons leftFresh rightFresh leftJoinFresh rightJoinFresh
         (paramBodyRelated_of_local_check
           (leftJoins := leftJoins) (rightJoins := rightJoins)
           rest accepted.2)
