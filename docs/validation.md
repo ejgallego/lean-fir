@@ -18,7 +18,7 @@ Run the quick corpus with:
 make validate
 ```
 
-Run the closed-scalar source-to-real-V8 cases with:
+Run the scalar source-to-real-V8 cases with:
 
 ```sh
 make validate-v8
@@ -573,21 +573,30 @@ both external-name obligations.
 ## WebAssembly integration
 
 The initial Wasm validation slice consumes the compiler track exclusively
-through its public `compileClosed` API.  The integration-owned
-`FirValidationWasm.lean` driver compiles the selected closed `UInt8`, `UInt16`,
-`UInt32`, `UInt64`, and `USize` boundary entries through `LCNF.main`, emits
-deterministic `.wasm` and ABI-manifest products only for that ordered selection,
-and checks that these deliberately host-free cases have no imports and exactly
-export their source entries.  It does not modify or add policy to `Fir/Wasm`.
+through its public `compileModule` and `withInvocation` APIs.  The
+integration-owned `FirValidationWasm.lean` driver compiles each selected source
+entry through `LCNF.main`, encodes its corpus arguments into the compiler's
+semantic ABI values, and attaches that checked invocation to the reusable
+module.  It emits deterministic `.wasm` and ABI-manifest products only for that
+ordered selection, and checks that the current deliberately host-free cases
+have no imports and exactly export their source entries.  Heap-backed
+invocations are rejected until an initial-runtime manifest exists.  The driver
+does not modify or add policy to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
-`WebAssembly` engine, verifies the compiler manifest against the corpus ABI,
-invokes the corpus-named export, converts V8's signed `i64` result back to
-unsigned `UInt64` bits, and emits the shared backend protocol.  The runner
-receipts the build inventory and both per-case products, accepts any nonempty
-unique subset of the supported scalar slice, and rejects cases outside it.
-Native Lean remains the source oracle.  Talos can subsequently consume the
-exact same module and inputs, with V8 as the reference Wasm engine:
+`WebAssembly` engine.  A registry keyed by compiler ABI kind—not corpus case
+name—cross-checks the manifest's parameter kinds and invocation values against
+the corpus schemas, marshals arguments into V8's physical lanes, invokes the
+corpus-named export, and decodes its result into the shared backend protocol.
+The current registry covers `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize`;
+unknown ABI kinds fail closed.  V8's signed `i32` and `i64` JavaScript boundary
+is converted explicitly to and from the protocol's unsigned values.  The
+runner receipts the build inventory and both per-case products and accepts any
+nonempty unique corpus selection that the compiler, no-host policy, and ABI
+registry support.  The checked suite includes all five scalar maxima and a
+parameterized `USize` round trip.  Native Lean remains the source oracle. Talos
+can subsequently consume the exact same module and inputs, with V8 as the
+reference Wasm engine:
 
 ```text
 native Lean <-> V8          compiler/runtime validation

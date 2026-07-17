@@ -1,4 +1,5 @@
 import Fir.Validation.Corpus
+import Fir.Validation.LCNF
 import Fir.Wasm.Emit.Source
 import Lean.Elab.Command
 
@@ -8,7 +9,8 @@ open Fir.Validation
 namespace FirValidationWasm
 
 def caseIds : Array String :=
-  #["uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max"]
+  #["uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max",
+    "usize-roundtrip"]
 
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
@@ -29,9 +31,6 @@ def parseSelectedCaseIds (raw : String) : Except String (Array String) := do
     throw "FIR_VALIDATION_CASES must be nonempty"
   if selected.toList.eraseDups.length != selected.size then
     throw "FIR_VALIDATION_CASES contains duplicate cases"
-  let unsupported := selected.filter fun caseId => !caseIds.contains caseId
-  unless unsupported.isEmpty do
-    throw s!"unsupported Wasm validation cases: {String.intercalate "," unsupported.toList}"
   return selected
 
 def selectedCaseIds : IO (Array String) := do
@@ -54,14 +53,25 @@ def elabFirValidationWasm : CommandElab := fun _ => do
   for caseId in selected do
     let some validationCase := Corpus.findCase? caseId
       | throwError "unknown validation case: {caseId}"
+    let (initialRuntime, args) ←
+      match Lcnf.encodeArgs validationCase.argSchemas validationCase.args with
+      | .ok invocation => pure invocation
+      | .error error => throwError "cannot encode Wasm invocation for {caseId}: {error}"
+    unless initialRuntime == {} do
+      throwError "{caseId} requires a heap-backed Wasm invocation"
     let result ← liftCoreM <|
-      Fir.Wasm.Emit.Source.compileClosed
+      Fir.Wasm.Emit.Source.compileModule
         validationCase.entry validationCase.dependencies
-    let artifact ←
+    let moduleArtifact ←
       match result with
       | .ok artifact => pure artifact
       | .error error =>
           throwError "Wasm compilation failed for {caseId}: {repr error}"
+    let artifact ←
+      match moduleArtifact.withInvocation caseId validationCase.entry validationCase.entry args with
+      | .ok artifact => pure artifact
+      | .error error =>
+          throwError "Wasm invocation failed for {caseId}: {repr error}"
     unless artifact.module.imports.isEmpty do
       throwError "{caseId} unexpectedly requires Wasm imports"
     unless artifact.module.exports == #[validationCase.entry] do

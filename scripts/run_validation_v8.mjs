@@ -2,43 +2,86 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-const CASE_SPECS = new Map([
-  ["uint8-max", {
-    manifestResult: "uint8",
-    resultSchema: { bits: { width: 8 } },
-    lane: "i32",
-    width: 8,
-    maximum: "255",
-  }],
-  ["uint16-max", {
-    manifestResult: "uint16",
-    resultSchema: { bits: { width: 16 } },
-    lane: "i32",
-    width: 16,
-    maximum: "65535",
-  }],
-  ["uint32-max", {
-    manifestResult: "uint32",
-    resultSchema: { bits: { width: 32 } },
-    lane: "i32",
-    width: 32,
-    maximum: "4294967295",
-  }],
-  ["uint64-max", {
-    manifestResult: "uint64",
-    resultSchema: { bits: { width: 64 } },
-    lane: "i64",
-    width: 64,
-    maximum: "18446744073709551615",
-  }],
-  ["usize-max", {
-    manifestResult: "usize",
-    resultSchema: "usize",
-    lane: "i64",
-    maximum: "18446744073709551615",
-  }],
+const ABI_CODECS = new Map([
+  ["uint8", { lane: "i32", width: 8 }],
+  ["uint16", { lane: "i32", width: 16 }],
+  ["uint32", { lane: "i32", width: 32 }],
+  ["uint64", { lane: "i64", width: 64 }],
+  ["usize", { lane: "i64" }],
 ]);
-const CASE_IDS = [...CASE_SPECS.keys()];
+
+function codecFor(kind, context) {
+  const codec = ABI_CODECS.get(kind);
+  assert.ok(codec, `${context} uses unsupported Wasm ABI kind ${kind}`);
+  return codec;
+}
+
+function expectedSchema(codec) {
+  return codec.width === undefined
+    ? "usize"
+    : { bits: { width: codec.width } };
+}
+
+function unsignedDecimal(value, context, width = 64) {
+  assert.equal(typeof value, "string", `${context} must be a decimal string`);
+  assert.match(value, /^(0|[1-9][0-9]*)$/, `${context} must be canonical decimal`);
+  const parsed = BigInt(value);
+  assert.ok(parsed < (1n << BigInt(width)), `${context} exceeds ${width} bits`);
+  return parsed;
+}
+
+function datumValue(codec, datum, context) {
+  const key = codec.width === undefined ? "usize" : "bits";
+  assert.deepStrictEqual(Object.keys(datum), [key], `${context} datum kind mismatch`);
+  if (codec.width !== undefined) {
+    assert.equal(datum.bits.width, codec.width, `${context} datum width mismatch`);
+  }
+  return unsignedDecimal(datum[key].value, `${context} value`, codec.width ?? 64);
+}
+
+function expectedManifestArgument(kind, codec, value) {
+  if (codec.width === undefined) {
+    return { kind: "usize", value: value.toString() };
+  }
+  return {
+    kind: "scalar",
+    scalarKind: kind,
+    value: value.toString(),
+  };
+}
+
+function physicalArgument(kind, manifestArgument, schema, datum, context) {
+  const codec = codecFor(kind, context);
+  assert.deepStrictEqual(schema, expectedSchema(codec), `${context} schema mismatch`);
+  const value = datumValue(codec, datum, context);
+  assert.deepStrictEqual(
+    manifestArgument,
+    expectedManifestArgument(kind, codec, value),
+    `${context} compiler manifest disagrees with the corpus invocation`,
+  );
+  return codec.lane === "i32"
+    ? Number(BigInt.asIntN(32, value))
+    : BigInt.asIntN(64, value);
+}
+
+function resultDatum(kind, schema, physicalResult, context) {
+  const codec = codecFor(kind, context);
+  assert.deepStrictEqual(schema, expectedSchema(codec), `${context} schema mismatch`);
+  let value;
+  if (codec.lane === "i32") {
+    assert.equal(typeof physicalResult, "number", `${context} must use V8's i32 lane`);
+    value = BigInt(physicalResult >>> 0);
+  } else {
+    assert.equal(typeof physicalResult, "bigint", `${context} must use V8's i64 lane`);
+    value = BigInt.asUintN(64, physicalResult);
+  }
+  if (codec.width !== undefined) {
+    assert.ok(value < (1n << BigInt(codec.width)),
+      `${context} result exceeds ${codec.width} bits`);
+    return { bits: { width: codec.width, value: value.toString() } };
+  }
+  return { usize: { value: value.toString() } };
+}
 
 function requiredEnvironment(name) {
   const value = process.env[name];
@@ -58,8 +101,6 @@ assert.ok(Array.isArray(selectedCases) && selectedCases.length > 0,
   "the V8 adapter selection must be a nonempty array");
 assert.equal(new Set(selectedCases).size, selectedCases.length,
   "the V8 adapter selection contains duplicates");
-assert.ok(selectedCases.every((caseId) => CASE_SPECS.has(caseId)),
-  "the V8 adapter selection contains an unsupported case");
 
 const corpus = JSON.parse(
   await readFile(requiredEnvironment("FIR_VALIDATION_CORPUS"), "utf8"),
@@ -88,6 +129,7 @@ for (const name of [
   "Init.olean",
   "Lean/Elab/Command.olean",
   "Fir/Validation/Corpus.olean",
+  "Fir/Validation/LCNF.olean",
   "Fir/Wasm/Emit/Source.olean",
 ]) {
   assert.ok(buildInputNames.has(name),
@@ -134,14 +176,12 @@ function caseProduct(caseId, kind, suffix) {
 }
 
 for (const caseId of selectedCases) {
-  const spec = CASE_SPECS.get(caseId);
-  assert.ok(spec, `unsupported V8 validation case ${caseId}`);
-  const descriptor = corpus.cases.find((item) => item.id === caseId);
-  assert.ok(descriptor, `validation corpus does not contain ${caseId}`);
-  assert.deepStrictEqual(descriptor.args, [], `${caseId} must not take arguments`);
-  assert.deepStrictEqual(descriptor.argSchemas, [], `${caseId} must not take arguments`);
-  assert.deepStrictEqual(descriptor.resultSchema, spec.resultSchema,
-    `${caseId} result schema mismatch`);
+  const descriptorMatches = corpus.cases.filter((item) => item.id === caseId);
+  assert.equal(descriptorMatches.length, 1,
+    `validation corpus must contain exactly one ${caseId} descriptor`);
+  const descriptor = descriptorMatches[0];
+  assert.equal(descriptor.args.length, descriptor.argSchemas.length,
+    `${caseId} argument schema/fixture arity mismatch`);
   assert.deepStrictEqual(descriptor.effectProjections, [],
     `${caseId} must not project host effects`);
 
@@ -153,15 +193,30 @@ for (const caseId of selectedCases) {
   assert.equal(consumedManifestSha256, manifestProduct.sha256,
     `loaded compiler manifest for ${caseId} disagrees with the captured product`);
   const compilerManifest = JSON.parse(manifestBytes.toString("utf8"));
-  assert.deepStrictEqual(compilerManifest, {
-    fixture: descriptor.entry,
-    sourceEntry: descriptor.entry,
-    entry: descriptor.entry,
-    result: spec.manifestResult,
-    params: [],
-    arguments: [],
-    imports: [],
-  });
+  assert.deepStrictEqual(Object.keys(compilerManifest).sort(),
+    ["arguments", "entry", "fixture", "imports", "params", "result", "sourceEntry"],
+    `${caseId} compiler manifest shape mismatch`);
+  assert.equal(compilerManifest.fixture, caseId, `${caseId} fixture mismatch`);
+  assert.equal(compilerManifest.sourceEntry, descriptor.entry,
+    `${caseId} source entry mismatch`);
+  assert.equal(compilerManifest.entry, descriptor.entry, `${caseId} entry mismatch`);
+  assert.ok(Array.isArray(compilerManifest.params), `${caseId} params must be an array`);
+  assert.ok(Array.isArray(compilerManifest.arguments),
+    `${caseId} arguments must be an array`);
+  assert.equal(compilerManifest.params.length, descriptor.args.length,
+    `${caseId} manifest/corpus argument arity mismatch`);
+  assert.equal(compilerManifest.arguments.length, descriptor.args.length,
+    `${caseId} manifest invocation arity mismatch`);
+  assert.deepStrictEqual(compilerManifest.imports, [],
+    `${caseId} unexpectedly requires a semantic host`);
+  const physicalArguments = compilerManifest.params.map((kind, index) =>
+    physicalArgument(
+      kind,
+      compilerManifest.arguments[index],
+      descriptor.argSchemas[index],
+      descriptor.args[index],
+      `${caseId} argument ${index}`,
+    ));
 
   const bytes = await readFile(moduleProduct.path);
   const consumedModuleSha256 = sha256(bytes);
@@ -178,19 +233,15 @@ for (const caseId of selectedCases) {
   const instance = await WebAssembly.instantiate(wasmModule, {});
   const entry = instance.exports[descriptor.entry];
   assert.equal(typeof entry, "function", `missing Wasm export ${descriptor.entry}`);
-  const physicalResult = entry();
-  let value;
-  if (spec.lane === "i32") {
-    assert.equal(typeof physicalResult, "number", `${caseId} must use V8's i32 lane`);
-    value = (physicalResult >>> 0).toString();
-  } else {
-    assert.equal(typeof physicalResult, "bigint", `${caseId} must use V8's i64 lane`);
-    value = BigInt.asUintN(64, physicalResult).toString();
-  }
-  assert.equal(value, spec.maximum, `${caseId} did not return its scalar maximum`);
-  const datum = spec.width === undefined
-    ? { usize: { value } }
-    : { bits: { width: spec.width, value } };
+  assert.equal(entry.length, compilerManifest.params.length,
+    `${caseId} binary/manifest argument arity mismatch`);
+  const physicalResult = entry(...physicalArguments);
+  const datum = resultDatum(
+    compilerManifest.result,
+    descriptor.resultSchema,
+    physicalResult,
+    `${caseId} result`,
+  );
   const receipt = JSON.stringify([
     {
       kind: inventoryProduct.kind,
