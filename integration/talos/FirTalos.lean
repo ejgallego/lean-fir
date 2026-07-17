@@ -17,3 +17,4 @@ import FirTalos.Correctness.Function
 import FirTalos.Correctness.FunctionExamples
 import FirTalos.Correctness.FunctionCtorProjectionExample
 import FirTalos.Correctness.FunctionCaseExample
+import FirTalos.Correctness.FunctionDefaultCaseExample

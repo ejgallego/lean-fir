@@ -144,11 +144,15 @@ production heap layout.
   selected, and only that arm receives the path-sensitive semantic proof.
   The final `abiCaseMain_export_correct` theorem covers the real four-import,
   two-local adapted export without runner fuel or unselected-arm execution.
+- `FirTalos/Correctness/FunctionDefaultCaseExample.lean` closes the fourth W3
+  fixture. The compiler-selected default is adapted once as the symbolic
+  fallback; the generated `Bool.false` test misses and resumes that fallback,
+  producing the premise-free `abiDefaultCaseMain_export_correct` theorem.
 
-The next W4 slice closes the remaining default-case fixture, then factors the
-repeated module/export packaging of all four representatives into the
-supported-fragment induction. The adapter still rejects initializers and
-closures.
+All four representative exports are now closed. The next W4 slice factors
+their repeated module/export packaging into the supported-fragment induction
+and states the common theorem independently of fixture-specific checked
+layouts. The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

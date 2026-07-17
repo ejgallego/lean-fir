@@ -94,8 +94,12 @@ runtime from the returned runtime, which is required once execution allocates
 a heap object. `FirTalos/Correctness/FunctionCaseExample.lean` follows the
 actual nested `Bool.false`/`Bool.true` tests and proves the premise-free
 `abiCaseMain_export_correct`; its path-sensitive proof executes only the true
-arm while retaining structural lowering evidence for the missed arm. The
-default-case fixture remains next.
+arm while retaining structural lowering evidence for the missed arm.
+`FirTalos/Correctness/FunctionDefaultCaseExample.lean` completes the initial
+four-program corpus: the false test misses into the separately compiled
+default fallback and yields `abiDefaultCaseMain_export_correct`. The next W4
+step is to factor the repeated fixture packaging into the general
+supported-fragment/export theorem.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
