@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import fcntl
 import hashlib
 import json
 import os
@@ -37,6 +38,7 @@ RESERVED_PRODUCT_KIND = "product-manifest"
 RESERVED_BUILD_INPUT_KIND = "build-input-manifest"
 BUILD_INPUT_SCOPE = "reported-loaded"
 BUILD_FILE_ACCESS_RECORDER_KIND = "file-access-recorder"
+BUILD_INPUT_REPLAY_ISOLATOR_KIND = "build-input-replay-isolator"
 STRACE_OPEN_SYSCALLS = {"open", "openat", "openat2"}
 STRACE_EXEC_SYSCALLS = {"execve", "execveat"}
 O_ACCMODE = 0x3
@@ -111,6 +113,7 @@ class ToolDeclaration:
     name: str
     path: Path | None = None
     command: str | None = None
+    resolve_command: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -247,12 +250,14 @@ def parse_build_file_access_trace(
                 f"{line_context}: incomplete traced {syscall} syscall"
             )
         if syscall in STRACE_OPEN_SYSCALLS:
-            result = re.search(r" = \d+<(.+)>$", line)
+            result = re.search(
+                r" = \d+<(.+)>(?:\(deleted\))?$", line
+            )
             if result is None:
                 raise ValidationError(
                     f"{line_context}: malformed traced {syscall} result"
                 )
-            call = line[: result.start()]
+            call = line[: result.start()].rstrip()
             flag_match = re.search(
                 r"flags=(0x[0-9a-fA-F]+|[0-9]+)", call
             )
@@ -323,6 +328,37 @@ def parse_build_file_access_trace(
     }
 
 
+def parse_bwrap_status(content: bytes, context: str) -> tuple[dict, dict]:
+    try:
+        lines = content.decode("utf-8").splitlines()
+        records = [json.loads(line) for line in lines if line]
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(f"{context}: malformed sandbox status") from error
+    namespace_fields = {
+        "child-pid",
+        "cgroup-namespace",
+        "ipc-namespace",
+        "mnt-namespace",
+        "net-namespace",
+        "pid-namespace",
+        "uts-namespace",
+    }
+    if (
+        len(records) != 2
+        or not isinstance(records[0], dict)
+        or set(records[0]) != namespace_fields
+        or not all(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+            for value in records[0].values()
+        )
+        or records[1] != {"exit-code": 0}
+    ):
+        raise ValidationError(f"{context}: malformed sandbox status")
+    return records[0], records[1]
+
+
 def canonical_json_bytes(value: object) -> bytes:
     return json.dumps(
         value,
@@ -330,6 +366,64 @@ def canonical_json_bytes(value: object) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def sealed_snapshot_fd(
+    digest: str,
+    content: bytes,
+    mode: int,
+    context: str,
+) -> int:
+    """Create an immutable in-memory file for one replay overlay."""
+    checked_digest = checked_sha256(digest, context)
+    if sha256_bytes(content) != checked_digest:
+        raise ValidationError(f"{context}: snapshot content digest mismatch")
+    if mode not in (0o444, 0o555):
+        raise ValidationError(f"{context}: invalid snapshot mode")
+    descriptor = -1
+    try:
+        descriptor = os.memfd_create(
+            f"fir-replay-{checked_digest[:16]}",
+            os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
+        )
+        remaining = memoryview(content)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("short write to replay snapshot")
+            remaining = remaining[written:]
+        os.fchmod(descriptor, mode)
+        os.utime(descriptor, ns=(0, 0))
+        seals = (
+            fcntl.F_SEAL_WRITE
+            | fcntl.F_SEAL_GROW
+            | fcntl.F_SEAL_SHRINK
+            | fcntl.F_SEAL_SEAL
+        )
+        fcntl.fcntl(descriptor, fcntl.F_ADD_SEALS, seals)
+        if fcntl.fcntl(descriptor, fcntl.F_GET_SEALS) != seals:
+            raise OSError("replay snapshot seals were not applied")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        inherited_descriptor = fcntl.fcntl(
+            descriptor, fcntl.F_DUPFD_CLOEXEC, 64
+        )
+        os.close(descriptor)
+        descriptor = inherited_descriptor
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise ValidationError(
+            f"{context}: cannot seal snapshot blob: {error}"
+        ) from error
+    return descriptor
+
+
+def close_file_descriptor(descriptor: int) -> None:
+    """Best-effort descriptor cleanup that cannot mask the primary failure."""
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
 
 
 def canonical_json_sha256(value: object) -> str:
@@ -811,22 +905,52 @@ def validation_tool_from_file(
 
 
 def validation_tool_from_declaration(
-    backend: str, declaration: ToolDeclaration
+    backend: str,
+    declaration: ToolDeclaration,
+    root: Path | None = None,
 ) -> ValidationTool:
     if (declaration.path is None) == (declaration.command is None):
         raise ValidationError("validation tool must declare one path or command")
     if declaration.path is not None:
+        if declaration.resolve_command is not None:
+            raise ValidationError(
+                "path validation tool cannot declare a resolver command"
+            )
         path = declaration.path
     else:
         command = declaration.command
         if command is None:
             raise ValidationError("validation tool command is missing")
-        resolved = shutil.which(command)
-        if resolved is None:
-            raise ValidationError(
-                f"cannot resolve validation tool command: {command}"
-            )
-        path = Path(resolved).resolve()
+        if declaration.resolve_command is None:
+            resolved = shutil.which(command)
+            if resolved is None:
+                raise ValidationError(
+                    f"cannot resolve validation tool command: {command}"
+                )
+            path = Path(resolved).resolve()
+        else:
+            if root is None:
+                raise ValidationError(
+                    f"validation tool resolver requires a root: {command}"
+                )
+            completed = run(list(declaration.resolve_command), root)
+            resolved_paths = [
+                line.strip()
+                for line in completed.stdout.splitlines()
+                if line.strip()
+            ]
+            if completed.returncode != 0 or len(resolved_paths) != 1:
+                raise ValidationError(
+                    f"cannot resolve validation tool command with "
+                    f"{' '.join(declaration.resolve_command)}: {command}"
+                )
+            path = Path(resolved_paths[0])
+            if not path.is_absolute():
+                raise ValidationError(
+                    f"validation tool resolver returned a relative path: "
+                    f"{command}"
+                )
+            path = Path(os.path.abspath(path))
     return validation_tool_from_file(
         backend,
         declaration.kind,
@@ -851,6 +975,7 @@ def run(
     cwd: Path,
     timeout: int = 120,
     extra_env: dict[str, str] | None = None,
+    pass_fds: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     environment = None
     if extra_env is not None:
@@ -866,6 +991,7 @@ def run(
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
+            pass_fds=pass_fds,
         )
     except subprocess.TimeoutExpired as error:
         raise ValidationError(f"command timed out: {' '.join(command)}") from error
@@ -1404,9 +1530,21 @@ VALIDATION_ARTIFACT_KINDS = {
     "build-determinism",
     "build-file-access",
     "build-file-access-trace",
+    "build-input-replay",
+    "build-input-replay-manifest",
+    "build-input-replay-status",
+    "build-input-replay-trace",
     "process-stdout",
     "process-stderr",
 }
+
+
+def is_build_attempt_scope(scope: str) -> bool:
+    return scope == "build" or (
+        scope.startswith("build-")
+        and scope[6:].isdigit()
+        and int(scope[6:]) >= 2
+    )
 
 
 def validation_artifact_scope(
@@ -1425,7 +1563,43 @@ def validation_artifact_scope(
         )
     parts = PurePosixPath(checked_name).parts
     case_id: str | None = None
-    if checked_kind == "build-file-access":
+    if checked_kind == "build-input-replay":
+        if len(parts) != 2 or parts[1] != "build-input-replay.json":
+            raise ValidationError(
+                "build-input-replay artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-input-replay"
+    elif checked_kind == "build-input-replay-manifest":
+        if (
+            len(parts) != 3
+            or parts[1] != "build-input-replay"
+            or parts[2] != "build-input-manifest.json"
+        ):
+            raise ValidationError(
+                "build-input-replay-manifest artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-input-replay"
+    elif checked_kind == "build-input-replay-status":
+        if (
+            len(parts) != 3
+            or parts[1] != "build-input-replay"
+            or parts[2] != "sandbox-status.jsonl"
+        ):
+            raise ValidationError(
+                "build-input-replay-status artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-input-replay"
+    elif checked_kind == "build-input-replay-trace":
+        if (
+            len(parts) != 3
+            or parts[1] != "build-input-replay"
+            or parts[2] != "file-access.strace"
+        ):
+            raise ValidationError(
+                "build-input-replay-trace artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-input-replay"
+    elif checked_kind == "build-file-access":
         if len(parts) != 2 or parts[1] != "build-file-access.json":
             raise ValidationError(
                 "build-file-access artifact has noncanonical name"
@@ -1435,14 +1609,7 @@ def validation_artifact_scope(
         if (
             len(parts) != 3
             or parts[2] != "file-access.strace"
-            or not (
-                parts[1] == "build"
-                or (
-                    parts[1].startswith("build-")
-                    and parts[1][6:].isdigit()
-                    and int(parts[1][6:]) >= 2
-                )
-            )
+            or not is_build_attempt_scope(parts[1])
         ):
             raise ValidationError(
                 "build-file-access-trace artifact has noncanonical name"
@@ -1471,12 +1638,8 @@ def validation_artifact_scope(
         if len(parts) == 2:
             backend, scope = parts[0], "execute"
         elif len(parts) == 3 and (
-            parts[1] == "build"
-            or (
-                parts[1].startswith("build-")
-                and parts[1][6:].isdigit()
-                and int(parts[1][6:]) >= 2
-            )
+            is_build_attempt_scope(parts[1])
+            or parts[1] == "build-input-replay"
         ):
             backend, scope = parts[0], parts[1]
         elif len(parts) == 3:
@@ -1932,11 +2095,13 @@ class ExternalCommandAdapter:
     run_command: list[str]
     result_domain: str
     build_command: list[str] = field(default_factory=list)
+    build_replay_command: list[str] = field(default_factory=list)
     timeout_seconds: int = 120
     product_declarations: tuple[ProductDeclaration, ...] = ()
     product_manifest: str | None = None
     build_input_manifest: str | None = None
     build_file_access_recorder: ToolDeclaration | None = None
+    build_input_replay_isolator: ToolDeclaration | None = None
     build_attempts: int = 1
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     build_tool_declarations: tuple[ToolDeclaration, ...] = ()
@@ -1952,10 +2117,16 @@ class ExternalCommandAdapter:
     _built_build_file_access_recorder: ValidationTool | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _built_build_input_replay_isolator: ValidationTool | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
     _built_build_inputs: tuple[ValidationBuildInput, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_build_command: tuple[str, ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_build_replay_command: tuple[str, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_run_command: tuple[str, ...] | None = field(
@@ -2099,10 +2270,12 @@ class ExternalCommandAdapter:
         )
 
     def collect_tools(
-        self, declarations: tuple[ToolDeclaration, ...]
+        self,
+        root: Path,
+        declarations: tuple[ToolDeclaration, ...],
     ) -> tuple[ValidationTool, ...]:
         return tuple(
-            validation_tool_from_declaration(self.name, declaration)
+            validation_tool_from_declaration(self.name, declaration, root)
             for declaration in sorted(
                 declarations,
                 key=lambda item: (item.kind, item.name),
@@ -2377,7 +2550,7 @@ class ExternalCommandAdapter:
 
     def bind_reported_inputs_to_file_accesses(
         self,
-        attempt: int,
+        attempt: int | str,
         trace_record: dict[str, object],
         accesses: dict[str, tuple[str, ...]],
         build_inputs: tuple[ValidationBuildInput, ...],
@@ -2411,13 +2584,654 @@ class ExternalCommandAdapter:
             "reportedInputCount": len(reported_inputs),
         }
 
+    def run_build_input_replay(
+        self,
+        context: BuildContext,
+        source_accesses: dict[str, tuple[str, ...]],
+    ) -> tuple[tuple[ValidationArtifact, ...], tuple[ValidationFinding, ...]]:
+        isolator = self._built_build_input_replay_isolator
+        recorder = self._built_build_file_access_recorder
+        if (
+            isolator is None
+            or recorder is None
+            or isolator.source_path is None
+            or recorder.source_path is None
+            or self._built_products is None
+            or self._built_build_inputs is None
+            or self._built_build_command is None
+            or self._built_build_replay_command is None
+            or self._built_build_tools is None
+        ):
+            raise ValidationError(
+                f"{self.name} build-input replay is not initialized"
+            )
+        replay_parent = (
+            context.out_dir.resolve() / "build-input-replay-output"
+        )
+        replay_backend = replay_parent / self.name
+        if replay_backend.is_symlink() or (
+            replay_backend.exists() and not replay_backend.is_dir()
+        ):
+            raise ValidationError(
+                f"{self.name} build-input replay output is not a directory"
+            )
+        if replay_backend.exists():
+            try:
+                shutil.rmtree(replay_backend)
+            except OSError as error:
+                raise ValidationError(
+                    f"cannot clear {self.name} build-input replay output: "
+                    f"{error}"
+                ) from error
+        replay_backend.mkdir(parents=True, exist_ok=True)
+
+        bindings: list[dict[str, object]] = []
+        overlay_specs: list[tuple[str, bytes, str, int, str]] = []
+        binding_targets: set[str] = set()
+
+        def add_binding(
+            category: str,
+            kind: str,
+            name: str,
+            digest: str,
+            content: bytes,
+            target_path: Path,
+            blob_category: str,
+            required_accesses: tuple[str, ...] | None = None,
+        ) -> None:
+            target = os.path.normpath(str(target_path.resolve()))
+            if any(
+                target == root or target.startswith(f"{root}/")
+                for root in ("/dev", "/proc", "/tmp")
+            ):
+                raise ValidationError(
+                    f"{self.name} replay binding is beneath an isolated "
+                    f"runtime path: {target}"
+                )
+            if target == str(replay_backend) or target.startswith(
+                f"{replay_backend}/"
+            ):
+                raise ValidationError(
+                    f"{self.name} replay binding collides with replay output"
+                )
+            if target in binding_targets:
+                raise ValidationError(
+                    f"{self.name} replay has duplicate binding target: "
+                    f"{target}"
+                )
+            binding_targets.add(target)
+            accesses = source_accesses.get(target, ())
+            if required_accesses is not None and accesses != required_accesses:
+                raise ValidationError(
+                    f"{self.name} replay source accesses changed for "
+                    f"{kind}:{name}"
+                )
+            if required_accesses is not None and not accesses:
+                raise ValidationError(
+                    f"{self.name} replay source was not observed: "
+                    f"{kind}:{name}"
+                )
+            mode = 0o555 if "exec" in accesses else 0o444
+            overlay_specs.append(
+                (
+                    digest,
+                    content,
+                    target,
+                    mode,
+                    f"{self.name} replay binding {category}:{kind}:{name}",
+                )
+            )
+            bindings.append(
+                {
+                    "backend": self.name,
+                    "category": category,
+                    "kind": kind,
+                    "name": name,
+                    "sha256": digest,
+                    "path": target,
+                    "mode": mode,
+                    "accesses": list(accesses),
+                    "blob": f"evidence/{blob_category}/{digest}",
+                }
+            )
+
+        for item in self._built_build_inputs:
+            if item.kind == RESERVED_BUILD_INPUT_KIND:
+                continue
+            if item.content is None or item.source_path is None:
+                raise ValidationError(
+                    f"{self.name} replay input has no captured source: "
+                    f"{item.kind}:{item.name}"
+                )
+            current = validation_build_input_from_file(
+                self.name,
+                BuildInputDeclaration(
+                    item.kind, item.name, item.source_path
+                ),
+            )
+            if current != item:
+                raise ValidationError(
+                    f"{self.name} build inputs changed before replay"
+                )
+            target = os.path.normpath(str(item.source_path.resolve()))
+            input_accesses = source_accesses.get(target, ())
+            add_binding(
+                "build-input",
+                item.kind,
+                item.name,
+                item.sha256,
+                item.content,
+                item.source_path,
+                "build-inputs",
+                input_accesses,
+            )
+        if not any(
+            binding["category"] == "build-input"
+            for binding in bindings
+        ):
+            raise ValidationError(
+                f"{self.name} build-input replay has no input members"
+            )
+        for tool in self._built_build_tools:
+            if tool.kind in {
+                BUILD_FILE_ACCESS_RECORDER_KIND,
+                BUILD_INPUT_REPLAY_ISOLATOR_KIND,
+            }:
+                continue
+            if tool.content is None or tool.source_path is None:
+                raise ValidationError(
+                    f"{self.name} replay tool has no captured source: "
+                    f"{tool.kind}:{tool.name}"
+                )
+            tool_target = os.path.normpath(str(tool.source_path.resolve()))
+            tool_accesses = source_accesses.get(tool_target, ())
+            add_binding(
+                "build-tool",
+                tool.kind,
+                tool.name,
+                tool.sha256,
+                tool.content,
+                tool.source_path,
+                "tools",
+                tool_accesses,
+            )
+        if context.run_context is not None:
+            corpus_path = context.run_context.out_dir / "corpus.json"
+            corpus_content = corpus_artifact_bytes(
+                context.run_context.descriptors
+            )
+            add_binding(
+                "validation-input",
+                "corpus",
+                "corpus.json",
+                sha256_bytes(corpus_content),
+                corpus_content,
+                corpus_path,
+                "inputs",
+            )
+        ordered_overlays = sorted(
+            zip(bindings, overlay_specs, strict=True),
+            key=lambda item: (
+                str(item[0]["category"]),
+                str(item[0]["kind"]),
+                str(item[0]["name"]),
+            ),
+        )
+        bindings = [item[0] for item in ordered_overlays]
+        overlay_specs = [item[1] for item in ordered_overlays]
+
+        trace_root = context.out_dir.resolve() / "build-file-access-traces"
+        if trace_root.is_symlink() or (
+            trace_root.exists() and not trace_root.is_dir()
+        ):
+            raise ValidationError(
+                f"{self.name} replay trace root is not a directory"
+            )
+        trace_root.mkdir(parents=True, exist_ok=True)
+        try:
+            trace_fd, raw_trace_path = tempfile.mkstemp(
+                prefix=f"{self.name}-replay-",
+                suffix=".strace",
+                dir=trace_root,
+            )
+            trace_stat = os.fstat(trace_fd)
+            os.close(trace_fd)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot create {self.name} replay trace: {error}"
+            ) from error
+        trace_path = Path(raw_trace_path)
+        trace_identity = (trace_stat.st_dev, trace_stat.st_ino)
+        trace_name = (
+            f"{self.name}/build-input-replay/file-access.strace"
+        )
+
+        build_environment = self.environment(
+            replay_parent, context.run_context
+        )
+        build_environment["FIR_VALIDATION_BUILD_TOOLS"] = (
+            self.tool_environment_value(self._built_build_tools)
+        )
+        executable_directories = sorted(
+            {
+                str(Path(str(binding["path"])).parent)
+                for binding in bindings
+                if binding["category"] == "build-input"
+                and "exec" in binding["accesses"]
+            }
+        )
+        replay_path = ":".join(
+            dict.fromkeys((*executable_directories, "/usr/bin", "/bin"))
+        )
+        payload_environment = {
+            "HOME": "/tmp/home",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": replay_path,
+            "TERM": "dumb",
+            "TMPDIR": "/tmp",
+        }
+        payload_environment.update(build_environment)
+        isolator_command = [
+            str(isolator.source_path),
+            "--die-with-parent",
+            "--new-session",
+            "--unshare-all",
+            "--unshare-user",
+            "--disable-userns",
+            "--assert-userns-disabled",
+            "--cap-drop",
+            "ALL",
+            "--hostname",
+            "fir-validation",
+            "--clearenv",
+            "--ro-bind",
+            "/",
+            "/",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--tmpfs",
+            "/tmp",
+            "--dir",
+            "/tmp/home",
+            "--bind",
+            str(replay_backend),
+            str(replay_backend),
+        ]
+        for key, value in sorted(payload_environment.items()):
+            isolator_command.extend(("--setenv", key, value))
+        overlay_fds: list[tuple[int, str, int]] = []
+        try:
+            for digest, content, target, mode, binding_context in overlay_specs:
+                descriptor = sealed_snapshot_fd(
+                    digest, content, mode, binding_context
+                )
+                overlay_fds.append((descriptor, target, mode))
+                isolator_command.extend(
+                    (
+                        "--perms",
+                        f"{mode:04o}",
+                        "--ro-bind-data",
+                        str(descriptor),
+                        target,
+                    )
+                )
+        except BaseException:
+            for descriptor, _, _ in overlay_fds:
+                close_file_descriptor(descriptor)
+            raise
+        status_read_fd = -1
+        status_write_fd = -1
+        try:
+            status_read_fd, status_write_fd = os.pipe()
+            inherited_status_fd = fcntl.fcntl(
+                status_write_fd, fcntl.F_DUPFD_CLOEXEC, 4096
+            )
+            close_file_descriptor(status_write_fd)
+            status_write_fd = inherited_status_fd
+        except OSError as error:
+            if status_read_fd >= 0:
+                close_file_descriptor(status_read_fd)
+            if status_write_fd >= 0:
+                close_file_descriptor(status_write_fd)
+            for descriptor, _, _ in overlay_fds:
+                close_file_descriptor(descriptor)
+            raise ValidationError(
+                f"cannot create {self.name} replay status pipe: {error}"
+            ) from error
+        isolator_command.extend(
+            ("--json-status-fd", str(status_write_fd))
+        )
+        isolator_command.extend(
+            (
+                "--chdir",
+                str(context.root.resolve()),
+                "--",
+                *self._built_build_replay_command,
+            )
+        )
+        command = [
+            str(recorder.source_path),
+            "-f",
+            "-qq",
+            "--kill-on-exit",
+            "-s",
+            "0",
+            "-yy",
+            "-X",
+            "raw",
+            "-e",
+            "trace=open,openat,openat2,execve,execveat",
+            "-e",
+            "status=successful",
+            "-e",
+            "signal=none",
+            "-o",
+            str(trace_path),
+            "--",
+            *isolator_command,
+        ]
+        passed_descriptors = tuple(
+            [descriptor for descriptor, _, _ in overlay_fds]
+            + [status_write_fd]
+        )
+        try:
+            try:
+                completed = run(
+                    command,
+                    context.root,
+                    self.timeout_seconds,
+                    build_environment,
+                    passed_descriptors,
+                )
+            finally:
+                for descriptor in passed_descriptors:
+                    close_file_descriptor(descriptor)
+        except BaseException:
+            close_file_descriptor(status_read_fd)
+            raise
+        try:
+            status_chunks: list[bytes] = []
+            while True:
+                chunk = os.read(status_read_fd, 65536)
+                if not chunk:
+                    break
+                status_chunks.append(chunk)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read {self.name} replay status: {error}"
+            ) from error
+        finally:
+            close_file_descriptor(status_read_fd)
+        status_content = b"".join(status_chunks)
+        destination = (
+            context.out_dir / self.name / "build-input-replay"
+        )
+        process_artifacts = write_process_artifacts(
+            destination,
+            completed,
+            f"{self.name}/build-input-replay",
+        )
+        self.verify_captured_tools(
+            self._built_build_tools, "during build-input replay"
+        )
+        if completed.returncode != 0:
+            raise ValidationError(
+                f"failed to replay {self.name} build inputs; "
+                f"see {destination}"
+            )
+        parse_bwrap_status(
+            status_content, f"{self.name} build-input replay status"
+        )
+        status_name = (
+            f"{self.name}/build-input-replay/sandbox-status.jsonl"
+        )
+        status_sha256 = sha256_bytes(status_content)
+        status_artifact = ValidationArtifact(
+            "build-input-replay-status",
+            status_name,
+            status_sha256,
+            status_content,
+        )
+        if context.run_context is not None:
+            self.verify_corpus(
+                context.run_context, "during build-input replay"
+            )
+        if trace_path.is_symlink() or not trace_path.is_file():
+            raise ValidationError(
+                f"{self.name} build-input replay produced no trace"
+            )
+        try:
+            final_trace_stat = trace_path.stat()
+            trace_content = trace_path.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read {self.name} build-input replay trace: {error}"
+            ) from error
+        if (
+            final_trace_stat.st_dev,
+            final_trace_stat.st_ino,
+        ) != trace_identity:
+            raise ValidationError(
+                f"{self.name} build-input replay trace was replaced"
+            )
+        accesses = parse_build_file_access_trace(
+            trace_content, f"{self.name} build-input replay trace"
+        )
+        trace_sha256 = sha256_bytes(trace_content)
+        trace_artifact = ValidationArtifact(
+            "build-input-replay-trace",
+            trace_name,
+            trace_sha256,
+            trace_content,
+        )
+        for binding in bindings:
+            expected_accesses = tuple(binding["accesses"])
+            if binding["category"] == "validation-input":
+                continue
+            if accesses.get(str(binding["path"])) != expected_accesses:
+                raise ValidationError(
+                    f"{self.name} replay did not preserve accesses for "
+                    f"{binding['category']}:{binding['kind']}:"
+                    f"{binding['name']}"
+                )
+        replay_products = self.collect_products(replay_parent)
+        if self.build_input_manifest is None:
+            raise ValidationError(
+                f"{self.name} build-input replay has no manifest"
+            )
+        _, replay_manifest_content = (
+            validation_product_and_content_from_file(
+                self.name,
+                ProductDeclaration(
+                    RESERVED_BUILD_INPUT_KIND,
+                    self.build_input_manifest,
+                ),
+                replay_parent,
+            )
+        )
+        replay_declarations = build_input_declarations_from_manifest(
+            replay_manifest_content,
+            f"{self.name} replay build input manifest",
+        )
+        source_members = {
+            (item.kind, item.name): item
+            for item in self._built_build_inputs
+            if item.kind != RESERVED_BUILD_INPUT_KIND
+        }
+        replay_binding_paths = {
+            (str(item["kind"]), str(item["name"])): str(item["path"])
+            for item in bindings
+            if item["category"] == "build-input"
+        }
+        declared_paths: dict[tuple[str, str], str] = {}
+        for item in replay_declarations:
+            key = (item.kind, item.name)
+            raw_path = os.path.normpath(str(item.path))
+            expected_path = replay_binding_paths.get(key)
+            if (
+                expected_path is not None
+                and raw_path == f"{expected_path} (deleted)"
+            ):
+                raw_path = expected_path
+            declared_paths[key] = raw_path
+        if (
+            set(declared_paths) != set(source_members)
+            or declared_paths != replay_binding_paths
+        ):
+            raise ValidationError(
+                f"{self.name} replay build input manifest does not match "
+                "its immutable overlays"
+            )
+        replay_members = tuple(
+            ValidationBuildInput(
+                self.name,
+                item.kind,
+                item.name,
+                source_members[(item.kind, item.name)].sha256,
+                source_members[(item.kind, item.name)].content,
+                Path(declared_paths[(item.kind, item.name)]),
+            )
+            for item in replay_declarations
+        )
+        canonical_replay_manifest = canonical_build_input_manifest_bytes(
+            replay_members
+        )
+        replay_build_inputs = tuple(
+            sorted(
+                (
+                    *replay_members,
+                    ValidationBuildInput(
+                        self.name,
+                        RESERVED_BUILD_INPUT_KIND,
+                        self.build_input_manifest,
+                        sha256_bytes(canonical_replay_manifest),
+                        canonical_replay_manifest,
+                    ),
+                ),
+                key=lambda item: (item.kind, item.name),
+            )
+        )
+        replay_manifest_name = (
+            f"{self.name}/build-input-replay/build-input-manifest.json"
+        )
+        replay_manifest_sha256 = sha256_bytes(replay_manifest_content)
+        replay_manifest_artifact = ValidationArtifact(
+            "build-input-replay-manifest",
+            replay_manifest_name,
+            replay_manifest_sha256,
+            replay_manifest_content,
+        )
+        access_record = self.bind_reported_inputs_to_file_accesses(
+            "replay",
+            {
+                "trace": {
+                    "name": trace_name,
+                    "sha256": trace_sha256,
+                },
+                "accesses": [
+                    {"path": path, "accesses": list(kinds)}
+                    for path, kinds in accesses.items()
+                ],
+                "accessCount": len(accesses),
+            },
+            accesses,
+            replay_build_inputs,
+        )
+        products_equal = replay_products == self._built_products
+        build_inputs_equal = (
+            replay_build_inputs == self._built_build_inputs
+        )
+        report = {
+            "version": PROTOCOL_VERSION,
+            "backend": self.name,
+            "isolator": isolator.to_json(),
+            "recorder": recorder.to_json(),
+            "policy": {
+                "mode": "content-addressed-declared-closure",
+                "ambientRoot": "read-only",
+                "network": "unshared",
+                "nestedUserNamespaces": "disabled",
+                "reportedInputs": "content-addressed-read-only-overlays",
+                "temporaryDirectory": "fresh",
+                "output": "isolated-writable",
+            },
+            "sourceAttempt": self.build_attempts,
+            "command": list(self._built_build_replay_command),
+            "cwd": str(context.root.resolve()),
+            "environment": payload_environment,
+            "writableRoot": str(replay_backend),
+            "bindings": bindings,
+            **access_record,
+            "ambientAccessCount": len(
+                set(accesses) - {str(binding["path"]) for binding in bindings}
+            ),
+            "sandboxStatus": {
+                "name": status_name,
+                "sha256": status_sha256,
+            },
+            "buildInputManifest": {
+                "name": replay_manifest_name,
+                "sha256": replay_manifest_sha256,
+            },
+            "products": [item.to_json() for item in replay_products],
+            "buildInputs": [
+                item.to_json() for item in replay_build_inputs
+            ],
+            "productsEqual": products_equal,
+            "buildInputsEqual": build_inputs_equal,
+            "equal": products_equal and build_inputs_equal,
+        }
+        report_content = (
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        report_path = context.out_dir / self.name / "build-input-replay.json"
+        report_path.write_bytes(report_content)
+        report_artifact = ValidationArtifact(
+            "build-input-replay",
+            f"{self.name}/build-input-replay.json",
+            sha256_bytes(report_content),
+            report_content,
+        )
+        findings: list[ValidationFinding] = []
+        if not products_equal:
+            findings.append(
+                ValidationFinding(
+                    "build-input-replay",
+                    "content-addressed replay produced different products",
+                    self.name,
+                )
+            )
+        if not build_inputs_equal:
+            findings.append(
+                ValidationFinding(
+                    "build-input-replay",
+                    "content-addressed replay reported different build inputs",
+                    self.name,
+                )
+            )
+        return (
+            (
+                *process_artifacts,
+                trace_artifact,
+                status_artifact,
+                replay_manifest_artifact,
+                report_artifact,
+            ),
+            tuple(findings),
+        )
+
     def build(self, context: BuildContext) -> None:
         self._built_products = None
         self._built_tools = None
         self._built_build_tools = None
         self._built_build_file_access_recorder = None
+        self._built_build_input_replay_isolator = None
         self._built_build_inputs = None
         self._built_build_command = None
+        self._built_build_replay_command = None
         self._built_run_command = None
         self._build_artifacts = ()
         self._build_findings = ()
@@ -2427,8 +3241,10 @@ class ExternalCommandAdapter:
         ) = None
         if not context.no_build and self.build_command:
             command_build_tools = self.collect_tools(
+                context.root,
                 self.build_tool_declarations
             )
+            validation_build_tools: list[ValidationTool] = []
             if self.build_file_access_recorder is not None:
                 if (
                     self.build_file_access_recorder.kind
@@ -2440,20 +3256,39 @@ class ExternalCommandAdapter:
                     )
                 self._built_build_file_access_recorder = (
                     validation_tool_from_declaration(
-                        self.name, self.build_file_access_recorder
+                        self.name,
+                        self.build_file_access_recorder,
+                        context.root,
                     )
                 )
-                self._built_build_tools = tuple(
-                    sorted(
-                        (
-                            *command_build_tools,
-                            self._built_build_file_access_recorder,
-                        ),
-                        key=lambda tool: (tool.kind, tool.name),
+                validation_build_tools.append(
+                    self._built_build_file_access_recorder
+                )
+            if self.build_input_replay_isolator is not None:
+                if (
+                    self.build_input_replay_isolator.kind
+                    != BUILD_INPUT_REPLAY_ISOLATOR_KIND
+                ):
+                    raise ValidationError(
+                        f"{self.name} build-input replay isolator kind "
+                        f"must be {BUILD_INPUT_REPLAY_ISOLATOR_KIND}"
+                    )
+                self._built_build_input_replay_isolator = (
+                    validation_tool_from_declaration(
+                        self.name,
+                        self.build_input_replay_isolator,
+                        context.root,
                     )
                 )
-            else:
-                self._built_build_tools = command_build_tools
+                validation_build_tools.append(
+                    self._built_build_input_replay_isolator
+                )
+            self._built_build_tools = tuple(
+                sorted(
+                    (*command_build_tools, *validation_build_tools),
+                    key=lambda tool: (tool.kind, tool.name),
+                )
+            )
             self._built_build_command = self.bind_command(
                 context.root,
                 self.build_command,
@@ -2461,9 +3296,24 @@ class ExternalCommandAdapter:
                 command_build_tools,
                 "build",
             )
+            if self.build_input_replay_isolator is not None:
+                self._built_build_replay_command = self.bind_command(
+                    context.root,
+                    self.build_replay_command,
+                    self.build_tool_declarations,
+                    command_build_tools,
+                    "build replay",
+                )
+            else:
+                self._built_build_replay_command = tuple(
+                    self.build_replay_command
+                )
         else:
             self._built_build_tools = ()
             self._built_build_command = tuple(self.build_command)
+            self._built_build_replay_command = tuple(
+                self.build_replay_command
+            )
         if not context.no_build and self.build_command:
             if self.product_manifest is not None:
                 self.clear_dynamic_product_staging(context.out_dir)
@@ -2681,7 +3531,23 @@ class ExternalCommandAdapter:
                     report_content,
                 ),
             )
-        self._built_tools = self.collect_tools(self.tool_declarations)
+        if (
+            not context.no_build
+            and self.build_input_replay_isolator is not None
+        ):
+            if recorded_access is None:
+                raise ValidationError(
+                    f"{self.name} build-input replay has no source trace"
+                )
+            _, source_accesses = recorded_access
+            replay_artifacts, replay_findings = (
+                self.run_build_input_replay(context, source_accesses)
+            )
+            self._build_artifacts += replay_artifacts
+            self._build_findings += replay_findings
+        self._built_tools = self.collect_tools(
+            context.root, self.tool_declarations
+        )
         self._built_run_command = self.bind_command(
             context.root,
             self.run_command,
@@ -2826,12 +3692,14 @@ def external_adapter_from_config(
     required = {"name", "runCommand", "resultDomain"}
     optional = {
         "buildCommand",
+        "buildReplayCommand",
         "buildAttempts",
         "timeoutSeconds",
         "products",
         "productManifest",
         "buildInputManifest",
         "buildFileAccessRecorder",
+        "buildInputReplay",
         "tools",
         "buildTools",
     }
@@ -2863,6 +3731,7 @@ def external_adapter_from_config(
 
     run_command = checked_command("runCommand", True)
     build_command = checked_command("buildCommand", False)
+    build_replay_command = checked_command("buildReplayCommand", False)
     result_domain = value["resultDomain"]
     if result_domain not in ("selected", "corpus"):
         raise ValidationError(
@@ -2999,18 +3868,34 @@ def external_adapter_from_config(
             locator_fields = fields & {"path", "command"}
             if (
                 not {"kind", "name"} <= fields
-                or not fields <= {"kind", "name", "path", "command"}
+                or not fields
+                <= {
+                    "kind",
+                    "name",
+                    "path",
+                    "command",
+                    "resolveCommand",
+                }
                 or len(locator_fields) != 1
+                or ("resolveCommand" in fields and "command" not in fields)
             ):
                 raise ValidationError(
                     f"{tool_context}: expected kind, name, and exactly one of "
-                    "path or command"
+                    "path or command; resolveCommand requires command"
                 )
             kind = validate_backend_name(tool["kind"], tool_context)
-            if kind == BUILD_FILE_ACCESS_RECORDER_KIND:
+            if kind in {
+                BUILD_FILE_ACCESS_RECORDER_KIND,
+                BUILD_INPUT_REPLAY_ISOLATOR_KIND,
+            }:
+                owning_field = (
+                    "buildFileAccessRecorder"
+                    if kind == BUILD_FILE_ACCESS_RECORDER_KIND
+                    else "buildInputReplay"
+                )
                 raise ValidationError(
                     f"{tool_context}: tool kind is reserved for "
-                    "buildFileAccessRecorder"
+                    f"{owning_field}"
                 )
             tool_name = checked_relative_posix_path(
                 tool["name"], tool_context
@@ -3043,10 +3928,29 @@ def external_adapter_from_config(
                     raise ValidationError(
                         f"{tool_context}: command must be a bare PATH command"
                     )
+                raw_resolve_command = tool.get("resolveCommand")
+                resolve_command = None
+                if raw_resolve_command is not None:
+                    if (
+                        not isinstance(raw_resolve_command, list)
+                        or not raw_resolve_command
+                        or not all(
+                            isinstance(argument, str)
+                            and argument
+                            and "\x00" not in argument
+                            for argument in raw_resolve_command
+                        )
+                    ):
+                        raise ValidationError(
+                            f"{tool_context}: resolveCommand must be a "
+                            "nonempty argv array"
+                        )
+                    resolve_command = tuple(raw_resolve_command)
                 declaration = ToolDeclaration(
                     kind,
                     tool_name,
                     command=command,
+                    resolve_command=resolve_command,
                 )
             source = (
                 ("path", str(declaration.path))
@@ -3145,6 +4049,84 @@ def external_adapter_from_config(
             recorder_name,
             command=recorder_command,
         )
+    raw_build_input_replay = value.get("buildInputReplay")
+    build_input_replay_isolator = None
+    if raw_build_input_replay is not None:
+        replay_context = f"adapter config {path}/buildInputReplay"
+        if (
+            not isinstance(raw_build_input_replay, dict)
+            or set(raw_build_input_replay)
+            != {"kind", "name", "command"}
+        ):
+            raise ValidationError(
+                f"{replay_context}: expected kind, name, and command fields"
+            )
+        replay_kind = validate_backend_name(
+            raw_build_input_replay["kind"], replay_context
+        )
+        if replay_kind != BUILD_INPUT_REPLAY_ISOLATOR_KIND:
+            raise ValidationError(
+                f"{replay_context}: kind must be "
+                f"{BUILD_INPUT_REPLAY_ISOLATOR_KIND}"
+            )
+        replay_name = checked_relative_posix_path(
+            raw_build_input_replay["name"], replay_context
+        )
+        replay_command = raw_build_input_replay["command"]
+        if (
+            not isinstance(replay_command, str)
+            or not replay_command
+            or "\x00" in replay_command
+            or "/" in replay_command
+            or "\\" in replay_command
+        ):
+            raise ValidationError(
+                f"{replay_context}: command must be a bare PATH command"
+            )
+        if not build_command:
+            raise ValidationError(
+                f"adapter config {path}: buildInputReplay requires "
+                "buildCommand"
+            )
+        if not build_replay_command:
+            raise ValidationError(
+                f"adapter config {path}: buildInputReplay requires "
+                "buildReplayCommand"
+            )
+        if build_input_manifest is None:
+            raise ValidationError(
+                f"adapter config {path}: buildInputReplay requires "
+                "buildInputManifest"
+            )
+        if build_file_access_recorder is None:
+            raise ValidationError(
+                f"adapter config {path}: buildInputReplay requires "
+                "buildFileAccessRecorder"
+            )
+        build_input_replay_isolator = ToolDeclaration(
+            replay_kind,
+            replay_name,
+            command=replay_command,
+        )
+    if build_replay_command and build_input_replay_isolator is None:
+        raise ValidationError(
+            f"adapter config {path}: buildReplayCommand requires "
+            "buildInputReplay"
+        )
+    if build_replay_command:
+        replay_command_tools = [
+            declaration
+            for declaration in build_tool_declarations
+            if declaration.command is not None
+        ]
+        if (
+            len(replay_command_tools) != 1
+            or replay_command_tools[0].command != build_replay_command[0]
+        ):
+            raise ValidationError(
+                f"adapter config {path}: buildTools command tool must "
+                "match buildReplayCommand[0]"
+            )
     duplicate_tool_keys = sorted(
         {
             (declaration.kind, declaration.name)
@@ -3193,11 +4175,45 @@ def external_adapter_from_config(
                 f"adapter config {path}: duplicate file-access recorder "
                 f"source: {build_file_access_recorder.command}"
             )
+    if build_input_replay_isolator is not None:
+        existing_declarations = (
+            *tool_declarations,
+            *build_tool_declarations,
+            build_file_access_recorder,
+        )
+        replay_key = (
+            build_input_replay_isolator.kind,
+            build_input_replay_isolator.name,
+        )
+        if replay_key in {
+            (declaration.kind, declaration.name)
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate build-input replay "
+                f"tool: {replay_key[0]}:{replay_key[1]}"
+            )
+        if (
+            "command",
+            str(build_input_replay_isolator.command),
+        ) in {
+            (
+                ("path", str(declaration.path))
+                if declaration.path is not None
+                else ("command", str(declaration.command))
+            )
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate build-input replay "
+                f"source: {build_input_replay_isolator.command}"
+            )
     return ExternalCommandAdapter(
         name=name,
         run_command=run_command,
         result_domain=result_domain,
         build_command=build_command,
+        build_replay_command=build_replay_command,
         timeout_seconds=timeout_seconds,
         product_declarations=tuple(
             sorted(
@@ -3208,6 +4224,7 @@ def external_adapter_from_config(
         product_manifest=product_manifest,
         build_input_manifest=build_input_manifest,
         build_file_access_recorder=build_file_access_recorder,
+        build_input_replay_isolator=build_input_replay_isolator,
         build_attempts=build_attempts,
         tool_declarations=tool_declarations,
         build_tool_declarations=build_tool_declarations,
@@ -3628,6 +4645,7 @@ def verify_matrix_artifact(
     if not isinstance(raw_inputs, list) or not raw_inputs:
         raise ValidationError("validation matrix has malformed inputs")
     inputs: list[ValidationInput] = []
+    input_contents: dict[tuple[str, str], bytes] = {}
     corpus_content: bytes | None = None
     for index, item in enumerate(raw_inputs):
         if not isinstance(item, dict) or set(item) != {
@@ -3650,6 +4668,7 @@ def verify_matrix_artifact(
             raise ValidationError("first validation input must be corpus.json")
         if index == 0:
             corpus_content = input_content
+        input_contents[(kind, name)] = input_content
         inputs.append(ValidationInput(kind, name, digest))
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
@@ -3873,6 +4892,10 @@ def verify_matrix_artifact(
     file_access_traces: dict[
         tuple[str, str], ValidationArtifact
     ] = {}
+    replay_reports: dict[str, dict] = {}
+    replay_traces: dict[str, ValidationArtifact] = {}
+    replay_statuses: dict[str, ValidationArtifact] = {}
+    replay_manifests: dict[str, ValidationArtifact] = {}
     stdout_scopes: set[tuple[str, str | None, str]] = set()
     stderr_scopes: set[tuple[str, str | None, str]] = set()
     for item in raw_artifacts:
@@ -4049,6 +5072,46 @@ def verify_matrix_artifact(
             file_access_traces[trace_key] = ValidationArtifact(
                 kind, name, digest, content
             )
+        elif kind == "build-input-replay":
+            if backend in replay_reports:
+                raise ValidationError(
+                    "validation matrix has duplicate build-input replay reports"
+                )
+            try:
+                report = json.loads(content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "build-input-replay artifact is not JSON"
+                ) from error
+            if not isinstance(report, dict):
+                raise ValidationError(
+                    "build-input-replay artifact is malformed"
+                )
+            replay_reports[backend] = report
+        elif kind == "build-input-replay-trace":
+            if backend in replay_traces:
+                raise ValidationError(
+                    "validation matrix has duplicate build-input replay traces"
+                )
+            replay_traces[backend] = ValidationArtifact(
+                kind, name, digest, content
+            )
+        elif kind == "build-input-replay-status":
+            if backend in replay_statuses:
+                raise ValidationError(
+                    "validation matrix has duplicate build-input replay statuses"
+                )
+            replay_statuses[backend] = ValidationArtifact(
+                kind, name, digest, content
+            )
+        elif kind == "build-input-replay-manifest":
+            if backend in replay_manifests:
+                raise ValidationError(
+                    "validation matrix has duplicate build-input replay manifests"
+                )
+            replay_manifests[backend] = ValidationArtifact(
+                kind, name, digest, content
+            )
         elif kind == "process-stdout":
             stdout_scopes.add((backend, case_id, scope))
         elif kind == "process-stderr":
@@ -4065,7 +5128,9 @@ def verify_matrix_artifact(
     repeat_log_backends = {
         backend
         for backend, case_id, scope in stdout_scopes
-        if case_id is None and scope.startswith("build-")
+        if case_id is None
+        and is_build_attempt_scope(scope)
+        and scope != "build"
     }
     if repeat_log_backends != determinism_backends:
         raise ValidationError(
@@ -4085,9 +5150,7 @@ def verify_matrix_artifact(
             for scope in stdout_scopes
             if scope[0] == backend
             and scope[1] is None
-            and (
-                scope[2] == "build" or scope[2].startswith("build-")
-            )
+            and is_build_attempt_scope(scope[2])
         }
         if actual_scopes != expected_scopes:
             raise ValidationError(
@@ -4347,9 +5410,7 @@ def verify_matrix_artifact(
             for item in stdout_scopes
             if item[0] == backend
             and item[1] is None
-            and (
-                item[2] == "build" or item[2].startswith("build-")
-            )
+            and is_build_attempt_scope(item[2])
         }
         if actual_scopes != expected_scopes:
             raise ValidationError(
@@ -4359,6 +5420,761 @@ def verify_matrix_artifact(
         raise ValidationError(
             "raw build file-access traces disagree with reports"
         )
+
+    replay_tool_backends = [
+        tool.backend
+        for tool in tools
+        if tool.kind == BUILD_INPUT_REPLAY_ISOLATOR_KIND
+    ]
+    replay_backends = set(replay_reports)
+    if (
+        len(set(replay_tool_backends)) != len(replay_tool_backends)
+        or set(replay_tool_backends) != replay_backends
+        or set(replay_traces) != replay_backends
+        or set(replay_statuses) != replay_backends
+        or set(replay_manifests) != replay_backends
+    ):
+        raise ValidationError(
+            "build-input replay tools and artifacts disagree"
+        )
+    expected_replay_policy = {
+        "mode": "content-addressed-declared-closure",
+        "ambientRoot": "read-only",
+        "network": "unshared",
+        "nestedUserNamespaces": "disabled",
+        "reportedInputs": "content-addressed-read-only-overlays",
+        "temporaryDirectory": "fresh",
+        "output": "isolated-writable",
+    }
+    for backend, report in replay_reports.items():
+        expected_fields = {
+            "version",
+            "backend",
+            "isolator",
+            "recorder",
+            "policy",
+            "sourceAttempt",
+            "command",
+            "cwd",
+            "environment",
+            "writableRoot",
+            "bindings",
+            "trace",
+            "accesses",
+            "accessCount",
+            "reportedInputs",
+            "reportedInputCount",
+            "ambientAccessCount",
+            "sandboxStatus",
+            "buildInputManifest",
+            "products",
+            "buildInputs",
+            "productsEqual",
+            "buildInputsEqual",
+            "equal",
+        }
+        if (
+            set(report) != expected_fields
+            or report.get("version") != PROTOCOL_VERSION
+            or isinstance(report.get("version"), bool)
+            or report.get("backend") != backend
+            or report.get("policy") != expected_replay_policy
+            or not isinstance(report.get("isolator"), dict)
+            or not isinstance(report.get("recorder"), dict)
+            or not isinstance(report.get("command"), list)
+            or not report["command"]
+            or not all(
+                isinstance(argument, str) and argument
+                for argument in report["command"]
+            )
+            or not isinstance(report.get("environment"), dict)
+            or not isinstance(report.get("bindings"), list)
+            or not report["bindings"]
+            or not isinstance(report.get("accesses"), list)
+            or not isinstance(report.get("reportedInputs"), list)
+            or not isinstance(report.get("products"), list)
+            or not isinstance(report.get("buildInputs"), list)
+            or not isinstance(report.get("productsEqual"), bool)
+            or not isinstance(report.get("buildInputsEqual"), bool)
+            or not isinstance(report.get("equal"), bool)
+        ):
+            raise ValidationError(
+                "build-input-replay artifact is malformed"
+            )
+        expected_source_attempt = determinism_attempt_counts.get(backend, 1)
+        if (
+            report.get("sourceAttempt") != expected_source_attempt
+            or isinstance(report.get("sourceAttempt"), bool)
+        ):
+            raise ValidationError(
+                "build-input replay names the wrong source attempt"
+            )
+        isolator = report["isolator"]
+        recorder = report["recorder"]
+        for role, record, expected_kind in (
+            (
+                "isolator",
+                isolator,
+                BUILD_INPUT_REPLAY_ISOLATOR_KIND,
+            ),
+            ("recorder", recorder, BUILD_FILE_ACCESS_RECORDER_KIND),
+        ):
+            if (
+                set(record) != {"backend", "kind", "name", "sha256"}
+                or record.get("backend") != backend
+                or record.get("kind") != expected_kind
+            ):
+                raise ValidationError(
+                    f"build-input replay {role} is malformed"
+                )
+            checked_relative_posix_path(
+                record.get("name"), f"build-input replay {role} name"
+            )
+            checked_sha256(
+                record.get("sha256"), f"build-input replay {role}"
+            )
+            if record not in tool_records:
+                raise ValidationError(
+                    f"build-input replay {role} is absent from tools"
+                )
+
+        trace_reference = report["trace"]
+        expected_trace_name = (
+            f"{backend}/build-input-replay/file-access.strace"
+        )
+        trace_artifact = replay_traces[backend]
+        if (
+            not isinstance(trace_reference, dict)
+            or set(trace_reference) != {"name", "sha256"}
+            or trace_reference.get("name") != expected_trace_name
+            or trace_artifact.name != expected_trace_name
+            or trace_artifact.sha256
+            != checked_sha256(
+                trace_reference.get("sha256"),
+                "build-input replay trace",
+            )
+        ):
+            raise ValidationError(
+                "build-input replay disagrees with its trace"
+            )
+        replay_accesses = parse_build_file_access_trace(
+            trace_artifact.content,
+            f"retained {backend} build-input replay trace",
+        )
+        canonical_replay_accesses = [
+            {"path": path, "accesses": list(kinds)}
+            for path, kinds in replay_accesses.items()
+        ]
+        if (
+            report["accesses"] != canonical_replay_accesses
+            or report.get("accessCount") != len(replay_accesses)
+            or isinstance(report.get("accessCount"), bool)
+        ):
+            raise ValidationError(
+                "build-input replay access report is malformed"
+            )
+
+        status_reference = report["sandboxStatus"]
+        expected_status_name = (
+            f"{backend}/build-input-replay/sandbox-status.jsonl"
+        )
+        status_artifact = replay_statuses[backend]
+        if (
+            not isinstance(status_reference, dict)
+            or set(status_reference) != {"name", "sha256"}
+            or status_reference.get("name") != expected_status_name
+            or status_artifact.name != expected_status_name
+            or status_artifact.sha256
+            != checked_sha256(
+                status_reference.get("sha256"),
+                "build-input replay sandbox status",
+            )
+        ):
+            raise ValidationError(
+                "build-input replay disagrees with sandbox status"
+            )
+        parse_bwrap_status(
+            status_artifact.content,
+            f"retained {backend} build-input replay status",
+        )
+
+        manifest_reference = report["buildInputManifest"]
+        expected_manifest_name = (
+            f"{backend}/build-input-replay/build-input-manifest.json"
+        )
+        manifest_artifact = replay_manifests[backend]
+        if (
+            not isinstance(manifest_reference, dict)
+            or set(manifest_reference) != {"name", "sha256"}
+            or manifest_reference.get("name") != expected_manifest_name
+            or manifest_artifact.name != expected_manifest_name
+            or manifest_artifact.sha256
+            != checked_sha256(
+                manifest_reference.get("sha256"),
+                "build-input replay manifest",
+            )
+        ):
+            raise ValidationError(
+                "build-input replay disagrees with its input manifest"
+            )
+        replay_declarations = build_input_declarations_from_manifest(
+            manifest_artifact.content,
+            f"retained {backend} build-input replay manifest",
+        )
+
+        environment = report["environment"]
+        required_environment_fields = {
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR",
+            "FIR_VALIDATION_BACKEND",
+            "FIR_VALIDATION_OUT_DIR",
+            "FIR_VALIDATION_PROTOCOL_VERSION",
+            "FIR_VALIDATION_CASES",
+            "FIR_VALIDATION_CORPUS",
+            "FIR_VALIDATION_BUILD_TOOLS",
+        }
+        writable_root = report.get("writableRoot")
+        cwd = report.get("cwd")
+        if (
+            set(environment) != required_environment_fields
+            or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in environment.items()
+            )
+            or environment.get("HOME") != "/tmp/home"
+            or environment.get("LANG") != "C.UTF-8"
+            or environment.get("LC_ALL") != "C.UTF-8"
+            or environment.get("TERM") != "dumb"
+            or environment.get("TMPDIR") != "/tmp"
+            or environment.get("FIR_VALIDATION_BACKEND") != backend
+            or environment.get("FIR_VALIDATION_PROTOCOL_VERSION")
+            != str(PROTOCOL_VERSION)
+            or environment.get("FIR_VALIDATION_CASES")
+            != json.dumps(selected_cases, separators=(",", ":"))
+            or not isinstance(writable_root, str)
+            or not os.path.isabs(writable_root)
+            or os.path.normpath(writable_root) != writable_root
+            or environment.get("FIR_VALIDATION_OUT_DIR") != writable_root
+            or not isinstance(cwd, str)
+            or not os.path.isabs(cwd)
+            or os.path.normpath(cwd) != cwd
+        ):
+            raise ValidationError(
+                "build-input replay environment is malformed"
+            )
+        try:
+            environment_tools = json.loads(
+                environment["FIR_VALIDATION_BUILD_TOOLS"]
+            )
+        except json.JSONDecodeError as error:
+            raise ValidationError(
+                "build-input replay tool environment is malformed"
+            ) from error
+        if not isinstance(environment_tools, list):
+            raise ValidationError(
+                "build-input replay tool environment is malformed"
+            )
+        checked_environment_tools: list[dict[str, str]] = []
+        for item in environment_tools:
+            if (
+                not isinstance(item, dict)
+                or set(item)
+                != {"backend", "kind", "name", "sha256", "path"}
+                or item.get("backend") != backend
+                or not isinstance(item.get("path"), str)
+                or not os.path.isabs(item["path"])
+                or os.path.normpath(item["path"]) != item["path"]
+            ):
+                raise ValidationError(
+                    "build-input replay tool environment is malformed"
+                )
+            logical = {
+                field: item[field]
+                for field in ("backend", "kind", "name", "sha256")
+            }
+            validate_backend_name(
+                logical["kind"], "build-input replay tool kind"
+            )
+            checked_relative_posix_path(
+                logical["name"], "build-input replay tool name"
+            )
+            checked_sha256(
+                logical["sha256"], "build-input replay tool"
+            )
+            if logical not in tool_records:
+                raise ValidationError(
+                    "build-input replay environment names an unknown tool"
+                )
+            checked_environment_tools.append(item)
+        environment_tool_keys = [
+            (item["kind"], item["name"])
+            for item in checked_environment_tools
+        ]
+        if (
+            len(set(environment_tool_keys)) != len(environment_tool_keys)
+            or environment_tool_keys != sorted(environment_tool_keys)
+            or isolator not in [
+                {
+                    field: item[field]
+                    for field in ("backend", "kind", "name", "sha256")
+                }
+                for item in checked_environment_tools
+            ]
+            or recorder not in [
+                {
+                    field: item[field]
+                    for field in ("backend", "kind", "name", "sha256")
+                }
+                for item in checked_environment_tools
+            ]
+        ):
+            raise ValidationError(
+                "build-input replay tool environment is malformed"
+            )
+
+        matching_configs: list[tuple[str, dict[str, object]]] = []
+        for (input_kind, input_name), input_content in input_contents.items():
+            if input_kind != "adapter-config":
+                continue
+            try:
+                config_value = json.loads(input_content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "retained validation adapter config is not JSON"
+                ) from error
+            if (
+                isinstance(config_value, dict)
+                and config_value.get("name") == backend
+            ):
+                matching_configs.append((input_name, config_value))
+        if len(matching_configs) != 1:
+            raise ValidationError(
+                "build-input replay has no unique retained adapter config"
+            )
+        config_name, adapter_config = matching_configs[0]
+        raw_replay_command = adapter_config.get("buildReplayCommand")
+        raw_build_tools = adapter_config.get("buildTools")
+        if (
+            not isinstance(raw_replay_command, list)
+            or not raw_replay_command
+            or not all(
+                isinstance(argument, str) and argument
+                for argument in raw_replay_command
+            )
+            or not isinstance(raw_build_tools, list)
+            or not raw_build_tools
+        ):
+            raise ValidationError(
+                "retained build-input replay declaration is malformed"
+            )
+        ordinary_environment_tools = {
+            (item["kind"], item["name"]): item
+            for item in checked_environment_tools
+            if item["kind"]
+            not in {
+                BUILD_FILE_ACCESS_RECORDER_KIND,
+                BUILD_INPUT_REPLAY_ISOLATOR_KIND,
+            }
+        }
+        declared_tool_keys: set[tuple[str, str]] = set()
+        bound_replay_command = list(raw_replay_command)
+        command_tool_count = 0
+        config_path = Path(cwd) / config_name
+        for item in raw_build_tools:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("kind"), str)
+                or not isinstance(item.get("name"), str)
+            ):
+                raise ValidationError(
+                    "retained build-input replay tools are malformed"
+                )
+            key = (item["kind"], item["name"])
+            tool = ordinary_environment_tools.get(key)
+            if key in declared_tool_keys or tool is None:
+                raise ValidationError(
+                    "retained build-input replay tools disagree with evidence"
+                )
+            declared_tool_keys.add(key)
+            if "command" in item:
+                command_tool_count += 1
+                if (
+                    item.get("command") != bound_replay_command[0]
+                    or "path" in item
+                ):
+                    raise ValidationError(
+                        "retained build-input replay command tool is malformed"
+                    )
+                bound_replay_command[0] = tool["path"]
+                continue
+            raw_path = item.get("path")
+            if not isinstance(raw_path, str) or "command" in item:
+                raise ValidationError(
+                    "retained build-input replay path tool is malformed"
+                )
+            declaration_path = Path(
+                os.path.abspath(config_path.parent / raw_path)
+            )
+            matches = [
+                index
+                for index, argument in enumerate(
+                    bound_replay_command[1:], start=1
+                )
+                if Path(
+                    os.path.abspath(
+                        Path(argument)
+                        if Path(argument).is_absolute()
+                        else Path(cwd) / argument
+                    )
+                )
+                == declaration_path
+            ]
+            if len(matches) != 1:
+                raise ValidationError(
+                    "retained build-input replay path tool is unbound"
+                )
+            bound_replay_command[matches[0]] = tool["path"]
+        if (
+            command_tool_count != 1
+            or declared_tool_keys != set(ordinary_environment_tools)
+            or report["command"] != bound_replay_command
+        ):
+            raise ValidationError(
+                "build-input replay command disagrees with retained config"
+            )
+
+        source_attempt = file_access_reports[backend]["attempts"][
+            expected_source_attempt - 1
+        ]
+        source_accesses = {
+            item["path"]: item["accesses"]
+            for item in source_attempt["accesses"]
+        }
+        source_reported_inputs = source_attempt["reportedInputs"]
+        expected_bindings: list[dict[str, object]] = []
+        for item in source_reported_inputs:
+            accesses = item["accesses"]
+            expected_bindings.append(
+                {
+                    "backend": backend,
+                    "category": "build-input",
+                    "kind": item["kind"],
+                    "name": item["name"],
+                    "sha256": item["sha256"],
+                    "path": item["path"],
+                    "mode": 0o555 if "exec" in accesses else 0o444,
+                    "accesses": accesses,
+                    "blob": f"evidence/build-inputs/{item['sha256']}",
+                }
+            )
+        for item in checked_environment_tools:
+            if item["kind"] in {
+                BUILD_FILE_ACCESS_RECORDER_KIND,
+                BUILD_INPUT_REPLAY_ISOLATOR_KIND,
+            }:
+                continue
+            accesses = source_accesses.get(item["path"], [])
+            if not accesses:
+                raise ValidationError(
+                    "build-input replay tool was absent from source trace"
+                )
+            expected_bindings.append(
+                {
+                    "backend": backend,
+                    "category": "build-tool",
+                    "kind": item["kind"],
+                    "name": item["name"],
+                    "sha256": item["sha256"],
+                    "path": item["path"],
+                    "mode": 0o555 if "exec" in accesses else 0o444,
+                    "accesses": accesses,
+                    "blob": f"evidence/tools/{item['sha256']}",
+                }
+            )
+        corpus_input = inputs[0]
+        corpus_path = environment.get("FIR_VALIDATION_CORPUS")
+        if (
+            corpus_input.kind != "corpus"
+            or corpus_input.name != "corpus.json"
+            or not isinstance(corpus_path, str)
+            or not os.path.isabs(corpus_path)
+            or os.path.normpath(corpus_path) != corpus_path
+        ):
+            raise ValidationError(
+                "build-input replay corpus binding is malformed"
+            )
+        corpus_accesses = source_accesses.get(corpus_path, [])
+        expected_bindings.append(
+            {
+                "backend": backend,
+                "category": "validation-input",
+                "kind": corpus_input.kind,
+                "name": corpus_input.name,
+                "sha256": corpus_input.sha256,
+                "path": corpus_path,
+                "mode": 0o555 if "exec" in corpus_accesses else 0o444,
+                "accesses": corpus_accesses,
+                "blob": f"evidence/inputs/{corpus_input.sha256}",
+            }
+        )
+        expected_bindings.sort(
+            key=lambda item: (
+                str(item["category"]),
+                str(item["kind"]),
+                str(item["name"]),
+            )
+        )
+        if report["bindings"] != expected_bindings:
+            raise ValidationError(
+                "build-input replay bindings disagree with source evidence"
+            )
+        binding_paths = [str(item["path"]) for item in expected_bindings]
+        if (
+            len(set(binding_paths)) != len(binding_paths)
+            or any(
+                path == writable_root or path.startswith(f"{writable_root}/")
+                for path in binding_paths
+            )
+        ):
+            raise ValidationError(
+                "build-input replay bindings collide"
+            )
+        executable_directories = sorted(
+            {
+                str(Path(str(item["path"])).parent)
+                for item in expected_bindings
+                if item["category"] == "build-input"
+                and "exec" in item["accesses"]
+            }
+        )
+        expected_path = ":".join(
+            dict.fromkeys((*executable_directories, "/usr/bin", "/bin"))
+        )
+        if environment.get("PATH") != expected_path:
+            raise ValidationError(
+                "build-input replay PATH is malformed"
+            )
+        command_tool_bindings = [
+            item
+            for item in expected_bindings
+            if item["category"] == "build-tool"
+        ]
+        exec_tools = [
+            item for item in command_tool_bindings
+            if "exec" in item["accesses"]
+        ]
+        if (
+            len(exec_tools) != 1
+            or report["command"][0] != exec_tools[0]["path"]
+            or any(
+                report["command"].count(str(item["path"])) != 1
+                for item in command_tool_bindings
+            )
+        ):
+            raise ValidationError(
+                "build-input replay command disagrees with build tools"
+            )
+        for item in expected_bindings:
+            expected_accesses = tuple(item["accesses"])
+            if item["category"] == "validation-input":
+                continue
+            if replay_accesses.get(str(item["path"])) != expected_accesses:
+                raise ValidationError(
+                    "build-input replay did not preserve declared accesses"
+                )
+        if (
+            report.get("ambientAccessCount")
+            != len(set(replay_accesses) - set(binding_paths))
+            or isinstance(report.get("ambientAccessCount"), bool)
+        ):
+            raise ValidationError(
+                "build-input replay ambient access count is malformed"
+            )
+
+        def checked_replay_inventory(
+            inventory: object, label: str
+        ) -> list[dict[str, str]]:
+            if not isinstance(inventory, list):
+                raise ValidationError(
+                    f"build-input replay {label} is malformed"
+                )
+            checked: list[dict[str, str]] = []
+            for item in inventory:
+                if (
+                    not isinstance(item, dict)
+                    or set(item)
+                    != {"backend", "kind", "name", "sha256"}
+                    or item.get("backend") != backend
+                ):
+                    raise ValidationError(
+                        f"build-input replay {label} is malformed"
+                    )
+                validate_backend_name(
+                    item.get("kind"), f"build-input replay {label} kind"
+                )
+                checked_relative_posix_path(
+                    item.get("name"), f"build-input replay {label} name"
+                )
+                checked_sha256(
+                    item.get("sha256"), f"build-input replay {label}"
+                )
+                checked.append(item)
+            keys = [(item["kind"], item["name"]) for item in checked]
+            if len(set(keys)) != len(keys) or keys != sorted(keys):
+                raise ValidationError(
+                    f"build-input replay {label} is duplicate or unsorted"
+                )
+            return checked
+
+        replay_products = checked_replay_inventory(
+            report["products"], "products"
+        )
+        replay_build_inputs = checked_replay_inventory(
+            report["buildInputs"], "build inputs"
+        )
+        replay_reported_records: list[dict[str, str]] = []
+        replay_reported_paths: list[tuple[str, str, str]] = []
+        replay_reported_bindings: list[tuple[str, str, str, str]] = []
+        for item in report["reportedInputs"]:
+            if (
+                not isinstance(item, dict)
+                or set(item)
+                != {
+                    "backend",
+                    "kind",
+                    "name",
+                    "sha256",
+                    "path",
+                    "accesses",
+                }
+                or item.get("backend") != backend
+            ):
+                raise ValidationError(
+                    "build-input replay reported input is malformed"
+                )
+            logical = {
+                field: item[field]
+                for field in ("backend", "kind", "name", "sha256")
+            }
+            validate_backend_name(
+                logical["kind"], "build-input replay input kind"
+            )
+            checked_relative_posix_path(
+                logical["name"], "build-input replay input name"
+            )
+            checked_sha256(
+                logical["sha256"], "build-input replay input"
+            )
+            input_path = item.get("path")
+            if (
+                not isinstance(input_path, str)
+                or not os.path.isabs(input_path)
+                or os.path.normpath(input_path) != input_path
+                or item.get("accesses")
+                != list(replay_accesses.get(input_path, ()))
+                or not item.get("accesses")
+            ):
+                raise ValidationError(
+                    "build-input replay reported input was not observed"
+                )
+            replay_reported_records.append(logical)
+            replay_reported_paths.append(
+                (logical["kind"], logical["name"], input_path)
+            )
+            replay_reported_bindings.append(
+                (
+                    logical["kind"],
+                    logical["name"],
+                    logical["sha256"],
+                    input_path,
+                )
+            )
+        expected_reported_bindings = [
+            (
+                str(item["kind"]),
+                str(item["name"]),
+                str(item["sha256"]),
+                str(item["path"]),
+            )
+            for item in expected_bindings
+            if item["category"] == "build-input"
+        ]
+        expected_reported_paths = {
+            (kind, name): path
+            for kind, name, _, path in expected_reported_bindings
+        }
+        replay_manifest_paths: list[tuple[str, str, str]] = []
+        for item in replay_declarations:
+            key = (item.kind, item.name)
+            raw_path = os.path.normpath(str(item.path))
+            expected_path = expected_reported_paths.get(key)
+            if (
+                expected_path is not None
+                and raw_path == f"{expected_path} (deleted)"
+            ):
+                raw_path = expected_path
+            replay_manifest_paths.append((item.kind, item.name, raw_path))
+        if (
+            report.get("reportedInputCount")
+            != len(replay_reported_records)
+            or isinstance(report.get("reportedInputCount"), bool)
+            or replay_reported_records
+            != [
+                item for item in replay_build_inputs
+                if item["kind"] != RESERVED_BUILD_INPUT_KIND
+            ]
+            or replay_reported_paths != replay_manifest_paths
+            or replay_reported_bindings != expected_reported_bindings
+        ):
+            raise ValidationError(
+                "build-input replay manifest and reported inputs disagree"
+            )
+        replay_members = tuple(
+            ValidationBuildInput(
+                item["backend"],
+                item["kind"],
+                item["name"],
+                item["sha256"],
+            )
+            for item in replay_reported_records
+        )
+        replay_manifest_records = [
+            item for item in replay_build_inputs
+            if item["kind"] == RESERVED_BUILD_INPUT_KIND
+        ]
+        if (
+            len(replay_manifest_records) != 1
+            or replay_manifest_records[0]["sha256"]
+            != sha256_bytes(canonical_build_input_manifest_bytes(replay_members))
+        ):
+            raise ValidationError(
+                "build-input replay canonical manifest is malformed"
+            )
+        final_products = [
+            item.to_json() for item in products if item.backend == backend
+        ]
+        final_build_inputs = [
+            item.to_json()
+            for item in build_inputs if item.backend == backend
+        ]
+        products_equal = replay_products == final_products
+        build_inputs_equal = replay_build_inputs == final_build_inputs
+        if (
+            report["productsEqual"] != products_equal
+            or report["buildInputsEqual"] != build_inputs_equal
+            or report["equal"] != (products_equal and build_inputs_equal)
+        ):
+            raise ValidationError(
+                "build-input replay equality is malformed"
+            )
+        if (backend, None, "build-input-replay") not in stdout_scopes:
+            raise ValidationError(
+                "build-input replay has no paired process logs"
+            )
 
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:

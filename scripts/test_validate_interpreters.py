@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -1332,7 +1333,8 @@ class HarnessTests(unittest.TestCase):
         trace = "\n".join(
             [
                 '101 execve("/opt/bin/tool", ["tool"], 0x0) = 0',
-                '101 openat(0xffffff9c, "/opt/input", 0x80000) = 3</opt/input>',
+                '101 openat(0xffffff9c, "/opt/input", 0x80000)     = 3</opt/input>',
+                '101 openat(0xffffff9c, "/opt/deleted", 0x80000) = 12</opt/deleted>(deleted)',
                 '101 open("/opt/read-write", 0x2) = 4</opt/read-write>',
                 '101 open("/opt/default-flags", 0) = 9</opt/default-flags>',
                 '101 open("/opt/name = value", 0) = 10</opt/name = value>',
@@ -1349,6 +1351,7 @@ class HarnessTests(unittest.TestCase):
                 "/opt/bin/helper": ("exec",),
                 "/opt/bin/tool": ("exec", "read"),
                 "/opt/default-flags": ("read",),
+                "/opt/deleted": ("read",),
                 "/opt/input": ("read",),
                 "/opt/name = value": ("read",),
                 "/opt/openat2": ("read",),
@@ -1389,6 +1392,107 @@ class HarnessTests(unittest.TestCase):
                     core.parse_build_file_access_trace(
                         malformed, "fixture"
                     )
+
+    def test_bwrap_status_parser_is_strict(self) -> None:
+        namespace = {
+            "child-pid": 101,
+            "cgroup-namespace": 102,
+            "ipc-namespace": 103,
+            "mnt-namespace": 104,
+            "net-namespace": 105,
+            "pid-namespace": 106,
+            "uts-namespace": 107,
+        }
+        exit_status = {"exit-code": 0}
+        content = (
+            json.dumps(namespace) + "\n" + json.dumps(exit_status) + "\n"
+        ).encode("utf-8")
+        self.assertEqual(
+            core.parse_bwrap_status(content, "fixture"),
+            (namespace, exit_status),
+        )
+
+        malformed = (
+            b"\xff",
+            b"not-json\n",
+            (json.dumps(namespace) + "\n").encode("utf-8"),
+            (
+                json.dumps(namespace | {"extra": 1})
+                + "\n"
+                + json.dumps(exit_status)
+                + "\n"
+            ).encode("utf-8"),
+            (
+                json.dumps(namespace | {"child-pid": True})
+                + "\n"
+                + json.dumps(exit_status)
+                + "\n"
+            ).encode("utf-8"),
+            (
+                json.dumps(namespace | {"child-pid": 0})
+                + "\n"
+                + json.dumps(exit_status)
+                + "\n"
+            ).encode("utf-8"),
+            (
+                json.dumps(namespace)
+                + "\n"
+                + json.dumps({"exit-code": 1})
+                + "\n"
+            ).encode("utf-8"),
+        )
+        for content in malformed:
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(
+                    harness.ValidationError, "malformed sandbox status"
+                ):
+                    core.parse_bwrap_status(content, "fixture")
+
+    def test_sealed_snapshot_fd_has_exact_content_mode_and_seals(self) -> None:
+        content = b"content-addressed replay input"
+        digest = harness.sha256_bytes(content)
+        expected_seals = (
+            fcntl.F_SEAL_WRITE
+            | fcntl.F_SEAL_GROW
+            | fcntl.F_SEAL_SHRINK
+            | fcntl.F_SEAL_SEAL
+        )
+        for mode in (0o444, 0o555):
+            with self.subTest(mode=oct(mode)):
+                descriptor = core.sealed_snapshot_fd(
+                    digest, content, mode, "fixture"
+                )
+                try:
+                    self.assertGreaterEqual(descriptor, 64)
+                    self.assertEqual(
+                        Path(f"/proc/self/fd/{descriptor}").read_bytes(),
+                        content,
+                    )
+                    metadata = os.fstat(descriptor)
+                    self.assertEqual(metadata.st_mode & 0o777, mode)
+                    self.assertEqual(
+                        fcntl.fcntl(descriptor, fcntl.F_GET_SEALS),
+                        expected_seals,
+                    )
+                    with self.assertRaises(OSError):
+                        os.write(descriptor, b"tamper")
+                    with self.assertRaises(OSError):
+                        os.ftruncate(descriptor, 0)
+                finally:
+                    os.close(descriptor)
+
+        with self.assertRaisesRegex(
+            harness.ValidationError, "malformed SHA-256"
+        ):
+            core.sealed_snapshot_fd("bad", content, 0o444, "fixture")
+        with self.assertRaisesRegex(
+            harness.ValidationError, "snapshot content digest mismatch"
+        ):
+            core.sealed_snapshot_fd(digest, b"different", 0o444, "fixture")
+        with self.assertRaisesRegex(
+            harness.ValidationError, "invalid snapshot mode"
+        ):
+            core.sealed_snapshot_fd(digest, content, 0o644, "fixture")
 
     def test_external_adapter_tool_config_is_strict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1712,6 +1816,206 @@ class HarnessTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 harness.ValidationError,
                 "duplicate file-access recorder source",
+            ):
+                harness.external_adapter_from_config(path)
+
+    def test_external_adapter_build_input_replay_config_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = {
+                "name": "v8",
+                "buildCommand": ["node", "build.mjs"],
+                "buildReplayCommand": ["node", "replay.mjs"],
+                "runCommand": ["node", "run.mjs"],
+                "resultDomain": "selected",
+                "products": [
+                    {"kind": "wasm-module", "path": "module.wasm"}
+                ],
+                "buildInputManifest": "build-inputs.json",
+                "buildTools": [
+                    {
+                        "kind": "build-launcher",
+                        "name": "node-build",
+                        "command": "node",
+                    }
+                ],
+                "tools": [
+                    {"kind": "engine", "name": "node", "command": "node"}
+                ],
+                "buildFileAccessRecorder": {
+                    "kind": "file-access-recorder",
+                    "name": "strace",
+                    "command": "strace",
+                },
+                "buildInputReplay": {
+                    "kind": "build-input-replay-isolator",
+                    "name": "bwrap",
+                    "command": "bwrap",
+                },
+            }
+
+            def copy_base() -> dict:
+                return json.loads(json.dumps(base))
+
+            path.write_text(json.dumps(base), encoding="utf-8")
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(
+                adapter.build_replay_command,
+                ["node", "replay.mjs"],
+            )
+            self.assertEqual(
+                adapter.build_input_replay_isolator,
+                harness.ToolDeclaration(
+                    "build-input-replay-isolator",
+                    "bwrap",
+                    command="bwrap",
+                ),
+            )
+
+            with_resolver = copy_base()
+            with_resolver["buildTools"][0]["resolveCommand"] = [
+                "node",
+                "resolve-node.mjs",
+            ]
+            path.write_text(json.dumps(with_resolver), encoding="utf-8")
+            resolved_adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(
+                resolved_adapter.build_tool_declarations[0],
+                harness.ToolDeclaration(
+                    "build-launcher",
+                    "node-build",
+                    command="node",
+                    resolve_command=("node", "resolve-node.mjs"),
+                ),
+            )
+
+            for malformed_resolver in (
+                [],
+                "node resolve-node.mjs",
+                ["node", ""],
+                ["node", 1],
+            ):
+                invalid = copy_base()
+                invalid["buildTools"][0]["resolveCommand"] = (
+                    malformed_resolver
+                )
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.subTest(resolve_command=malformed_resolver):
+                    with self.assertRaisesRegex(
+                        harness.ValidationError,
+                        "resolveCommand must be a nonempty argv array",
+                    ):
+                        harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildTools"] = [
+                {
+                    "kind": "build-driver",
+                    "name": "build.mjs",
+                    "path": "build.mjs",
+                    "resolveCommand": ["node", "resolve-node.mjs"],
+                }
+            ]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "resolveCommand requires command",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildReplayCommand"] = "node replay.mjs"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "buildReplayCommand must be an argv array",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildReplayCommand"][0] = "python3"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "buildTools command tool must match buildReplayCommand",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            del invalid["buildInputReplay"]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "buildReplayCommand requires buildInputReplay",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildInputReplay"] = {}
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "expected kind, name, and command fields",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildInputReplay"]["kind"] = "sandbox"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "kind must be build-input-replay-isolator",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildInputReplay"]["command"] = "./bwrap"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "bare PATH command"
+            ):
+                harness.external_adapter_from_config(path)
+
+            for missing, message in (
+                (
+                    "buildReplayCommand",
+                    "buildInputReplay requires buildReplayCommand",
+                ),
+                (
+                    "buildInputManifest",
+                    "buildInputReplay requires buildInputManifest",
+                ),
+                (
+                    "buildFileAccessRecorder",
+                    "buildInputReplay requires buildFileAccessRecorder",
+                ),
+            ):
+                invalid = copy_base()
+                del invalid[missing]
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.subTest(missing=missing):
+                    with self.assertRaisesRegex(
+                        harness.ValidationError, message
+                    ):
+                        harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildInputReplay"]["command"] = "strace"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "duplicate build-input replay source",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = copy_base()
+            invalid["buildTools"][0]["kind"] = (
+                "build-input-replay-isolator"
+            )
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "tool kind is reserved for buildInputReplay",
             ):
                 harness.external_adapter_from_config(path)
 
@@ -2586,6 +2890,10 @@ class HarnessTests(unittest.TestCase):
             ["lake", "lean", "FirValidationWasm.lean"],
         )
         self.assertEqual(
+            adapter.build_replay_command,
+            ["lake", "env", "lean", "FirValidationWasm.lean"],
+        )
+        self.assertEqual(
             adapter.run_command,
             [
                 "node",
@@ -2604,12 +2912,33 @@ class HarnessTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
+            adapter.build_input_replay_isolator,
+            harness.ToolDeclaration(
+                "build-input-replay-isolator",
+                "bwrap",
+                command="bwrap",
+            ),
+        )
+        self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
                 ("engine", "node"),
                 ("runner", "scripts/run_validation_v8.mjs"),
                 ("runtime", "scripts/wasm_semantic_host.mjs"),
             ],
+        )
+        self.assertEqual(
+            next(
+                tool
+                for tool in adapter.build_tool_declarations
+                if tool.kind == "build-launcher"
+            ),
+            harness.ToolDeclaration(
+                "build-launcher",
+                "lake",
+                command="lake",
+                resolve_command=("lake", "env", "which", "lake"),
+            ),
         )
 
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
@@ -2636,7 +2965,7 @@ class HarnessTests(unittest.TestCase):
             ) -> harness.BackendAudit:
                 return harness.BackendAudit()
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=harness.ROOT) as directory:
             root = Path(directory)
             out_dir = root / "out"
             product_path = out_dir / "v8" / "modules" / "validation.wasm"
@@ -2648,6 +2977,72 @@ class HarnessTests(unittest.TestCase):
             material_path = root / "compiler.input"
             material_bytes = b"exact compiler input"
             material_path.write_bytes(material_bytes)
+            isolator_path = root / "fake-bwrap"
+            isolator_path.write_text(
+                "#!/usr/bin/env python3\n"
+                "import fcntl,json,os,pathlib,subprocess,sys\n"
+                "args=sys.argv[1:]\n"
+                "environment={}\n"
+                "status_fd=None\n"
+                "cwd=None\n"
+                "payload=None\n"
+                "pending_mode=None\n"
+                "index=0\n"
+                "while index < len(args):\n"
+                " arg=args[index]\n"
+                " if arg == '--':\n"
+                "  payload=args[index+1:]\n"
+                "  break\n"
+                " if arg == '--setenv':\n"
+                "  environment[args[index+1]]=args[index+2]\n"
+                "  index+=3\n"
+                " elif arg == '--json-status-fd':\n"
+                "  status_fd=int(args[index+1])\n"
+                "  index+=2\n"
+                " elif arg == '--chdir':\n"
+                "  cwd=args[index+1]\n"
+                "  index+=2\n"
+                " elif arg == '--perms':\n"
+                "  pending_mode=int(args[index+1],8)\n"
+                "  index+=2\n"
+                " elif arg == '--ro-bind-data':\n"
+                "  descriptor=int(args[index+1])\n"
+                "  target=pathlib.Path(args[index+2])\n"
+                "  assert pending_mode in (0o444,0o555)\n"
+                "  assert os.fstat(descriptor).st_mode & 0o777 == pending_mode\n"
+                "  assert fcntl.fcntl(descriptor,fcntl.F_GET_SEALS) == "
+                "(fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|"
+                "fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL)\n"
+                "  assert pathlib.Path(f'/proc/self/fd/{descriptor}').read_bytes()"
+                " == target.read_bytes()\n"
+                "  pending_mode=None\n"
+                "  index+=3\n"
+                " elif arg in ('--ro-bind','--bind'):\n"
+                "  index+=3\n"
+                " elif arg in ('--proc','--dev','--tmpfs','--dir',"
+                "'--cap-drop','--hostname'):\n"
+                "  index+=2\n"
+                " else:\n"
+                "  index+=1\n"
+                "assert status_fd is not None and cwd is not None and payload\n"
+                "namespace={key:os.getpid() for key in "
+                "('child-pid','cgroup-namespace','ipc-namespace',"
+                "'mnt-namespace','net-namespace','pid-namespace',"
+                "'uts-namespace')}\n"
+                "os.write(status_fd,(json.dumps(namespace)+'\\n').encode())\n"
+                "completed=subprocess.run(payload,cwd=cwd,env=environment,"
+                "text=True,capture_output=True)\n"
+                "os.write(status_fd,(json.dumps({'exit-code':completed.returncode})"
+                "+'\\n').encode())\n"
+                "sys.stdout.write(completed.stdout)\n"
+                "sys.stderr.write(completed.stderr)\n"
+                "raise SystemExit(completed.returncode)\n",
+                encoding="utf-8",
+            )
+            isolator_path.chmod(0o755)
+            isolator_sha256 = harness.sha256_bytes(
+                isolator_path.read_bytes()
+            )
             recorder_path = root / "fake-strace"
             recorder_path.write_text(
                 "#!/usr/bin/env python3\n"
@@ -2655,9 +3050,18 @@ class HarnessTests(unittest.TestCase):
                 "args=sys.argv[1:]\n"
                 "trace=pathlib.Path(args[args.index('-o')+1])\n"
                 "command=args[args.index('--')+1:]\n"
-                "completed=subprocess.run(command,text=True,capture_output=True)\n"
+                "passed=[]\n"
+                "for index,arg in enumerate(command[:-1]):\n"
+                " if arg in ('--ro-bind-data','--json-status-fd'):\n"
+                "  passed.append(int(command[index+1]))\n"
+                "completed=subprocess.run(command,text=True,capture_output=True,"
+                "pass_fds=tuple(passed))\n"
                 "executable=str(pathlib.Path(command[0]).resolve())\n"
                 "lines=[f'{os.getpid()} execve({json.dumps(executable)}, [], 0x0) = 0']\n"
+                "if '--' in command:\n"
+                " payload=command[command.index('--')+1:]\n"
+                " payload_executable=str(pathlib.Path(payload[0]).resolve())\n"
+                " lines.append(f'{os.getpid()} execve({json.dumps(payload_executable)}, [], 0x0) = 0')\n"
                 "if completed.returncode == 0:\n"
                 " manifest=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],'build-inputs.json')\n"
                 " for item in json.loads(manifest.read_text())['inputs']:\n"
@@ -2679,7 +3083,8 @@ class HarnessTests(unittest.TestCase):
                 "assert json.loads(os.environ['FIR_VALIDATION_CASES'])==['case'];"
                 "build_tools=json.loads(os.environ['FIR_VALIDATION_BUILD_TOOLS']);"
                 "assert [(tool['kind'],tool['name']) for tool in build_tools]"
-                "==[('build-launcher','python-build'),"
+                "==[('build-input-replay-isolator','fake-bwrap'),"
+                "('build-launcher','python-build'),"
                 "('file-access-recorder','fake-strace')];"
                 "assert pathlib.Path(os.environ['FIR_VALIDATION_CORPUS']).is_file();"
                 f"assert pathlib.Path({str(material_path)!r}).read_bytes()=={material_bytes!r};"
@@ -2728,11 +3133,21 @@ class HarnessTests(unittest.TestCase):
                             "-c",
                             build_program,
                         ],
+                        "buildReplayCommand": [
+                            engine_command,
+                            "-c",
+                            build_program,
+                        ],
                         "buildAttempts": 2,
                         "buildFileAccessRecorder": {
                             "kind": "file-access-recorder",
                             "name": "fake-strace",
                             "command": "fake-strace",
+                        },
+                        "buildInputReplay": {
+                            "kind": "build-input-replay-isolator",
+                            "name": "fake-bwrap",
+                            "command": "fake-bwrap",
                         },
                         "runCommand": [engine_command, str(runner_path)],
                         "resultDomain": "selected",
@@ -2817,8 +3232,8 @@ class HarnessTests(unittest.TestCase):
                 [item["name"] for item in matrix["inputs"]],
                 [
                     "corpus.json",
-                    f"external/{plan_sha256}/matrix.json",
-                    f"external/{adapter_sha256}/v8.json",
+                    f"{root.name}/matrix.json",
+                    f"{root.name}/v8.json",
                 ],
             )
             self.assertEqual(
@@ -2851,6 +3266,13 @@ class HarnessTests(unittest.TestCase):
                 [
                     {
                         "backend": "v8",
+                        "kind": "build-input-replay-isolator",
+                        "name": "fake-bwrap",
+                        "sha256": isolator_sha256,
+                        "artifact": f"evidence/tools/{isolator_sha256}",
+                    },
+                    {
+                        "backend": "v8",
                         "kind": "build-launcher",
                         "name": "python-build",
                         "sha256": engine_sha256,
@@ -2879,7 +3301,7 @@ class HarnessTests(unittest.TestCase):
                     },
                 ],
             )
-            self.assertEqual(matrix["summary"]["toolCount"], 4)
+            self.assertEqual(matrix["summary"]["toolCount"], 5)
             self.assertEqual(matrix["summary"]["buildInputCount"], 2)
             self.assertEqual(
                 [
@@ -2902,7 +3324,7 @@ class HarnessTests(unittest.TestCase):
                     "artifact": f"evidence/build-inputs/{material_sha256}",
                 },
             )
-            self.assertEqual(matrix["summary"]["artifactCount"], 12)
+            self.assertEqual(matrix["summary"]["artifactCount"], 18)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
                 [
@@ -2918,10 +3340,31 @@ class HarnessTests(unittest.TestCase):
                         "build-file-access-trace",
                         "v8/build/file-access.strace",
                     ),
+                    ("build-input-replay", "v8/build-input-replay.json"),
+                    (
+                        "build-input-replay-manifest",
+                        "v8/build-input-replay/build-input-manifest.json",
+                    ),
+                    (
+                        "build-input-replay-status",
+                        "v8/build-input-replay/sandbox-status.jsonl",
+                    ),
+                    (
+                        "build-input-replay-trace",
+                        "v8/build-input-replay/file-access.strace",
+                    ),
                     ("process-stderr", "v8/build-2/stderr.log"),
+                    (
+                        "process-stderr",
+                        "v8/build-input-replay/stderr.log",
+                    ),
                     ("process-stderr", "v8/build/stderr.log"),
                     ("process-stderr", "v8/stderr.log"),
                     ("process-stdout", "v8/build-2/stdout.jsonl"),
+                    (
+                        "process-stdout",
+                        "v8/build-input-replay/stdout.jsonl",
+                    ),
                     ("process-stdout", "v8/build/stdout.jsonl"),
                     ("process-stdout", "v8/stdout.jsonl"),
                 ],
@@ -2988,6 +3431,80 @@ class HarnessTests(unittest.TestCase):
                 [attempt["reportedInputCount"] for attempt in access_report["attempts"]],
                 [1, 1],
             )
+            replay_item = next(
+                item
+                for item in matrix["artifacts"]
+                if item["kind"] == "build-input-replay"
+            )
+            replay_report = json.loads(
+                (out_dir / replay_item["artifact"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(replay_report["equal"])
+            self.assertTrue(replay_report["productsEqual"])
+            self.assertTrue(replay_report["buildInputsEqual"])
+            self.assertEqual(replay_report["sourceAttempt"], 2)
+            self.assertEqual(
+                [binding["category"] for binding in replay_report["bindings"]],
+                ["build-input", "build-tool", "validation-input"],
+            )
+            self.assertEqual(replay_report["reportedInputCount"], 1)
+            self.assertEqual(
+                replay_report["reportedInputs"][0]["sha256"],
+                material_sha256,
+            )
+            status_item = next(
+                item
+                for item in matrix["artifacts"]
+                if item["kind"] == "build-input-replay-status"
+            )
+            core.parse_bwrap_status(
+                (out_dir / status_item["artifact"]).read_bytes(),
+                "retained fake sandbox status",
+            )
+
+            tampered_replay_report = json.loads(json.dumps(replay_report))
+            tampered_replay_report["bindings"][0]["mode"] = 0o555
+            tampered_replay_content = (
+                json.dumps(
+                    tampered_replay_report, indent=2, sort_keys=True
+                )
+                + "\n"
+            ).encode("utf-8")
+            tampered_replay_sha256 = harness.sha256_bytes(
+                tampered_replay_content
+            )
+            (
+                out_dir
+                / "evidence"
+                / "artifacts"
+                / tampered_replay_sha256
+            ).write_bytes(tampered_replay_content)
+            tampered_replay_matrix = json.loads(original_matrix_bytes)
+            tampered_replay_item = next(
+                item
+                for item in tampered_replay_matrix["artifacts"]
+                if item["kind"] == "build-input-replay"
+            )
+            tampered_replay_item["sha256"] = tampered_replay_sha256
+            tampered_replay_item["artifact"] = (
+                f"evidence/artifacts/{tampered_replay_sha256}"
+            )
+            matrix_path.write_text(
+                json.dumps(
+                    tampered_replay_matrix, indent=2, sort_keys=True
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "bindings disagree with source evidence",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(original_matrix_bytes)
+
             tampered_access_report = json.loads(
                 json.dumps(access_report)
             )
@@ -3072,6 +3589,7 @@ class HarnessTests(unittest.TestCase):
             runner_path.unlink()
             material_path.unlink()
             recorder_path.unlink()
+            isolator_path.unlink()
             product_path.unlink()
             (out_dir / "comparisons" / "native--v8.json").unlink()
             for item in matrix["artifacts"]:

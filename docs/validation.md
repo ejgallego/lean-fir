@@ -104,7 +104,9 @@ product, result, log, or comparison path is therefore not needed to verify the
 completed report.  The sorted `artifacts` inventory includes every successfully
 parsed per-case backend result, the exact stdout/stderr pair from each current
 execution or external build, build-determinism and file-access reports, and
-every retained raw file-access trace.  It is assembled from bytes captured
+every retained raw file-access trace.  Opt-in build-input replay adds its own
+paired process logs, raw trace, sandbox status, emitted input manifest, and
+canonical report to the same inventory.  It is assembled from bytes captured
 when the files are written, not by scanning a possibly stale output tree.
 
 Verification is read-only and does not execute any backend:
@@ -223,11 +225,17 @@ JSON, and commands are argv arrays executed directly rather than shell text:
 {
   "name": "v8",
   "buildCommand": ["node", "scripts/build-lean-wasm.mjs"],
+  "buildReplayCommand": ["node", "scripts/build-lean-wasm.mjs"],
   "buildAttempts": 2,
   "buildFileAccessRecorder": {
     "kind": "file-access-recorder",
     "name": "strace",
     "command": "strace"
+  },
+  "buildInputReplay": {
+    "kind": "build-input-replay-isolator",
+    "name": "bwrap",
+    "command": "bwrap"
   },
   "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
   "resultDomain": "selected",
@@ -278,7 +286,13 @@ an adapter with a `buildCommand` must likewise declare `buildTools`.  A tool has
 restricted lowercase `kind`, a normalized report-stable relative POSIX `name`,
 and exactly one source locator.  `command` is a bare executable name resolved
 through `PATH`; exactly one command tool is required per phase and it must equal
-that phase's command at index zero.  `path` is a normalized POSIX path resolved
+that phase's command at index zero.  A command tool may add a nonempty
+`resolveCommand` argv.  The harness runs that resolver in the project root and
+requires it to print exactly one absolute path, then captures and binds that
+file instead of the direct `PATH` result.  This lets a Lean adapter resolve a
+project-selected toolchain executable such as `lake env which lake` without a
+machine-specific path or an Elan lookup during sealed replay.  `path` is a
+normalized POSIX path resolved
 relative to the adapter config, may use leading `..`, and must resolve to
 exactly one later argument of the owning phase command under the project root.
 Duplicate identities and duplicate sources within a phase are rejected.
@@ -287,6 +301,20 @@ reserved kind `file-access-recorder`; its identity and source must also be
 distinct from every build and execution tool.  It can record a trace without a
 `buildInputManifest`; when both are present the harness additionally enforces
 reported-closure coverage.
+
+`buildReplayCommand` and `buildInputReplay` opt an adapter into sealed replay of
+its declared build-input closure.  `buildReplayCommand` is a direct argv array,
+not shell text.  It may differ from `buildCommand` when the ordinary command is
+responsible for dependency scheduling but a replay should invoke only the
+compiler action.  Both argv arrays use the same `buildTools` declarations and
+are bound to the same captured launcher and path arguments.  The current
+`buildInputReplay` contract has exactly `kind`, `name`, and `command` fields;
+the kind is reserved as `build-input-replay-isolator`, and the command is a
+bare PATH command.  The current implementation is the Linux `bwrap` CLI.
+Replay requires `buildCommand`, `buildReplayCommand`, `buildInputManifest`, and
+`buildFileAccessRecorder`; a replay argv without an isolator is rejected.  The
+isolator is captured, hashed, and retained as a build tool, with an identity
+and source distinct from the recorder and all other tools.
 
 `buildAttempts` is an optional positive integer with default `1`.  Values
 greater than one require declared products and mean total clean builds, not
@@ -398,10 +426,78 @@ This evidence says that the traced build acquired a path through a
 read-capable open or execution.  It can overapproximate actual consumption and
 does not prove that the bytes later hashed by the harness were the exact bytes
 seen at open time.  Inherited descriptors, untraced acquisition mechanisms,
-and a path swap between acquisition and hashing remain outside the claim.  The
-next strengthening is sealed, content-addressed replay; the recorder report is
-designed to supply that future replay boundary without making the stronger
-claim today.
+and a path swap between acquisition and hashing remain outside the source-build
+claim.  An adapter without `buildInputReplay` makes only this observational
+claim.
+
+After the final successful traced attempt, an adapter with `buildInputReplay`
+runs one separately declared replay build.  Every reported build-input member
+and ordinary build tool must have been observed in the final source trace.  The
+harness rechecks each captured source file, creates a Linux `memfd` from its
+content-addressed bytes, sets mode `0444` or `0555` according to the observed
+access, and applies write, grow, shrink, and further-sealing seals.  It then
+uses `bwrap --ro-bind-data` with explicit permissions to copy those sealed
+source bytes into a new read-only overlay at the original absolute path.  The
+payload-visible modification time is bubblewrap metadata and is not part of
+the claim.  The canonical corpus receives the same treatment at its protocol
+path.  Bindings record the logical identity, SHA-256, target path, access modes,
+and corresponding immutable evidence blob
+under `evidence/build-inputs`, `evidence/tools`, or `evidence/inputs`.
+
+The current sandbox profile starts a new session, unshares every namespace,
+disables nested user namespaces, drops all capabilities, fixes the hostname,
+and leaves the network namespace unconnected.  It clears the inherited
+environment and supplies only `HOME=/tmp/home`, `LANG` and `LC_ALL` as
+`C.UTF-8`, a reconstructed `PATH`, `TERM=dumb`, `TMPDIR=/tmp`, and the exact
+`FIR_VALIDATION_*` protocol variables.  `/proc` and `/dev` are recreated,
+`/tmp` and its home are fresh, the original project directory is the working
+directory, and only the backend's separate replay output directory is writable.
+This keeps replay products out of the ordinary product staging directory.  The
+ordinary products remain readable through the ambient root, however; any such
+read is traced and counted as ambient rather than treated as a sealed binding.
+Because the current profile replaces `/tmp` before installing bindings, the
+validation output directory (and therefore the canonical corpus path) must not
+itself resolve beneath `/tmp`.
+
+The recorder wraps the isolator as well as its payload.  A successful replay
+retains paired stdout and stderr, the raw strace file, bwrap's JSON namespace
+and zero-exit status, the replay-emitted build-input manifest, and a canonical
+`build-input-replay.json` report.  The report contains the declarative argv,
+fixed environment, sandbox policy, sealed bindings, complete observed access
+set, ambient-access count, reported inputs, replay products, and replay build
+inputs.  Product or build-input differences from the final ordinary build are
+typed `build-input-replay` findings; equality establishes that the separately
+replayed build produced the exact product and reported-closure bytes later used
+by validation.
+
+Read-only matrix verification does not rerun bwrap.  It verifies the retained
+isolator and recorder identities, reparses the source and replay traces and the
+sandbox status, reconstructs every expected binding from the retained
+content-addressed inventories, checks the argv, environment, PATH, policy, and
+source-attempt number, reparses the replay build-input manifest, checks that
+every sealed build-input and ordinary build-tool path was observed with its
+recorded access modes, and recomputes the product and closure equality flags.
+The sole path normalization is Linux's exact ` (deleted)` procfs suffix when
+stripping it yields the already expected binding for that same logical input;
+the raw manifest remains retained unchanged.
+Trace, status, manifest, report, and process-log inventories must agree
+exactly.  `--no-build` performs no replay and makes no replay claim.
+
+This is a sealed replay of the declared closure, not yet a hermetic build-root
+claim.  The current bwrap tier mounts the ambient host `/` read-only before
+installing sealed overlays.  The dynamic loader, shared libraries, indirectly
+launched runtime tools, package-manager metadata, and any other undeclared
+readable files may therefore still come from that ambient root.  Their
+successful opens and executions contribute to `ambientAccessCount`, but they
+are not content-addressed bindings.  The trace also retains the recorder's
+limits around inherited descriptors and untraced acquisition mechanisms.
+Consequently the strong claim is that the declared inputs, declared build
+tools, and corpus were replayed from the exact captured immutable bytes and
+produced equal outputs; it is not that every byte consumed by the process came
+from the evidence store, nor that the replay is portable to a different host.
+A future synthetic-root tier can remove the ambient root once the namespace
+shape, symlink aliases, dynamic loader, shared-library closure, and indirect
+runtime tools are explicitly inventoried.
 
 `FirValidationWasm.lean` obtains this inventory from the same running Lean
 process that emits the Wasm: `IO.appPath` reports the compiler executable,
@@ -413,8 +509,11 @@ cryptographic evidence identities.  The reported-loaded scope is intentionally
 honest: without the optional strace recorder it does not independently observe
 arbitrary IO performed by command elaborators or the host dynamic loader.  With
 the recorder it gains process-level path-acquisition evidence, but a file could
-still be swapped between acquisition and later hashing.  Exact-byte replay
-requires execution from a sealed content-addressed snapshot.
+still be swapped between acquisition and later hashing in the ordinary build.
+With `buildInputReplay`, the reported Lean compiler and olean members are
+subsequently supplied to a separate build as sealed, content-addressed
+overlays.  The ambient-root limitations above still apply to the compiler's
+indirect runtime closure.
 
 The build-input inventory is not copied into process environment variables;
 large Lean closures can exceed operating-system argv/environment limits.  It

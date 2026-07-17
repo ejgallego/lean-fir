@@ -1,11 +1,17 @@
 {
   "name": "v8",
   "buildCommand": ["lake", "lean", "FirValidationWasm.lean"],
+  "buildReplayCommand": ["lake", "env", "lean", "FirValidationWasm.lean"],
   "buildAttempts": 2,
   "buildFileAccessRecorder": {
     "kind": "file-access-recorder",
     "name": "strace",
     "command": "strace"
+  },
+  "buildInputReplay": {
+    "kind": "build-input-replay-isolator",
+    "name": "bwrap",
+    "command": "bwrap"
   },
   "runCommand": [
     "node",
@@ -25,7 +31,8 @@
     {
       "kind": "build-launcher",
       "name": "lake",
-      "command": "lake"
+      "command": "lake",
+      "resolveCommand": ["lake", "env", "which", "lake"]
     }
   ],
   "tools": [
