@@ -529,6 +529,15 @@ the real `foldAlphaEquivalent` fixture observationally equivalent at the
 `alphaLeft`. The existing command regression still executes Lean's actual
 pass and confirms the resulting syntax.
 
+All three local rewrite families now expose `CodeEquivalentAt` interfaces.
+The singleton-default fixture eliminates directly; the unreachable-filter
+fixture first proves the compiler-shape dead arm removable and then eliminates
+the surviving singleton constructor; the alpha-fold fixture uses the
+bidirectional checker theorem. Thus every actual-pass fixture has both an
+executed syntax regression and a kernel-checked observational-equivalence
+proof at its valid runtime tag. This deliberately separates local semantic
+correctness from the still-missing compiler traversal graph.
+
 Attempting to replace that command bridge with a kernel theorem exposed a
 second upstream proof-interface gap. Lean 4.32 keeps `filterUnreachable`,
 `addDefaultAlt`, `simplifyCases`, and recursive `Code.simpCase` module-private;

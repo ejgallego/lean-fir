@@ -8,6 +8,45 @@ open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.SimpCase
 
+/-- Unreachable-arm filtering as a reusable code-equivalence theorem. -/
+theorem remove_unreachable_codeEquivalent_of_selected
+    {state : MachineState} {caseInfo : LCNF.Cases .impure}
+    {discr : Value} {tag : Nat} {branch : LCNF.Code .impure}
+    {externals : ExternalSpec}
+    (lookupDiscr : lookupValue state.env caseInfo.discr = .ok discr)
+    (readTag : getTag state.runtime discr = .ok tag)
+    (selected : chooseAlt tag caseInfo.alts.toList = some branch)
+    (reachable : isUnreachable branch = false) :
+    CodeEquivalentAt externals state (.cases caseInfo)
+      (.cases (removeUnreachableCases caseInfo)) := by
+  intro observation
+  exact remove_unreachable_correct_of_selected lookupDiscr readTag
+    selected reachable
+
+/-- Singleton-default elimination as a reusable code-equivalence theorem. -/
+theorem singleton_default_codeEquivalent
+    {state : MachineState} {caseInfo : LCNF.Cases .impure}
+    {discr : Value} {tag : Nat} {branch : LCNF.Code .impure}
+    {externals : ExternalSpec}
+    (lookupDiscr : lookupValue state.env caseInfo.discr = .ok discr)
+    (readTag : getTag state.runtime discr = .ok tag)
+    (alts : caseInfo.alts = #[.default branch]) :
+    CodeEquivalentAt externals state (.cases caseInfo) branch := by
+  intro observation
+  exact singleton_default_elimination_correct lookupDiscr readTag alts
+
+/-- Singleton-constructor elimination as a reusable code-equivalence theorem. -/
+theorem singleton_constructor_codeEquivalent
+    {state : MachineState} {caseInfo : LCNF.Cases .impure}
+    {discr : Value} {info : LCNF.CtorInfo} {branch : LCNF.Code .impure}
+    {externals : ExternalSpec}
+    (lookupDiscr : lookupValue state.env caseInfo.discr = .ok discr)
+    (readTag : getTag state.runtime discr = .ok info.cidx)
+    (alts : caseInfo.alts = #[.ctorAlt info branch]) :
+    CodeEquivalentAt externals state (.cases caseInfo) branch := by
+  intro observation
+  exact singleton_constructor_elimination_correct lookupDiscr readTag alts
+
 /-- The default-folding rewrite is observationally correct when both branch
 orientations are accepted by FIR's transparent alpha checker. -/
 theorem fold_to_default_correct_of_local_alpha

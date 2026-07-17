@@ -17,13 +17,19 @@ open Fir.LeanIR.Passes.SimpCaseCorrectness
 def selectedBranch : LCNF.Code .impure :=
   .return x
 
+def singletonDefaultCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[.default selectedBranch]
+
 def singletonDefaultCode : LCNF.Code .impure :=
-  .cases (.mk ``Bool objType c #[.default selectedBranch])
+  .cases singletonDefaultCases
+
+def filterUnreachableCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .ctorAlt falseInfo (.unreach objType),
+    .ctorAlt trueInfo selectedBranch]
 
 def filterUnreachableCode : LCNF.Code .impure :=
-  .cases (.mk ``Bool objType c #[
-    .ctorAlt falseInfo (.unreach objType),
-    .ctorAlt trueInfo selectedBranch])
+  .cases filterUnreachableCases
 
 def alphaLeftId : FVarId := ⟨`alphaLeft⟩
 
@@ -182,6 +188,54 @@ theorem alphaFoldTrueCodeEquivalent :
   · exact .nil
   · intro name decl found
     simp [alphaFoldProofState, Program.findDecl?] at found
+
+def singletonDefaultProofState : MachineState := {
+  program := { decls := #[] }
+  control := .code singletonDefaultCode
+  env := bind (bind [] c (.object (.tagged 0))) x .erased
+}
+
+/-- The actual singleton-default fixture is equivalent to its surviving arm. -/
+theorem singletonDefaultCodeEquivalent :
+    CodeEquivalentAt externals singletonDefaultProofState
+      singletonDefaultCode selectedBranch := by
+  apply singleton_default_codeEquivalent
+    (discr := .object (.tagged 0)) (tag := 0)
+  · rfl
+  · rfl
+  · rfl
+
+def filterUnreachableProofState : MachineState := {
+  program := { decls := #[] }
+  control := .code filterUnreachableCode
+  env := bind (bind [] c (.object (.tagged 1))) x .erased
+}
+
+/-- The actual unreachable-filter fixture first removes the dead arm and then
+eliminates the surviving singleton constructor arm. -/
+theorem filterUnreachableCodeEquivalent :
+    CodeEquivalentAt externals filterUnreachableProofState
+      filterUnreachableCode selectedBranch := by
+  intro observation
+  calc
+    EvaluatesState externals
+        { filterUnreachableProofState with
+          control := .code filterUnreachableCode } observation ↔
+      EvaluatesState externals
+        { filterUnreachableProofState with
+          control := .code (.cases
+            (removeUnreachableCases filterUnreachableCases)) } observation :=
+      remove_unreachable_codeEquivalent_of_selected
+        (discr := .object (.tagged 1)) (tag := 1)
+        (branch := selectedBranch) (by rfl) (by rfl) (by rfl) (by rfl)
+        observation
+    _ ↔ EvaluatesState externals
+        { filterUnreachableProofState with
+          control := .code selectedBranch } observation :=
+      singleton_constructor_codeEquivalent
+        (caseInfo := removeUnreachableCases filterUnreachableCases)
+        (discr := .object (.tagged 1)) (info := trueInfo)
+        (branch := selectedBranch) (by rfl) (by rfl) (by rfl) observation
 
 def proofCaseTable : LCNF.Cases .impure :=
   .mk ``Bool objType c #[]
