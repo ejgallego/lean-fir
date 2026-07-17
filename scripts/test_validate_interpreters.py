@@ -1285,6 +1285,7 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(adapter.run_command, ["node", "scripts/run-v8.mjs"])
             self.assertEqual(adapter.result_domain, "selected")
             self.assertEqual(adapter.timeout_seconds, 30)
+            self.assertEqual(adapter.build_attempts, 1)
             self.assertEqual(
                 adapter.product_declarations,
                 (
@@ -1595,6 +1596,35 @@ class HarnessTests(unittest.TestCase):
                 harness.external_adapter_from_config(path)
 
             value = dict(base)
+            value["buildAttempts"] = 2
+            value["products"] = [
+                {"kind": "wasm-module", "path": "module.wasm"}
+            ]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(
+                harness.external_adapter_from_config(path).build_attempts,
+                2,
+            )
+
+            for attempts in (0, -1, True, "2"):
+                value["buildAttempts"] = attempts
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "buildAttempts must be a positive integer",
+                ):
+                    harness.external_adapter_from_config(path)
+
+            value = dict(base)
+            value["buildAttempts"] = 2
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "multiple buildAttempts require products",
+            ):
+                harness.external_adapter_from_config(path)
+
+            value = dict(base)
             value["productManifest"] = "products.json"
             path.write_text(json.dumps(value), encoding="utf-8")
             adapter = harness.external_adapter_from_config(path)
@@ -1771,6 +1801,73 @@ class HarnessTests(unittest.TestCase):
             ):
                 adapter.clear_dynamic_product_staging(out_dir)
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_repeat_build_records_product_mismatch_and_executes_final(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            module = out_dir / "v8" / "module.wasm"
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=["builder"],
+                run_command=["runner"],
+                result_domain="selected",
+                product_declarations=(
+                    harness.ProductDeclaration("wasm-module", "module.wasm"),
+                ),
+                build_attempts=2,
+            )
+            attempts = 0
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+
+            def build_once(*args: object, **kwargs: object) -> mock.Mock:
+                nonlocal attempts
+                attempts += 1
+                module.parent.mkdir(parents=True, exist_ok=True)
+                module.write_bytes(
+                    b"first build" if attempts == 1 else b"second build"
+                )
+                return completed
+
+            with mock.patch.object(core, "run", side_effect=build_once):
+                adapter.build(harness.BuildContext(root, out_dir, False))
+            self.assertEqual(attempts, 2)
+            self.assertEqual(len(adapter._build_findings), 1)
+            self.assertEqual(
+                adapter._build_findings[0].phase, "build-determinism"
+            )
+            report = json.loads(
+                (out_dir / "v8" / "build-determinism.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertFalse(report["equal"])
+            self.assertNotEqual(
+                report["attempts"][0]["products"],
+                report["attempts"][1]["products"],
+            )
+            self.assertEqual(
+                adapter._built_products[0].sha256,
+                harness.sha256_bytes(b"second build"),
+            )
+
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            run_context = harness.RunContext(
+                root, out_dir, descriptors, ["case"]
+            )
+            execution = mock.Mock(
+                returncode=0,
+                stdout=json.dumps(success("case", "v8")) + "\n",
+                stderr="",
+            )
+            with mock.patch.object(core, "run", return_value=execution):
+                backend_run = adapter.execute(run_context)
+            self.assertIn("case", backend_run.results)
+            self.assertEqual(
+                [finding.phase for finding in backend_run.findings],
+                ["build-determinism"],
+            )
 
     def test_build_input_manifest_is_strict_and_rejects_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2159,6 +2256,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(adapter.product_declarations, ())
         self.assertEqual(adapter.product_manifest, "products.json")
         self.assertEqual(adapter.build_input_manifest, "build-inputs.json")
+        self.assertEqual(adapter.build_attempts, 2)
         self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
@@ -2256,6 +2354,7 @@ class HarnessTests(unittest.TestCase):
                             "-c",
                             build_program,
                         ],
+                        "buildAttempts": 2,
                         "runCommand": [engine_command, str(runner_path)],
                         "resultDomain": "selected",
                         "products": [
@@ -2413,14 +2512,17 @@ class HarnessTests(unittest.TestCase):
                     "artifact": f"evidence/build-inputs/{material_sha256}",
                 },
             )
-            self.assertEqual(matrix["summary"]["artifactCount"], 6)
+            self.assertEqual(matrix["summary"]["artifactCount"], 9)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
                 [
                     ("backend-result", "case/native/result.json"),
                     ("backend-result", "case/v8/result.json"),
+                    ("build-determinism", "v8/build-determinism.json"),
+                    ("process-stderr", "v8/build-2/stderr.log"),
                     ("process-stderr", "v8/build/stderr.log"),
                     ("process-stderr", "v8/stderr.log"),
+                    ("process-stdout", "v8/build-2/stdout.jsonl"),
                     ("process-stdout", "v8/build/stdout.jsonl"),
                     ("process-stdout", "v8/stdout.jsonl"),
                 ],
@@ -2429,6 +2531,21 @@ class HarnessTests(unittest.TestCase):
                 self.assertEqual(
                     item["artifact"], f"evidence/artifacts/{item['sha256']}"
                 )
+            determinism_item = next(
+                item
+                for item in matrix["artifacts"]
+                if item["kind"] == "build-determinism"
+            )
+            determinism = json.loads(
+                (out_dir / determinism_item["artifact"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(determinism["equal"])
+            self.assertEqual(
+                [attempt["attempt"] for attempt in determinism["attempts"]],
+                [1, 2],
+            )
             self.assertTrue(
                 (out_dir / "comparisons" / "native--v8.json").is_file()
             )

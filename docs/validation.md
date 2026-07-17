@@ -219,6 +219,7 @@ JSON, and commands are argv arrays executed directly rather than shell text:
 {
   "name": "v8",
   "buildCommand": ["node", "scripts/build-lean-wasm.mjs"],
+  "buildAttempts": 2,
   "runCommand": ["node", "scripts/run-lean-wasm-v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
@@ -272,6 +273,28 @@ that phase's command at index zero.  `path` is a normalized POSIX path resolved
 relative to the adapter config, may use leading `..`, and must resolve to
 exactly one later argument of the owning phase command under the project root.
 Duplicate identities and duplicate sources within a phase are rejected.
+
+`buildAttempts` is an optional positive integer with default `1`.  Values
+greater than one require declared products and mean total clean builds, not
+retries.  The harness reuses the exact captured argv, environment, corpus, and
+selection for every attempt; clears dynamic staging or removes static products
+before each one; and compares the complete product inventory plus the
+canonical reported build-input closure against attempt one.  It does not
+compare compiler stdout or stderr, since diagnostics are not build products.
+Those streams are instead retained as paired `build`, `build-2`, and later
+attempt logs.
+
+After the final successful attempt, the harness writes and retains a strict
+`build-determinism` artifact.  It records every attempt's sorted product and
+build-input identities and hashes, recomputes its equality flag during
+read-only matrix verification, and requires the final attempt to equal the
+products and build inputs used for execution.  A difference becomes a typed
+`build-determinism` finding while the final build still runs against the source
+oracle, preserving semantic signal alongside the reproducibility failure.
+Identical attempts point at the final content-addressed product and build-input
+bytes; earlier differing bytes are summarized by digest rather than duplicated
+into the successful run's retained product inventory.  `--no-build` performs
+no attempts and makes no determinism claim.
 
 Build tools are captured before the build starts; execution tools are captured
 after it finishes.  The harness replaces matching argv entries with those exact
@@ -422,7 +445,8 @@ native–V8, and V8–Talos evidence coexist in one output tree.  Backend names 
 validated before being used as path components.  A comparison file is written
 for successful and failed comparisons, with selected/compared/equal/finding
 counts and typed findings for
-`execution`, `result-domain`, `audit`, and `comparison` phases.  Each finding
+`build-determinism`, `execution`, `result-domain`, `audit`, and `comparison`
+phases.  Each finding
 retains its backend and case ID when applicable, so automation does not need to
 recover structure from stderr text.  The native oracle's `--manifest` JSONL is
 the single discovery surface for the harness: case and tag selection no longer

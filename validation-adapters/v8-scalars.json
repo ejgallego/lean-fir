@@ -1,6 +1,7 @@
 {
   "name": "v8",
   "buildCommand": ["lake", "lean", "FirValidationWasm.lean"],
+  "buildAttempts": 2,
   "runCommand": ["node", "scripts/run_validation_v8.mjs"],
   "resultDomain": "selected",
   "timeoutSeconds": 120,

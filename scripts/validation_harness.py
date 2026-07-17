@@ -1261,6 +1261,7 @@ def retain_validation_build_inputs(
 
 VALIDATION_ARTIFACT_KINDS = {
     "backend-result",
+    "build-determinism",
     "process-stdout",
     "process-stderr",
 }
@@ -1282,7 +1283,13 @@ def validation_artifact_scope(
         )
     parts = PurePosixPath(checked_name).parts
     case_id: str | None = None
-    if checked_kind == "backend-result":
+    if checked_kind == "build-determinism":
+        if len(parts) != 2 or parts[1] != "build-determinism.json":
+            raise ValidationError(
+                "build-determinism artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "build-determinism"
+    elif checked_kind == "backend-result":
         if len(parts) != 3 or parts[2] != "result.json":
             raise ValidationError("backend-result artifact has noncanonical name")
         case_id, backend, scope = parts[0], parts[1], "result"
@@ -1298,8 +1305,15 @@ def validation_artifact_scope(
             )
         if len(parts) == 2:
             backend, scope = parts[0], "execute"
-        elif len(parts) == 3 and parts[1] == "build":
-            backend, scope = parts[0], "build"
+        elif len(parts) == 3 and (
+            parts[1] == "build"
+            or (
+                parts[1].startswith("build-")
+                and parts[1][6:].isdigit()
+                and int(parts[1][6:]) >= 2
+            )
+        ):
+            backend, scope = parts[0], parts[1]
         elif len(parts) == 3:
             case_id, backend, scope = parts[0], parts[1], "execute"
         else:
@@ -1757,6 +1771,7 @@ class ExternalCommandAdapter:
     product_declarations: tuple[ProductDeclaration, ...] = ()
     product_manifest: str | None = None
     build_input_manifest: str | None = None
+    build_attempts: int = 1
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     build_tool_declarations: tuple[ToolDeclaration, ...] = ()
     _built_products: tuple[ValidationProduct, ...] | None = field(
@@ -1778,6 +1793,9 @@ class ExternalCommandAdapter:
         default=None, init=False, repr=False, compare=False
     )
     _build_artifacts: tuple[ValidationArtifact, ...] = field(
+        default=(), init=False, repr=False, compare=False
+    )
+    _build_findings: tuple[ValidationFinding, ...] = field(
         default=(), init=False, repr=False, compare=False
     )
 
@@ -2054,6 +2072,7 @@ class ExternalCommandAdapter:
         self._built_build_command = None
         self._built_run_command = None
         self._build_artifacts = ()
+        self._build_findings = ()
         if not context.no_build and self.build_command:
             self._built_build_tools = self.collect_tools(
                 self.build_tool_declarations
@@ -2106,6 +2125,128 @@ class ExternalCommandAdapter:
             if not context.no_build
             else ()
         )
+        if (
+            not context.no_build
+            and self.build_command
+            and self.build_attempts > 1
+        ):
+            attempts = [
+                {
+                    "attempt": 1,
+                    "products": [
+                        product.to_json()
+                        for product in self._built_products
+                    ],
+                    "buildInputs": [
+                        item.to_json()
+                        for item in self._built_build_inputs
+                    ],
+                }
+            ]
+            first_products = self._built_products
+            first_build_inputs = tuple(
+                ValidationBuildInput(
+                    item.backend,
+                    item.kind,
+                    item.name,
+                    item.sha256,
+                )
+                for item in self._built_build_inputs
+            )
+            findings: list[ValidationFinding] = []
+            for attempt in range(2, self.build_attempts + 1):
+                if self.product_manifest is not None:
+                    self.clear_dynamic_product_staging(context.out_dir)
+                else:
+                    self.remove_stale_products(context.out_dir)
+                destination = (
+                    context.out_dir / self.name / f"build-{attempt}"
+                )
+                destination.mkdir(parents=True, exist_ok=True)
+                build_environment = self.environment(
+                    context.out_dir, context.run_context
+                )
+                build_environment["FIR_VALIDATION_BUILD_TOOLS"] = (
+                    self.tool_environment_value(self._built_build_tools)
+                )
+                completed = run(
+                    list(self._built_build_command),
+                    context.root,
+                    self.timeout_seconds,
+                    build_environment,
+                )
+                self._build_artifacts += write_process_artifacts(
+                    destination,
+                    completed,
+                    f"{self.name}/build-{attempt}",
+                )
+                self.verify_captured_tools(
+                    self._built_build_tools,
+                    f"during build attempt {attempt}",
+                )
+                if completed.returncode != 0:
+                    raise ValidationError(
+                        f"failed to build {self.name} validation backend "
+                        f"on attempt {attempt}; see {destination}"
+                    )
+                if context.run_context is not None:
+                    self.verify_corpus(
+                        context.run_context,
+                        f"during build attempt {attempt}",
+                    )
+                products = self.collect_products(context.out_dir)
+                build_inputs = self.collect_build_inputs(context.out_dir)
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "products": [
+                            product.to_json() for product in products
+                        ],
+                        "buildInputs": [
+                            item.to_json() for item in build_inputs
+                        ],
+                    }
+                )
+                if products != first_products:
+                    findings.append(
+                        ValidationFinding(
+                            "build-determinism",
+                            f"build attempt {attempt} produced different products",
+                            self.name,
+                        )
+                    )
+                if build_inputs != first_build_inputs:
+                    findings.append(
+                        ValidationFinding(
+                            "build-determinism",
+                            f"build attempt {attempt} reported different build inputs",
+                            self.name,
+                        )
+                    )
+                self._built_products = products
+                self._built_build_inputs = build_inputs
+            report = {
+                "version": PROTOCOL_VERSION,
+                "backend": self.name,
+                "equal": not findings,
+                "attempts": attempts,
+            }
+            report_content = (
+                json.dumps(report, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            report_path = (
+                context.out_dir / self.name / "build-determinism.json"
+            )
+            report_path.write_bytes(report_content)
+            self._build_artifacts += (
+                ValidationArtifact(
+                    "build-determinism",
+                    f"{self.name}/build-determinism.json",
+                    sha256_bytes(report_content),
+                    report_content,
+                ),
+            )
+            self._build_findings = tuple(findings)
         self._built_tools = self.collect_tools(self.tool_declarations)
         self._built_run_command = self.bind_command(
             context.root,
@@ -2209,6 +2350,7 @@ class ExternalCommandAdapter:
         backend_run = BackendRun(
             self.name,
             list(expected_cases),
+            findings=list(self._build_findings),
             products=list(self._built_products),
             tools=[*self._built_build_tools, *self._built_tools],
             build_inputs=list(self._built_build_inputs),
@@ -2250,6 +2392,7 @@ def external_adapter_from_config(
     required = {"name", "runCommand", "resultDomain"}
     optional = {
         "buildCommand",
+        "buildAttempts",
         "timeoutSeconds",
         "products",
         "productManifest",
@@ -2298,6 +2441,15 @@ def external_adapter_from_config(
     ):
         raise ValidationError(
             f"adapter config {path}: timeoutSeconds must be a positive integer"
+        )
+    build_attempts = value.get("buildAttempts", 1)
+    if (
+        not isinstance(build_attempts, int)
+        or isinstance(build_attempts, bool)
+        or build_attempts <= 0
+    ):
+        raise ValidationError(
+            f"adapter config {path}: buildAttempts must be a positive integer"
         )
     raw_products = value.get("products", [])
     if not isinstance(raw_products, list):
@@ -2355,6 +2507,18 @@ def external_adapter_from_config(
             raise ValidationError(
                 f"adapter config {path}: productManifest requires buildCommand"
             )
+    if build_attempts > 1 and not build_command:
+        raise ValidationError(
+            f"adapter config {path}: multiple buildAttempts require buildCommand"
+        )
+    if (
+        build_attempts > 1
+        and not product_declarations
+        and product_manifest is None
+    ):
+        raise ValidationError(
+            f"adapter config {path}: multiple buildAttempts require products"
+        )
     raw_build_input_manifest = value.get("buildInputManifest")
     build_input_manifest = None
     if raw_build_input_manifest is not None:
@@ -2523,6 +2687,7 @@ def external_adapter_from_config(
         ),
         product_manifest=product_manifest,
         build_input_manifest=build_input_manifest,
+        build_attempts=build_attempts,
         tool_declarations=tool_declarations,
         build_tool_declarations=build_tool_declarations,
     )
@@ -3178,6 +3343,8 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix has malformed artifacts")
     artifacts: list[ValidationArtifact] = []
     result_records: dict[tuple[str, str], dict] = {}
+    determinism_backends: set[str] = set()
+    determinism_attempt_counts: dict[str, int] = {}
     stdout_scopes: set[tuple[str, str | None, str]] = set()
     stderr_scopes: set[tuple[str, str | None, str]] = set()
     for item in raw_artifacts:
@@ -3222,10 +3389,118 @@ def verify_matrix_artifact(
                     "backend-result artifact disagrees with its name"
                 )
             result_records[(case_id, backend)] = record
+        elif kind == "build-determinism":
+            if backend in determinism_backends:
+                raise ValidationError(
+                    "validation matrix has duplicate build determinism reports"
+                )
+            determinism_backends.add(backend)
+            try:
+                report = json.loads(content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "build-determinism artifact is not JSON"
+                ) from error
+            if (
+                not isinstance(report, dict)
+                or set(report) != {"version", "backend", "equal", "attempts"}
+                or report["version"] != PROTOCOL_VERSION
+                or isinstance(report["version"], bool)
+                or report["backend"] != backend
+                or not isinstance(report["equal"], bool)
+                or not isinstance(report["attempts"], list)
+                or len(report["attempts"]) < 2
+            ):
+                raise ValidationError(
+                    "build-determinism artifact is malformed"
+                )
+            checked_attempts: list[
+                tuple[list[dict[str, str]], list[dict[str, str]]]
+            ] = []
+            for expected_attempt, attempt in enumerate(
+                report["attempts"], start=1
+            ):
+                if (
+                    not isinstance(attempt, dict)
+                    or set(attempt)
+                    != {"attempt", "products", "buildInputs"}
+                    or attempt["attempt"] != expected_attempt
+                    or isinstance(attempt["attempt"], bool)
+                    or not isinstance(attempt["products"], list)
+                    or not isinstance(attempt["buildInputs"], list)
+                ):
+                    raise ValidationError(
+                        "build-determinism attempt is malformed"
+                    )
+                for inventory_name in ("products", "buildInputs"):
+                    inventory = attempt[inventory_name]
+                    for entry in inventory:
+                        if (
+                            not isinstance(entry, dict)
+                            or set(entry)
+                            != {"backend", "kind", "name", "sha256"}
+                            or entry["backend"] != backend
+                        ):
+                            raise ValidationError(
+                                f"build-determinism {inventory_name} "
+                                "inventory is malformed"
+                            )
+                        validate_backend_name(
+                            entry["kind"],
+                            f"build-determinism {inventory_name} kind",
+                        )
+                        checked_relative_posix_path(
+                            entry["name"],
+                            f"build-determinism {inventory_name} name",
+                        )
+                        checked_sha256(
+                            entry["sha256"],
+                            f"build-determinism {inventory_name}",
+                        )
+                    keys = [
+                        (entry["kind"], entry["name"])
+                        for entry in inventory
+                    ]
+                    if len(set(keys)) != len(keys) or keys != sorted(keys):
+                        raise ValidationError(
+                            f"build-determinism {inventory_name} "
+                            "inventory is malformed"
+                        )
+                checked_attempts.append(
+                    (attempt["products"], attempt["buildInputs"])
+                )
+            actual_equal = all(
+                attempt == checked_attempts[0]
+                for attempt in checked_attempts[1:]
+            )
+            if report["equal"] != actual_equal:
+                raise ValidationError(
+                    "build-determinism equality disagrees with attempts"
+                )
+            determinism_attempt_counts[backend] = len(checked_attempts)
+            final_products = [
+                product.to_json()
+                for product in products
+                if product.backend == backend
+            ]
+            final_build_inputs = [
+                build_input.to_json()
+                for build_input in build_inputs
+                if build_input.backend == backend
+            ]
+            if checked_attempts[-1] != (
+                final_products,
+                final_build_inputs,
+            ):
+                raise ValidationError(
+                    "build-determinism final attempt disagrees with matrix"
+                )
         elif kind == "process-stdout":
             stdout_scopes.add((backend, case_id, scope))
-        else:
+        elif kind == "process-stderr":
             stderr_scopes.add((backend, case_id, scope))
+        else:
+            raise ValidationError("validation artifact kind is malformed")
     artifact_keys = [(artifact.kind, artifact.name) for artifact in artifacts]
     if len(set(artifact_keys)) != len(artifact_keys):
         raise ValidationError("validation matrix has duplicate artifacts")
@@ -3233,6 +3508,37 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix artifacts are not sorted")
     if stdout_scopes != stderr_scopes:
         raise ValidationError("validation process artifacts are not paired")
+    repeat_log_backends = {
+        backend
+        for backend, case_id, scope in stdout_scopes
+        if case_id is None and scope.startswith("build-")
+    }
+    if repeat_log_backends != determinism_backends:
+        raise ValidationError(
+            "repeat-build process artifacts disagree with determinism reports"
+        )
+    for backend, attempt_count in determinism_attempt_counts.items():
+        expected_scopes = {
+            (
+                backend,
+                None,
+                "build" if attempt == 1 else f"build-{attempt}",
+            )
+            for attempt in range(1, attempt_count + 1)
+        }
+        actual_scopes = {
+            scope
+            for scope in stdout_scopes
+            if scope[0] == backend
+            and scope[1] is None
+            and (
+                scope[2] == "build" or scope[2].startswith("build-")
+            )
+        }
+        if actual_scopes != expected_scopes:
+            raise ValidationError(
+                "build-determinism attempts disagree with process artifacts"
+            )
 
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
