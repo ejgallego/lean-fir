@@ -2587,7 +2587,11 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             adapter.run_command,
-            ["node", "scripts/run_validation_v8.mjs"],
+            [
+                "node",
+                "scripts/run_validation_v8.mjs",
+                "scripts/wasm_semantic_host.mjs",
+            ],
         )
         self.assertEqual(adapter.product_declarations, ())
         self.assertEqual(adapter.product_manifest, "products.json")
@@ -2604,6 +2608,7 @@ class HarnessTests(unittest.TestCase):
             [
                 ("engine", "node"),
                 ("runner", "scripts/run_validation_v8.mjs"),
+                ("runtime", "scripts/wasm_semantic_host.mjs"),
             ],
         )
 

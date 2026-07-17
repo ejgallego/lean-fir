@@ -11,7 +11,7 @@ namespace FirValidationWasm
 def caseIds : Array String :=
   #["uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max",
     "uint8-roundtrip", "uint16-roundtrip", "uint32-roundtrip", "uint64-roundtrip",
-    "usize-roundtrip"]
+    "usize-roundtrip", "nat-list-nonempty"]
 
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
@@ -54,12 +54,6 @@ def elabFirValidationWasm : CommandElab := fun _ => do
   for caseId in selected do
     let some validationCase := Corpus.findCase? caseId
       | throwError "unknown validation case: {caseId}"
-    let (initialRuntime, _) ←
-      match Lcnf.encodeArgs validationCase.argSchemas validationCase.args with
-      | .ok invocation => pure invocation
-      | .error error => throwError "cannot encode Wasm invocation for {caseId}: {error}"
-    unless initialRuntime == {} do
-      throwError "{caseId} requires a heap-backed Wasm invocation"
     let result ← liftCoreM <|
       Fir.Wasm.Emit.Source.compileValidationInvocation validationCase.id validationCase.entry
         validationCase.argSchemas validationCase.args validationCase.resultSchema
@@ -69,8 +63,6 @@ def elabFirValidationWasm : CommandElab := fun _ => do
       | .ok artifact => pure artifact
       | .error error =>
           throwError "Wasm compilation failed for {caseId}: {repr error}"
-    unless artifact.module.imports.isEmpty do
-      throwError "{caseId} unexpectedly requires Wasm imports"
     unless artifact.module.exports == #[validationCase.entry] do
       throwError "Wasm module does not export {validationCase.entry}"
     let modulePath := moduleDirectory / s!"{caseId}.wasm"

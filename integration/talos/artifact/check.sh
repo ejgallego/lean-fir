@@ -38,7 +38,7 @@ done
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
-  import { SemanticHost, manifestValue } from "./run-artifacts.mjs";
+  import { SemanticHost, manifestValue } from "../../../scripts/wasm_semantic_host.mjs";
   const cases = [
     [process.argv[1], "uint64", [], 0xffffffffffffffffn],
     [process.argv[2], "usize", ["usize"], 42n],

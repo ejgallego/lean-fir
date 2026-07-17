@@ -160,8 +160,9 @@ immutable manifest preserves multiple executions with the same run identity.
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
 `validation-plans/native-lcnf.json`, while `make validate-v8` uses
-`validation-plans/native-v8-scalars.json`.  A later combined plan can add Talos
-without changing the harness:
+`validation-plans/native-v8-scalars.json` (the stable path now also selects one
+heap-backed constructor case).  A later combined plan can add Talos without
+changing the harness:
 
 ```json
 {
@@ -655,28 +656,26 @@ through its public `compileValidationInvocation` API.  The integration-owned
 `LCNF.main`; the shared API encodes corpus schemas and datums into semantic ABI
 values, checks the result schema against the emitted result lane, and attaches
 the invocation to the reusable module.  It emits deterministic `.wasm` and
-ABI-manifest products only for that ordered selection, and checks that the
-current deliberately host-free cases have no imports and exactly export their
-source entries.  Although the emitter now supports explicit initial-runtime
-manifests, this validation adapter retains its scalar-only guard until its V8
-runner consumes the semantic host.  The driver does not modify or add policy
-to `Fir/Wasm`.
+ABI-manifest products only for that ordered selection and checks that each
+module exactly exports its source entry.  Manifests may include the encoded
+initial FIR runtime and semantic imports needed by heap-backed invocations;
+the driver does not modify or add policy to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
-`WebAssembly` engine.  A registry keyed by compiler ABI kind—not corpus case
-name—cross-checks the manifest's parameter kinds and invocation values against
-the corpus schemas, marshals arguments into V8's physical lanes, invokes the
-corpus-named export, and decodes its result into the shared backend protocol.
-The current registry covers `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize`;
-unknown ABI kinds fail closed.  V8's signed `i32` and `i64` JavaScript boundary
-is converted explicitly to and from the protocol's unsigned values.  The
-runner receipts the build inventory and both per-case products and accepts any
-nonempty unique corpus selection that the compiler, no-host policy, and ABI
-registry support.  The checked suite includes all five scalar maxima plus
-parameterized maximum-value round trips for `UInt8`, `UInt16`, `UInt32`,
-`UInt64`, and `USize`.  Native Lean remains the source oracle. Talos can
-subsequently consume the exact same module and inputs, with V8 as the reference
-Wasm engine:
+`WebAssembly` engine.  It and the Talos artifact runner consume the same
+semantic host module for initial-runtime reconstruction, opaque handles, ABI
+lane conversion, and imports.  Schema-directed decoding cross-checks each
+manifest argument against the corpus datum before invocation and converts the
+semantic result back into the shared backend protocol; unsupported schemas
+fail closed.  The binary's imports must exactly match the compiler manifest.
+The runner receipts the shared host, build inventory, and both per-case
+products.  The checked suite includes all five scalar maxima, parameterized
+maximum-value round trips for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and
+`USize`, plus a nonempty `List Nat` containing a heap natural.  That last case
+reconstructs the initial constructor graph and executes the compiler-produced
+`getTag` import before returning `UInt64`.  Native Lean remains the source
+oracle. Talos can subsequently consume the exact same module and inputs, with
+V8 as the reference Wasm engine:
 
 ```text
 native Lean <-> V8          compiler/runtime validation

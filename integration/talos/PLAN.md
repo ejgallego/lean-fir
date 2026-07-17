@@ -99,18 +99,21 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 | 2026-07-17 | A0 heap-backed source arguments | W4 and integration owners | ready | Source manifests can now carry a checked `initialRuntime` heap, and `#fir_wasm_emit` accepts string literals by allocating them in that runtime. V8 reconstructs the heap and passes an opaque handle to a compiler-produced `String → UInt64` fixture. The full `idString : String → String` capture is intentionally deferred: Lean 4.32 emits `inc[ref] value; return value`, and ownership operations remain in the W4-owned supported-fragment lane. No shared contract changed. |
 | 2026-07-17 | A0 structured source arguments | W4 and integration owners | ready | `#fir_wasm_emit` now accepts `natList([...])` and builds the corresponding FIR constructor graph, including heap naturals beyond the tagged-immediate range. A compiler-produced `List Nat → UInt64` fixture executes `cases` through the imported `getTag` host operation in V8 and distinguishes the nonempty constructor. The test reconstructs and checks the entire input list before invocation. No shared contract changed. |
 | 2026-07-17 | A0 schema-driven source invocation | validation and integration owners | ready | `compileValidationInvocation` encodes corpus schemas/datums, checks the declared result schema against the emitted ABI lane, and chooses the scalar or initial-runtime manifest path. `#fir_wasm_emit_case "…"` resolves entry, dependencies, arguments, and schemas from one corpus case. The five scalar source fixtures and `FirValidationWasm` now share this boundary. No shared semantic contract changed. |
+| 2026-07-17 | A0 shared semantic host | validation and integration owners | landed | The artifact and validation V8 runners now share one manifest/runtime/handle/import implementation. The native↔V8 matrix admits `nat-list-nonempty`, audits its entire initial heap against the corpus schema, and executes the compiler-produced `getTag` import. The additive common corpus case landed separately as `09d3c06`; no semantic ABI changed. |
 
-No shared semantic contract was changed by these A0 slices. Once W4 repairs
-and proves the natural-literal invariant, A0 should replace the rejection
-regression with a successful source-to-engine test and close the bug card.
+The only shared-contract change in these A0 slices is the additive common
+`nat-list-nonempty` case in `09d3c06`; runtime semantics and the semantic ABI
+are unchanged. Once W4 repairs and proves the natural-literal invariant, A0
+should replace the rejection regression with a successful source-to-engine
+test and close the bug card.
 A0 has now separated module generation from fixture invocation and covers all
 unsigned integer and `USize` parameter kinds with explicit ABI schemas. Its
 initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
 vocabulary as the W3 observation oracle. Its next heap-returning source slice
 depends on W4 admitting and proving the compiler-produced ownership operation;
-independent A0 work can next share the semantic host between the artifact and
-validation V8 runners, then admit selected initial-runtime cases into the main
-validation matrix.
+the shared semantic host and the first initial-runtime validation case are now
+landed. Independent A0 work can next broaden schema-directed results whose
+compiler-produced LCNF is already inside the proved supported fragment.
 
 ## Architecture decisions
 

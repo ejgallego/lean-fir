@@ -1,86 +1,129 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 
-const ABI_CODECS = new Map([
-  ["uint8", { lane: "i32", width: 8 }],
-  ["uint16", { lane: "i32", width: 16 }],
-  ["uint32", { lane: "i32", width: 32 }],
-  ["uint64", { lane: "i64", width: 64 }],
-  ["usize", { lane: "i64" }],
+const semanticHostPath = process.argv[2];
+assert.ok(semanticHostPath, "usage: node run_validation_v8.mjs <semantic-host>");
+const { SemanticHost, manifestValue } = await import(pathToFileURL(semanticHostPath).href);
+
+const SCALAR_KINDS = new Map([
+  [8, "uint8"],
+  [16, "uint16"],
+  [32, "uint32"],
+  [64, "uint64"],
 ]);
 
-function codecFor(kind, context) {
-  const codec = ABI_CODECS.get(kind);
-  assert.ok(codec, `${context} uses unsupported Wasm ABI kind ${kind}`);
-  return codec;
+function exactJsonNatural(value, context) {
+  assert.ok(value >= 0n, `${context} must be nonnegative`);
+  const result = Number(value);
+  assert.ok(Number.isFinite(result) && BigInt(result) === value,
+    `${context} cannot be represented exactly by the validation JSON protocol`);
+  return result;
 }
 
-function expectedSchema(codec) {
-  return codec.width === undefined
-    ? "usize"
-    : { bits: { width: codec.width } };
-}
-
-function unsignedDecimal(value, context, width = 64) {
-  assert.equal(typeof value, "string", `${context} must be a decimal string`);
-  assert.match(value, /^(0|[1-9][0-9]*)$/, `${context} must be canonical decimal`);
-  const parsed = BigInt(value);
-  assert.ok(parsed < (1n << BigInt(width)), `${context} exceeds ${width} bits`);
-  return parsed;
-}
-
-function datumValue(codec, datum, context) {
-  const key = codec.width === undefined ? "usize" : "bits";
-  assert.deepStrictEqual(Object.keys(datum), [key], `${context} datum kind mismatch`);
-  if (codec.width !== undefined) {
-    assert.equal(datum.bits.width, codec.width, `${context} datum width mismatch`);
+function naturalValue(host, value, context) {
+  if (value.kind === "tagged") {
+    return value.payload;
   }
-  return unsignedDecimal(datum[key].value, `${context} value`, codec.width ?? 64);
+  assert.equal(value.kind, "heap", `${context} must be a tagged or heap natural`);
+  const object = host.liveCell(value.location).object;
+  assert.equal(object.kind, "natural", `${context} heap object must be a natural`);
+  return object.value;
 }
 
-function expectedManifestArgument(kind, codec, value) {
-  if (codec.width === undefined) {
-    return { kind: "usize", value: value.toString() };
+function semanticDatum(schema, value, host, context) {
+  if (typeof schema === "string") {
+    switch (schema) {
+      case "unit":
+        assert.deepStrictEqual(value, { kind: "tagged", payload: 0n },
+          `${context} must be the unit constructor`);
+        return { unit: {} };
+      case "bool":
+        assert.equal(value.kind, "tagged", `${context} must be a tagged boolean`);
+        assert.ok(value.payload === 0n || value.payload === 1n,
+          `${context} boolean tag is out of range`);
+        return { bool: { value: value.payload === 1n } };
+      case "nat":
+        return {
+          nat: { value: exactJsonNatural(naturalValue(host, value, context), context) },
+        };
+      case "string": {
+        assert.equal(value.kind, "heap", `${context} must be a heap string`);
+        const object = host.liveCell(value.location).object;
+        assert.equal(object.kind, "string", `${context} heap object must be a string`);
+        return { string: { value: object.value } };
+      }
+      case "usize":
+        assert.equal(value.kind, "usize", `${context} must be a usize value`);
+        return { usize: { value: value.value.toString() } };
+      default:
+        throw new Error(`${context} uses unsupported validation schema ${schema}`);
+    }
   }
-  return {
-    kind: "scalar",
-    scalarKind: kind,
-    value: value.toString(),
-  };
-}
 
-function physicalArgument(kind, manifestArgument, schema, datum, context) {
-  const codec = codecFor(kind, context);
-  assert.deepStrictEqual(schema, expectedSchema(codec), `${context} schema mismatch`);
-  const value = datumValue(codec, datum, context);
-  assert.deepStrictEqual(
-    manifestArgument,
-    expectedManifestArgument(kind, codec, value),
-    `${context} compiler manifest disagrees with the corpus invocation`,
-  );
-  return codec.lane === "i32"
-    ? Number(BigInt.asIntN(32, value))
-    : BigInt.asIntN(64, value);
-}
-
-function resultDatum(kind, schema, physicalResult, context) {
-  const codec = codecFor(kind, context);
-  assert.deepStrictEqual(schema, expectedSchema(codec), `${context} schema mismatch`);
-  let value;
-  if (codec.lane === "i32") {
-    assert.equal(typeof physicalResult, "number", `${context} must use V8's i32 lane`);
-    value = BigInt(physicalResult >>> 0);
-  } else {
-    assert.equal(typeof physicalResult, "bigint", `${context} must use V8's i64 lane`);
-    value = BigInt.asUintN(64, physicalResult);
+  assert.ok(schema && typeof schema === "object", `${context} schema must be an object`);
+  if (schema.bits !== undefined) {
+    const width = schema.bits.width;
+    const scalarKind = SCALAR_KINDS.get(width);
+    assert.ok(scalarKind, `${context} uses unsupported scalar width ${width}`);
+    assert.equal(value.kind, "scalar", `${context} must be a scalar value`);
+    assert.equal(value.scalarKind, scalarKind, `${context} scalar kind mismatch`);
+    assert.ok(value.value >= 0n && value.value < (1n << BigInt(width)),
+      `${context} scalar value is out of range`);
+    return { bits: { width, value: value.value.toString() } };
   }
-  if (codec.width !== undefined) {
-    assert.ok(value < (1n << BigInt(codec.width)),
-      `${context} result exceeds ${codec.width} bits`);
-    return { bits: { width: codec.width, value: value.toString() } };
+  if (schema.seq !== undefined) {
+    const elements = [];
+    const locations = new Set();
+    let cursor = value;
+    while (cursor.kind !== "tagged" || cursor.payload !== 0n) {
+      assert.equal(cursor.kind, "heap", `${context} list tail must be nil or a heap constructor`);
+      assert.ok(!locations.has(cursor.location), `${context} list contains a cycle`);
+      locations.add(cursor.location);
+      const object = host.liveCell(cursor.location).object;
+      assert.equal(object.kind, "ctor", `${context} list cell must be a constructor`);
+      assert.equal(object.tag, 1n, `${context} list cell must use the cons tag`);
+      assert.equal(object.objectFields.length, 2, `${context} list cell must have two fields`);
+      assert.equal(object.usizeFields.length, 0, `${context} list cell has usize fields`);
+      assert.equal(object.scalarFields.length, 0, `${context} list cell has scalar fields`);
+      elements.push(semanticDatum(
+        schema.seq.element,
+        object.objectFields[0],
+        host,
+        `${context} element ${elements.length}`,
+      ));
+      cursor = object.objectFields[1];
+    }
+    return { seq: { value: elements } };
   }
-  return { usize: { value: value.toString() } };
+  if (schema.ctor !== undefined) {
+    const ctor = schema.ctor;
+    const tag = BigInt(ctor.tag);
+    let fields;
+    if (value.kind === "tagged") {
+      assert.equal(value.payload, tag, `${context} constructor tag mismatch`);
+      assert.equal(ctor.fields.length, 0, `${context} tagged constructor has fields`);
+      fields = [];
+    } else {
+      assert.equal(value.kind, "heap", `${context} must be a constructor value`);
+      const object = host.liveCell(value.location).object;
+      assert.equal(object.kind, "ctor", `${context} heap object must be a constructor`);
+      assert.equal(object.tag, tag, `${context} constructor tag mismatch`);
+      assert.equal(object.objectFields.length, ctor.fields.length,
+        `${context} constructor field arity mismatch`);
+      assert.equal(object.usizeFields.length, 0, `${context} constructor has usize fields`);
+      assert.equal(object.scalarFields.length, 0, `${context} constructor has scalar fields`);
+      fields = ctor.fields.map((fieldSchema, index) => semanticDatum(
+        fieldSchema,
+        object.objectFields[index],
+        host,
+        `${context} field ${index}`,
+      ));
+    }
+    return { ctor: { name: ctor.name, tag: ctor.tag, fields } };
+  }
+  throw new Error(`${context} uses an unsupported validation schema`);
 }
 
 function requiredEnvironment(name) {
@@ -193,8 +236,13 @@ for (const caseId of selectedCases) {
   assert.equal(consumedManifestSha256, manifestProduct.sha256,
     `loaded compiler manifest for ${caseId} disagrees with the captured product`);
   const compilerManifest = JSON.parse(manifestBytes.toString("utf8"));
+  const manifestKeys =
+    ["arguments", "entry", "fixture", "imports", "params", "result", "sourceEntry"];
+  if (Object.hasOwn(compilerManifest, "initialRuntime")) {
+    manifestKeys.push("initialRuntime");
+  }
   assert.deepStrictEqual(Object.keys(compilerManifest).sort(),
-    ["arguments", "entry", "fixture", "imports", "params", "result", "sourceEntry"],
+    manifestKeys.sort(),
     `${caseId} compiler manifest shape mismatch`);
   assert.equal(compilerManifest.fixture, caseId, `${caseId} fixture mismatch`);
   assert.equal(compilerManifest.sourceEntry, descriptor.entry,
@@ -207,16 +255,22 @@ for (const caseId of selectedCases) {
     `${caseId} manifest/corpus argument arity mismatch`);
   assert.equal(compilerManifest.arguments.length, descriptor.args.length,
     `${caseId} manifest invocation arity mismatch`);
-  assert.deepStrictEqual(compilerManifest.imports, [],
-    `${caseId} unexpectedly requires a semantic host`);
-  const physicalArguments = compilerManifest.params.map((kind, index) =>
-    physicalArgument(
-      kind,
-      compilerManifest.arguments[index],
-      descriptor.argSchemas[index],
+  assert.ok(Array.isArray(compilerManifest.imports), `${caseId} imports must be an array`);
+  const host = new SemanticHost(compilerManifest.initialRuntime);
+  const physicalArguments = compilerManifest.params.map((kind, index) => {
+    const semanticArgument = manifestValue(compilerManifest.arguments[index]);
+    assert.deepStrictEqual(
+      semanticDatum(
+        descriptor.argSchemas[index],
+        semanticArgument,
+        host,
+        `${caseId} argument ${index}`,
+      ),
       descriptor.args[index],
-      `${caseId} argument ${index}`,
-    ));
+      `${caseId} compiler manifest disagrees with the corpus invocation`,
+    );
+    return host.encode(kind, semanticArgument);
+  });
 
   const bytes = await readFile(moduleProduct.path);
   const consumedModuleSha256 = sha256(bytes);
@@ -225,21 +279,31 @@ for (const caseId of selectedCases) {
   assert.ok(WebAssembly.validate(bytes),
     `V8 rejected the generated WebAssembly module for ${caseId}`);
   const wasmModule = await WebAssembly.compile(bytes);
-  assert.deepStrictEqual(WebAssembly.Module.imports(wasmModule), [],
-    `${caseId} unexpectedly requires a semantic host`);
+  assert.deepStrictEqual(
+    WebAssembly.Module.imports(wasmModule),
+    compilerManifest.imports.map((descriptor) => ({
+      module: descriptor.module,
+      name: descriptor.name,
+      kind: "function",
+    })),
+    `${caseId} binary/manifest import mismatch`,
+  );
   assert.deepStrictEqual(WebAssembly.Module.exports(wasmModule), [
     { name: descriptor.entry, kind: "function" },
   ]);
-  const instance = await WebAssembly.instantiate(wasmModule, {});
+  const instance = await WebAssembly.instantiate(
+    wasmModule,
+    host.imports(compilerManifest.imports),
+  );
   const entry = instance.exports[descriptor.entry];
   assert.equal(typeof entry, "function", `missing Wasm export ${descriptor.entry}`);
   assert.equal(entry.length, compilerManifest.params.length,
     `${caseId} binary/manifest argument arity mismatch`);
   const physicalResult = entry(...physicalArguments);
-  const datum = resultDatum(
-    compilerManifest.result,
+  const datum = semanticDatum(
     descriptor.resultSchema,
-    physicalResult,
+    host.decode(compilerManifest.result, physicalResult),
+    host,
     `${caseId} result`,
   );
   const receipt = JSON.stringify([

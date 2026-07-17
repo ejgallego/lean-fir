@@ -68,6 +68,9 @@ Structured source invocation also covers `List Nat` constructor graphs. The
 fixture includes a natural beyond the tagged-immediate range, checks the full
 reconstructed list, and executes a compiler-produced constructor case through
 the semantic `getTag` import in V8.
+The artifact and validation runners import the same semantic host module. The
+main native↔V8 validation matrix now exercises that constructor graph directly
+from the shared corpus and receipts the host as a captured runtime tool.
 `#fir_wasm_emit_case "case-id"` consumes the validation corpus directly. Its
 schema-driven API checks argument datums and the emitted result lane, carries
 case dependencies into capture, and preserves the case ID in the artifact

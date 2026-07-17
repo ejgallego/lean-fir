@@ -17,8 +17,9 @@ semantic observations are frozen in the emitter.
 World and trace observations remain empty in this corpus because the current
 `lowerSupported` contract deliberately excludes external declarations. Add an
 effect-producing fixture only after that supported-domain change lands through W4.
-Heap-backed entry arguments likewise remain outside the corpus until the manifest and both
-engines share an explicit initial-runtime format.
+Compiler-produced source fixtures also cover heap-backed string and `List Nat`
+arguments through the explicit initial-runtime manifest. The semantic host is
+shared with the repository's native↔V8 validation adapter.
 
 Run the complete lane-local check with:
 
@@ -68,14 +69,18 @@ The command writes `answer.wasm`, the Node-compatible ABI manifest
 derived from the compiled entry; changing them changes only the manifest, not
 the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
 `uint8(n)`, `uint16(n)`, `uint32(n)`, `uint64(n)`, and `usize(n)` arguments,
-with range checks before compilation. Heap-backed initial arguments, external
-declarations, and recursive source programs remain explicit follow-up work.
+plus `string("…")` and `natList([…])`, with range and schema checks before
+compilation. External declarations and recursive source programs remain
+explicit follow-up work.
 
 The lane-local source fixture executes compiler-produced identity declarations
 for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` at their boundary values.
 The Node runner derives every physical argument from the manifest and
 normalizes signed WebAssembly `i32` results back to the declared unsigned
 source width before comparison.
+The source checks additionally reconstruct a Unicode string and a list
+containing a natural above the tagged-immediate range, then execute the latter
+through the semantic `getTag` import.
 
 Lean 4.32's compiler-produced small `Nat` literal currently exposes a shared
 supported-domain mismatch tracked by

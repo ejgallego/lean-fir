@@ -7,7 +7,11 @@
     "name": "strace",
     "command": "strace"
   },
-  "runCommand": ["node", "scripts/run_validation_v8.mjs"],
+  "runCommand": [
+    "node",
+    "scripts/run_validation_v8.mjs",
+    "scripts/wasm_semantic_host.mjs"
+  ],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
   "productManifest": "products.json",
@@ -34,6 +38,11 @@
       "kind": "runner",
       "name": "scripts/run_validation_v8.mjs",
       "path": "../scripts/run_validation_v8.mjs"
+    },
+    {
+      "kind": "runtime",
+      "name": "scripts/wasm_semantic_host.mjs",
+      "path": "../scripts/wasm_semantic_host.mjs"
     }
   ]
 }
