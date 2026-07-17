@@ -2527,6 +2527,52 @@ theorem diverges_iff_of_bisimilar
   exact ⟨diverges_forward related.forward bodies,
     diverges_forward related.backward leftBodies⟩
 
+/-- Two code relations, one for each renaming orientation, induce semantic
+equivalence in any runtime context covered by the proof scopes. -/
+theorem codeEquivalentAt_of_birelated
+    (forward : CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) scope scope left right)
+    (backward : CodeRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) scope scope right left)
+    (covers : EnvCovers scope state.env)
+    (frames : FramesRelated state.frames state.frames)
+    (bodies : ProgramBodiesRelated state.program) :
+    CodeEquivalentAt externals state left right := by
+  let leftState : MachineState := { state with control := .code left }
+  let rightState : MachineState := { state with control := .code right }
+  have forwardMachine :
+      MachineStateRelated
+        (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) scope scope leftState rightState := {
+    program_eq := rfl
+    runtime_eq := rfl
+    joins := .empty
+    frames := frames
+    envs := envsAgree_refl_of_covers covers
+    renaming_scoped := renamingScoped_empty scope
+    join_renaming_scoped := renamingScoped_empty []
+    control := .code forward
+  }
+  have backwardMachine :
+      MachineStateRelated
+        (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) scope scope rightState leftState := {
+    program_eq := rfl
+    runtime_eq := rfl
+    joins := .empty
+    frames := frames
+    envs := envsAgree_refl_of_covers covers
+    renaming_scoped := renamingScoped_empty scope
+    join_renaming_scoped := renamingScoped_empty []
+    control := .code backward
+  }
+  have bisimilar : StatesBisimilar leftState rightState := {
+    forward := ⟨_, _, _, _, _, forwardMachine⟩
+    backward := ⟨_, _, _, _, _, backwardMachine⟩
+  }
+  intro observation
+  exact evaluatesState_iff_of_bisimilar bisimilar bodies
+
 /-- The matching immediate outcomes of two related terminal instructions. -/
 inductive TerminalResultRelated (leftEnv rightEnv : Env) (state : MachineState) :
     CoreResult → CoreResult → Prop where

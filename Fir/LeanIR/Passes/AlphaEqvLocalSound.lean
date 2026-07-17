@@ -687,6 +687,25 @@ theorem codeRelated_of_local_accepts
   rcases accepted with ⟨fuel, accepted⟩
   exact codeRelated_of_local_check side accepted
 
+/-- Bidirectional transparent-checker acceptance yields observational
+equivalence once the surrounding runtime context satisfies the proof scopes. -/
+theorem codeEquivalentAt_of_local_accepts_both
+    (forwardSide : CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) scope scope left right)
+    (backwardSide : CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) scope scope right left)
+    (forwardAccepted : Local.Accepts left right)
+    (backwardAccepted : Local.Accepts right left)
+    (covers : EnvCovers scope state.env)
+    (frames : FramesRelated state.frames state.frames)
+    (bodies : ProgramBodiesRelated state.program) :
+    Fir.LeanIR.Passes.SimpCase.CodeEquivalentAt
+      externals state left right :=
+  codeEquivalentAt_of_birelated
+    (codeRelated_of_local_accepts forwardSide forwardAccepted)
+    (codeRelated_of_local_accepts backwardSide backwardAccepted)
+    covers frames bodies
+
 /--
 An accepting transparent comparison of ordered alternatives constructs the
 pointwise semantic relation. Alternative bodies may use the complete fragment

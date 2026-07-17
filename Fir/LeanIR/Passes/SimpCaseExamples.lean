@@ -101,11 +101,50 @@ theorem alphaCodeSideConditions :
     · native_decide
     · native_decide
 
+theorem alphaCodeSideConditionsReverse :
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] [] alphaRight alphaLeft := by
+  apply CodeSideConditions.letE
+  · rfl
+  · rfl
+  · rfl
+  · trivial
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · apply CodeSideConditions.ret
+    · native_decide
+    · native_decide
+
 /-- The transparent checker closes the complete alpha-renamed `let` fixture. -/
 theorem alphaLocalCodeRelated :
     CodeRelated (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] [] alphaLeft alphaRight :=
   codeRelated_of_local_accepts alphaCodeSideConditions ⟨2, by native_decide⟩
+
+def alphaProofState : MachineState := {
+  program := { decls := #[] }
+  control := .code alphaLeft
+}
+
+/-- Bidirectional local acceptance closes a genuine alpha-renamed fixture all
+the way to interpreter observational equivalence. -/
+theorem alphaLocalCodeEquivalent :
+    CodeEquivalentAt externals alphaProofState alphaLeft alphaRight := by
+  apply codeEquivalentAt_of_local_accepts_both
+    alphaCodeSideConditions alphaCodeSideConditionsReverse
+    (by exact ⟨2, by native_decide⟩)
+    (by exact ⟨2, by native_decide⟩)
+  · intro fvarId member
+    simp at member
+  · exact .nil
+  · intro name decl found
+    simp [alphaProofState, Program.findDecl?] at found
 
 def proofCaseTable : LCNF.Cases .impure :=
   .mk ``Bool objType c #[]

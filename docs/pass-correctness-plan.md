@@ -508,13 +508,25 @@ simulations in both alpha-renaming directions; from it,
 terminating result and `diverges_iff_of_bisimilar` proves divergence
 equivalence. This slice adds no trusted assumption.
 
+The bidirectional checker boundary is connected too.
+`codeEquivalentAt_of_birelated` embeds two oppositely oriented `CodeRelated`
+proofs into related machine states whenever the environment covers the proof
+scope, the saved frames relate to themselves, and declaration bodies satisfy
+the explicit phase premise. `codeEquivalentAt_of_local_accepts_both` obtains
+those two relations from FIR's transparent checker and the two orientations of
+`CodeSideConditions`; it is axiom-free. The genuinely alpha-renamed `let`
+fixture now closes all the way to `CodeEquivalentAt`. The compiler-facing
+`trustedCodeEquivalentAt_of_upstream_both` converts the two Lean Boolean
+checks through the existing audited correspondence axiom. It adds no trusted
+assumption and deliberately does not assume checker symmetry.
+
 The remaining bounded work is:
 
 1. refactor FIR's opaque hygiene/binder traversals into transparent total
    definitions with equation lemmas, then derive `ProgramBodiesRelated` from
    `CheckedImpureProgram`/`ImpureHygienic`;
-2. construct both directions of `StatesBisimilar` from checker acceptance and
-   the two orientations of the phase side conditions;
+2. derive the two orientations of `CodeSideConditions`, environment coverage,
+   and declaration-body coverage from the public checked-program boundary;
 3. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream

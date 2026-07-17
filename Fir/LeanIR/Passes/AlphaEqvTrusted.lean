@@ -39,6 +39,25 @@ theorem trustedCodeRelated_of_upstream
       ({} : FVarIdMap Lean.FVarId) scope scope left right :=
   codeRelated_of_local_accepts side (localAccepts_of_upstream accepted)
 
+/-- Compiler-facing observational equivalence from acceptance in both checker
+orientations. The only trusted step is the existing upstream-to-local bridge. -/
+theorem trustedCodeEquivalentAt_of_upstream_both
+    (forwardSide : CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId) scope scope left right)
+    (backwardSide : CodeSideConditions (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap Lean.FVarId) scope scope right left)
+    (forwardAccepted : left.alphaEqv right = true)
+    (backwardAccepted : right.alphaEqv left = true)
+    (covers : EnvCovers scope state.env)
+    (frames : FramesRelated state.frames state.frames)
+    (bodies : ProgramBodiesRelated state.program) :
+    Fir.LeanIR.Passes.SimpCase.CodeEquivalentAt
+      externals state left right :=
+  codeEquivalentAt_of_local_accepts_both forwardSide backwardSide
+    (localAccepts_of_upstream forwardAccepted)
+    (localAccepts_of_upstream backwardAccepted)
+    covers frames bodies
+
 /-- Compiler-facing construction for one deterministic impure case table. -/
 theorem trustedCasesCodeRelated_of_upstream
     (scope : List Lean.FVarId)
