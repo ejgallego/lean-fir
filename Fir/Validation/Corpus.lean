@@ -101,6 +101,18 @@ def idNatList (xs : List Nat) : List Nat :=
 def idString (value : String) : String :=
   value
 
+def idUInt8 (value : UInt8) : UInt8 :=
+  value
+
+def idUInt16 (value : UInt16) : UInt16 :=
+  value
+
+def idUInt32 (value : UInt32) : UInt32 :=
+  value
+
+def idUInt64 (value : UInt64) : UInt64 :=
+  value
+
 def maxUInt8 : UInt8 := 255
 
 def maxUInt16 : UInt16 := 65535
@@ -649,6 +661,46 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["lit", "return"]
     provenance := leanCompileProvenance "tests/compile/uint_fold.lean"
       "Maximum-width USize literal" },
+  { id := "uint8-roundtrip"
+    entry := ``Source.idUInt8
+    args := #[.bits 8 255]
+    argSchemas := #[.bits 8]
+    resultSchema := .bits 8
+    native := fun _ => .bits 8 (UInt64.ofNat (Source.idUInt8 255).toNat)
+    tags := #["quick", "scalar", "roundtrip", "boundary"]
+    requiredLcnfForms := #["return"]
+    requiredExecutedLcnfForms := #["return"]
+    provenance := firProvenance "Maximum-width UInt8 ABI round trip" },
+  { id := "uint16-roundtrip"
+    entry := ``Source.idUInt16
+    args := #[.bits 16 65535]
+    argSchemas := #[.bits 16]
+    resultSchema := .bits 16
+    native := fun _ => .bits 16 (UInt64.ofNat (Source.idUInt16 65535).toNat)
+    tags := #["quick", "scalar", "roundtrip", "boundary"]
+    requiredLcnfForms := #["return"]
+    requiredExecutedLcnfForms := #["return"]
+    provenance := firProvenance "Maximum-width UInt16 ABI round trip" },
+  { id := "uint32-roundtrip"
+    entry := ``Source.idUInt32
+    args := #[.bits 32 4294967295]
+    argSchemas := #[.bits 32]
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat (Source.idUInt32 4294967295).toNat)
+    tags := #["quick", "scalar", "roundtrip", "boundary"]
+    requiredLcnfForms := #["return"]
+    requiredExecutedLcnfForms := #["return"]
+    provenance := firProvenance "Maximum-width UInt32 ABI round trip" },
+  { id := "uint64-roundtrip"
+    entry := ``Source.idUInt64
+    args := #[.bits 64 18446744073709551615]
+    argSchemas := #[.bits 64]
+    resultSchema := .bits 64
+    native := fun _ => .bits 64 (Source.idUInt64 18446744073709551615)
+    tags := #["quick", "scalar", "roundtrip", "boundary"]
+    requiredLcnfForms := #["return"]
+    requiredExecutedLcnfForms := #["return"]
+    provenance := firProvenance "Maximum-width UInt64 ABI round trip" },
   { id := "boxed-uint32"
     entry := ``Source.boxedUInt32
     dependencies := #[``Source.polyId]
