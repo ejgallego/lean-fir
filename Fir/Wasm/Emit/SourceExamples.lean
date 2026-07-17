@@ -8,6 +8,14 @@ open Lean Elab Command
 open Fir.Wasm.Emit.Source
 
 run_cmd do
+  unless validationSchemaAcceptsAbiKind .bool .uint8 do
+    throwError "validation Bool schema rejected Lean's scalar result ABI"
+  unless validationSchemaAcceptsAbiKind .bool .tagged do
+    throwError "validation Bool schema rejected its tagged object ABI"
+  if validationSchemaAcceptsAbiKind .bool .uint16 then
+    throwError "validation Bool schema accepted an unrelated scalar ABI"
+
+run_cmd do
   let result ← liftCoreM <|
     compileClosed ``Fir.Validation.Corpus.Source.litNat
   match result with

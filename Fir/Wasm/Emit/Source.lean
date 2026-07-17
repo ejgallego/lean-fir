@@ -77,6 +77,7 @@ def validationSchemaAcceptsAbiKind : Fir.Validation.ValidationSchema → Fir.Was
   | .bits 16, .uint16 => true
   | .bits 32, .uint32 => true
   | .bits 64, .uint64 => true
+  | .bool, .uint8 => true
   | .unit, kind
   | .bool, kind
   | .nat, kind

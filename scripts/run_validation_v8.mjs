@@ -40,10 +40,16 @@ function semanticDatum(schema, value, host, context) {
           `${context} must be the unit constructor`);
         return { unit: {} };
       case "bool":
-        assert.equal(value.kind, "tagged", `${context} must be a tagged boolean`);
-        assert.ok(value.payload === 0n || value.payload === 1n,
-          `${context} boolean tag is out of range`);
-        return { bool: { value: value.payload === 1n } };
+        if (value.kind === "tagged") {
+          assert.ok(value.payload === 0n || value.payload === 1n,
+            `${context} boolean tag is out of range`);
+          return { bool: { value: value.payload === 1n } };
+        }
+        assert.equal(value.kind, "scalar", `${context} must be a tagged or scalar boolean`);
+        assert.equal(value.scalarKind, "uint8", `${context} scalar boolean must use uint8`);
+        assert.ok(value.value === 0n || value.value === 1n,
+          `${context} scalar boolean is out of range`);
+        return { bool: { value: value.value === 1n } };
       case "nat":
         return {
           nat: { value: exactJsonNatural(naturalValue(host, value, context), context) },

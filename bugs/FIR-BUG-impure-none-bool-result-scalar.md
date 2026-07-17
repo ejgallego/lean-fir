@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-bool-result-scalar
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-07-17
 reproduction: Fir/Validation/Corpus.lean#nat-list-nonempty-bool
-regression: none
+regression: Fir/Validation/Corpus.lean#nat-list-nonempty-bool
 ---
 
 # Summary
@@ -72,4 +72,9 @@ none
 
 ## Resolution and regression
 
-unresolved
+The LCNF validation decoder now accepts scalar `UInt8` zero and one as the
+compiler's unboxed Boolean representation while continuing to reject other
+scalar values. The Wasm validation schema admits `Bool` over `uint8`, and the
+V8 schema decoder applies the same range check. The
+`nat-list-nonempty-bool` case permanently checks native Lean, LCNF, and V8 at
+this boundary.

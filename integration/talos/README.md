@@ -71,6 +71,8 @@ the semantic `getTag` import in V8.
 The artifact and validation runners import the same semantic host module. The
 main native↔V8 validation matrix now exercises that constructor graph directly
 from the shared corpus and receipts the host as a captured runtime tool.
+It also checks Lean 4.32's scalar `UInt8` result representation for `Bool`,
+accepting only zero and one at both the LCNF and V8 schema boundaries.
 `#fir_wasm_emit_case "case-id"` consumes the validation corpus directly. Its
 schema-driven API checks argument datums and the emitted result lane, carries
 case dependencies into capture, and preserves the case ID in the artifact
