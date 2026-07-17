@@ -489,16 +489,16 @@ theorem abiCtorProjectionObjectDecoded :
       .ok #[abiCtorProjectionPairValue] := by
   rfl
 
-/-- Local W4 proof for the generated literal/literal/constructor/projection body. -/
-theorem abiCtorProjectionMain_codeWP :
-    CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
+/-- Program-level W4 simulation for literal/literal/constructor/projection. -/
+theorem abiCtorProjectionMain_simulation :
+    CodeSimulation abiCtorProjectionContext abiCtorProjectionSourceModule
       abiCtorProjectionSourceFunction []
       abiCtorProjectionAdaptedModule.wasmModule
       abiCtorProjectionResolvedHosts.env
       {} [] abiCtorProjectionCode abiCtorProjectionMainFunction.body
       abiCtorProjectionInitialStore
-      (abiCtorProjectionMainFunction.toLocals []) []
-      (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7 .tobject []) := by
+      (abiCtorProjectionMainFunction.toLocals []) abiCtorProjectionRuntime
+      abiCtorProjectionValue7 .tobject := by
   have contract0 :
       abiCtorProjectionResolvedHosts.spec.contracts[0]? =
         some (hostContract (.naturalLiteral 7 .tobject)) := by
@@ -516,6 +516,66 @@ theorem abiCtorProjectionMain_codeWP :
       abiCtorProjectionResolvedHosts.spec.contracts[3]? =
         some (hostContract (.objectProj 0 .tobject)) := by
     simp [ResolvedHosts.spec, abiCtorProjectionResolvedHosts_operations]
+
+  have adaptedX :
+      instructions abiCtorProjectionSourceModule
+          abiCtorProjectionSourceFunction []
+          [.call (.runtime (.literal (.nat 7) .tobject))] =
+        .ok [.call 0] := by
+    have callFound :
+        callIndex? abiCtorProjectionSourceModule
+          (.runtime (.literal (.nat 7) .tobject)) = some 0 := by
+      native_decide
+    simp [instructions, instruction, callFound]
+    rfl
+  have adaptedY :
+      instructions abiCtorProjectionSourceModule
+          abiCtorProjectionSourceFunction []
+          [.call (.runtime (.literal (.nat 8) .tobject))] =
+        .ok [.call 1] := by
+    have callFound :
+        callIndex? abiCtorProjectionSourceModule
+          (.runtime (.literal (.nat 8) .tobject)) = some 1 := by
+      native_decide
+    simp [instructions, instruction, callFound]
+    rfl
+  have adaptedP :
+      instructions abiCtorProjectionSourceModule
+          abiCtorProjectionSourceFunction []
+          [.localGet x, .localGet y,
+            .call (.runtime
+              (.allocCtor pairInfo #[.tobject, .tobject] .object))] =
+        .ok [.localGet 0, .localGet 1, .call 2] := by
+    have xFound :
+        findFVar? (abiCtorProjectionSourceFunction.params.toList ++
+          abiCtorProjectionSourceFunction.locals.toList) x = some 0 := by
+      native_decide
+    have yFound :
+        findFVar? (abiCtorProjectionSourceFunction.params.toList ++
+          abiCtorProjectionSourceFunction.locals.toList) y = some 1 := by
+      native_decide
+    have callFound :
+        callIndex? abiCtorProjectionSourceModule
+          (.runtime (.allocCtor pairInfo #[.tobject, .tobject] .object)) =
+            some 2 := by
+      native_decide
+    simp [instructions, instruction, xFound, yFound, callFound]
+    rfl
+  have adaptedR :
+      instructions abiCtorProjectionSourceModule
+          abiCtorProjectionSourceFunction []
+          [.localGet p, .call (.runtime (.objectProj 0 .tobject))] =
+        .ok [.localGet 2, .call 3] := by
+    have pFound :
+        findFVar? (abiCtorProjectionSourceFunction.params.toList ++
+          abiCtorProjectionSourceFunction.locals.toList) p = some 2 := by
+      native_decide
+    have callFound :
+        callIndex? abiCtorProjectionSourceModule
+          (.runtime (.objectProj 0 .tobject)) = some 3 := by
+      native_decide
+    simp [instructions, instruction, pFound, callFound]
+    rfl
 
   have stepX := letStepSimulates_naturalLiteral
     (context := abiCtorProjectionContext)
@@ -625,172 +685,32 @@ theorem abiCtorProjectionMain_codeWP :
       abiCtorProjectionStoreP, abiCtorProjectionDeclR, letDecl,
       successfulHostStore]
       using stepR.2.2.1
-
-  have returned :
-      CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
-        abiCtorProjectionSourceFunction []
-        abiCtorProjectionAdaptedModule.wasmModule
-        abiCtorProjectionResolvedHosts.env
-        abiCtorProjectionRuntime abiCtorProjectionEnvR (.return r)
-        [.localGet 3, .ret] abiCtorProjectionStoreR abiCtorProjectionLocalsR []
-        (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7
-          .tobject []) := by
-    apply codeWP_return abiCtorProjectionGetR
-      (resultIndex := 3) (by native_decide) (by native_decide)
-      (lookup_bind_self abiCtorProjectionEnvP r abiCtorProjectionValue7)
-      relatedR
-
-  have projected :
-      CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
-        abiCtorProjectionSourceFunction []
-        abiCtorProjectionAdaptedModule.wasmModule
-        abiCtorProjectionResolvedHosts.env
-        abiCtorProjectionRuntime abiCtorProjectionEnvP
-        (.let abiCtorProjectionDeclR (.return r))
-        [.localGet 2, .call 3, .localSet 3, .localGet 3, .ret]
-        abiCtorProjectionStoreP abiCtorProjectionLocalsP []
-        (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7
-          .tobject []) := by
-    apply codeWP_objectProjection_let
-      (spec := abiCtorProjectionResolvedHosts.spec)
-      (id := 3) (imp := abiCtorProjectionImport 3)
-      (index := 0) (objectId := p) (objectIndex := 2) (resultIndex := 3)
-      (objectHandle := 3) (sourceObject := abiCtorProjectionPairValue)
-      (sourceValue := abiCtorProjectionValue7) (resultKind := .tobject)
-      (after := abiCtorProjectionHandlesP) (resultHandle := 1)
-    · rfl
-    · exact abiCtorProjectionCompileR
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionObjectLookup
-    · exact abiCtorProjectionProjected
-    · exact relatedP
-    · native_decide
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionImport3_found
-    · exact abiCtorProjectionHostsSatisfy
-    · native_decide
-    · exact contract3
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionObjectDecoded
-    · rfl
-    · exact abiCtorProjectionEncodeR
-    · exact abiCtorProjectionSetR
-    · simpa [abiCtorProjectionEnvR, abiCtorProjectionStoreR,
-        abiCtorProjectionStoreP, abiCtorProjectionDeclR, letDecl,
-        successfulHostStore]
-        using returned
-
-  have constructed :
-      CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
-        abiCtorProjectionSourceFunction []
-        abiCtorProjectionAdaptedModule.wasmModule
-        abiCtorProjectionResolvedHosts.env
-        {} abiCtorProjectionEnvY
-        (.let abiCtorProjectionDeclP <|
-          .let abiCtorProjectionDeclR <| .return r)
-        [.localGet 0, .localGet 1, .call 2, .localSet 2,
-          .localGet 2, .call 3, .localSet 3, .localGet 3, .ret]
-        abiCtorProjectionStoreY abiCtorProjectionLocalsY []
-        (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7
-          .tobject []) := by
-    apply codeWP_constructor_let
-      (spec := abiCtorProjectionResolvedHosts.spec)
-      (id := 2) (imp := abiCtorProjectionImport 2)
-      (info := pairInfo) (args := #[.fvar x, .fvar y])
-      (fvarIds := [x, y]) (indices := [0, 1])
-      (physicalArgs := [.i32 1, .i32 2])
-      (semanticArgs := #[abiCtorProjectionValue7, abiCtorProjectionValue8])
-      (nextRuntime := abiCtorProjectionRuntime)
-      (sourceValue := abiCtorProjectionPairValue) (resultIndex := 2)
-      (fieldKinds := #[.tobject, .tobject]) (resultKind := .object)
-      (after := abiCtorProjectionHandlesP) (handle := 3)
-    · rfl
-    · simpa using abiCtorProjectionCompileP
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionArgumentsEvaluated
-    · exact abiCtorProjectionAllocated
-    · exact relatedY
-    · native_decide
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionImport2_found
-    · exact abiCtorProjectionHostsSatisfy
-    · native_decide
-    · exact contract2
-    · native_decide
-    · native_decide
-    · exact abiCtorProjectionConstructorDecoded
-    · rfl
-    · exact abiCtorProjectionEncodeP
-    · exact abiCtorProjectionSetP
-    · simpa [abiCtorProjectionEnvP, abiCtorProjectionStoreP,
-        abiCtorProjectionDeclP, letDecl] using projected
-
-  have literal8 :
-      CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
-        abiCtorProjectionSourceFunction []
-        abiCtorProjectionAdaptedModule.wasmModule
-        abiCtorProjectionResolvedHosts.env
-        {} abiCtorProjectionEnvX
-        (.let abiCtorProjectionDeclY <|
-          .let abiCtorProjectionDeclP <|
-          .let abiCtorProjectionDeclR <| .return r)
-        [.call 1, .localSet 1, .localGet 0, .localGet 1, .call 2,
-          .localSet 2, .localGet 2, .call 3, .localSet 3,
-          .localGet 3, .ret]
-        abiCtorProjectionStoreX abiCtorProjectionLocalsX []
-        (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7
-          .tobject []) := by
-    apply codeWP_naturalLiteral_let
-      (spec := abiCtorProjectionResolvedHosts.spec)
-      (id := 1) (imp := abiCtorProjectionImport 1)
-      (resultIndex := 1) (value := 8)
-      (after := abiCtorProjectionHandlesY) (handle := 2)
-    · rfl
-    · exact abiCtorProjectionCompileY
-    · native_decide
-    · native_decide
-    · native_decide
-    · exact relatedX
-    · exact abiCtorProjectionImport1_found
-    · exact abiCtorProjectionHostsSatisfy
-    · native_decide
-    · exact contract1
-    · native_decide
-    · native_decide
-    · simpa [abiCtorProjectionLiteral8] using abiCtorProjectionEncodeY
-    · exact abiCtorProjectionSetY
-    · simpa [abiCtorProjectionEnvY, abiCtorProjectionStoreY,
-        abiCtorProjectionDeclY, letDecl, abiCtorProjectionLiteral8]
-        using constructed
-
   rw [abiCtorProjectionMain_body]
-  apply codeWP_naturalLiteral_let
-    (spec := abiCtorProjectionResolvedHosts.spec)
-    (id := 0) (imp := abiCtorProjectionImport 0)
-    (resultIndex := 0) (value := 7)
-    (after := abiCtorProjectionHandlesX) (handle := 1)
-  · rfl
-  · exact abiCtorProjectionCompileX
-  · native_decide
-  · native_decide
-  · native_decide
-  · exact abiCtorProjectionInitialState_related
-  · exact abiCtorProjectionImport0_found
-  · exact abiCtorProjectionHostsSatisfy
-  · native_decide
-  · exact contract0
-  · native_decide
-  · native_decide
-  · simpa [abiCtorProjectionLiteral7] using abiCtorProjectionEncodeX
-  · exact abiCtorProjectionSetX
-  · simpa [abiCtorProjectionCode, abiCtorProjectionEnvX,
-      abiCtorProjectionStoreX, abiCtorProjectionDeclX, letDecl,
-      abiCtorProjectionLiteral7] using literal8
+  simp only [abiCtorProjectionCode]
+  apply CodeSimulation.letValue abiCtorProjectionCompileX adaptedX
+    (by native_decide) stepX
+  apply CodeSimulation.letValue abiCtorProjectionCompileY adaptedY
+    (by native_decide) stepY
+  apply CodeSimulation.letValue abiCtorProjectionCompileP adaptedP
+    (by native_decide) stepP
+  apply CodeSimulation.letValue abiCtorProjectionCompileR adaptedR
+    (by native_decide) stepR
+  apply CodeSimulation.ret abiCtorProjectionGetR
+    (by native_decide) (by native_decide)
+    (lookup_bind_self abiCtorProjectionEnvP r abiCtorProjectionValue7)
+    relatedR
+
+/-- The local judgment is derived uniformly from the simulation certificate. -/
+theorem abiCtorProjectionMain_codeWP :
+    CodeWP abiCtorProjectionContext abiCtorProjectionSourceModule
+      abiCtorProjectionSourceFunction []
+      abiCtorProjectionAdaptedModule.wasmModule
+      abiCtorProjectionResolvedHosts.env
+      {} [] abiCtorProjectionCode abiCtorProjectionMainFunction.body
+      abiCtorProjectionInitialStore
+      (abiCtorProjectionMainFunction.toLocals []) []
+      (ReturnPost abiCtorProjectionRuntime abiCtorProjectionValue7 .tobject []) :=
+  abiCtorProjectionMain_simulation.toCodeWP
 
 theorem abiCtorProjectionObservation_related :
     compareObservations
@@ -815,6 +735,22 @@ theorem abiCtorProjectionObservation_related :
   rw [noDifferences]
   rfl
 
+/-- The generic W4 theorem simultaneously closes source and target execution. -/
+theorem abiCtorProjectionMain_correct :
+    CodeEvaluates abiCtorProjectionContext {} [] abiCtorProjectionCode
+        abiCtorProjectionRuntime abiCtorProjectionValue7 ∧
+      ExportTerminatesWith abiCtorProjectionResolvedHosts.env
+        abiCtorProjectionAdaptedModule.wasmModule "main"
+        abiCtorProjectionInitialStore []
+        (RelatedPost #[.tobject]
+          (ReturnedObservation abiCtorProjectionRuntime
+            abiCtorProjectionValue7)) := by
+  apply abiCtorProjectionSupportedExport.correct_of_simulation
+    abiCtorProjectionObservation_related
+  · simpa [abiCtorProjectionSupportedExport, abiCtorProjectionInitialStore] using
+      abiCtorProjectionMain_simulation
+  · simp [abiCtorProjectionSupportedExport]
+
 /--
 End-to-end W3/W4 theorem for the generated constructor/projection fixture.
 The actual adapted `main` export terminates with an observation related to the
@@ -826,10 +762,13 @@ theorem abiCtorProjectionMain_export_correct :
       abiCtorProjectionInitialStore []
       (RelatedPost #[.tobject]
         (ReturnedObservation abiCtorProjectionRuntime
-          abiCtorProjectionValue7)) := by
-  apply abiCtorProjectionSupportedExport.terminatesWithRelated_of_return
-    abiCtorProjectionObservation_related
-  simpa [abiCtorProjectionSupportedExport, abiCtorProjectionInitialStore] using
-    abiCtorProjectionMain_codeWP
+          abiCtorProjectionValue7)) :=
+  abiCtorProjectionMain_correct.2
+
+/-- Successful source evaluation follows from the same induction certificate. -/
+theorem abiCtorProjectionMain_source_evaluates :
+    CodeEvaluates abiCtorProjectionContext {} [] abiCtorProjectionCode
+      abiCtorProjectionRuntime abiCtorProjectionValue7 :=
+  abiCtorProjectionMain_correct.1
 
 end FirTalos.Correctness
