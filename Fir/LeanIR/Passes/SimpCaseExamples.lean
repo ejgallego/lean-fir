@@ -650,6 +650,89 @@ theorem joinInvocationCoreStepRelated :
   · exact jump
   · trivial
 
+def callProofProgram : ImpureProgram := { decls := #[idDecl] }
+
+theorem idDeclBodyRelated : DeclBodyRelated idDecl := by
+  change ParamBodyRelated (leftJoins := []) (rightJoins := [])
+    ({} : FVarIdMap FVarId) [] []
+    #[param x].toList #[param x].toList (.return x) (.return x)
+  apply ParamBodyRelated.cons
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · apply ParamBodyRelated.nil
+    apply CodeRelated.terminal
+    apply TerminalCodeRelated.ret
+    exact ⟨by native_decide, by native_decide,
+      fVarRelated_insert_self ({} : FVarIdMap FVarId) x x⟩
+
+theorem callProofProgramBodiesRelated : ProgramBodiesRelated callProofProgram := by
+  intro name foundDecl found
+  simp [callProofProgram, Program.findDecl?] at found
+  rcases found with ⟨_, rfl⟩
+  exact idDeclBodyRelated
+
+def namedCallProofState : MachineState := {
+  program := callProofProgram
+  control := .invokeName `id #[.erased]
+}
+
+/-- Named declaration entry is covered by the full control-step simulation. -/
+theorem namedCallCoreStepRelated :
+    CoreResultRelated
+      (coreStep namedCallProofState) (coreStep namedCallProofState) := by
+  apply coreStep_machine_related
+    (rho := ({} : FVarIdMap FVarId))
+    (leftScope := []) (rightScope := [])
+    (leftJoins := []) (rightJoins := [])
+  · exact {
+      program_eq := rfl
+      runtime_eq := rfl
+      joins := .empty
+      frames := .nil
+      envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
+      renaming_scoped := renamingScoped_empty []
+      join_renaming_scoped := renamingScoped_empty []
+      control := .invokeName `id #[.erased]
+    }
+  · exact callProofProgramBodiesRelated
+
+def closureProofRuntime : RuntimeState := {
+  heap := [(0, { object := .closure `id 1 #[] })]
+  nextLocation := 1
+}
+
+def closureProofState : MachineState := {
+  program := callProofProgram
+  control := .invokeValue (.object (.heap 0)) #[.erased]
+  runtime := closureProofRuntime
+}
+
+/-- Closure lookup delegates to the same declaration-entry simulation. -/
+theorem closureCallCoreStepRelated :
+    CoreResultRelated
+      (coreStep closureProofState) (coreStep closureProofState) := by
+  apply coreStep_machine_related
+    (rho := ({} : FVarIdMap FVarId))
+    (leftScope := []) (rightScope := [])
+    (leftJoins := []) (rightJoins := [])
+  · exact {
+      program_eq := rfl
+      runtime_eq := rfl
+      joins := .empty
+      frames := .nil
+      envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
+      renaming_scoped := renamingScoped_empty []
+      join_renaming_scoped := renamingScoped_empty []
+      control := .invokeValue (.object (.heap 0)) #[.erased]
+    }
+  · exact callProofProgramBodiesRelated
+
 #guard Local.check 8 joinAlphaLeft joinAlphaRight
 #guard !Local.check 8 joinAlphaLeft joinBodyMismatch
 #guard !Local.check 8 joinAlphaLeft joinTargetMismatch

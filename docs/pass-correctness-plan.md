@@ -471,21 +471,39 @@ compiler's global-freshness consequence that variable and parameter binders
 cannot shadow active join identifiers. No runtime contract or trusted
 assumption changed.
 
+Whole-control simulation is now complete at the interpreter's `coreStep`
+boundary. Related yielded values pop bind, apply, and cache frames in lockstep;
+cache writes preserve equal runtimes. Named calls agree on global-cache lookup,
+partial-application allocation, argument splitting, parameter binding,
+extra-argument frames, internal code entry, external requests, and faults.
+Closure calls read the same heap cell and delegate to the named-call theorem.
+`coreStep_machine_related` combines those paths with the complete code-head
+simulation. Focused regressions enter the same one-parameter body through both
+a named call and a heap closure.
+
+Declaration entry adds one deliberate phase premise: `ProgramBodiesRelated`
+says that every reachable internal declaration is reflexively related beneath
+its parameter binders. This is not a new axiom; call proofs accept it as an
+ordinary proposition. The next phase-boundary task is to derive it from the
+checked impure program's global hygiene invariant and the transparent local
+checker.
+
 The remaining bounded work is:
 
-1. extend whole-state simulation through named/closure calls and the remaining
-   yielded/apply/cache frame paths, reusing the existing related `fap`, `pap`,
-   and free-variable call actions;
-2. prove the transparent local checker sound for each newly added declarative
+1. derive `ProgramBodiesRelated` from `CheckedImpureProgram`/`ImpureHygienic`,
+   making declaration entry available from the public phase boundary;
+2. lift `CoreResultRelated` through internal/external steps and evaluation,
+   including related external responses and resumed waiting states;
+3. prove the transparent local checker sound for each newly added declarative
    code constructor, discharge or refine the exact runtime-type premises at
    the impure phase boundary, and eventually replace the audited upstream
    correspondence axiom with a kernel theorem;
-3. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
+4. connect `filterUnreachable`, `addDefaultAlt`, and `simplifyCases` directly
    to the local rewrite theorems, creating a bug card for every mismatch;
-4. lift the resulting theorem through recursive code, declarations, and program
-   entry evaluation;
-5. expand the compiler-generated conformance corpus around the whole pass;
-6. in parallel, continue the Talos runtime work and run
+5. lift the resulting theorem through declarations and program entry
+   evaluation;
+6. expand the compiler-generated conformance corpus around the whole pass;
+7. in parallel, continue the Talos runtime work and run
    the constructor/projection examples end to end.
 
 Completing those items finishes the first whole-pass theorem and the first
