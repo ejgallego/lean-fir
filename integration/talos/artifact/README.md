@@ -41,9 +41,9 @@ lake -d .. env lean --run ../FirWasmOracleMain.lean all /tmp/fir-wasm-corpus
 node run-artifacts.mjs /tmp/fir-wasm-corpus
 ```
 
-To compile a closed Lean source declaration through the real final-impure LCNF
+To compile a Lean source declaration through the real final-impure LCNF
 pipeline and emit it directly, import the command after the declaration is
-available:
+available. Closed declarations need no invocation clause:
 
 ```lean
 import Fir.Wasm.Emit.Command
@@ -53,12 +53,23 @@ def answer : UInt64 := 42
 #fir_wasm_emit answer to "answer.wasm"
 ```
 
+Parameterized declarations record one checked semantic invocation alongside
+the reusable module. The module's parameter ABI is the argument schema:
+
+```lean
+def idUSize (value : USize) : USize := value
+
+#fir_wasm_emit idUSize with [usize(42)] to "id-usize.wasm"
+```
+
 The command writes `answer.wasm`, the Node-compatible ABI manifest
 `answer.wasm.json`, and the captured final-impure program
-`answer.wasm.lcnf`. The initial bridge accepts only closed entries whose
-dependency closure is already in A0's supported lowering and semantic-host
-fragment. Parameter schemas, external declarations, and recursive source
-programs remain explicit follow-up work.
+`answer.wasm.lcnf`. Invocation arguments are checked against the ABI kinds
+derived from the compiled entry; changing them changes only the manifest, not
+the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
+`uint8(n)`, `uint16(n)`, `uint32(n)`, `uint64(n)`, and `usize(n)` arguments,
+with range checks before compilation. Heap-backed initial arguments, external
+declarations, and recursive source programs remain explicit follow-up work.
 
 Lean 4.32's compiler-produced small `Nat` literal currently exposes a shared
 supported-domain mismatch tracked by

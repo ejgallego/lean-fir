@@ -30,4 +30,43 @@ run_cmd do
   unless artifact.bytes.size > Fir.Wasm.Emit.header.size do
     throwError "source UInt64 literal did not produce a complete Wasm module"
 
+run_cmd do
+  let result ← liftCoreM <|
+    compileModule ``Fir.Validation.Corpus.Source.idUSize
+  let moduleArtifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "parameterized source did not compile: {repr error}"
+  let artifact ← match moduleArtifact.withInvocation
+      "id-usize-42" ``Fir.Validation.Corpus.Source.idUSize
+      ``Fir.Validation.Corpus.Source.idUSize #[.usize 42] with
+    | .ok artifact => pure artifact
+    | .error error => throwError "parameterized invocation was rejected: {repr error}"
+  let function ← match Fir.Wasm.Emit.Manifest.entryFunction artifact.module
+      ``Fir.Validation.Corpus.Source.idUSize with
+    | .ok function => pure function
+    | .error error => throwError "parameterized source export failure: {error}"
+  unless function.params.map (·.snd) == #[.usize] do
+    throwError "parameterized source schema mismatch: {repr function.params}"
+  unless artifact.manifest.compress.contains
+      "\"arguments\":[{\"kind\":\"usize\",\"value\":\"42\"}]" do
+    throwError "parameterized source manifest did not retain the invocation"
+  let secondArtifact ← match moduleArtifact.withInvocation
+      "id-usize-7" ``Fir.Validation.Corpus.Source.idUSize
+      ``Fir.Validation.Corpus.Source.idUSize #[.usize 7] with
+    | .ok artifact => pure artifact
+    | .error error => throwError "second parameterized invocation was rejected: {repr error}"
+  unless artifact.bytes == secondArtifact.bytes &&
+      artifact.formattedLcnf == secondArtifact.formattedLcnf do
+    throwError "invocation data changed the reusable source artifact"
+  if artifact.manifest.compress == secondArtifact.manifest.compress then
+    throwError "distinct parameterized invocations produced the same manifest"
+  match moduleArtifact.withInvocation
+      "id-usize-wrong-kind" ``Fir.Validation.Corpus.Source.idUSize
+      ``Fir.Validation.Corpus.Source.idUSize #[.scalar (.uint64 42)] with
+  | .error (.manifest message) =>
+      unless message.contains "does not match ABI kind" do
+        throwError "unexpected argument-schema rejection: {message}"
+  | .error error => throwError "unexpected parameterized source failure: {repr error}"
+  | .ok _ => throwError "parameterized source accepted the wrong semantic argument kind"
+
 end Fir.Wasm.Emit.SourceExamples
