@@ -23,6 +23,9 @@ inductive HostOperation where
   | usizeSet (index : Nat)
   | scalarSet (width offset : Nat) (field : AbiKind)
   | setTag (tag : Nat)
+  | inc (amount : Nat) (check : Bool)
+  | dec (amount : Nat) (check : Bool) (objectFields? : Option Nat)
+  | delete
   | getTag
   deriving Inhabited, BEq
 
@@ -40,6 +43,9 @@ def HostOperation.runtimeOp : HostOperation → RuntimeOp
   | .usizeSet index => .usizeSet index
   | .scalarSet width offset field => .scalarSet width offset field
   | .setTag tag => .setTag tag
+  | .inc amount check => .inc amount check
+  | .dec amount check objectFields? => .dec amount check objectFields?
+  | .delete => .delete
   | .getTag => .getTag
 
 def HostOperation.signature (operation : HostOperation) : Signature :=
@@ -59,6 +65,9 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .usizeSet index => some (.usizeSet index)
   | .scalarSet width offset field => some (.scalarSet width offset field)
   | .setTag tag => some (.setTag tag)
+  | .inc amount check => some (.inc amount check)
+  | .dec amount check objectFields? => some (.dec amount check objectFields?)
+  | .delete => some .delete
   | .getTag => some .getTag
   | _ => none
 
@@ -172,6 +181,27 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
       match args[0]? with
       | some object =>
           match Fir.LeanIR.Impure.setTag runtime object tag with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .inc amount check =>
+      match args[0]? with
+      | some object =>
+          match incValue runtime object amount check with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .dec amount check _ =>
+      match args[0]? with
+      | some object =>
+          match decValue runtime object amount check with
+          | .ok runtime => .ok (runtime, #[])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .delete =>
+      match args[0]? with
+      | some object =>
+          match deleteValue runtime object with
           | .ok runtime => .ok (runtime, #[])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
@@ -456,6 +486,58 @@ theorem hostStep_setTag_of_decode
           targetFailure? := none } } := by
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     HostOperation.runtimeOp, RuntimeOp.signature, decoded, mutated]
+
+theorem hostStep_inc_of_decode
+    (initial : Wasm.Store RuntimeHost) (amount : Nat) (check : Bool)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (updated : incValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime) :
+    hostStep (.inc amount check) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, updated]
+
+theorem hostStep_dec_of_decode
+    (initial : Wasm.Store RuntimeHost) (amount : Nat) (check : Bool)
+    (objectFields? : Option Nat) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (updated : decValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime) :
+    hostStep (.dec amount check objectFields?) initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, updated]
+
+theorem hostStep_delete_of_decode
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (sourceRuntime : RuntimeState)
+    (decoded : decodeArgs initial.host.handles #[.object] physicalArgs =
+      .ok #[sourceObject])
+    (updated : deleteValue initial.host.runtime sourceObject = .ok sourceRuntime) :
+    hostStep .delete initial physicalArgs =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, updated]
 
 theorem hostStep_getTag_of_decode
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)

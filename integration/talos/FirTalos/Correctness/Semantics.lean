@@ -1351,6 +1351,68 @@ theorem letStepSimulates_isShared
       wp_isShared_let objectHandle sourceObject shared tail hObject hImp hSat hi
         hContract hParams hResults decodedObject evaluated targetSet continued
 
+/-- Generic unary semantic-host instance of the no-result effect boundary. -/
+theorem effectStepSimulates_unaryHost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex : Nat} {physicalObject : Wasm.Value}
+    {operation : HostOperation} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (sourceStep : SourceEffectResult context initial.host.runtime sourceRuntime
+      sourceEnv code continuation)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels code
+      ([.localGet objectIndex, .call id] ++ targetRest))
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (hObject : locals.get objectIndex = some physicalObject)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract operation))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (step : hostStep operation initial [physicalObject] =
+      .Return [] (successfulHostStore initial sourceRuntime initial.host.handles)) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv code continuation
+      ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  refine ⟨sourceStep, adapted, initialRelated, ?_, ?_⟩
+  · exact ⟨rfl, rfl, rfl, initialRelated.2.2.2.1,
+      initialRelated.2.2.2.2⟩
+  · intro Q tail continued
+    simpa using
+      wp_effect_localGets
+        (indices := [objectIndex]) (physicalArgs := [physicalObject])
+        (operation := operation) (tail := tail) (.cons hObject .nil)
+        hImp hSat hi hContract hParams hResults step continued
+
+/-- A compiler-elided source effect advances only the source control state. -/
+theorem effectStepSimulates_elided
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    (sourceStep : SourceEffectResult context initial.host.runtime
+      initial.host.runtime sourceEnv code continuation)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetRest)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime initial.host.runtime sourceEnv code continuation
+      targetRest targetRest initial initial locals := by
+  exact ⟨sourceStep, adapted, initialRelated, initialRelated,
+    fun _ _ continued => continued⟩
+
 /-- USize-field mutation instance of the reusable no-result effect boundary. -/
 theorem effectStepSimulates_usizeSet
     {context : Fir.Wasm.Context}
@@ -1616,6 +1678,219 @@ theorem effectStepSimulates_objectSet
           [.i32 objectHandle, physicalField] sourceObject sourceField sourceRuntime
           decoded mutated)
         continued
+
+/-- Nonpersistent reference-count increment through the unary host boundary. -/
+theorem effectStepSimulates_inc
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex : Nat} {objectHandle : Handle} {objectKind : AbiKind}
+    {sourceObject : Value} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : incValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.inc amount check)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract (.inc amount check)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation) continuation
+      ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  apply effectStepSimulates_unaryHost
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, updated]
+  · exact codeAdapted_inc objectCompiled objectFound callFound continuationAdapted
+  · exact initialRelated
+  · exact hObject
+  · exact hImp
+  · exact hSat
+  · exact hi
+  · exact hContract
+  · exact hParams
+  · exact hResults
+  · simpa [successfulHostStore] using
+      hostStep_inc_of_decode initial amount check [.i32 objectHandle]
+        sourceObject sourceRuntime decoded updated
+
+/-- Nonpersistent reference-count decrement through the unary host boundary. -/
+theorem effectStepSimulates_dec
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat} {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex : Nat} {objectHandle : Handle} {objectKind : AbiKind}
+    {sourceObject : Value} {sourceRuntime : RuntimeState}
+    {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : decValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.dec amount check objectFields?)) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (hostContract (.dec amount check objectFields?)))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
+      .ok #[sourceObject]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation) continuation
+      ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+      (successfulHostStore initial sourceRuntime initial.host.handles) locals := by
+  apply effectStepSimulates_unaryHost
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, updated]
+  · exact codeAdapted_dec objectCompiled objectFound callFound continuationAdapted
+  · exact initialRelated
+  · exact hObject
+  · exact hImp
+  · exact hSat
+  · exact hi
+  · exact hContract
+  · exact hParams
+  · exact hResults
+  · simpa [successfulHostStore] using
+      hostStep_dec_of_decode initial amount check objectFields?
+        [.i32 objectHandle] sourceObject sourceRuntime decoded updated
+
+/-- Explicit deletion through the unary host boundary. -/
+theorem effectStepSimulates_delete
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {spec : Wasm.HostSpec RuntimeHost}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {objectIndex : Nat} {objectHandle : Handle} {sourceObject : Value}
+    {sourceRuntime : RuntimeState} {targetRest : Wasm.Program}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : deleteValue initial.host.runtime sourceObject = .ok sourceRuntime)
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime .delete) = some id)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest)
+    (hObject : locals.get objectIndex = some (.i32 objectHandle))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (hostContract .delete))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (decoded : decodeArgs initial.host.handles #[.object] [.i32 objectHandle] =
+      .ok #[sourceObject]) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime sourceRuntime sourceEnv (.del objectId continuation)
+      continuation ([.localGet objectIndex, .call id] ++ targetRest) targetRest
+      initial (successfulHostStore initial sourceRuntime initial.host.handles)
+      locals := by
+  apply effectStepSimulates_unaryHost
+  · intro externals
+    simp [executeStep, coreStep, objectLookup, updated]
+  · exact codeAdapted_delete objectCompiled objectFound callFound
+      continuationAdapted
+  · exact initialRelated
+  · exact hObject
+  · exact hImp
+  · exact hSat
+  · exact hi
+  · exact hContract
+  · exact hParams
+  · exact hResults
+  · simpa [successfulHostStore] using
+      hostStep_delete_of_decode initial [.i32 objectHandle] sourceObject
+        sourceRuntime decoded updated
+
+/-- Persistent increments are source and target control-flow no-ops. -/
+theorem effectStepSimulates_inc_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime initial.host.runtime sourceEnv
+      (.inc objectId amount check true continuation) continuation targetRest
+      targetRest initial initial locals := by
+  apply effectStepSimulates_elided
+  · intro externals
+    simp [executeStep, coreStep]
+  · exact codeAdapted_inc_persistent continuationAdapted
+  · exact initialRelated
+
+/-- Persistent decrements are source and target control-flow no-ops. -/
+theorem effectStepSimulates_dec_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat} {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {targetRest : Wasm.Program}
+    (initialRelated :
+      StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      initial.host.runtime initial.host.runtime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) continuation
+      targetRest targetRest initial initial locals := by
+  apply effectStepSimulates_elided
+  · intro externals
+    simp [executeStep, coreStep]
+  · exact codeAdapted_dec_persistent continuationAdapted
+  · exact initialRelated
 
 /-- The empty constructor-test suffix executes its already adapted fallback. -/
 theorem caseChainWP_nil

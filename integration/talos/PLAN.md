@@ -568,6 +568,20 @@ Differential regressions exercise a compiler-shaped layout containing object,
 mutation followed by case selection. No semantic discrepancy or new bug card
 was found in this slice.
 
+W5.4 is complete. Nonpersistent `inc` and `dec` and explicit deletion now use
+semantic host operations backed by FIR's reference-count runtime; persistent
+increments and decrements are proved source/target control-flow no-ops, exactly
+matching the executable lowerer. All operations return no physical result and
+preserve the handle table while updating liveness and reference counts in the
+shared runtime.
+
+The W5.3 effect induction is reused unchanged. Transparent compiler equations
+and adapter rules cover emitted and elided ownership instructions; unary-host
+and elided-effect semantic rules instantiate `EffectStepSimulates` for each
+case. Differential regressions cover an increment/decrement round trip,
+persistent elision, and deletion followed by the exact `deadObject` source
+fault. No new bug card was required.
+
 ### A0: emit the first host-backed Wasm artifact
 
 A0 is an independently assignable artifact lane. It can run in parallel with

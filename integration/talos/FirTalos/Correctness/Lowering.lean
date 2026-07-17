@@ -602,6 +602,74 @@ theorem setTag_host_simulates
   exact hostStep_setTag_of_decode initial tag physicalArgs sourceObject
     sourceRuntime decodedArgs mutated
 
+theorem inc_host_simulates
+    (initial : Wasm.Store RuntimeHost) (amount : Nat) (check : Bool)
+    (physicalArgs : List Wasm.Value) (sourceObject : Value)
+    (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (updated : incValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.inc amount check) initial physicalArgs = .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_inc_of_decode initial amount check physicalArgs sourceObject
+    sourceRuntime decodedArgs updated
+
+theorem dec_host_simulates
+    (initial : Wasm.Store RuntimeHost) (amount : Nat) (check : Bool)
+    (objectFields? : Option Nat) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[sourceObject])
+    (updated : decValue initial.host.runtime sourceObject amount check =
+      .ok sourceRuntime) :
+    ∃ final,
+      hostStep (.dec amount check objectFields?) initial physicalArgs =
+        .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_dec_of_decode initial amount check objectFields? physicalArgs
+    sourceObject sourceRuntime decodedArgs updated
+
+theorem delete_host_simulates
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (sourceObject : Value) (sourceRuntime : RuntimeState)
+    (invariant : HandleTableInvariant initial.host.handles)
+    (decodedArgs : decodeArgs initial.host.handles #[.object] physicalArgs =
+      .ok #[sourceObject])
+    (updated : deleteValue initial.host.runtime sourceObject = .ok sourceRuntime) :
+    ∃ final,
+      hostStep .delete initial physicalArgs = .Return [] final ∧
+      final.host.runtime = sourceRuntime ∧
+      HandleTableInvariant final.host.handles := by
+  let final : Wasm.Store RuntimeHost := {
+    initial with host := {
+      initial.host with
+      runtime := sourceRuntime
+      fault? := none
+      targetFailure? := none } }
+  refine ⟨final, ?_, rfl, invariant⟩
+  exact hostStep_delete_of_decode initial physicalArgs sourceObject sourceRuntime
+    decodedArgs updated
+
 /-- Constructor tag lookup preserves the source tag modulo the checked i32 lane. -/
 theorem getTag_host_simulates
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)

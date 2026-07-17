@@ -522,6 +522,101 @@ theorem compileCode_setTag
     .call (.runtime (.setTag tag))] ++ restCode)) = _
   rfl
 
+theorem compileCode_inc
+    {context : Context} {objectId : FVarId} {amount : Nat} {check : Bool}
+    {continuation : LCNF.Code .impure} {objectInstruction : Instruction}
+    {objectKind : AbiKind} {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.inc objectId amount check false continuation) =
+      .ok ([objectInstruction, .call (.runtime (.inc amount check))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [restCore, objectCompiled]
+  change some (Except.ok ([objectInstruction,
+    .call (.runtime (.inc amount check))] ++ restCode)) = _
+  rfl
+
+theorem compileCode_inc_persistent
+    {context : Context} {objectId : FVarId} {amount : Nat} {check : Bool}
+    {continuation : LCNF.Code .impure} {restCode : List Instruction}
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.inc objectId amount check true continuation) =
+      .ok restCode := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [restCore]
+  rfl
+
+theorem compileCode_dec
+    {context : Context} {objectId : FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat} {continuation : LCNF.Code .impure}
+    {objectInstruction : Instruction} {objectKind : AbiKind}
+    {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context
+        (.dec objectId amount check false objectFields? continuation) =
+      .ok ([objectInstruction,
+        .call (.runtime (.dec amount check objectFields?))] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [restCore, objectCompiled]
+  change some (Except.ok ([objectInstruction,
+    .call (.runtime (.dec amount check objectFields?))] ++ restCode)) = _
+  rfl
+
+theorem compileCode_dec_persistent
+    {context : Context} {objectId : FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat} {continuation : LCNF.Code .impure}
+    {restCode : List Instruction}
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context
+        (.dec objectId amount check true objectFields? continuation) =
+      .ok restCode := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [restCore]
+  rfl
+
+theorem compileCode_delete
+    {context : Context} {objectId : FVarId}
+    {continuation : LCNF.Code .impure} {objectInstruction : Instruction}
+    {objectKind : AbiKind} {restCode : List Instruction}
+    (objectCompiled :
+      getLocal context objectId = .ok (objectInstruction, objectKind))
+    (restCompiled : compileCode context continuation = .ok restCode) :
+    compileCode context (.del objectId continuation) =
+      .ok ([objectInstruction, .call (.runtime .delete)] ++ restCode) := by
+  apply finishCompileResult_eq_ok_iff.mpr
+  have restCore : compileCodeCore context continuation = some (.ok restCode) := by
+    apply finishCompileResult_eq_ok_iff.mp
+    exact restCompiled
+  rw [compileCodeCore.eq_def]
+  simp only
+  rw [objectCompiled, restCore]
+  change some (Except.ok
+    ([objectInstruction, .call (.runtime .delete)] ++ restCode)) = _
+  rfl
+
 def compileCaseChain (context : Context) (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) :=

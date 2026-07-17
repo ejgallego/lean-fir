@@ -1029,4 +1029,103 @@ theorem codeAdapted_setTag
     Fir.Wasm.compileCode_setTag objectCompiled restCompiled, ?_⟩
   simp [instructions, instruction, objectFound, callFound, restAdapted]
 
+theorem codeAdapted_inc
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.inc amount check)) =
+      some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.inc objectId amount check false continuation)
+      ([.localGet objectIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId, .call (.runtime (.inc amount check))] ++ restCode,
+    Fir.Wasm.compileCode_inc objectCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, callFound, restAdapted]
+
+theorem codeAdapted_inc_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {targetRest : Wasm.Program}
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.inc objectId amount check true continuation) targetRest := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  exact ⟨restCode, Fir.Wasm.compileCode_inc_persistent restCompiled, restAdapted⟩
+
+theorem codeAdapted_dec
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {amount : Nat} {check : Bool} {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.dec amount check objectFields?)) = some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.dec objectId amount check false objectFields? continuation)
+      ([.localGet objectIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId,
+      .call (.runtime (.dec amount check objectFields?))] ++ restCode,
+    Fir.Wasm.compileCode_dec objectCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, callFound, restAdapted]
+
+theorem codeAdapted_dec_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {amount : Nat} {check : Bool} {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {targetRest : Wasm.Program}
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels
+      (.dec objectId amount check true objectFields? continuation) targetRest := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  exact ⟨restCode, Fir.Wasm.compileCode_dec_persistent restCompiled, restAdapted⟩
+
+theorem codeAdapted_delete
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {objectId : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {objectKind : Fir.Wasm.AbiKind} {objectIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar?
+      (sourceFunction.params.toList ++ sourceFunction.locals.toList) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime .delete) = some callIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation targetRest) :
+    CodeAdapted context sourceModule sourceFunction labels (.del objectId continuation)
+      ([.localGet objectIndex, .call callIndex] ++ targetRest) := by
+  rcases continuationAdapted with ⟨restCode, restCompiled, restAdapted⟩
+  refine ⟨[.localGet objectId, .call (.runtime .delete)] ++ restCode,
+    Fir.Wasm.compileCode_delete objectCompiled restCompiled, ?_⟩
+  simp [instructions, instruction, objectFound, callFound, restAdapted]
+
 end FirTalos.Correctness

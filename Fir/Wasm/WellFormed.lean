@@ -8,7 +8,7 @@ open Lean.Compiler
 /--
 The proof-oriented backend fragment: literals, erased values, constructors,
 object/usize/integer-scalar projections, boxing, object mutation, constructor
-cases, returns, and unreachable code. Calls, joins, ownership operations,
+cases, ownership operations, returns, and unreachable code. Calls, joins,
 reuse, initializers-as-effects, and externals are deliberate later gates.
 -/
 def supportedLetValue : LCNF.LetValue .impure → Bool
@@ -156,7 +156,22 @@ partial def supportedCode (locals : LocalKinds) (expectedResult : Option AbiKind
   | .setTag objectId _ continuation =>
       findLocalKind? locals objectId == some .object &&
         supportedCode locals expectedResult continuation
-  | .jp .. | .jmp .. | .inc .. | .dec .. | .del .. => false
+  | .inc objectId _ _ persistent continuation =>
+      if persistent then
+        supportedCode locals expectedResult continuation
+      else
+        (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
+          supportedCode locals expectedResult continuation
+  | .dec objectId _ _ persistent _ continuation =>
+      if persistent then
+        supportedCode locals expectedResult continuation
+      else
+        (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
+          supportedCode locals expectedResult continuation
+  | .del objectId continuation =>
+      findLocalKind? locals objectId == some .object &&
+        supportedCode locals expectedResult continuation
+  | .jp .. | .jmp .. => false
 
 partial def supportedAlt (locals : LocalKinds) (expectedResult : Option AbiKind) :
     LCNF.Alt .impure → Bool

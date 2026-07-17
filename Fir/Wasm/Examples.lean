@@ -370,6 +370,9 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiMutationProgram
 #guard supportedProgram abiObjectMutationProgram
 #guard supportedProgram abiTagMutationProgram
+#guard supportedProgram rcProgram
+#guard supportedProgram persistentRcProgram
+#guard supportedProgram deletedProgram
 #guard !supportedProgram externalProgram
 
 #guard match lowerSupported abiCaseProgram with
