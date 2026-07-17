@@ -13,17 +13,38 @@ def caseIds : Array String :=
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
 
+def parseSelectedCaseIds (raw : String) : Except String (Array String) := do
+  let .arr values ← Json.parse raw
+    | throw "FIR_VALIDATION_CASES must be a JSON array"
+  let selected ← values.mapM fun
+    | .str caseId => pure caseId
+    | _ => throw "FIR_VALIDATION_CASES must contain only strings"
+  if selected.isEmpty then
+    throw "FIR_VALIDATION_CASES must be nonempty"
+  if selected.toList.eraseDups.length != selected.size then
+    throw "FIR_VALIDATION_CASES contains duplicate cases"
+  let unsupported := selected.filter fun caseId => !caseIds.contains caseId
+  unless unsupported.isEmpty do
+    throw s!"unsupported Wasm validation cases: {String.intercalate "," unsupported.toList}"
+  return selected
+
+def selectedCaseIds : IO (Array String) := do
+  let some raw ← IO.getEnv "FIR_VALIDATION_CASES"
+    | return caseIds
+  IO.ofExcept (parseSelectedCaseIds raw)
+
 syntax (name := firValidationWasm) "#fir_validation_wasm" : command
 
 @[command_elab firValidationWasm]
 def elabFirValidationWasm : CommandElab := fun _ => do
+  let selected ← liftIO selectedCaseIds
   let outputDirectory :=
     (← liftIO <| IO.getEnv "FIR_VALIDATION_OUT_DIR").getD
       "_build/validation-v8/v8"
   let moduleDirectory : System.FilePath :=
     (outputDirectory : System.FilePath) / "modules"
   liftIO <| IO.FS.createDirAll moduleDirectory
-  for caseId in caseIds do
+  for caseId in selected do
     let some validationCase := Corpus.findCase? caseId
       | throwError "unknown validation case: {caseId}"
     let result ← liftCoreM <|
@@ -43,9 +64,9 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     liftIO <| IO.FS.writeFile (modulePath.toString ++ ".json")
       artifact.manifest.compress
   let manifestProducts :=
-    caseIds.map (fun caseId =>
+    selected.map (fun caseId =>
       productJson "wasm-manifest" s!"modules/{caseId}.wasm.json") ++
-    caseIds.map (fun caseId =>
+    selected.map (fun caseId =>
       productJson "wasm-module" s!"modules/{caseId}.wasm")
   let productManifest := Json.mkObj [
     ("version", Json.num 1),

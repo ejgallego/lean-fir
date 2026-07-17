@@ -1669,6 +1669,46 @@ class HarnessTests(unittest.TestCase):
             ):
                 harness.verify_matrix_artifact(out_dir / "matrix.json")
 
+    def test_external_commands_cannot_mutate_canonical_corpus(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            run_context = harness.RunContext(
+                root, out_dir, descriptors, ["case"]
+            )
+            mutate = (
+                "import os,pathlib;"
+                "pathlib.Path(os.environ['FIR_VALIDATION_CORPUS'])."
+                "write_bytes(b'mutated')"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                build_command=[sys.executable, "-c", mutate],
+                run_command=[sys.executable, "-c", mutate],
+                result_domain="selected",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "corpus changed during build"
+            ):
+                adapter.build(
+                    harness.BuildContext(
+                        root, out_dir, False, run_context=run_context
+                    )
+                )
+
+            harness.write_corpus_manifest(out_dir, descriptors)
+            adapter.build(
+                harness.BuildContext(
+                    root, out_dir, True, run_context=run_context
+                )
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError, "corpus changed during execution"
+            ):
+                adapter.execute(run_context)
+
     def test_validation_input_hashes_bytes_with_stable_path_labels(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
@@ -1864,7 +1904,9 @@ class HarnessTests(unittest.TestCase):
             runner_path = root / "runner.py"
             product_sha256 = harness.sha256_bytes(product_bytes)
             build_program = (
-                "import os,pathlib;"
+                "import json,os,pathlib;"
+                "assert json.loads(os.environ['FIR_VALIDATION_CASES'])==['case'];"
+                "assert pathlib.Path(os.environ['FIR_VALIDATION_CORPUS']).is_file();"
                 "path=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
                 "'modules','validation.wasm');"
                 "path.parent.mkdir(parents=True,exist_ok=True);"

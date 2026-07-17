@@ -1327,6 +1327,7 @@ class BuildContext:
     root: Path
     out_dir: Path
     no_build: bool
+    run_context: RunContext | None = None
 
 
 @dataclass(frozen=True)
@@ -1501,12 +1502,44 @@ class ExternalCommandAdapter:
     def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
         return descriptors
 
-    def environment(self, out_dir: Path) -> dict[str, str]:
-        return {
+    def environment(
+        self, out_dir: Path, run_context: RunContext | None = None
+    ) -> dict[str, str]:
+        environment = {
             "FIR_VALIDATION_BACKEND": self.name,
             "FIR_VALIDATION_OUT_DIR": str((out_dir / self.name).resolve()),
             "FIR_VALIDATION_PROTOCOL_VERSION": str(PROTOCOL_VERSION),
         }
+        if run_context is not None:
+            environment.update(
+                {
+                    "FIR_VALIDATION_CASES": json.dumps(
+                        run_context.selected, separators=(",", ":")
+                    ),
+                    "FIR_VALIDATION_CORPUS": str(
+                        (run_context.out_dir / "corpus.json").resolve()
+                    ),
+                }
+            )
+        return environment
+
+    def verify_corpus(self, context: RunContext, phase: str) -> None:
+        path = context.out_dir / "corpus.json"
+        if path.is_symlink() or not path.is_file():
+            raise ValidationError(
+                f"{self.name} validation corpus is not a regular file {phase}"
+            )
+        expected = corpus_artifact_bytes(context.descriptors)
+        try:
+            actual = path.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read {self.name} validation corpus {phase}: {error}"
+            ) from error
+        if actual != expected:
+            raise ValidationError(
+                f"{self.name} validation corpus changed {phase}"
+            )
 
     def collect_products(self, out_dir: Path) -> tuple[ValidationProduct, ...]:
         declarations = self.product_declarations
@@ -1681,7 +1714,7 @@ class ExternalCommandAdapter:
                 self.build_command,
                 context.root,
                 self.timeout_seconds,
-                self.environment(context.out_dir),
+                self.environment(context.out_dir, context.run_context),
             )
             self._build_artifacts = write_process_artifacts(
                 destination, completed, f"{self.name}/build"
@@ -1691,6 +1724,8 @@ class ExternalCommandAdapter:
                     f"failed to build {self.name} validation backend; "
                     f"see {destination}"
                 )
+        if context.run_context is not None:
+            self.verify_corpus(context.run_context, "during build")
         self._built_products = self.collect_products(context.out_dir)
         self._built_tools = self.collect_tools()
         self._built_run_command = self.bind_run_command(context.root)
@@ -1706,20 +1741,15 @@ class ExternalCommandAdapter:
             raise ValidationError(
                 f"{self.name} adapter must be built before execution"
             )
+        self.verify_corpus(context, "before execution")
         if self.collect_products(context.out_dir) != self._built_products:
             raise ValidationError(
                 f"{self.name} products changed between build and execution"
             )
         self.verify_captured_tools("between build and execution")
-        environment = self.environment(context.out_dir)
+        environment = self.environment(context.out_dir, context)
         environment.update(
             {
-                "FIR_VALIDATION_CASES": json.dumps(
-                    context.selected, separators=(",", ":")
-                ),
-                "FIR_VALIDATION_CORPUS": str(
-                    (context.out_dir / "corpus.json").resolve()
-                ),
                 "FIR_VALIDATION_PRODUCTS": json.dumps(
                     [
                         {
@@ -1763,6 +1793,7 @@ class ExternalCommandAdapter:
             raise ValidationError(
                 f"{self.name} products changed during execution"
             )
+        self.verify_corpus(context, "during execution")
         self.verify_captured_tools("during execution")
         expected_cases = (
             context.selected

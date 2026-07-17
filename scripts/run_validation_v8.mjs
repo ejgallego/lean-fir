@@ -54,8 +54,12 @@ assert.equal(requiredEnvironment("FIR_VALIDATION_PROTOCOL_VERSION"), "1");
 assert.equal(requiredEnvironment("FIR_VALIDATION_BACKEND"), "v8");
 
 const selectedCases = JSON.parse(requiredEnvironment("FIR_VALIDATION_CASES"));
-assert.deepStrictEqual(selectedCases, CASE_IDS,
-  "the V8 adapter selection must be the closed scalar corpus slice");
+assert.ok(Array.isArray(selectedCases) && selectedCases.length > 0,
+  "the V8 adapter selection must be a nonempty array");
+assert.equal(new Set(selectedCases).size, selectedCases.length,
+  "the V8 adapter selection contains duplicates");
+assert.ok(selectedCases.every((caseId) => CASE_SPECS.has(caseId)),
+  "the V8 adapter selection contains an unsupported case");
 
 const corpus = JSON.parse(
   await readFile(requiredEnvironment("FIR_VALIDATION_CORPUS"), "utf8"),
@@ -64,7 +68,7 @@ assert.equal(corpus.version, 1, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
 const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
-assert.equal(products.length, CASE_IDS.length * 2 + 1,
+assert.equal(products.length, selectedCases.length * 2 + 1,
   "the V8 adapter requires its product inventory and two products per case");
 
 const inventoryMatches = products.filter((product) =>

@@ -371,14 +371,9 @@ def main() -> int:
     participating_adapters = {
         adapter.name: adapter for pair in pairs for adapter in pair
     }
-    build_context = BuildContext(ROOT, args.out_dir, args.no_build)
-    adapters_to_build = {
-        adapter.name: adapter
-        for adapter in (adapters["native"], *participating_adapters.values())
-    }
-    for adapter in adapters_to_build.values():
-        adapter.build(build_context)
-
+    adapters["native"].build(
+        BuildContext(ROOT, args.out_dir, args.no_build)
+    )
     descriptors = corpus_manifest()
     for adapter in participating_adapters.values():
         descriptors = adapter.prepare_manifest(descriptors)
@@ -391,6 +386,16 @@ def main() -> int:
         selected,
         tuple(provenance_inputs),
     )
+    build_context = BuildContext(
+        ROOT, args.out_dir, args.no_build, run_context=context
+    )
+    adapters_to_build = {
+        adapter.name: adapter
+        for adapter in participating_adapters.values()
+        if adapter.name != "native"
+    }
+    for adapter in adapters_to_build.values():
+        adapter.build(build_context)
     pair_results, findings = validate_matrix(context, pairs)
     matrix_content = (args.out_dir / "matrix.json").read_bytes()
     matrix = json.loads(matrix_content)

@@ -240,14 +240,14 @@ python3 scripts/validate_interpreters.py \
 
 `buildCommand` is optional.  `resultDomain` is `selected` when the command emits
 only requested cases and `corpus` when it emits the whole manifest.  Both
-commands receive `FIR_VALIDATION_BACKEND`, `FIR_VALIDATION_OUT_DIR`, and
-`FIR_VALIDATION_PROTOCOL_VERSION`.  The run command additionally receives
-`FIR_VALIDATION_CORPUS`, the absolute path of the canonical corpus JSON, and
-`FIR_VALIDATION_CASES`, a JSON array preserving the requested order.  It writes
+commands receive `FIR_VALIDATION_BACKEND`, `FIR_VALIDATION_OUT_DIR`,
+`FIR_VALIDATION_PROTOCOL_VERSION`, `FIR_VALIDATION_CORPUS` (the absolute path
+of the canonical corpus JSON), and `FIR_VALIDATION_CASES` (a JSON array
+preserving the requested order).  Candidate builds therefore happen only
+after the native oracle has defined and selected the corpus.  The run command
+additionally receives the captured product and tool inventories.  It writes
 protocol JSONL to stdout; stdout, stderr, result records, domain failures, and
-comparisons then follow the same path as built-in adapters.  This contract does
-not assume how a Wasm module is produced or initialized, so it can be exercised
-only after the compiler track deliberately supplies those pieces.
+comparisons then follow the same path as built-in adapters.
 
 Every JSON external adapter must declare its execution tools.  A tool has a
 restricted lowercase `kind`, a normalized report-stable relative POSIX `name`,
@@ -500,22 +500,21 @@ both external-name obligations.
 ## WebAssembly integration
 
 The initial Wasm validation slice consumes the compiler track exclusively
-through its public `lowerSupported` and binary `encode` APIs.  The
-integration-owned `FirValidationWasm.lean` driver asks `compileClosed` to
-compile the closed `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` boundary
-entries through `LCNF.main`, emits deterministic `.wasm` and ABI-manifest
-products for each case, and checks that these deliberately host-free cases have
-no imports and exactly export their source entries.  It does not modify or add
-policy to `Fir/Wasm`.
+through its public `compileClosed` API.  The integration-owned
+`FirValidationWasm.lean` driver compiles the selected closed `UInt8`, `UInt16`,
+`UInt32`, `UInt64`, and `USize` boundary entries through `LCNF.main`, emits
+deterministic `.wasm` and ABI-manifest products only for that ordered selection,
+and checks that these deliberately host-free cases have no imports and exactly
+export their source entries.  It does not modify or add policy to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
 `WebAssembly` engine, verifies the compiler manifest against the corpus ABI,
 invokes the corpus-named export, converts V8's signed `i64` result back to
 unsigned `UInt64` bits, and emits the shared backend protocol.  The runner
-receipts both per-case products and rejects any other selection, so broader
-coverage cannot silently collapse to this scalar slice.  Native Lean remains the
-source oracle.  Talos can subsequently consume the exact same module and
-inputs, with V8 as the reference Wasm engine:
+receipts the build inventory and both per-case products, accepts any nonempty
+unique subset of the supported scalar slice, and rejects cases outside it.
+Native Lean remains the source oracle.  Talos can subsequently consume the
+exact same module and inputs, with V8 as the reference Wasm engine:
 
 ```text
 native Lean <-> V8          compiler/runtime validation
