@@ -131,11 +131,18 @@ production heap layout.
   the premise-free `abiLiteralMain_export_correct` total-correctness theorem.
   The conclusion uses the same `compareObservations` policy as the executable
   differential harness, rather than a proof-only observation relation.
+- `FirTalos/Correctness/FunctionCtorProjectionExample.lean` now closes the
+  second W3 fixture. It composes two literal calls, a pair allocation, object
+  projection, four checked local writes, and the generated return across the
+  exact 13-instruction adapted body. The export bridge separately tracks the
+  initial and returned source runtimes, so the premise-free theorem retains
+  the constructor heap created during execution instead of assuming the
+  source runtime is unchanged.
 
 The next W4 slice extends the exported theorem from the now-closed literal
-case across the supported constructor/projection/case fixtures, then factors
-their repeated module/export packaging into the supported-fragment induction.
-The adapter still rejects initializers and closures.
+and constructor/projection cases across the supported case fixtures, then
+factors their repeated module/export packaging into the supported-fragment
+induction. The adapter still rejects initializers and closures.
 
 An independent artifact lane, A0, may proceed in parallel with W4. It turns
 the already checked semantic module into a standards-consumable host-backed

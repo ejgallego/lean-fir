@@ -15,3 +15,4 @@ import FirTalos.Correctness.Composition
 import FirTalos.Correctness.Semantics
 import FirTalos.Correctness.Function
 import FirTalos.Correctness.FunctionExamples
+import FirTalos.Correctness.FunctionCtorProjectionExample

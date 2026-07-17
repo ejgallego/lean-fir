@@ -254,7 +254,7 @@ theorem CodeWP.toExportTerminatesWithRelated_of_return
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
     {labels : List Lean.FVarId} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv RuntimeHost}
-    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initialSourceRuntime resultSourceRuntime : RuntimeState} {sourceEnv : Env}
     {sourceValue : Value} {kind : AbiKind}
     {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
     {functionIndex : Nat} {exportName : String}
@@ -266,17 +266,18 @@ theorem CodeWP.toExportTerminatesWithRelated_of_return
     (noArgs : args = [])
     (resultCount : function.results.length = 1)
     (related :
-      compareObservations (ReturnedObservation sourceRuntime sourceValue)
-          (.returned sourceValue sourceRuntime) =
-        .related (ReturnedObservation sourceRuntime sourceValue)
-          (.returned sourceValue sourceRuntime))
+      compareObservations (ReturnedObservation resultSourceRuntime sourceValue)
+          (.returned sourceValue resultSourceRuntime) =
+        .related (ReturnedObservation resultSourceRuntime sourceValue)
+          (.returned sourceValue resultSourceRuntime))
     (correct :
       CodeWP context sourceModule sourceFunction labels module hostEnv
-        sourceRuntime sourceEnv code function.body initial
+        initialSourceRuntime sourceEnv code function.body initial
         (function.toLocals (args.take function.numParams).reverse) []
-        (ReturnPost sourceRuntime sourceValue kind [])) :
+        (ReturnPost resultSourceRuntime sourceValue kind [])) :
     ExportTerminatesWith hostEnv module exportName initial args
-      (RelatedPost #[kind] (ReturnedObservation sourceRuntime sourceValue)) := by
+      (RelatedPost #[kind]
+        (ReturnedObservation resultSourceRuntime sourceValue)) := by
   subst args
   apply CodeWP.toExportTerminatesWithRelated exported notImport found
   exact correct.conseq (ReturnPost.toFunctionBodyPost resultCount related)

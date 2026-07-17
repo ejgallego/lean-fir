@@ -26,6 +26,55 @@ def StepResultRelated (sourceRuntime : RuntimeState) (sourceValue : Value)
     compileLiteral result (.str value) =
       [.call (.runtime (.literal (.str value) result))] := rfl
 
+@[simp] theorem checkedAbiKind_object :
+    checkedAbiKind Lean.Compiler.LCNF.ImpureType.object = .ok .object := by
+  have objectSelf :
+      (Lean.Compiler.LCNF.ImpureType.object ==
+        Lean.Compiler.LCNF.ImpureType.object) = true := by
+    native_decide
+  simp [checkedAbiKind, Fir.Wasm.abiKind, Fir.Wasm.abiKind?, objectSelf]
+  rfl
+
+@[simp] theorem checkedAbiKind_tobject :
+    checkedAbiKind Lean.Compiler.LCNF.ImpureType.tobject = .ok .tobject := by
+  have tobjectNotObject :
+      (Lean.Compiler.LCNF.ImpureType.tobject ==
+        Lean.Compiler.LCNF.ImpureType.object) = false := by
+    native_decide
+  have tobjectNotTagged :
+      (Lean.Compiler.LCNF.ImpureType.tobject ==
+        Lean.Compiler.LCNF.ImpureType.tagged) = false := by
+    native_decide
+  have tobjectSelf :
+      (Lean.Compiler.LCNF.ImpureType.tobject ==
+        Lean.Compiler.LCNF.ImpureType.tobject) = true := by
+    native_decide
+  simp [checkedAbiKind, Fir.Wasm.abiKind, Fir.Wasm.abiKind?, tobjectNotObject,
+    tobjectNotTagged, tobjectSelf]
+  rfl
+
+/-- A checked natural-literal declaration exposes its exact symbolic host call. -/
+theorem compileLetValue_naturalLiteral
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {value : Nat}
+    (valueEq : decl.value = .lit (.nat value))
+    (resultEq : letValueKind decl = .ok .tobject) :
+    compileLetValue context decl =
+      .ok [.call (.runtime (.literal (.nat value) .tobject))] := by
+  simp [compileLetValue, valueEq, resultEq, AbiKind.acceptsLiteral]
+  rfl
+
+/-- A checked string-literal declaration exposes its exact symbolic host call. -/
+theorem compileLetValue_stringLiteral
+    {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {value : String}
+    (valueEq : decl.value = .lit (.str value))
+    (resultEq : letValueKind decl = .ok .object) :
+    compileLetValue context decl =
+      .ok [.call (.runtime (.literal (.str value) .object))] := by
+  simp [compileLetValue, valueEq, resultEq, AbiKind.acceptsLiteral]
+  rfl
+
 theorem compileLetValue_constructor
     {context : Context} {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {info : Lean.Compiler.LCNF.CtorInfo} {args : Array (Lean.Compiler.LCNF.Arg .impure)}

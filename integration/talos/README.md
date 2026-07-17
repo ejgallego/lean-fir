@@ -85,8 +85,13 @@ by those wrappers. `FirTalos/Correctness/FunctionExamples.lean` closes the
 first representative W3 instance: it follows the actual `abiLiteralProgram`
 through lowering, adaptation, host resolution, local `CodeWP`, exported-name
 resolution, and observation comparison to prove the premise-free
-`abiLiteralMain_export_correct` total-correctness theorem. Constructor,
-projection, and case fixtures are the next exported instances.
+`abiLiteralMain_export_correct` total-correctness theorem.
+`FirTalos/Correctness/FunctionCtorProjectionExample.lean` supplies the next
+one: it composes the actual two-literal, pair-allocation, projection, and
+return body and proves `abiCtorProjectionMain_export_correct`. This fixture
+also generalizes the exported-return bridge to distinguish the initial source
+runtime from the returned runtime, which is required once execution allocates
+a heap object. Constructor-case fixtures remain next.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
