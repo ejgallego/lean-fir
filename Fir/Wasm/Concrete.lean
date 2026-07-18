@@ -22,6 +22,7 @@ import Fir.Wasm.Concrete.ScalarMutationCorrectness
 import Fir.Wasm.Concrete.BoxingCorrectness
 import Fir.Wasm.Concrete.SharingCorrectness
 import Fir.Wasm.Concrete.ReferenceCountCorrectness
+import Fir.Wasm.Concrete.ClosureOwnershipCorrectness
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 import Fir.Wasm.Concrete.ReuseMemoryCorrectness
 import Fir.Wasm.Concrete.ResetReuseCorrectness

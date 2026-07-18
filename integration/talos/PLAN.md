@@ -1655,6 +1655,16 @@ as owned, then verifies that releasing the closure recursively frees both
 allocations. The next slice proves this filtered decoder corresponds to FIR's
 closure-owned-value fold and lifts the release into the heap relation.
 
+W6.4j proves the filtered ownership decoder boundary. `closureOwnedValues`
+selects exactly the semantic captures whose static ABI kinds carry object
+words; a list induction shows `readClosureOwnedReferences` returns those
+words in source order under `OwnershipValuesRel`, while typed scalar captures
+are skipped. `ClosureObjectRel` supplies every pointwise typed read, and the
+stronger `ClosureCellRel` packages the exact live header, descriptor lookup,
+ordinary flag, and fixed count needed to lift that result through the public
+`readOwnedReferences`. The next slice constructs this complete cell relation
+after allocation and embeds it in `LiveCellRel`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
