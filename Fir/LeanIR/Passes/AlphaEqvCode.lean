@@ -395,6 +395,77 @@ def DeclBodyRelated (decl : LCNF.Decl .impure) : Prop :=
 def ProgramBodiesRelated (program : ImpureProgram) : Prop :=
   ∀ name decl, program.findDecl? name = some decl → DeclBodyRelated decl
 
+/-- Two looked-up code declarations expose alpha-related parameter bodies.
+External declarations retain the ABI observed by the interpreter. -/
+inductive ProgramDeclRelated :
+    LCNF.Decl .impure → LCNF.Decl .impure → Prop where
+  | code
+      (left right : LCNF.Decl .impure)
+      (leftCode rightCode : LCNF.Code .impure)
+      (body : ParamBodyRelated (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) [] []
+        left.params.toList right.params.toList leftCode rightCode) :
+      ProgramDeclRelated
+        { left with value := .code leftCode }
+        { right with value := .code rightCode }
+  | extern
+      (left right : LCNF.Decl .impure)
+      (leftMetadata rightMetadata : ExternAttrData)
+      (arity_eq : left.params.size = right.params.size)
+      (paramTypes_eq : left.params.map (·.type) = right.params.map (·.type))
+      (resultType_eq : left.type = right.type) :
+      ProgramDeclRelated
+        { left with value := .extern leftMetadata }
+        { right with value := .extern rightMetadata }
+
+/-- Named lookup succeeds or fails on both sides and returns related ABIs. -/
+inductive OptionalProgramDeclRelated :
+    Option (LCNF.Decl .impure) → Option (LCNF.Decl .impure) → Prop where
+  | none : OptionalProgramDeclRelated none none
+  | some (related : ProgramDeclRelated left right) :
+      OptionalProgramDeclRelated (some left) (some right)
+
+/-- Cross-program alpha boundary used when execution enters a global body. -/
+def ProgramsRelated (left right : ImpureProgram) : Prop :=
+  ∀ name, OptionalProgramDeclRelated
+    (left.findDecl? name) (right.findDecl? name)
+
+theorem ProgramDeclRelated.arity_eq
+    (related : ProgramDeclRelated left right) :
+    left.params.size = right.params.size := by
+  cases related with
+  | code _ _ _ _ body => simpa using body.length_eq
+  | extern _ _ _ _ arity _ _ => exact arity
+
+/-- The previous one-program body invariant constructs the reflexive instance
+of the new cross-program relation. -/
+theorem programsRelated_refl
+    (bodies : ProgramBodiesRelated program) : ProgramsRelated program program := by
+  intro name
+  generalize found : program.findDecl? name = declaration
+  cases declaration with
+  | none => exact .none
+  | some declaration =>
+      have body := bodies name declaration found
+      rcases declaration with ⟨signature, value, recursive, inlineAttr⟩
+      cases value with
+      | code code =>
+          exact OptionalProgramDeclRelated.some
+            (ProgramDeclRelated.code
+              { toSignature := signature, value := .code code,
+                recursive := recursive, inlineAttr? := inlineAttr }
+              { toSignature := signature, value := .code code,
+                recursive := recursive, inlineAttr? := inlineAttr }
+              code code body)
+      | extern metadata =>
+          exact OptionalProgramDeclRelated.some
+            (ProgramDeclRelated.extern
+              { toSignature := signature, value := .extern metadata,
+                recursive := recursive, inlineAttr? := inlineAttr }
+              { toSignature := signature, value := .extern metadata,
+                recursive := recursive, inlineAttr? := inlineAttr }
+              metadata metadata rfl rfl rfl)
+
 /-- Successful top-level parameter binding exposes its fold and arity facts. -/
 theorem bindParams_data_of_ok
     (found : bindParams params values = .ok env) :
@@ -409,6 +480,18 @@ theorem bindParams_data_of_ok
     have foldEq := Except.ok.inj foldResult
     exact ⟨by simpa [bindParamValues] using foldEq, by simpa using sizes.symm⟩
   · simp [bindParams, sizes] at found
+
+/-- Parameter binding failures depend only on the two array sizes, not on the
+parameter binder identities. -/
+theorem bindParams_error_of_size_eq
+    (sameSize : leftParams.size = rightParams.size)
+    (found : bindParams leftParams values = .error fault) :
+    bindParams rightParams values = .error fault := by
+  by_cases sizes : leftParams.size = values.size
+  · simp [bindParams, sizes] at found
+  · have rightMismatch : rightParams.size ≠ values.size := by
+      simpa only [sameSize] using sizes
+    simpa [bindParams, sizes, rightMismatch, sameSize] using found
 
 /--
 Binding equal values to related parameter lists produces related environments
@@ -690,6 +773,27 @@ theorem framesRelated_prepare_call
     · simpa [extraEmpty, cache] using
         ListRel.cons (FrameRelated.apply extraArgs) related
 
+/-- Call-frame preparation depends on a declaration's parameter array only
+through its arity and emptiness. -/
+theorem framesRelated_prepare_related_call
+    (name : Name)
+    (leftParams rightParams : Array (LCNF.Param .impure))
+    (args extraArgs : Array Value)
+    (sameSize : leftParams.size = rightParams.size)
+    (related : FramesRelated leftFrames rightFrames) :
+    FramesRelated
+      (let frames :=
+        if extraArgs.isEmpty then leftFrames else .apply extraArgs :: leftFrames
+       if leftParams.isEmpty && args.isEmpty then .cache name :: frames else frames)
+      (let frames :=
+        if extraArgs.isEmpty then rightFrames else .apply extraArgs :: rightFrames
+       if rightParams.isEmpty && args.isEmpty then .cache name :: frames else frames) := by
+  have sameEmpty : leftParams.isEmpty = rightParams.isEmpty := by
+    simp only [Array.isEmpty]
+    rw [sameSize]
+  simpa only [sameEmpty] using
+    framesRelated_prepare_call name leftParams args extraArgs related
+
 /-- Machine controls that carry equal runtime data or related residual code. -/
 inductive ControlRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
@@ -711,15 +815,16 @@ inductive ControlRelated (rho : FVarIdMap FVarId)
         (.invokeValue function args) (.invokeValue function args)
 
 /--
-The state invariant used by the declarative simulation. Program and runtime
-state are shared literally; variable environments, join-point environments,
-frames, and code are related structurally.
+The state invariant used by the declarative simulation. Programs agree at
+every named declaration boundary and runtime state is shared literally;
+variable environments, join-point environments, frames, and code are related
+structurally.
 -/
 structure MachineStateRelated (rho : FVarIdMap FVarId)
     (leftScope rightScope : List FVarId)
     {leftJoins rightJoins : List FVarId}
     (left right : MachineState) : Prop where
-  program_eq : left.program = right.program
+  programs : ProgramsRelated left.program right.program
   runtime_eq : left.runtime = right.runtime
   joins : JoinEnvsRelated rho leftScope rightScope
     leftJoins rightJoins left.joins right.joins
@@ -998,19 +1103,34 @@ theorem chooseAlt_related
 
 /-- `evalLetValue` observes only a state's program, runtime, and environment. -/
 theorem evalLetValue_eq_of_state_fields
-    (programEq : left.program = right.program)
+    (programs : ProgramsRelated left.program right.program)
     (runtimeEq : left.runtime = right.runtime)
     (envEq : left.env = right.env) :
     evalLetValue left declaration = evalLetValue right declaration := by
-  cases left
-  cases right
-  simp_all only
   rcases declaration with ⟨fvarId, binderName, type, value⟩
-  cases value <;> rfl
+  cases value <;> simp only [evalLetValue, runtimeEq, envEq]
+  case pap name args purity =>
+    generalize leftFound : left.program.findDecl? name = leftDecl
+    generalize rightFound : right.program.findDecl? name = rightDecl
+    have lookup := programs name
+    rw [leftFound, rightFound] at lookup
+    cases leftDecl with
+    | none =>
+        cases rightDecl with
+        | none => rfl
+        | some rightDecl => cases lookup
+    | some leftDecl =>
+        cases rightDecl with
+        | none => cases lookup
+        | some rightDecl =>
+            cases lookup with
+            | some related =>
+                simp only
+                rw [related.arity_eq]
 
 /-- Evaluate related declarations in two states satisfying the machine fields. -/
 theorem evalLetValue_eq_of_related_states
-    (programEq : left.program = right.program)
+    (programs : ProgramsRelated left.program right.program)
     (runtimeEq : left.runtime = right.runtime)
     (agree : EnvsAgree rho leftScope rightScope left.env right.env)
     (related : LetDeclValueRelated rho leftScope rightScope leftDecl rightDecl) :
@@ -1022,7 +1142,7 @@ theorem evalLetValue_eq_of_related_states
     _ = evalLetValue right rightDecl := by
       exact evalLetValue_eq_of_state_fields
         (left := { left with env := right.env }) (right := right)
-        programEq runtimeEq rfl
+        programs runtimeEq rfl
 
 theorem observe_eq_of_runtime_eq
     (runtimeEq : left.runtime = right.runtime) (outcome : Outcome) :
@@ -1035,7 +1155,7 @@ theorem observe_eq_of_runtime_eq
 theorem continuationResult_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
@@ -1050,7 +1170,7 @@ theorem continuationResult_related
       (.next { leftState with control := .code leftContinuation })
       (.next { rightState with control := .code rightContinuation }) :=
   .next {
-    program_eq := programEq
+    programs := programEq
     runtime_eq := runtimeEq
     joins := joinEnvs
     frames := framesRelated
@@ -1064,7 +1184,7 @@ theorem continuationResult_related
 theorem runtimeEffectResult_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
@@ -1096,7 +1216,7 @@ theorem runtimeEffectResult_related
   | ok nextRuntime =>
       simp only
       exact .next {
-        program_eq := programEq
+        programs := programEq
         runtime_eq := rfl
         joins := joinEnvs
         frames := framesRelated
@@ -1119,7 +1239,7 @@ same runtime effect on both sides before entering related continuations.
 theorem coreStep_code_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
@@ -1145,7 +1265,7 @@ theorem coreStep_code_related
                 rho leftScope rightScope
                 { leftState with control := .yielded value }
                 { rightState with control := .yielded value } := {
-            program_eq := programEq
+            programs := programEq
             runtime_eq := runtimeEq
             joins := joinEnvs
             frames := framesRelated
@@ -1211,7 +1331,7 @@ theorem coreStep_code_related
                       runtime := nextRuntime
                       env := bind rightState.env rightDecl.fvarId value
                       control := .code rightContinuation } := {
-                program_eq := programEq
+                programs := programEq
                 runtime_eq := rfl
                 joins := .bind joinEnvs renamingScoped joinRenamingScoped
                   leftFresh rightFresh leftJoinFresh rightJoinFresh
@@ -1246,7 +1366,7 @@ theorem coreStep_code_related
                       frames := .bind rightDecl.fvarId rightContinuation
                         rightState.env rightState.joins :: rightState.frames
                       control := .invokeName name args } := {
-                program_eq := programEq
+                programs := programEq
                 runtime_eq := rfl
                 joins := joinEnvs
                 frames := .cons bindFrameRelated framesRelated
@@ -1279,7 +1399,7 @@ theorem coreStep_code_related
                       frames := .bind rightDecl.fvarId rightContinuation
                         rightState.env rightState.joins :: rightState.frames
                       control := .invokeValue function args } := {
-                program_eq := programEq
+                programs := programEq
                 runtime_eq := rfl
                 joins := joinEnvs
                 frames := .cons bindFrameRelated framesRelated
@@ -1301,7 +1421,7 @@ theorem coreStep_code_related
             { rightState with
               joins := (rightDecl.fvarId, rightDecl) :: rightState.joins
               control := .code rightContinuation } := {
-        program_eq := programEq
+        programs := programEq
         runtime_eq := runtimeEq
         joins := .join joinEnvs renamingScoped joinRenamingScoped
           leftFresh rightFresh body
@@ -1365,7 +1485,7 @@ theorem coreStep_code_related
               simpa only [bindParamValues] using rightFold
             rw [leftBind, rightBind]
             exact .next {
-              program_eq := programEq
+              programs := programEq
               runtime_eq := runtimeEq
               joins := finalJoins
               frames := framesRelated
@@ -1707,7 +1827,7 @@ theorem coreStep_code_related
 theorem coreStep_yielded_bind_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (restFrames : FramesRelated leftFrames rightFrames)
     (agree : EnvsAgree rho leftScope rightScope leftEnv rightEnv)
@@ -1747,7 +1867,7 @@ theorem coreStep_yielded_bind_related
           env := bind rightEnv rightId value
           joins := rightJoinEnv
           frames := rightFrames } := {
-    program_eq := programEq
+    programs := programEq
     runtime_eq := runtimeEq
     joins := .bind joinEnvs renamingScoped joinRenamingScoped
       leftFresh rightFresh leftJoinFresh rightJoinFresh
@@ -1764,7 +1884,7 @@ theorem coreStep_yielded_bind_related
 theorem coreStep_yielded_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
@@ -1798,7 +1918,7 @@ theorem coreStep_yielded_related
                   control := .invokeValue value args, frames := _ }
                 { rightState with
                   control := .invokeValue value args, frames := _ } := {
-            program_eq := programEq
+            programs := programEq
             runtime_eq := runtimeEq
             joins := joinEnvs
             frames := rest
@@ -1818,7 +1938,7 @@ theorem coreStep_yielded_related
                 { rightState with
                   runtime := rightState.runtime.setGlobal name value
                   control := .yielded value, frames := _ } := {
-            program_eq := programEq
+            programs := programEq
             runtime_eq := congrArg (fun runtime => runtime.setGlobal name value) runtimeEq
             joins := joinEnvs
             frames := rest
@@ -1844,7 +1964,7 @@ that was not traversed by the current local alpha check.
 theorem invokeDecl_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
@@ -1853,160 +1973,213 @@ theorem invokeDecl_related
     (renamingScoped : RenamingScoped rho leftScope rightScope)
     (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
     (waitingControl : ControlRelated (leftJoins := []) (rightJoins := [])
-      ({} : FVarIdMap FVarId) [] [] leftState.control rightState.control)
-    (bodies : ProgramBodiesRelated rightState.program) :
+      ({} : FVarIdMap FVarId) [] [] leftState.control rightState.control) :
     CoreResultRelated
       (invokeDecl leftState name args) (invokeDecl rightState name args) := by
-  have lookupEq :
-      leftState.program.findDecl? name = rightState.program.findDecl? name :=
-    congrArg (fun program => program.findDecl? name) programEq
   unfold invokeDecl
-  rw [lookupEq]
-  generalize found : rightState.program.findDecl? name = declaration
-  cases declaration with
+  generalize leftFound : leftState.program.findDecl? name = leftDeclaration
+  generalize rightFound : rightState.program.findDecl? name = rightDeclaration
+  have lookup := programEq name
+  rw [leftFound, rightFound] at lookup
+  cases leftDeclaration with
   | none =>
-      simp only [fail]
-      rw [observe_eq_of_runtime_eq (left := leftState) (right := rightState)
-        runtimeEq (.fault (.unknownDecl name))]
-      exact .done _
-  | some decl =>
-      simp only
-      by_cases tooFew : args.size < decl.params.size
-      · simp only [tooFew, ↓reduceIte]
-        rw [runtimeEq]
-        generalize allocation :
-          alloc rightState.runtime (.closure name decl.params.size args) = allocated
-        rcases allocated with ⟨nextRuntime, reference⟩
-        have nextRelated :
-            MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
-              rho leftScope rightScope
-              (leftState.withValue nextRuntime (.object reference))
-              (rightState.withValue nextRuntime (.object reference)) := {
-          program_eq := programEq
-          runtime_eq := rfl
-          joins := joinEnvs
-          frames := framesRelated
-          envs := agree
-          renaming_scoped := renamingScoped
-          join_renaming_scoped := joinRenamingScoped
-          control := .yielded (.object reference)
-        }
-        exact .next nextRelated
-      · simp only [tooFew, ↓reduceIte]
-        let callArgs := args.extract 0 decl.params.size
-        let extraArgs := args.extract decl.params.size args.size
-        let leftPreparedFrames :=
-          let frames := if extraArgs.isEmpty then leftState.frames
-            else .apply extraArgs :: leftState.frames
-          if decl.params.isEmpty && args.isEmpty then .cache name :: frames else frames
-        let rightPreparedFrames :=
-          let frames := if extraArgs.isEmpty then rightState.frames
-            else .apply extraArgs :: rightState.frames
-          if decl.params.isEmpty && args.isEmpty then .cache name :: frames else frames
-        have preparedFrames : FramesRelated leftPreparedFrames rightPreparedFrames := by
-          exact framesRelated_prepare_call
-            name decl.params args extraArgs framesRelated
-        generalize binding : bindParams decl.params callArgs = bound
-        cases bound with
-        | error fault =>
-            simp only [fail]
-            rw [observe_eq_of_runtime_eq (left := leftState) (right := rightState)
-              runtimeEq (.fault fault)]
-            exact .done _
-        | ok env =>
-            simp only
-            have boundData := bindParams_data_of_ok binding
-            have bodyWitness := bodies name decl found
-            cases valueEq : decl.value with
-            | code code =>
-                simp only [DeclBodyRelated, valueEq] at bodyWitness
-                rcases paramBody_bind_values_related bodyWitness
-                    (envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] [])
-                    (renamingScoped_empty []) (renamingScoped_empty [])
-                    (JoinEnvsRelated.empty (left := []) (right := []))
-                    boundData.2 with
-                  ⟨finalRho, finalLeftScope, finalRightScope, leftBound,
-                    rightBound, leftFold, rightFold, finalAgree, finalRenaming,
-                    finalJoinRenaming, finalJoins, finalCode⟩
-                have leftBoundEq : leftBound = env :=
-                  leftFold.symm.trans boundData.1
-                have rightBoundEq : rightBound = env :=
-                  rightFold.symm.trans boundData.1
-                subst leftBound
-                subst rightBound
-                have finalAgreeEnv :
-                    EnvsAgree finalRho finalLeftScope finalRightScope env env := by
-                  simpa only [boundData.1] using finalAgree
-                have nextRelated :
-                    MachineStateRelated
-                      (leftJoins := []) (rightJoins := [])
-                      finalRho finalLeftScope finalRightScope
-                      { leftState with
-                        env := env
-                        joins := []
-                        frames := leftPreparedFrames
-                        control := .code code }
-                      { rightState with
-                        env := env
-                        joins := []
-                        frames := rightPreparedFrames
-                        control := .code code } := {
-                  program_eq := programEq
-                  runtime_eq := runtimeEq
-                  joins := finalJoins
-                  frames := preparedFrames
-                  envs := finalAgreeEnv
-                  renaming_scoped := finalRenaming
-                  join_renaming_scoped := finalJoinRenaming
-                  control := .code finalCode
+      cases rightDeclaration with
+      | none =>
+          simp only [fail]
+          rw [observe_eq_of_runtime_eq (left := leftState) (right := rightState)
+            runtimeEq (.fault (.unknownDecl name))]
+          exact .done _
+      | some rightDeclaration => cases lookup
+  | some leftDeclaration =>
+      cases rightDeclaration with
+      | none => cases lookup
+      | some rightDeclaration =>
+          cases lookup with
+          | some declarations =>
+              simp only
+              have sameSize := declarations.arity_eq
+              by_cases tooFew : args.size < leftDeclaration.params.size
+              · have rightTooFew : args.size < rightDeclaration.params.size := by
+                  simpa only [sameSize] using tooFew
+                rw [if_pos tooFew, if_pos rightTooFew, runtimeEq, ← sameSize]
+                generalize allocation :
+                  alloc rightState.runtime
+                    (.closure name leftDeclaration.params.size args) = allocated
+                rcases allocated with ⟨nextRuntime, reference⟩
+                exact .next {
+                  programs := programEq
+                  runtime_eq := rfl
+                  joins := joinEnvs
+                  frames := framesRelated
+                  envs := agree
+                  renaming_scoped := renamingScoped
+                  join_renaming_scoped := joinRenamingScoped
+                  control := .yielded (.object reference)
                 }
-                simpa [callArgs, extraArgs, leftPreparedFrames,
-                  rightPreparedFrames, valueEq] using
-                  CoreResultRelated.next nextRelated
-            | extern externDecl =>
-                have nextRelated :
-                    MachineStateRelated (leftJoins := []) (rightJoins := [])
-                      ({} : FVarIdMap FVarId) [] []
-                      { leftState with
-                        env := env
-                        joins := []
-                        frames := leftPreparedFrames }
-                      { rightState with
-                        env := env
-                        joins := []
-                        frames := rightPreparedFrames } := {
-                  program_eq := programEq
-                  runtime_eq := runtimeEq
-                  joins := .empty
-                  frames := preparedFrames
-                  envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) env env
-                  renaming_scoped := renamingScoped_empty []
-                  join_renaming_scoped := renamingScoped_empty []
-                  control := waitingControl
-                }
-                simpa [callArgs, extraArgs, leftPreparedFrames,
-                  rightPreparedFrames, valueEq] using
-                  CoreResultRelated.external
-                    (request := {
-                      name
-                      paramTypes := decl.params.map (·.type)
-                      resultType := decl.type
-                      args := callArgs }) nextRelated
+              · have rightNotTooFew : ¬ args.size < rightDeclaration.params.size := by
+                  simpa only [sameSize] using tooFew
+                rw [if_neg tooFew, if_neg rightNotTooFew]
+                let callArgs := args.extract 0 leftDeclaration.params.size
+                let extraArgs := args.extract leftDeclaration.params.size args.size
+                let leftPreparedFrames :=
+                  let frames := if extraArgs.isEmpty then leftState.frames
+                    else .apply extraArgs :: leftState.frames
+                  if leftDeclaration.params.isEmpty && args.isEmpty then
+                    .cache name :: frames else frames
+                let rightPreparedFrames :=
+                  let frames := if extraArgs.isEmpty then rightState.frames
+                    else .apply extraArgs :: rightState.frames
+                  if rightDeclaration.params.isEmpty && args.isEmpty then
+                    .cache name :: frames else frames
+                have preparedFrames :
+                    FramesRelated leftPreparedFrames rightPreparedFrames := by
+                  exact framesRelated_prepare_related_call name
+                    leftDeclaration.params rightDeclaration.params args extraArgs
+                    sameSize framesRelated
+                generalize leftBinding :
+                  bindParams leftDeclaration.params callArgs = bound
+                cases bound with
+                | error fault =>
+                    have rightBinding :
+                        bindParams rightDeclaration.params callArgs = .error fault :=
+                      bindParams_error_of_size_eq sameSize leftBinding
+                    have rightBindingActual :
+                        bindParams rightDeclaration.params
+                          (args.extract 0 rightDeclaration.params.size) =
+                            .error fault := by
+                      simpa [callArgs, sameSize] using rightBinding
+                    simp only [rightBindingActual, fail]
+                    rw [observe_eq_of_runtime_eq
+                      (left := leftState) (right := rightState)
+                      runtimeEq (.fault fault)]
+                    exact .done _
+                | ok leftEnv =>
+                    have boundData := bindParams_data_of_ok leftBinding
+                    cases declarations with
+                    | code leftDecl rightDecl leftCode rightCode body =>
+                        rcases paramBody_bind_values_related body
+                            (envsAgree_empty_scopes
+                              ({} : FVarIdMap FVarId) [] [])
+                            (renamingScoped_empty []) (renamingScoped_empty [])
+                            (JoinEnvsRelated.empty (left := []) (right := []))
+                            boundData.2 with
+                          ⟨finalRho, finalLeftScope, finalRightScope, leftBound,
+                            rightBound, leftFold, rightFold, finalAgree,
+                            finalRenaming, finalJoinRenaming, finalJoins, finalCode⟩
+                        have leftBoundEq : leftBound = leftEnv :=
+                          leftFold.symm.trans boundData.1
+                        subst leftBound
+                        have rightSize : rightDecl.params.size = callArgs.size := by
+                          have rightLength := body.length_eq.symm.trans
+                            boundData.2.symm
+                          simpa using rightLength
+                        have rightBinding :
+                            bindParams rightDecl.params callArgs = .ok rightBound := by
+                          have foldOk :
+                              (Except.ok (bindParamValues [] rightDecl.params.toList
+                                callArgs.toList) : Except RuntimeFault Env) =
+                                .ok rightBound :=
+                            congrArg
+                              (fun env => (Except.ok env : Except RuntimeFault Env))
+                              rightFold
+                          simpa [bindParams, rightSize, bindParamValues] using foldOk
+                        have rightBindingActual :
+                            bindParams rightDecl.params
+                              (args.extract 0 rightDecl.params.size) =
+                                .ok rightBound := by
+                          simpa [callArgs, sameSize] using rightBinding
+                        have finalAgreeEnv :
+                            EnvsAgree finalRho finalLeftScope finalRightScope
+                              leftEnv rightBound := by
+                          simpa only [boundData.1] using finalAgree
+                        have nextRelated :
+                            MachineStateRelated
+                              (leftJoins := []) (rightJoins := [])
+                              finalRho finalLeftScope finalRightScope
+                              { leftState with
+                                env := leftEnv
+                                joins := []
+                                frames := leftPreparedFrames
+                                control := .code leftCode }
+                              { rightState with
+                                env := rightBound
+                                joins := []
+                                frames := rightPreparedFrames
+                                control := .code rightCode } := {
+                          programs := programEq
+                          runtime_eq := runtimeEq
+                          joins := finalJoins
+                          frames := preparedFrames
+                          envs := finalAgreeEnv
+                          renaming_scoped := finalRenaming
+                          join_renaming_scoped := finalJoinRenaming
+                          control := .code finalCode
+                        }
+                        simpa [callArgs, extraArgs, leftPreparedFrames,
+                          rightPreparedFrames, sameSize, leftBinding,
+                          rightBindingActual] using CoreResultRelated.next nextRelated
+                    | extern leftDecl rightDecl leftMetadata rightMetadata
+                        arityEq paramTypesEq resultTypeEq =>
+                        let rightEnv := bindParamValues []
+                          rightDecl.params.toList callArgs.toList
+                        have rightSize : rightDecl.params.size = callArgs.size := by
+                          have leftLength :
+                              callArgs.toList.length = leftDecl.params.toList.length :=
+                            boundData.2
+                          simpa [arityEq] using leftLength.symm
+                        have rightBinding :
+                            bindParams rightDecl.params callArgs = .ok rightEnv := by
+                          simp [rightEnv, bindParams, rightSize, bindParamValues]
+                        have rightBindingActual :
+                            bindParams rightDecl.params
+                              (args.extract 0 rightDecl.params.size) =
+                                .ok rightEnv := by
+                          simpa [callArgs, sameSize] using rightBinding
+                        have nextRelated :
+                            MachineStateRelated (leftJoins := []) (rightJoins := [])
+                              ({} : FVarIdMap FVarId) [] []
+                              { leftState with
+                                env := leftEnv
+                                joins := []
+                                frames := leftPreparedFrames }
+                              { rightState with
+                                env := rightEnv
+                                joins := []
+                                frames := rightPreparedFrames } := {
+                          programs := programEq
+                          runtime_eq := runtimeEq
+                          joins := .empty
+                          frames := preparedFrames
+                          envs := envsAgree_empty_scopes
+                            ({} : FVarIdMap FVarId) leftEnv rightEnv
+                          renaming_scoped := renamingScoped_empty []
+                          join_renaming_scoped := renamingScoped_empty []
+                          control := waitingControl
+                        }
+                        simpa [callArgs, extraArgs, leftPreparedFrames,
+                          rightPreparedFrames, arityEq, leftBinding, rightBinding,
+                          rightBindingActual,
+                          paramTypesEq, resultTypeEq] using
+                          CoreResultRelated.external
+                            (request := {
+                              name
+                              paramTypes := leftDecl.params.map (·.type)
+                              resultType := leftDecl.type
+                              args := callArgs }) nextRelated
 
 /-- Closure invocation observes the same heap cell and delegates to the
 related named-declaration simulation when that cell is a closure. -/
 theorem invokeClosure_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
-    (programEq : leftState.program = rightState.program)
+    (programEq : ProgramsRelated leftState.program rightState.program)
     (runtimeEq : leftState.runtime = rightState.runtime)
     (joinEnvs : JoinEnvsRelated rho leftScope rightScope
       leftJoins rightJoins leftState.joins rightState.joins)
     (framesRelated : FramesRelated leftState.frames rightState.frames)
     (agree : EnvsAgree rho leftScope rightScope leftState.env rightState.env)
     (renamingScoped : RenamingScoped rho leftScope rightScope)
-    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins)
-    (bodies : ProgramBodiesRelated rightState.program) :
+    (joinRenamingScoped : RenamingScoped rho leftJoins rightJoins) :
     CoreResultRelated
       (invokeClosure
         { leftState with control := .invokeValue function args } function args)
@@ -2046,7 +2219,7 @@ theorem invokeClosure_related
                   exact invokeDecl_related leftInvoke rightInvoke
                     programEq runtimeEq joinEnvs framesRelated agree
                     renamingScoped joinRenamingScoped
-                    (.invokeValue (.object (.heap location)) args) bodies
+                    (.invokeValue (.object (.heap location)) args)
               | ctor object => exact failRelated .expectedClosure
               | boxed type value => exact failRelated .expectedClosure
               | string value => exact failRelated .expectedClosure
@@ -2072,8 +2245,7 @@ the shared program exposes related declaration bodies at named-call entries. -/
 theorem coreStep_machine_related
     {leftJoins rightJoins : List FVarId}
     (related : MachineStateRelated (leftJoins := leftJoins)
-      (rightJoins := rightJoins) rho leftScope rightScope leftState rightState)
-    (bodies : ProgramBodiesRelated rightState.program) :
+      (rightJoins := rightJoins) rho leftScope rightScope leftState rightState) :
     CoreResultRelated (coreStep leftState) (coreStep rightState) := by
   let leftMachine := leftState
   let rightMachine := rightState
@@ -2103,10 +2275,10 @@ theorem coreStep_machine_related
         | none =>
             exact invokeDecl_related leftMachine rightMachine programEq runtimeEq
               joinEnvs framesRelated agree renamingScoped joinRenamingScoped
-              (.invokeName name args) bodies
+              (.invokeName name args)
         | some value =>
             exact .next {
-              program_eq := programEq
+              programs := programEq
               runtime_eq := runtimeEq
               joins := joinEnvs
               frames := framesRelated
@@ -2118,11 +2290,11 @@ theorem coreStep_machine_related
       · simp only [coreStep, argsEmpty]
         exact invokeDecl_related leftMachine rightMachine programEq runtimeEq
           joinEnvs framesRelated agree renamingScoped joinRenamingScoped
-          (.invokeName name args) bodies
+          (.invokeName name args)
   | invokeValue function args =>
       simpa only [coreStep] using
         invokeClosure_related leftMachine rightMachine programEq runtimeEq
-          joinEnvs framesRelated agree renamingScoped joinRenamingScoped bodies
+          joinEnvs framesRelated agree renamingScoped joinRenamingScoped
 
 /-- Existential closure of the indexed machine relation for step-level use. -/
 def StatesRelated (left right : MachineState) : Prop :=
@@ -2130,11 +2302,11 @@ def StatesRelated (left right : MachineState) : Prop :=
     MachineStateRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
       rho leftScope rightScope left right
 
-theorem StatesRelated.program_eq (related : StatesRelated left right) :
-    left.program = right.program := by
+theorem StatesRelated.programs (related : StatesRelated left right) :
+    ProgramsRelated left.program right.program := by
   rcases related with
     ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
-  exact indexed.program_eq
+  exact indexed.programs
 
 /-- A proof-facing bisimulation packages simulations in both alpha-renaming
 directions; each direction may use its own renaming and scope indices. -/
@@ -2408,7 +2580,7 @@ theorem resumeExternal_related
     ⟨programEq, runtimeEq, joinEnvs, framesRelated, agree,
       renamingScoped, joinRenamingScoped, control⟩
   exact {
-    program_eq := programEq
+    programs := programEq
     runtime_eq := by
       simp [resumeExternal, MachineState.withValue, runtimeEq]
     joins := joinEnvs
@@ -2424,11 +2596,10 @@ theorem step_forward
     {leftJoins rightJoins : List FVarId}
     (related : MachineStateRelated (leftJoins := leftJoins)
       (rightJoins := rightJoins) rho leftScope rightScope leftBefore rightBefore)
-    (bodies : ProgramBodiesRelated rightBefore.program)
     (step : Step externals leftBefore leftAfter) :
     ∃ rightAfter, Step externals rightBefore rightAfter ∧
       StatesRelated leftAfter rightAfter := by
-  have results := coreStep_machine_related related bodies
+  have results := coreStep_machine_related related
   generalize rightTransition : coreStep rightBefore = rightResult at results
   cases step with
   | internal transition =>
@@ -2449,7 +2620,6 @@ theorem step_forward
 /-- Every finite left execution has a same-length related right execution. -/
 theorem steps_forward
     (related : StatesRelated leftBefore rightBefore)
-    (bodies : ProgramBodiesRelated rightBefore.program)
     (steps : Steps externals count leftBefore leftAfter) :
     ∃ rightAfter, Steps externals count rightBefore rightAfter ∧
       StatesRelated leftAfter rightAfter := by
@@ -2458,74 +2628,106 @@ theorem steps_forward
   | step head tail ih =>
       rcases related with
         ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
-      rcases step_forward indexed bodies head with
+      rcases step_forward indexed head with
         ⟨rightSecond, rightHead, secondRelated⟩
-      have rightProgram : rightSecond.program = rightBefore.program :=
-        step_preserves_program rightHead
-      have secondBodies : ProgramBodiesRelated rightSecond.program := by
-        rw [rightProgram]
-        exact bodies
-      rcases ih secondRelated secondBodies with
+      rcases ih secondRelated with
         ⟨rightAfter, rightTail, finalRelated⟩
       exact ⟨rightAfter, .step rightHead rightTail, finalRelated⟩
 
 /-- Terminating observations of a related left state are reproduced on the
 right with the same number of semantic steps. -/
 theorem evaluatesState_forward
-    (related : StatesRelated leftBefore rightBefore)
-    (bodies : ProgramBodiesRelated rightBefore.program) :
+    (related : StatesRelated leftBefore rightBefore) :
     EvaluatesState externals leftBefore observation →
       EvaluatesState externals rightBefore observation := by
   rintro ⟨count, leftFinal, leftSteps, leftDone⟩
-  rcases steps_forward related bodies leftSteps with
+  rcases steps_forward related leftSteps with
     ⟨rightFinal, rightSteps, finalRelated⟩
   rcases finalRelated with
     ⟨rho, leftScope, rightScope, leftJoins, rightJoins, indexed⟩
-  have rightProgram : rightFinal.program = rightBefore.program :=
-    steps_preserve_program rightSteps
-  have finalBodies : ProgramBodiesRelated rightFinal.program := by
-    rw [rightProgram]
-    exact bodies
   have finalResults :
       CoreResultRelated (.done observation) (coreStep rightFinal) := by
-    simpa only [leftDone] using coreStep_machine_related indexed finalBodies
+    simpa only [leftDone] using coreStep_machine_related indexed
   exact ⟨count, rightFinal, rightSteps, finalResults.done_right⟩
 
 /-- Divergence of a related left state is reproduced on the right. -/
 theorem diverges_forward
     (related : StatesRelated leftBefore rightBefore)
-    (bodies : ProgramBodiesRelated rightBefore.program)
     (diverges : Diverges externals leftBefore) :
     Diverges externals rightBefore := by
   intro count
   rcases diverges count with ⟨leftAfter, leftSteps⟩
-  rcases steps_forward related bodies leftSteps with
+  rcases steps_forward related leftSteps with
     ⟨rightAfter, rightSteps, finalRelated⟩
   exact ⟨rightAfter, rightSteps⟩
 
 /-- A bidirectional state relation gives observational equivalence for every
 terminating observation. -/
 theorem evaluatesState_iff_of_bisimilar
-    (related : StatesBisimilar left right)
-    (bodies : ProgramBodiesRelated right.program) :
+    (related : StatesBisimilar left right) :
     EvaluatesState externals left observation ↔
       EvaluatesState externals right observation := by
-  have leftBodies : ProgramBodiesRelated left.program := by
-    rw [related.forward.program_eq]
-    exact bodies
-  exact ⟨evaluatesState_forward related.forward bodies,
-    evaluatesState_forward related.backward leftBodies⟩
+  exact ⟨evaluatesState_forward related.forward,
+    evaluatesState_forward related.backward⟩
 
 /-- The same bidirectional relation preserves and reflects divergence. -/
 theorem diverges_iff_of_bisimilar
-    (related : StatesBisimilar left right)
-    (bodies : ProgramBodiesRelated right.program) :
+    (related : StatesBisimilar left right) :
     Diverges externals left ↔ Diverges externals right := by
-  have leftBodies : ProgramBodiesRelated left.program := by
-    rw [related.forward.program_eq]
-    exact bodies
-  exact ⟨diverges_forward related.forward bodies,
-    diverges_forward related.backward leftBodies⟩
+  exact ⟨diverges_forward related.forward,
+    diverges_forward related.backward⟩
+
+/-- Pointwise declaration relations in both orientations provide the complete
+program boundary needed by the alpha machine bisimulation. -/
+structure ProgramsBirelated (left right : ImpureProgram) : Prop where
+  forward : ProgramsRelated left right
+  backward : ProgramsRelated right left
+
+/-- Bidirectionally alpha-related programs have bisimilar entry machines for
+every entry name and argument array. -/
+theorem initialStates_bisimilar
+    (related : ProgramsBirelated left right) (entry : Name)
+    (args : Array Value) :
+    StatesBisimilar (initialState left entry args) (initialState right entry args) := by
+  have forwardMachine :
+      MachineStateRelated (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) [] []
+        (initialState left entry args) (initialState right entry args) := {
+    programs := related.forward
+    runtime_eq := rfl
+    joins := .empty
+    frames := .nil
+    envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
+    renaming_scoped := renamingScoped_empty []
+    join_renaming_scoped := renamingScoped_empty []
+    control := .invokeName entry args
+  }
+  have backwardMachine :
+      MachineStateRelated (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) [] []
+        (initialState right entry args) (initialState left entry args) := {
+    programs := related.backward
+    runtime_eq := rfl
+    joins := .empty
+    frames := .nil
+    envs := envsAgree_empty_scopes ({} : FVarIdMap FVarId) [] []
+    renaming_scoped := renamingScoped_empty []
+    join_renaming_scoped := renamingScoped_empty []
+    control := .invokeName entry args
+  }
+  exact {
+    forward := ⟨_, _, _, _, _, forwardMachine⟩
+    backward := ⟨_, _, _, _, _, backwardMachine⟩
+  }
+
+/-- Whole-program alpha renaming preserves and reflects every terminating
+observation at every requested entry. -/
+theorem samePhaseCorrect_of_programsBirelated
+    (related : ProgramsBirelated before after) :
+    SamePhaseCorrect (Impure.semantics externals) before after entries := by
+  intro entry member args observation
+  exact evaluatesState_iff_of_bisimilar
+    (initialStates_bisimilar related entry args)
 
 /-- Two code relations, one for each renaming orientation, induce semantic
 equivalence in any runtime context covered by the proof scopes. -/
@@ -2544,7 +2746,7 @@ theorem codeEquivalentAt_of_birelated
       MachineStateRelated
         (leftJoins := []) (rightJoins := [])
         ({} : FVarIdMap FVarId) scope scope leftState rightState := {
-    program_eq := rfl
+    programs := programsRelated_refl bodies
     runtime_eq := rfl
     joins := .empty
     frames := frames
@@ -2557,7 +2759,7 @@ theorem codeEquivalentAt_of_birelated
       MachineStateRelated
         (leftJoins := []) (rightJoins := [])
         ({} : FVarIdMap FVarId) scope scope rightState leftState := {
-    program_eq := rfl
+    programs := programsRelated_refl bodies
     runtime_eq := rfl
     joins := .empty
     frames := frames
@@ -2571,7 +2773,7 @@ theorem codeEquivalentAt_of_birelated
     backward := ⟨_, _, _, _, _, backwardMachine⟩
   }
   intro observation
-  exact evaluatesState_iff_of_bisimilar bisimilar bodies
+  exact evaluatesState_iff_of_bisimilar bisimilar
 
 /-- The matching immediate outcomes of two related terminal instructions. -/
 inductive TerminalResultRelated (leftEnv rightEnv : Env) (state : MachineState) :

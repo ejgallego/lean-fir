@@ -15,6 +15,8 @@ open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.SimpCase
 open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseCorrectness
+open Fir.LeanIR.Passes.NonLockstep.Structural
+open Fir.LeanIR.Passes.SimpCaseRelation
 
 def selectedBranch : LCNF.Code .impure :=
   .return x
@@ -313,6 +315,289 @@ theorem defaultCtorCaseTableDeterministic
   · intro left right leftHas rightHas
     simp [HasDefaultAlt] at leftHas rightHas
     simp_all
+
+/-!
+The whole-program alpha-fold regression factors the compiler result through an
+intermediate default that retains the source's selected `alphaRight` body.
+The recursive relation handles source-to-intermediate stuttering at tag `1`;
+the program-aware alpha relation then renames that default to `alphaLeft`.
+-/
+
+def alphaFoldIntermediateCases : LCNF.Cases .impure :=
+  .mk `Three objType c #[
+    .ctorAlt thirdInfo selectedBranch,
+    .default alphaRight]
+
+def alphaFoldIntermediate : LCNF.Code .impure :=
+  .cases alphaFoldIntermediateCases
+
+def alphaFoldValidCase (cases : LCNF.Cases .impure) (tag : Nat) : Prop :=
+  cases = alphaFoldBeforeCases ∧ tag = 1
+
+abbrev AlphaFoldStructuralRel := CodeRel alphaFoldValidCase
+
+theorem alphaFoldRightStructuralRefl :
+    AlphaFoldStructuralRel alphaRight alphaRight := by
+  exact .aligned (.let (letDecl alphaRightId objType (.lit (.nat 5)))
+    (.aligned (.return alphaRightId)))
+
+theorem alphaFoldStructuralCodeRelated :
+    AlphaFoldStructuralRel alphaFoldCode alphaFoldIntermediate := by
+  apply CodeRel.aligned
+  apply HeadRel.cases
+  intro tag valid
+  rcases valid with ⟨_, rfl⟩
+  change SelectionRel alphaFoldValidCase (some alphaRight) (some alphaRight)
+  exact .some alphaFoldRightStructuralRefl
+
+def alphaFoldDeclWith (code : LCNF.Code .impure) : LCNF.Decl .impure :=
+  decl `main #[param c, param x] objType (.code code)
+
+def alphaFoldProgramWith (code : LCNF.Code .impure) : ImpureProgram :=
+  { decls := #[alphaFoldDeclWith code] }
+
+def alphaFoldBeforeProgram : ImpureProgram :=
+  alphaFoldProgramWith alphaFoldCode
+
+def alphaFoldIntermediateProgram : ImpureProgram :=
+  alphaFoldProgramWith alphaFoldIntermediate
+
+def alphaFoldAfterProgram : ImpureProgram :=
+  alphaFoldProgramWith alphaFoldExpected
+
+def alphaFoldEntries : Array Name := #[`main]
+
+theorem alphaFoldStructuralProgramsRelated :
+    ProgramRelated AlphaFoldStructuralRel
+      alphaFoldBeforeProgram alphaFoldIntermediateProgram := by
+  exact .cons {
+    name_eq := rfl
+    levelParams_eq := rfl
+    type_eq := rfl
+    params_eq := rfl
+    safe_eq := rfl
+    value := .code alphaFoldStructuralCodeRelated
+    recursive_eq := rfl
+    inlineAttr_eq := rfl
+  } .nil
+
+theorem alphaFoldStructuralCorrect :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      alphaFoldBeforeProgram alphaFoldIntermediateProgram alphaFoldEntries
+      (ReachablyReadyAdmissible externals alphaFoldValidCase
+        alphaFoldBeforeProgram alphaFoldIntermediateProgram) :=
+  samePhaseCorrectOn_reachablyReady alphaFoldStructuralProgramsRelated
+
+def alphaFoldParamRho : FVarIdMap FVarId :=
+  (({} : FVarIdMap FVarId).insert c c).insert x x
+
+theorem alphaFoldIntermediateNormalization :
+    CaseTableNormalizationInvariant alphaFoldIntermediateCases.alts := by
+  exact ⟨ctorDefaultCaseTableDeterministic
+    thirdInfo selectedBranch alphaRight⟩
+
+theorem alphaFoldExpectedNormalization :
+    CaseTableNormalizationInvariant alphaFoldAfterCases.alts := by
+  exact ⟨ctorDefaultCaseTableDeterministic
+    thirdInfo selectedBranch alphaLeft⟩
+
+theorem alphaRightFreshForParams : FreshForScope alphaRightId [x, c] := by
+  intro old oldScoped
+  simp at oldScoped
+  rcases oldScoped with oldIsX | oldIsC
+  · have oldEq : old = x := fvar_eq_of_beq oldIsX
+    subst old
+    native_decide
+  · have oldEq : old = c := fvar_eq_of_beq oldIsC
+    subst old
+    native_decide
+
+theorem alphaLeftFreshForParams : FreshForScope alphaLeftId [x, c] := by
+  intro old oldScoped
+  simp at oldScoped
+  rcases oldScoped with oldIsX | oldIsC
+  · have oldEq : old = x := fvar_eq_of_beq oldIsX
+    subst old
+    native_decide
+  · have oldEq : old = c := fvar_eq_of_beq oldIsC
+    subst old
+    native_decide
+
+theorem xFreshForC : FreshForScope x [c] := by
+  intro old oldScoped
+  simp at oldScoped
+  have oldEq : old = c := fvar_eq_of_beq oldScoped
+  subst old
+  native_decide
+
+theorem alphaRightLeftSideConditionsAtParams :
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c] alphaRight alphaLeft := by
+  apply CodeSideConditions.letE
+  · rfl
+  · rfl
+  · rfl
+  · trivial
+  · exact alphaRightFreshForParams
+  · exact alphaLeftFreshForParams
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · apply CodeSideConditions.ret <;> native_decide
+
+theorem alphaLeftRightSideConditionsAtParams :
+    CodeSideConditions (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c] alphaLeft alphaRight := by
+  apply CodeSideConditions.letE
+  · rfl
+  · rfl
+  · rfl
+  · trivial
+  · exact alphaLeftFreshForParams
+  · exact alphaRightFreshForParams
+  · intro old oldScoped
+    simp at oldScoped
+  · intro old oldScoped
+    simp at oldScoped
+  · apply CodeSideConditions.ret <;> native_decide
+
+theorem alphaFoldCaseBranchesForward :
+    CaseBranchesSideConditions (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      alphaFoldIntermediateCases.alts.toList alphaFoldAfterCases.alts.toList := by
+  constructor
+  · intro tag leftCode rightCode leftHas rightHas
+    simp [HasCtorAlt, alphaFoldIntermediateCases, alphaFoldAfterCases,
+      LCNF.Cases.alts]
+      at leftHas rightHas
+    rcases leftHas with ⟨_, ⟨rfl, rfl⟩, _⟩
+    rcases rightHas with ⟨_, ⟨rfl, rfl⟩, _⟩
+    exact .ret (by native_decide) (by native_decide)
+  · intro leftCode rightCode leftHas rightHas
+    simp [HasDefaultAlt, alphaFoldIntermediateCases, alphaFoldAfterCases,
+      LCNF.Cases.alts]
+      at leftHas rightHas
+    subst leftCode
+    subst rightCode
+    exact alphaRightLeftSideConditionsAtParams
+
+theorem alphaFoldCaseBranchesBackward :
+    CaseBranchesSideConditions (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      alphaFoldAfterCases.alts.toList alphaFoldIntermediateCases.alts.toList := by
+  constructor
+  · intro tag leftCode rightCode leftHas rightHas
+    simp [HasCtorAlt, alphaFoldIntermediateCases, alphaFoldAfterCases,
+      LCNF.Cases.alts]
+      at leftHas rightHas
+    rcases leftHas with ⟨_, ⟨rfl, rfl⟩, _⟩
+    rcases rightHas with ⟨_, ⟨rfl, rfl⟩, _⟩
+    exact .ret (by native_decide) (by native_decide)
+  · intro leftCode rightCode leftHas rightHas
+    simp [HasDefaultAlt, alphaFoldIntermediateCases, alphaFoldAfterCases,
+      LCNF.Cases.alts]
+      at leftHas rightHas
+    subst leftCode
+    subst rightCode
+    exact alphaLeftRightSideConditionsAtParams
+
+theorem alphaFoldCasesAlphaForward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      alphaFoldIntermediate alphaFoldExpected := by
+  apply codeRelated_cases_of_local_accepts
+  · native_decide
+  · native_decide
+  · exact alphaFoldIntermediateNormalization
+  · exact alphaFoldExpectedNormalization
+  · exact alphaFoldCaseBranchesForward
+  · exact ⟨4, by native_decide⟩
+
+theorem alphaFoldCasesAlphaBackward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      alphaFoldExpected alphaFoldIntermediate := by
+  apply codeRelated_cases_of_local_accepts
+  · native_decide
+  · native_decide
+  · exact alphaFoldExpectedNormalization
+  · exact alphaFoldIntermediateNormalization
+  · exact alphaFoldCaseBranchesBackward
+  · exact ⟨4, by native_decide⟩
+
+theorem alphaFoldParamBodyForward :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList
+      alphaFoldIntermediate alphaFoldExpected := by
+  apply ParamBodyRelated.cons
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · apply ParamBodyRelated.cons
+    · exact xFreshForC
+    · exact xFreshForC
+    · intro old oldScoped; simp at oldScoped
+    · intro old oldScoped; simp at oldScoped
+    · exact .nil alphaFoldCasesAlphaForward
+
+theorem alphaFoldParamBodyBackward :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList
+      alphaFoldExpected alphaFoldIntermediate := by
+  apply ParamBodyRelated.cons
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · apply ParamBodyRelated.cons
+    · exact xFreshForC
+    · exact xFreshForC
+    · intro old oldScoped; simp at oldScoped
+    · intro old oldScoped; simp at oldScoped
+    · exact .nil alphaFoldCasesAlphaBackward
+
+theorem alphaFoldProgramsRelatedOfParamBody
+    (body : ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList leftCode rightCode) :
+    ProgramsRelated (alphaFoldProgramWith leftCode)
+      (alphaFoldProgramWith rightCode) := by
+  intro name
+  by_cases isMain : name = `main
+  · subst name
+    simpa [alphaFoldProgramWith, alphaFoldDeclWith, Program.findDecl?, decl] using
+      OptionalProgramDeclRelated.some
+        (ProgramDeclRelated.code
+          (alphaFoldDeclWith leftCode) (alphaFoldDeclWith rightCode)
+          leftCode rightCode body)
+  · simpa [alphaFoldProgramWith, alphaFoldDeclWith, Program.findDecl?, decl,
+      isMain, Ne.symm isMain] using OptionalProgramDeclRelated.none
+
+theorem alphaFoldAlphaProgramsBirelated :
+    ProgramsBirelated alphaFoldIntermediateProgram alphaFoldAfterProgram := {
+  forward := alphaFoldProgramsRelatedOfParamBody alphaFoldParamBodyForward
+  backward := alphaFoldProgramsRelatedOfParamBody alphaFoldParamBodyBackward
+}
+
+theorem alphaFoldAlphaCorrect :
+    SamePhaseCorrect (Impure.semantics externals)
+      alphaFoldIntermediateProgram alphaFoldAfterProgram alphaFoldEntries :=
+  samePhaseCorrect_of_programsBirelated alphaFoldAlphaProgramsBirelated
+
+/-- The recursive stuttering theorem and the cross-program alpha theorem
+compose to close the alpha-default-folding fixture at whole-program scope. -/
+theorem alphaFoldComposedCorrect :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      alphaFoldBeforeProgram alphaFoldAfterProgram alphaFoldEntries
+      (ReachablyReadyAdmissible externals alphaFoldValidCase
+        alphaFoldBeforeProgram alphaFoldIntermediateProgram) := by
+  intro entry member args admissible observation
+  exact (alphaFoldStructuralCorrect entry member args admissible observation).trans
+    (alphaFoldAlphaCorrect entry member args observation)
 
 def nestedInnerLeftCases : LCNF.Cases .impure :=
   .mk ``Bool objType c #[
@@ -664,6 +949,11 @@ def joinProofState (code : LCNF.Code .impure) : MachineState := {
   control := .code code
 }
 
+theorem emptyProgramBodiesRelated :
+    ProgramBodiesRelated ({ decls := #[] } : ImpureProgram) := by
+  intro name declaration found
+  simp [Program.findDecl?] at found
+
 /-- Installing alpha-renamed join declarations preserves the machine relation. -/
 theorem joinInstallationCoreStepRelated :
     CoreResultRelated
@@ -675,7 +965,7 @@ theorem joinInstallationCoreStepRelated :
     (leftJoins := []) (rightJoins := [])
     (leftState := joinProofState joinAlphaLeft)
     (rightState := joinProofState joinAlphaRight)
-  · rfl
+  · exact programsRelated_refl emptyProgramBodiesRelated
   · rfl
   · exact .empty
   · exact .nil
@@ -771,7 +1061,7 @@ theorem joinInvocationCoreStepRelated :
     (leftJoins := [joinLeftId]) (rightJoins := [joinRightId])
     (leftState := joinJumpLeftState)
     (rightState := joinJumpRightState)
-  · rfl
+  · exact programsRelated_refl emptyProgramBodiesRelated
   · rfl
   · exact .bind installedJoins joinedVariableRenaming joinedJoinRenaming
       leftArgFresh rightArgFresh leftArgJoinFresh rightArgJoinFresh
@@ -820,7 +1110,7 @@ theorem namedCallMachineRelated :
       (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] []
       namedCallProofState namedCallProofState := {
-  program_eq := rfl
+  programs := programsRelated_refl callProofProgramBodiesRelated
   runtime_eq := rfl
   joins := .empty
   frames := .nil
@@ -843,22 +1133,19 @@ theorem namedCallCoreStepRelated :
     CoreResultRelated
       (coreStep namedCallProofState) (coreStep namedCallProofState) := by
   exact coreStep_machine_related namedCallMachineRelated
-    callProofProgramBodiesRelated
 
 /-- The execution-level API composes declaration entry through arbitrarily
 many internal or external steps. -/
 theorem namedCallEvaluatesForward
     (evaluation : EvaluatesState externals namedCallProofState observation) :
     EvaluatesState externals namedCallProofState observation :=
-  evaluatesState_forward namedCallStatesRelated
-    callProofProgramBodiesRelated evaluation
+  evaluatesState_forward namedCallStatesRelated evaluation
 
 /-- The bidirectional execution boundary yields observational equivalence. -/
 theorem namedCallEvaluatesIff :
     EvaluatesState externals namedCallProofState observation ↔
       EvaluatesState externals namedCallProofState observation :=
   evaluatesState_iff_of_bisimilar namedCallStatesBisimilar
-    callProofProgramBodiesRelated
 
 def closureProofRuntime : RuntimeState := {
   heap := [(0, { object := .closure `id 1 #[] })]
@@ -880,7 +1167,7 @@ theorem closureCallCoreStepRelated :
     (leftScope := []) (rightScope := [])
     (leftJoins := []) (rightJoins := [])
   · exact {
-      program_eq := rfl
+      programs := programsRelated_refl callProofProgramBodiesRelated
       runtime_eq := rfl
       joins := .empty
       frames := .nil
@@ -889,7 +1176,6 @@ theorem closureCallCoreStepRelated :
       join_renaming_scoped := renamingScoped_empty []
       control := .invokeValue (.object (.heap 0)) #[.erased]
     }
-  · exact callProofProgramBodiesRelated
 
 #guard Local.check 8 joinAlphaLeft joinAlphaRight
 #guard !Local.check 8 joinAlphaLeft joinBodyMismatch

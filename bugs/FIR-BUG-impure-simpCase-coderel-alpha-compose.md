@@ -9,7 +9,7 @@ pass: simpCase-0
 discovered-by: proof
 first-seen: 2026-07-18
 reproduction: Fir/LeanIR/Passes/SimpCaseExamples.lean#alphaFoldCode
-regression: Fir/LeanIR/Passes/SimpCaseCompilerBridge.lean#CaseBoundarySound
+regression: Fir/LeanIR/Passes/SimpCaseExamples.lean#alphaFoldComposedCorrect
 ---
 
 # Summary
@@ -56,17 +56,24 @@ to `alphaLeft`, even though `CodeRelated` and `CodeEquivalentAt` do.
 
 `alphaLocalCodeRelated` constructs the declarative alpha relation and
 `alphaFoldTrueCodeEquivalent` closes the local observational proof. The actual
-pass and the transparent shadow both produce `alphaFoldExpected`. In contrast,
-the generic recursive traversal theorem can reduce all other syntax to the
-single `CaseBoundarySound` premise but cannot instantiate that premise for
-this fixture using `CodeRel` alone.
+pass and the transparent shadow both produce `alphaFoldExpected`.
+
+`alphaFoldComposedCorrect` now closes the same fixture at whole-program scope.
+It factors the result through `alphaFoldIntermediateProgram`: recursive
+`CodeRel` stuttering replaces the selected source cases with a default holding
+`alphaRight`, then the program-aware alpha bisimulation renames that default
+to `alphaLeft`. The generic compiler traversal theorem still reduces arbitrary
+results to `CaseBoundarySound`; it cannot instantiate that premise directly
+because its result relation remains `CodeRel` rather than the semantic
+composition.
 
 ## Semantic impact
 
-This is a limitation of FIR's proof relation, not evidence of a compiler
-miscompilation. Whole-pass correctness is complete for programs whose case
-results inhabit `CodeRel`; alpha-default folding remains outside that theorem
-until the two existing simulations are composed.
+This is a limitation of FIR's generic compiler-bridge relation, not evidence
+of a compiler miscompilation. The concrete alpha-default-folding fixture is
+now covered by a composed whole-program theorem. Arbitrary shadow traversal
+results remain outside the generic theorem when their case boundary needs an
+alpha step.
 
 ## Classification and triage
 
@@ -76,10 +83,11 @@ as `fir-semantics`.
 
 ## Workaround
 
-Keep `CaseBoundarySound` explicit, prove local alpha-fold equivalence with the
-bidirectional transparent checker, and differentially compare the actual pass
-with the pinned transparent traversal shadow. Do not weaken `CodeRel` or add a
-trusted alpha constructor.
+Keep `CaseBoundarySound` explicit for the generic shadow theorem and factor
+concrete alpha folds through a structural intermediate plus
+`ProgramsBirelated`. Continue to compare the actual pass with the pinned
+transparent traversal shadow. Do not weaken `CodeRel` or add a trusted alpha
+constructor.
 
 ## Upstream tracking
 
@@ -87,6 +95,13 @@ none
 
 ## Resolution and regression
 
-Unresolved. Add a composed recursive/alpha machine relation, prove its
-non-lockstep bisimulation, discharge `CaseBoundarySound` for default folding,
-and turn `alphaFoldCode` into the permanent whole-pass regression.
+Partially resolved. `ProgramsRelated` now relates named declarations across
+distinct programs, including partial-application arities and external ABIs;
+its bidirectional machine simulation proves whole-program observational
+equivalence. `alphaFoldComposedCorrect` composes that theorem with recursive
+stuttering and is the permanent whole-program regression.
+
+The card stays confirmed until the generic `CaseBoundarySound` interface is
+generalized to a relation closed under structural stuttering followed by
+alpha equivalence, so arbitrary shadow results can use the same composition
+without a fixture-specific intermediate.
