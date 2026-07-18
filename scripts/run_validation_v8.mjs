@@ -51,12 +51,39 @@ function exactJsonInteger(value, context) {
   return result;
 }
 
+function byteArrayValue(host, value, context) {
+  assert.equal(value.kind, "heap", `${context} must be a heap byte array`);
+  const object = host.liveCell(value.location).object;
+  assert.equal(object.kind, "byteArray", `${context} heap object must be a byte array`);
+  return object.value;
+}
+
 const validationExternalRegistry = {
   "Nat.add": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Nat.add external arity mismatch");
     const left = naturalValue(host, args[0], "Nat.add left operand");
     const right = naturalValue(host, args[1], "Nat.add right operand");
     return { value: host.natural(left + right), world };
+  },
+  "ByteArray.size": ({ args, host, world }) => {
+    assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
+    const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");
+    return { value: host.natural(BigInt(bytes.length)), world };
+  },
+  "ByteArray.get!": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "ByteArray.get! external arity mismatch");
+    const bytes = byteArrayValue(host, args[0], "ByteArray.get! operand");
+    const index = naturalValue(host, args[1], "ByteArray.get! index");
+    assert.ok(index >= 0n && index < BigInt(bytes.length),
+      `ByteArray.get! index ${index} is out of bounds`);
+    return {
+      value: {
+        kind: "scalar",
+        scalarKind: "uint8",
+        value: BigInt(bytes[Number(index)]),
+      },
+      world,
+    };
   },
 };
 

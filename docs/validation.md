@@ -787,7 +787,9 @@ through the semantic host.  Signed `Int` identity programs cover positive and
 negative immediates, both exact 32-bit boundaries, and the first positive and
 negative values represented by heap integer objects.  A heap-backed
 `ByteArray → ByteArray` identity preserves zero, signed-boundary, and maximum
-byte payloads.  The independent artifact corpus separately compares external
+byte payloads.  Exact `ByteArray.size` and `ByteArray.get!` external handlers
+also cover zero, high-bit, and maximum-byte reads without changing heap state
+or world.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Large odd naturals remain excluded from this adapter because the version-1
 validation protocol encodes `Nat` as an inexact JSON number; the limitation is
