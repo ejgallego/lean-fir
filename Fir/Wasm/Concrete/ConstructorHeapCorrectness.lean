@@ -46,6 +46,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     (arity : fields.size = info.size)
     (semanticArity : semanticFields.size = info.size)
     (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
     (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
       fieldKinds[index]? = some kind →
       semanticFields[index]? = some value →
@@ -73,7 +74,8 @@ theorem allocateConstructor_nonempty_liveHeapRel
   obtain ⟨finalFrontier, objectRelated, exactHeader⟩ :=
     allocateConstructor_nonempty_objectRel state result witness info fieldKinds fields
       semanticFields address related.frontier arity semanticArity fieldKindsSize
-      fieldRelated nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+      fieldKindsValid fieldRelated nonempty tagFits objectFieldsFit usizeFieldsFit
+      scalarBytesFit allocated
   have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
     cases found : witness.locations.lookup? runtime.nextLocation with
     | none => rfl

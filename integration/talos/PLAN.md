@@ -1224,6 +1224,17 @@ still reject non-objects, invalid words remain errors, and a constructor
 release regression covers the erased-field path. The recursive proof can now
 relate each constructor field without excluding a valid ABI kind.
 
+W6.3p strengthens the constructor refinement with the ABI fact needed to use
+that field relation recursively. Bug card
+`FIR-BUG-wasm-none-constructor-refinement-field-kinds` records that the prior
+relation constrained only the descriptor length and therefore admitted scalar
+kinds in ownership-traversed slots. `ConstructorObjectRel` now retains
+`fieldKinds.all AbiKind.isObjectField = true`; allocation must establish it and
+every payload/header preservation theorem transports it. The indexed
+`fieldKind` theorem exposes an admissible kind for each declared slot. The next
+slice can state the owned-reference decoder correspondence without an external
+well-formedness premise.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

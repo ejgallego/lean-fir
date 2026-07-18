@@ -48,6 +48,7 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
         field.offset + 8 ≤ info.ssize ∧
         readScalarUInt64Field state address field.width field.offset = .ok value
   fieldKindsSize : fieldKinds.size = info.size
+  fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true
   objectFields : ∀ index kind value,
     fieldKinds[index]? = some kind →
     semantic.objectFields[index]? = some value →
@@ -56,6 +57,21 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
   usizeFields : ∀ index value,
     semantic.usizeFields[index]? = some value →
     readUSizeField state address index = .ok value
+
+/-- Every declared constructor object slot carries an ABI kind whose concrete
+word may participate in ownership traversal. -/
+theorem ConstructorObjectRel.fieldKind
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {index : Nat} (indexLt : index < info.size) :
+    ∃ kind, fieldKinds[index]? = some kind ∧ kind.isObjectField = true := by
+  have kindLt : index < fieldKinds.size := by
+    rw [related.fieldKindsSize]
+    exact indexLt
+  refine ⟨fieldKinds[index], Array.getElem?_eq_getElem kindLt, ?_⟩
+  exact Array.all_eq_true.mp related.fieldKindsValid index kindLt
 
 /-- Constructor decoding and typed projections are stable through a fresh
 prefix extension whenever the constructor's declared extent is owned by the
@@ -248,6 +264,7 @@ theorem ConstructorObjectRel.prefixExtension
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := scalarFieldsAfter
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · intro index kind value kindAt valueAt
@@ -320,6 +337,7 @@ theorem ConstructorObjectRel.witnessExtension
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := related.semanticScalarFields
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := related.usizeFields }
   intro index kind value kindAt valueAt

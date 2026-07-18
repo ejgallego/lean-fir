@@ -201,6 +201,7 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
       semanticUSizeFields := related.semanticUSizeFields
       semanticScalarFields := ?_
       fieldKindsSize := related.fieldKindsSize
+      fieldKindsValid := related.fieldKindsValid
       objectFields := ?_
       usizeFields := ?_ }
     · intro field member
@@ -400,6 +401,7 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
       semanticUSizeFields := related.semanticUSizeFields
       semanticScalarFields := ?_
       fieldKindsSize := related.fieldKindsSize
+      fieldKindsValid := related.fieldKindsValid
       objectFields := ?_
       usizeFields := ?_ }
     · intro field member
@@ -578,6 +580,7 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := ?_
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · intro field member
@@ -754,6 +757,7 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := ?_
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · intro field member

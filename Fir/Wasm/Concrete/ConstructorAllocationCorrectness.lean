@@ -180,6 +180,7 @@ theorem allocateConstructor_nonempty_objectRel
     (arity : fields.size = info.size)
     (semanticArity : semanticFields.size = info.size)
     (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
     (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
       fieldKinds[index]? = some kind →
       semanticFields[index]? = some value →
@@ -303,6 +304,7 @@ theorem allocateConstructor_nonempty_objectRel
     semanticUSizeFields := by simp
     semanticScalarFields := by simp
     fieldKindsSize
+    fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · exact ⟨Header.forAllocation .constructor layout.allocationBytes false

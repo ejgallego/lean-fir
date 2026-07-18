@@ -176,6 +176,7 @@ theorem ConstructorObjectRel.writeUSizeField
     semanticUSizeFields := by simp [related.semanticUSizeFields]
     semanticScalarFields := ?_
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · intro field member

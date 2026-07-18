@@ -558,6 +558,7 @@ theorem ConstructorObjectRel.allocationFrame
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := scalarFieldsAfter
     fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
     objectFields := ?_
     usizeFields := ?_ }
   · intro index kind value kindAt valueAt
