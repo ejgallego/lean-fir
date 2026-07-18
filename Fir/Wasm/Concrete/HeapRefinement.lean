@@ -363,6 +363,7 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
       LiveCellRel state witness address cell
+
   | boxed {kind scalar header cell}
       (descriptor : witness.descriptors.lookup? address = some (.boxed kind))
       (objectEq : cell.object = .boxed kind.semanticType scalar.semanticValue)
@@ -387,6 +388,23 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
       LiveCellRel state witness address cell
+
+/-- Canonical concrete representation of a released semantic cell. The old
+payload is intentionally not decoded: only the retained allocation extent and
+the frozen freed-header metadata remain observable. -/
+structure DeadCellRel (state : MemoryState) (address : Word32) : Prop where
+  header : ∃ header,
+    Header.read state.memory address = .ok header ∧
+    address.classify = .heap ∧
+    header.kind = .freed ∧
+    header.persistent = false ∧
+    header.live = false ∧
+    header.refCount = 0 ∧
+    header.aux0 = 0 ∧ header.aux1 = 0 ∧ header.aux2 = 0 ∧ header.aux3 = 0 ∧
+    headerBytes ≤ header.allocationBytes.toNat ∧
+    header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+    address.value + header.allocationBytes.toNat ≤ state.memory.size
+  headerOwned : address.value + headerBytes ≤ state.heapCursor
 
 /-- The recursive natural-limb decoder reads identically when all requested
 slots lie below the preserved prefix. -/
@@ -521,6 +539,24 @@ theorem LiveCellRel.witnessExtension
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
         headerKind ordinary marker extent limbsFit decoded refCount persistent live
+
+/-- Released headers remain canonical through fresh allocation beyond their
+owned prefix. -/
+theorem DeadCellRel.prefixExtension
+    {before after : MemoryState} {address : Word32}
+    (related : DeadCellRel before address)
+    (extension : before.PrefixExtension after) :
+    DeadCellRel after address := by
+  obtain ⟨header, headerRead, addressHeap, headerKind, ordinary, dead, refCount,
+      aux0, aux1, aux2, aux3, minimum, aligned, extentInMemory⟩ := related.header
+  have headerAfter : Header.read after.memory address = .ok header := by
+    rw [extension.readHeader address related.headerOwned]
+    exact headerRead
+  exact {
+    header := ⟨header, headerAfter, addressHeap, headerKind, ordinary, dead, refCount,
+      aux0, aux1, aux2, aux3, minimum, aligned,
+      Nat.le_trans extentInMemory extension.memorySize⟩
+    headerOwned := Nat.le_trans related.headerOwned extension.cursor }
 
 theorem LiveCellRel.headerOwned
     {state : MemoryState} {witness : RefinementWitness}

@@ -1137,6 +1137,16 @@ and auxiliary words. A raw-header regression proves the dedicated `.freed`
 encoding while the public live-header decoder reports the expected dead-object
 failure. Dead-cell refinement can now target one exact representation.
 
+W6.3h establishes that dead-cell boundary. `DeadCellRel` records the canonical
+freed header, its validated retained extent, and prefix ownership without
+attempting to decode stale payload bytes; it is stable under later fresh
+allocations. The generic count-one leaf theorem reduces concrete release to
+that relation, while boxes and heap naturals instantiate its empty concrete
+child-reference premise. The matching source theorem proves their semantic
+owned values contain no heap reference, and the composed theorem joins both
+executions at the dead-cell update. Recursive constructor release and the
+whole-heap live/dead relation remain the next slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

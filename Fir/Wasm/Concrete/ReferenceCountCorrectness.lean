@@ -182,6 +182,90 @@ theorem writeReferenceCount_header
   exact ⟨result, updatedHeader, memory, operation, rfl, rfl, headerWrite,
     finalValid, headerReadAfter⟩
 
+/-- Canonicalize one validated live header as a released allocation while
+preserving the frontier and the checked allocation extent. -/
+theorem releaseHeader
+    {state : MemoryState} {address : Word32} {header : Header}
+    (valid : state.FrontierInvariant)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor) :
+    ∃ result,
+      writeLiveHeader state address header.forRelease = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address := by
+  obtain ⟨heap, _, _, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans headerOwned valid.cursorInBounds
+  obtain ⟨memory, headerWrite, _⟩ :=
+    Header.write_spec state.memory address header.forRelease headerInBounds
+  let result : MemoryState := { state with memory }
+  have operation : writeLiveHeader state address header.forRelease = .ok result := by
+    unfold writeLiveHeader
+    rw [headerWrite]
+    rfl
+  have memorySize : memory.size = state.memory.size :=
+    Header.write_preserves_size state.memory memory address header.forRelease
+      headerInBounds headerWrite
+  have headerReadAfter : Header.read memory address = .ok header.forRelease :=
+    Header.read_of_write_eq_ok state.memory memory address header.forRelease
+      headerInBounds headerWrite
+  have finalValid : result.FrontierInvariant :=
+    valid.writeHeader headerOwned headerWrite
+  refine ⟨result, operation, finalValid, ?_⟩
+  exact {
+    header := ⟨header.forRelease, headerReadAfter, heap,
+      by simp [Header.forRelease], by simp [Header.forRelease],
+      by simp [Header.forRelease], by simp [Header.forRelease],
+      by simp [Header.forRelease], by simp [Header.forRelease],
+      by simp [Header.forRelease], by simp [Header.forRelease],
+      by simpa [Header.forRelease] using minimum,
+      by simpa [Header.forRelease] using aligned,
+      by
+        change address.value + header.allocationBytes.toNat ≤ memory.size
+        rw [memorySize]
+        exact extentInMemory⟩
+    headerOwned := headerOwned }
+
+/-- The count-one leaf branch is exactly canonical header release: there are
+no recursively owned references to visit after the write. -/
+theorem decrementReferenceOnce_leaf_one
+    {state : MemoryState} {address : Word32} {header : Header}
+    (valid : state.FrontierInvariant)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor)
+    (notPromoted : header.isPromotedTag = false)
+    (ordinary : header.persistent = false)
+    (refCount : header.refCount.toNat = 1)
+    (owned : readOwnedReferences state address header = .ok [])
+    (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address := by
+  obtain ⟨result, released, finalValid, deadRelated⟩ :=
+    releaseHeader valid headerRead headerOwned
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
+  have refCountNe : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+  have operation : decrementReferenceOnce state address check = .ok result := by
+    simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+    rw [heap]
+    simp only
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [ordinary])]
+    rw [if_neg (by simpa using refCountNe)]
+    rw [refCount, if_neg (by omega)]
+    rw [owned]
+    rw [released]
+    rfl
+  exact ⟨result, operation, finalValid, deadRelated⟩
+
 /-- A common-header rewrite leaves the recursive natural payload decoder
 unchanged because every limb starts after the 32-byte header. -/
 theorem Header.readNaturalLimbs_of_write_eq_ok
@@ -1111,6 +1195,54 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
       · simpa using persistent
       · simpa using live
 
+/-- Boxes and heap naturals own no concrete child references. At count one,
+both representations therefore transition directly to `DeadCellRel`. -/
+theorem LiveCellRel.decrementReferenceOnce_leaf_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (valid : state.FrontierInvariant) (one : cell.rc = 1) (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address := by
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      rcases leafCell with boxedCell | naturalCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+  | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.boxed == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header = .ok [] := by
+        simp [readOwnedReferences, objectRelated.headerKind]
+      exact Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid
+        objectRelated.headerRead objectRelated.headerOwned notPromoted
+        objectRelated.ordinary countOne owned check
+  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        extent limbsFit decoded refCount persistent live =>
+      have notPromoted : header.isPromotedTag = false := by
+        simp [Header.isPromotedTag, headerKind, ordinary]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header = .ok [] := by
+        simp [readOwnedReferences, headerKind]
+      exact Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid headerRead
+        (LiveCellRel.natural descriptor objectEq headerRead headerKind ordinary marker
+          extent limbsFit decoded refCount persistent live).headerOwned
+        notPromoted ordinary countOne owned check
+
 /-- Complete local increment theorem for every live-cell representation in
 the current W6 heap relation. -/
 theorem LiveCellRel.incrementReference
@@ -1215,6 +1347,83 @@ theorem LiveCellRel.decValueOnce_above_one_eq
   unfold Fir.LeanIR.Impure.decValueOnce
   exact Fir.LeanIR.Impure.decLocation_above_one runtime location cell found
     related.live_eq_true related.persistent_eq_false oneLt
+
+/-- Source count-one release of a box or natural marks the cell dead directly:
+their semantic payloads contain no heap references requiring recursion. -/
+theorem LiveCellRel.decValueOnce_leaf_one_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (one : cell.rc = 1) (check : Bool) :
+    Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+      setCell runtime location { cell with rc := 0, live := false } := by
+  have nonzero : cell.rc ≠ 0 := by omega
+  have notAboveOne : ¬1 < cell.rc := by omega
+  unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
+  simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
+    related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
+  rw [if_neg (by simp [related.persistent_eq_false])]
+  rw [if_neg nonzero, if_neg notAboveOne]
+  rcases leafCell with boxedCell | naturalCell
+  · obtain ⟨kind, scalar, objectEq⟩ := boxedCell
+    have ownedValues : cell.object.ownedValues = #[scalar.semanticValue] := by
+      rw [objectEq]
+      rfl
+    rw [ownedValues]
+    have foldScalar (next : RuntimeState) :
+        Array.foldlM (fun next value =>
+          match value with
+          | .object (.heap child) =>
+              Fir.LeanIR.Impure.decLocationFuel runtime.heap.length next child
+          | _ => .ok next) next #[scalar.semanticValue] = .ok next := by
+      cases scalar <;>
+        simp [BoxedScalar.semanticValue, Array.foldlM, Array.foldlM.loop]
+    cases resultEq : setCell runtime location { cell with rc := 0, live := false } with
+    | error fault => rfl
+    | ok next => exact foldScalar next
+  · obtain ⟨value, objectEq⟩ := naturalCell
+    have ownedValues : cell.object.ownedValues = #[] := by
+      rw [objectEq]
+      rfl
+    rw [ownedValues]
+    cases resultEq : setCell runtime location { cell with rc := 0, live := false } with
+    | error fault => rfl
+    | ok next =>
+        change Except.ok next = Except.ok next
+        rfl
+
+/-- Complete local source/concrete composition for count-one boxes and heap
+naturals: both executions make the semantic cell dead, and concrete memory
+retains exactly the canonical freed allocation relation. -/
+theorem LiveCellRel.decrementReferenceOnce_leaf_refines_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (valid : state.FrontierInvariant)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (one : cell.rc = 1) (check : Bool) :
+    ∃ result,
+      Fir.Wasm.Concrete.decrementReferenceOnce state address check = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        setCell runtime location { cell with rc := 0, live := false } ∧
+      result.FrontierInvariant ∧
+      DeadCellRel result address := by
+  obtain ⟨result, operation, finalValid, deadRelated⟩ :=
+    related.decrementReferenceOnce_leaf_one leafCell valid one check
+  exact ⟨result, operation,
+    related.decValueOnce_leaf_one_eq leafCell runtime location found one check,
+    finalValid, deadRelated⟩
 
 /-- The boxed above-one decrement crosses the complete local refinement
 boundary: concrete and source execution perform the same count update, and
