@@ -42,6 +42,39 @@ theorem LiveHeapRel.incrementReference_tagged
       rw [if_pos isPromoted]
       cases check <;> rfl
 
+/-- Checked decrements retain the same tagged-value split as increments. -/
+theorem LiveHeapRel.decrementReferenceOnce_tagged
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload)
+    (check : Bool) :
+    decrementReferenceOnce state word check =
+      if check then .ok state else .error (.source .expectedHeapReference) := by
+  cases tagged with
+  | immediate actualPayload fits =>
+      simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+      simp [Word32.classify_encodeImmediate]
+      cases check <;> rfl
+  | promoted found =>
+      have promoted := related.promoted payload word found
+      obtain ⟨header, headerRead, headerKind, persistent, _, marker, _, _⟩ :=
+        promoted.header
+      have addressHeap :=
+        (MemoryState.PrefixExtension.readLiveHeader_facts state word header
+          headerRead).1
+      have isPromoted : header.isPromotedTag = true := by
+        unfold Header.isPromotedTag
+        rw [headerKind, persistent, marker]
+        decide
+      simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+      rw [addressHeap]
+      simp only
+      rw [headerRead]
+      simp only [Bind.bind, Except.bind, liftMemory]
+      rw [if_pos isPromoted]
+      cases check <;> rfl
+
 /-- Shared header-level postcondition for ordinary successful increments. It
 separates the common-header write from object-kind-specific payload framing. -/
 theorem incrementReference_header
@@ -531,6 +564,161 @@ theorem BoxedObjectRel.incrementReference
     headerOwned := related.headerOwned
     extent := related.extent
     decoded := by rw [decoderEq]; exact related.decoded }
+
+/-- Object-independent common-header count replacement, specialized here to
+the canonical boxed payload decoder. -/
+theorem BoxedObjectRel.writeReferenceCount
+    {state : MemoryState} {address : Word32} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {header : Header}
+    (related : BoxedObjectRel state address kind scalar header)
+    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      BoxedObjectRel result address kind scalar updatedHeader := by
+  obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans related.headerOwned valid.cursorInBounds
+  let updatedHeader : Header := { header with refCount := nextCount }
+  obtain ⟨memory, headerWrite, _⟩ :=
+    Header.write_spec state.memory address updatedHeader headerInBounds
+  let result : MemoryState := { state with memory }
+  have operation : writeLiveHeader state address updatedHeader = .ok result := by
+    unfold writeLiveHeader
+    rw [headerWrite]
+    rfl
+  have memorySize : memory.size = state.memory.size :=
+    Header.write_preserves_size state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have decodedHeader : Header.read memory address = .ok updatedHeader :=
+    Header.read_of_write_eq_ok state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have headerReadAfter : result.readLiveHeader address = .ok updatedHeader := by
+    unfold MemoryState.readLiveHeader
+    simp [result, heap, decodedHeader]
+    simp only [Bind.bind, Except.bind]
+    simp [updatedHeader, live, minimum, aligned, memorySize, extentInMemory]
+    rfl
+  have finalValid : result.FrontierInvariant :=
+    valid.writeHeader related.headerOwned headerWrite
+  have payloadRead : memory.readUInt64 (address.value + headerBytes) =
+      state.memory.readUInt64 (address.value + headerBytes) :=
+    Header.readUInt64_of_write_eq_ok_payload state.memory memory address updatedHeader
+      (address.value + headerBytes) headerInBounds headerWrite (by omega)
+  have decoderEq :
+      readBoxedScalar result kind address = readBoxedScalar state kind address := by
+    unfold readBoxedScalar
+    rw [heap]
+    simp only
+    rw [headerReadAfter, related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    have boxed : (header.kind == ObjectKind.boxed) = true := by
+      rw [related.headerKind]
+      decide
+    have boxedAfter : (updatedHeader.kind == ObjectKind.boxed) = true := by
+      simpa [updatedHeader] using boxed
+    rw [boxedAfter]
+    simp
+    unfold readHeapBoxedScalar
+    simp only [updatedHeader]
+    rw [payloadRead]
+  refine ⟨result, updatedHeader, operation, rfl, finalValid, headerReadAfter, ?_⟩
+  exact {
+    scalarKind := related.scalarKind
+    headerRead := headerReadAfter
+    headerKind := by simpa [updatedHeader] using related.headerKind
+    ordinary := by simpa [updatedHeader] using related.ordinary
+    allocationBytes := by simpa [updatedHeader] using related.allocationBytes
+    kindCode := by simpa [updatedHeader] using related.kindCode
+    payloadBytes := by simpa [updatedHeader] using related.payloadBytes
+    reserved2 := by simpa [updatedHeader] using related.reserved2
+    reserved3 := by simpa [updatedHeader] using related.reserved3
+    headerOwned := related.headerOwned
+    extent := related.extent
+    decoded := by rw [decoderEq]; exact related.decoded }
+
+/-- Above one, decrement is precisely a live common-header rewrite. -/
+theorem BoxedObjectRel.decrementReferenceOnce_above_one
+    {state : MemoryState} {address : Word32} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {header : Header}
+    (related : BoxedObjectRel state address kind scalar header)
+    (valid : state.FrontierInvariant) (oldCount : Nat)
+    (refCount : header.refCount.toNat = oldCount) (oneLt : 1 < oldCount)
+    (check : Bool) :
+    ∃ result updatedHeader,
+      decrementReferenceOnce state address check = .ok result ∧
+      updatedHeader = { header with refCount := UInt32.ofNat (oldCount - 1) } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      BoxedObjectRel result address kind scalar updatedHeader := by
+  obtain ⟨result, updatedHeader, write, updatedEq, finalValid, headerReadAfter,
+      objectAfter⟩ := related.writeReferenceCount valid (UInt32.ofNat (oldCount - 1))
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      related.headerRead).1
+  have notPromoted : header.isPromotedTag = false := by
+    have different : (ObjectKind.boxed == ObjectKind.natural) = false := by decide
+    simp [Header.isPromotedTag, related.headerKind, different]
+  have refCountNe : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+    omega
+  have operation : decrementReferenceOnce state address check = .ok result := by
+    simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+    rw [heap]
+    simp only
+    rw [related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [related.ordinary])]
+    rw [if_neg (by simpa using refCountNe)]
+    rw [refCount, if_pos oneLt]
+    simpa [updatedEq] using write
+  exact ⟨result, updatedHeader, operation, updatedEq, finalValid, headerReadAfter,
+    objectAfter⟩
+
+/-- First successful decrement refinement: a live box above one remains live,
+retains its scalar payload, and lowers the semantic/concrete count together. -/
+theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+      cell.object = .boxed kind.semanticType scalar.semanticValue)
+    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc - 1 } := by
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
+  | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
+          headerReadAfter, objectAfter⟩ :=
+        objectRelated.decrementReferenceOnce_above_one valid cell.rc refCount oneLt check
+      subst updatedHeader
+      have nextFits : cell.rc - 1 < UInt32.size := by
+        have oldFits := UInt32.toNat_lt_size header.refCount
+        rw [refCount] at oldFits
+        omega
+      refine ⟨result, operation, finalValid, ?_⟩
+      apply LiveCellRel.boxed descriptor (by simpa using objectEq) objectAfter
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' nextFits
+      · simpa using persistent
+      · simpa using live
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
 
 /-- Local live-cell refinement for the first W6.3 ownership case. -/
 theorem LiveCellRel.incrementReference_boxed

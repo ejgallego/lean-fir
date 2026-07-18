@@ -18,6 +18,8 @@ inductive MemoryError where
   | malformedHeader (address allocationBytes : Nat)
   | malformedBoxedHeader (address : Nat)
   | deadObject (address : Word32)
+  | unsupportedOwnershipKind (kind : ObjectKind)
+  | releaseFuelExhausted
   deriving BEq, Repr
 
 abbrev LinearMemory := Array UInt8

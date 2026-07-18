@@ -7,8 +7,13 @@ open Fir.LeanIR.Impure
 
 /-- Concrete execution keeps source-semantic failures distinct from checked
 memory/target failures, matching the W2 structured-trap boundary. -/
+inductive ConcreteAddressFault where
+  | referenceCountUnderflow (address : Word32)
+  deriving BEq, Repr
+
 inductive ConcreteError where
   | source (fault : RuntimeFault)
+  | sourceAddress (fault : ConcreteAddressFault)
   | target (failure : MemoryError)
   deriving BEq, Repr
 
@@ -484,6 +489,62 @@ def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError N
       header.aux0 == bigNaturalMarker do
     throw (.source .expectedObject)
   liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
+
+/-- Load references owned by the current concrete object before marking it
+dead. Constructor object slots are the W6.3 recursive-release fragment;
+closure captures join this decoder with W6.4's typed capture layout. -/
+def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header) :
+    Except ConcreteError (List Word32) :=
+  match header.kind with
+  | .constructor =>
+      (List.range header.aux1.toNat).mapM fun index =>
+        readObjectField state object index
+  | .closure => throw (.target (.unsupportedOwnershipKind .closure))
+  | .freed => throw (.target (.unsupportedOwnershipKind .freed))
+  | .boxed | .string | .natural | .integer | .byteArray | .opaque => .ok []
+
+/-- Fuel-indexed recursive release. Each nested object consumes one unit;
+siblings reuse the remaining depth while threading the updated memory. -/
+def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
+    Except ConcreteError MemoryState
+  | 0, _, _, _ => throw (.target .releaseFuelExhausted)
+  | fuel + 1, state, object, check => do
+      match object.classify with
+      | .immediate =>
+          if check then return state else throw (.source .expectedHeapReference)
+      | .heap =>
+          let header ← liftMemory <| state.readLiveHeader object
+          if header.isPromotedTag then
+            if check then return state else throw (.source .expectedHeapReference)
+          else if header.persistent then
+            return state
+          else if header.refCount == 0 then
+            throw (.sourceAddress (.referenceCountUnderflow object))
+          else if 1 < header.refCount.toNat then
+            writeLiveHeader state object
+              { header with refCount := UInt32.ofNat (header.refCount.toNat - 1) }
+          else
+            let owned ← readOwnedReferences state object header
+            let state ← writeLiveHeader state object
+              { header with refCount := 0, live := false }
+            owned.foldlM (init := state) fun state child =>
+              decrementReferenceOnceFuel fuel state child true
+      | .sentinel | .invalid => throw (.source .expectedObject)
+
+/-- One concrete decrement, including the zero transition and recursive
+release of constructor-owned object fields. The parent is marked dead before
+children are visited, matching FIR's cycle-safe ordering. The allocated byte
+prefix provides a conservative bound on possible nesting depth. -/
+def decrementReferenceOnce (state : MemoryState) (object : Word32)
+    (check : Bool) : Except ConcreteError MemoryState :=
+  decrementReferenceOnceFuel (state.heapCursor / headerBytes + 1) state object check
+
+/-- FIR's multi-decrement repeats the one-step transition exactly; amount zero
+therefore leaves even a non-object operand untouched. -/
+def decrementReference (state : MemoryState) (object : Word32)
+    (amount : Nat) (check : Bool) : Except ConcreteError MemoryState :=
+  (List.replicate amount object).foldlM (init := state) fun state object =>
+    decrementReferenceOnce state object check
 
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
     (fits : payload.toNat ≤ maxImmediatePayload) :

@@ -237,6 +237,22 @@ def incrementedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := 
             shared == 1
       | _, _, _ => false
 
+def decrementedSharedBoxedUInt64Max :
+    Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← incrementedBoxedUInt64Max
+  let state ← decrementReferenceOnce state object true
+  return (state, object)
+
+#guard match decrementedSharedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readBoxedScalar state .uint64 object,
+          readIsShared state object with
+      | .ok header, .ok scalar, .ok shared =>
+          header.refCount == 2 && scalar == .uint64 18446744073709551615 &&
+            shared == 1
+      | _, _, _ => false
+
 /- Tagged references retain their no-ownership representation contract:
 checked increments are no-ops and unchecked increments reject them. -/
 #guard match smallTagged, promotedTagged with
@@ -245,6 +261,23 @@ checked increments are no-ops and unchecked increments reject them. -/
           incrementReference promotedState promoted 1 true,
           incrementReference immediateState immediate 1 false,
           incrementReference promotedState promoted 1 false with
+      | .ok immediateResult, .ok promotedResult,
+          .error (.source .expectedHeapReference),
+          .error (.source .expectedHeapReference) =>
+          match readTag immediateResult immediate, readTag promotedResult promoted with
+          | .ok immediatePayload, .ok promotedPayload =>
+              immediatePayload == 42 &&
+                promotedPayload.toNat == maxImmediatePayload + 1
+          | _, _ => false
+      | _, _, _, _ => false
+  | _, _ => false
+
+#guard match smallTagged, promotedTagged with
+  | .ok (immediateState, immediate), .ok (promotedState, promoted) =>
+      match decrementReferenceOnce immediateState immediate true,
+          decrementReferenceOnce promotedState promoted true,
+          decrementReferenceOnce immediateState immediate false,
+          decrementReferenceOnce promotedState promoted false with
       | .ok immediateResult, .ok promotedResult,
           .error (.source .expectedHeapReference),
           .error (.source .expectedHeapReference) =>

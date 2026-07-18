@@ -1096,6 +1096,17 @@ object field, `USize` field, and scalar field. With all current payload kinds
 covered, W6.3 proceeds to decrement-above-one and then dead-cell/recursive
 release semantics.
 
+W6.3d adds the concrete decrement engine and proves its first successful
+above-one case for boxed cells. Recursive constructor release is explicitly
+fuel-indexed by the allocated prefix, marks the parent dead before visiting
+children, and distinguishes address-bearing source underflow from target
+memory failures. Checked/unchecked tagged decrements retain their exact FIR
+behavior. Proof work found
+`FIR-BUG-impure-none-decLocation-opaque-proof-boundary`: the shared semantic
+`partial def` has no equation theorem, so source-side decrement, deletion,
+reset, and reuse composition require an isolated proof-visible runtime refactor
+on `main` before the remaining W6.3 proofs proceed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
