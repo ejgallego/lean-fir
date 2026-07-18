@@ -930,6 +930,17 @@ constructors continue to use the immediate tag encoding and require no heap
 projection. W6.1 is complete; W6.2 begins with checked field mutation and
 boxing while preserving the same heap and witness relations.
 
+W6.2a establishes the mutable-tag object boundary. Constructor descriptors
+remain allocation/layout metadata, while `ConstructorObjectRel` now relates
+the header tag directly to the current semantic constructor tag; this is the
+invariant required by `setTag` after allocation. The checked concrete
+`writeTag` operation rewrites the canonical common header, and its preservation
+theorem proves exact updated decoding while framing every object and `USize`
+payload read. An executable regression mutates a mixed constructor and checks
+the new tag together with both preserved payload regions. The next slice lifts
+this local object theorem through a non-overlapping-allocation invariant to
+the complete semantic heap, then reuses that frame for field mutation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

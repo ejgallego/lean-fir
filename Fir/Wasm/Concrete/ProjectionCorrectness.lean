@@ -46,12 +46,12 @@ theorem ConstructorObjectRel.readTag_refines
   simp [heap]
   rw [headerRead]
   simp only [Bind.bind, Except.bind]
-  have tag64 : header.aux0.toUInt64 = UInt64.ofNat info.cidx := by
+  have tag64 : header.aux0.toUInt64 = UInt64.ofNat semantic.tag := by
     rw [← tag]
     simp
   have constructorBeq : (ObjectKind.constructor == ObjectKind.constructor) = true := by
     decide
-  simp [liftMemory, headerKind, related.semanticTag, tag64, constructorBeq]
+  simp [liftMemory, headerKind, tag64, constructorBeq]
   rfl
 
 /-- The checked concrete object projection refines the actual W2 semantic

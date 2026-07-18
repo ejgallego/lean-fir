@@ -140,6 +140,16 @@ def readUSizeField (state : MemoryState) (object : Word32) (index : Nat) :
     target.semanticSlotBytes * (objectFields + index)
   liftMemory <| state.memory.readUInt64 offset
 
+/-- Replace the mutable constructor tag while preserving the checked common
+header. Rewriting the complete header keeps one canonical encoding path for
+all metadata updates and leaves the payload bytes untouched. -/
+def writeTag (state : MemoryState) (object : Word32) (tag : Nat) :
+    Except ConcreteError MemoryState := do
+  let header ← readConstructorHeader state object
+  let encoded ← uint32Field "constructor tag" tag
+  let memory ← liftMemory <| { header with aux0 := encoded }.write state.memory object
+  return { state with memory }
+
 partial def naturalLimbs (value : Nat) : List UInt64 :=
   if value < UInt64.size then
     [UInt64.ofNat value]

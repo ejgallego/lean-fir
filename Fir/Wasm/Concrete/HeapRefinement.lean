@@ -17,14 +17,13 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
     header.kind = .constructor ∧
     header.refCount.toNat = 1 ∧
     header.persistent = false ∧
-    header.aux0.toNat = info.cidx ∧
+    header.aux0.toNat = semantic.tag ∧
     header.aux1.toNat = info.size ∧
     header.aux2.toNat = info.usize ∧
     header.aux3.toNat = info.ssize
   headerOwned : address.value + headerBytes ≤ state.heapCursor
   extent : address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
     state.heapCursor
-  semanticTag : semantic.tag = info.cidx
   semanticObjectFields : semantic.objectFields.size = info.size
   semanticUSizeFields : semantic.usizeFields.size = info.usize
   semanticScalarFields : semantic.scalarFields = []
@@ -71,7 +70,6 @@ theorem ConstructorObjectRel.prefixExtension
       objectCount, usizeCount, scalarCount⟩
     headerOwned := Nat.le_trans related.headerOwned extension.cursor
     extent := Nat.le_trans related.extent extension.cursor
-    semanticTag := related.semanticTag
     semanticObjectFields := related.semanticObjectFields
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := related.semanticScalarFields
@@ -144,7 +142,6 @@ theorem ConstructorObjectRel.witnessExtension
     header := related.header
     headerOwned := related.headerOwned
     extent := related.extent
-    semanticTag := related.semanticTag
     semanticObjectFields := related.semanticObjectFields
     semanticUSizeFields := related.semanticUSizeFields
     semanticScalarFields := related.semanticScalarFields

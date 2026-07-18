@@ -268,7 +268,6 @@ theorem allocateConstructor_nonempty_objectRel
     headerOwned := Nat.le_trans
       (Nat.add_le_add_left layoutMinimum address.value) resultExtent
     extent := resultExtent
-    semanticTag := rfl
     semanticObjectFields := semanticArity
     semanticUSizeFields := by simp
     semanticScalarFields := rfl
