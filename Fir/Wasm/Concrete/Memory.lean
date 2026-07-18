@@ -11,10 +11,12 @@ inductive MemoryError where
   | addressSpaceExhausted (requestedEnd : Nat)
   | invalidObjectAddress (word : Word32)
   | unknownObjectKind (code : UInt32)
+  | unknownBoxedScalarKind (code : UInt32)
   | headerValueOverflow (field : String) (value : Nat)
   | nonzeroPadding (address value : Nat)
   | invalidAllocationSize (bytes : Nat)
   | malformedHeader (address allocationBytes : Nat)
+  | malformedBoxedHeader (address : Nat)
   | deadObject (address : Word32)
   deriving BEq, Repr
 
@@ -362,6 +364,38 @@ theorem readUInt64_of_writeUInt64_eq_ok (memory result : LinearMemory)
     return value.toUInt32.toUInt64 + high.toUInt64 * 4294967296) = .ok value
   rw [highReadResult]
   exact congrArg Except.ok (assembleUInt64 value)
+
+/-- A successful 64-bit write preserves every byte outside its eight-byte
+extent. Fresh boxed allocations use this to frame the complete old heap
+prefix after installing their payload. -/
+theorem readByte_of_writeUInt64_eq_ok_other (memory result : LinearMemory)
+    (address : Nat) (value : UInt64) (inBounds : address + 7 < memory.size)
+    (written : writeUInt64 memory address value = .ok result) (other : Nat)
+    (disjoint : other < address ∨ address + 7 < other) :
+    readByte result other = readByte memory other := by
+  obtain ⟨middle, lowWrite, middleSize, highWrite⟩ :=
+    writeUInt64_decompose memory result address value inBounds written
+  calc
+    readByte result other = readByte middle other :=
+      readByte_of_writeUInt32_eq_ok middle result (address + 4)
+        (value >>> (32 : UInt64)).toUInt32 (by omega) highWrite other
+        (by omega) (by omega) (by omega) (by omega)
+    _ = readByte memory other :=
+      readByte_of_writeUInt32_eq_ok memory middle address value.toUInt32
+        (by omega) lowWrite other (by omega) (by omega) (by omega) (by omega)
+
+theorem size_of_writeUInt64_eq_ok (memory result : LinearMemory)
+    (address : Nat) (value : UInt64) (inBounds : address + 7 < memory.size)
+    (written : writeUInt64 memory address value = .ok result) :
+    result.size = memory.size := by
+  obtain ⟨middle, lowWrite, middleSize, highWrite⟩ :=
+    writeUInt64_decompose memory result address value inBounds written
+  obtain ⟨_, actualWrite, finalSize, _, _, _, _, _⟩ :=
+    writeUInt32_spec middle (address + 4)
+      (value >>> (32 : UInt64)).toUInt32 (by omega)
+  rw [actualWrite] at highWrite
+  cases highWrite
+  exact finalSize.trans middleSize
 
 /-- A 64-bit write frames a disjoint 32-bit read. -/
 theorem readUInt32_of_writeUInt64_eq_ok_other (memory result : LinearMemory)

@@ -128,6 +128,66 @@ def promotedTagged : Except ConcreteError (MemoryState × Word32) :=
               value.toNat == maxImmediatePayload + 1
         | _, _ => false
 
+def boxedUInt8Max : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.uint8 255)
+
+#guard match boxedUInt8Max with
+  | .error _ => false
+  | .ok (state, word) =>
+      state.heapCursor == heapBase && word.value == 511 &&
+        match readBoxedScalar state .uint8 word with
+        | .ok scalar => scalar == .uint8 255
+        | .error _ => false
+
+/-- `UInt32.max` is semantically tagged but cannot fit in a wasm32 immediate,
+so boxing reuses the persistent promoted-tag representation. -/
+def boxedUInt32Max : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.uint32 4294967295)
+
+#guard match boxedUInt32Max with
+  | .error _ => false
+  | .ok (state, word) =>
+      state.heapCursor == heapBase + 40 &&
+        match state.readLiveHeader word, readBoxedScalar state .uint32 word with
+        | .ok header, .ok scalar =>
+            header.kind == .natural && header.persistent &&
+              scalar == .uint32 4294967295
+        | _, _ => false
+
+/-- Only payloads above FIR's 63-bit semantic tagged range allocate a real
+`boxed` object. -/
+def boxedUInt64Max : Except ConcreteError (MemoryState × Word32) :=
+  boxScalar MemoryState.initial (.uint64 18446744073709551615)
+
+#guard match boxedUInt64Max with
+  | .error _ => false
+  | .ok (state, word) =>
+      state.heapCursor == heapBase + 40 &&
+        match state.readLiveHeader word, readBoxedScalar state .uint64 word with
+        | .ok header, .ok scalar =>
+            header.kind == .boxed && !header.persistent && header.refCount == 1 &&
+              header.allocationBytes == 40 &&
+              header.aux0 == BoxedScalarKind.uint64.code && header.aux1 == 8 &&
+              header.aux2 == 0 && header.aux3 == 0 &&
+              scalar == .uint64 18446744073709551615
+        | _, _ => false
+
+def semanticBoxedUInt64Max :=
+  Fir.LeanIR.Impure.box (runtime := {}) LCNF.ImpureType.uint64
+    (.scalar (.uint64 18446744073709551615))
+
+#guard match semanticBoxedUInt64Max, boxedUInt64Max with
+  | .ok (semanticState, .object (.heap semanticLocation)),
+      .ok (concreteState, concreteObject) =>
+      semanticLocation == 0 && semanticState.nextLocation == 1 &&
+        match Fir.LeanIR.Impure.unbox semanticState LCNF.ImpureType.uint64
+            (.object (.heap semanticLocation)),
+          readBoxedScalar concreteState .uint64 concreteObject with
+        | .ok (.scalar (.uint64 semantic)), .ok (.uint64 concrete) =>
+            semantic == concrete && concrete == 18446744073709551615
+        | _, _ => false
+  | _, _ => false
+
 def emptyConcreteInfo : LCNF.CtorInfo := {
   name := `Concrete.empty
   cidx := 3

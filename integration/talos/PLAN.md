@@ -1013,6 +1013,26 @@ regressions cover unaligned `UInt16.max` memory round-trip and packed-field
 mutation. All four scalar integer kinds now have concrete read/write and local
 semantic refinement boundaries; boxing and unboxing are next.
 
+W6.2i establishes the heap-backed integer boxing boundary. Box headers store a
+stable five-way `UInt8`/`UInt16`/`UInt32`/`UInt64`/`USize` code in `aux0`, the
+meaningful payload width in `aux1`, zero reserved auxiliaries, and one
+canonical zero-extended eight-byte payload slot. Concrete boxing follows FIR's
+63-bit semantic tagged limit rather than wasm32's 31-bit immediate limit: only
+larger `UInt64`/`USize` payloads allocate a reference-counted box, while the
+existing tagged encoder handles direct and promoted representations.
+
+The decoded live-cell relation now has an exact boxed-object case. Successful
+heap-box allocation preserves the allocation frontier and every old decoded
+cell, extends the ghost location/descriptor bijection, installs the fresh FIR
+boxed cell, and relates the returned wasm32 address at `tobject`. Checked heap
+unboxing validates the stored kind, width, reserved header words, allocation
+extent, and canonical payload before proving agreement with FIR's stored-value
+`unbox` branch. Executable regressions cover an immediate `UInt8`, a promoted
+`UInt32.max`, a genuine `UInt64.max` heap box, and semantic/concrete round-trip
+agreement. The next W6.2 slice proves allocation-side refinement for the
+concrete-only promoted-tag branch and then packages tagged unboxing; no runtime
+import switches before that full representation split is covered.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

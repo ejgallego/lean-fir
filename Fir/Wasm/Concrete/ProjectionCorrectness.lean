@@ -78,6 +78,11 @@ theorem LiveHeapRel.readObjectField_refines
       have valueAt := (getObjectField_eq_ok_iff_of_cell runtime location cell _ index
         value found live objectEq).mp projected
       exact objectRelated.readObjectField_refines kindAt valueAt
+  | boxed _ objectEq _ _ _ _ =>
+      simp [getObjectField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       simp [getObjectField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
@@ -108,6 +113,11 @@ theorem LiveHeapRel.readUSizeField_refines
       have valueAt := (getUSizeField_eq_ok_iff_of_cell runtime location cell _ index
         value found live objectEq).mp projected
       exact objectRelated.readUSizeField_refines valueAt
+  | boxed _ objectEq _ _ _ _ =>
+      simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
@@ -134,6 +144,11 @@ theorem LiveHeapRel.readTag_refines
       have tagEq := Except.ok.inj semanticTag
       rw [← tagEq]
       exact objectRelated.readTag_refines
+  | boxed _ objectEq _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag

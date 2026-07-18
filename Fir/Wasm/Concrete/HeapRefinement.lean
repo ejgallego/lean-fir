@@ -328,8 +328,27 @@ theorem ConstructorObjectRel.witnessExtension
     related.objectFields index kind value kindAt valueAt
   exact ⟨word, read, valueRelated.witnessExtension extension⟩
 
-/-- Relation for live semantic cells implemented by the current W6.1 runtime.
-Dead cells, boxes, closures, and other heap objects receive cases in their
+/-- Exact decoded relation for one canonical heap-backed scalar box. The
+semantic type/value pair is recovered from `kind` and `scalar`; no source
+location identity is stored in linear memory. -/
+structure BoxedObjectRel (state : MemoryState) (address : Word32)
+    (kind : BoxedScalarKind) (scalar : BoxedScalar) (header : Header) : Prop where
+  scalarKind : scalar.kind = kind
+  headerRead : state.readLiveHeader address = .ok header
+  headerKind : header.kind = .boxed
+  ordinary : header.persistent = false
+  allocationBytes : header.allocationBytes.toNat =
+    align8 (headerBytes + target.semanticSlotBytes)
+  kindCode : header.aux0 = kind.code
+  payloadBytes : header.aux1 = UInt32.ofNat kind.payloadBytes
+  reserved2 : header.aux2 = 0
+  reserved3 : header.aux3 = 0
+  headerOwned : address.value + headerBytes ≤ state.heapCursor
+  extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
+  decoded : readBoxedScalar state kind address = .ok scalar
+
+/-- Relation for live semantic cells implemented by the current W6 runtime.
+Dead cells, closures, and other heap objects receive cases in their
 own implementation slices rather than being hidden behind a permissive
 catch-all. -/
 inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
@@ -341,6 +360,14 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (related : ConstructorObjectRel state witness address info fieldKinds semantic)
       (headerRead : state.readLiveHeader address = .ok header)
       (headerKind : header.kind = .constructor)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent)
+      (live : cell.live = true) :
+      LiveCellRel state witness address cell
+  | boxed {kind scalar header cell}
+      (descriptor : witness.descriptors.lookup? address = some (.boxed kind))
+      (objectEq : cell.object = .boxed kind.semanticType scalar.semanticValue)
+      (related : BoxedObjectRel state address kind scalar header)
       (refCount : header.refCount.toNat = cell.rc)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
@@ -383,6 +410,55 @@ theorem MemoryState.PrefixExtension.readNaturalLimbs
         simp [target] at owned ⊢
         omega)]
 
+/-- Canonical boxed headers and payloads decode identically through a fresh
+prefix extension. -/
+theorem BoxedObjectRel.prefixExtension
+    {before after : MemoryState} {address : Word32} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {header : Header}
+    (related : BoxedObjectRel before address kind scalar header)
+    (extension : before.PrefixExtension after) :
+    BoxedObjectRel after address kind scalar header := by
+  have headerAfter := extension.readLiveHeader_eq_ok address header
+    related.headerOwned related.headerRead
+  have payloadOwned :
+      address.value + headerBytes + target.semanticSlotBytes ≤ before.heapCursor := by
+    have extent := related.extent
+    rw [related.allocationBytes] at extent
+    simp [target, headerBytes, align8] at extent ⊢
+    omega
+  have payloadEq := extension.readUInt64
+    (address.value + headerBytes) (by simpa [target] using payloadOwned)
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts before address header
+      related.headerRead).1
+  have decoderEq :
+      readBoxedScalar after kind address = readBoxedScalar before kind address := by
+    unfold readBoxedScalar
+    rw [heap]
+    simp only
+    rw [headerAfter, related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    have boxedBeq : (header.kind == ObjectKind.boxed) = true := by
+      rw [related.headerKind]
+      decide
+    rw [boxedBeq]
+    simp only [if_true]
+    unfold readHeapBoxedScalar
+    rw [payloadEq]
+  exact {
+    scalarKind := related.scalarKind
+    headerRead := headerAfter
+    headerKind := related.headerKind
+    ordinary := related.ordinary
+    allocationBytes := related.allocationBytes
+    kindCode := related.kindCode
+    payloadBytes := related.payloadBytes
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    headerOwned := Nat.le_trans related.headerOwned extension.cursor
+    extent := Nat.le_trans related.extent extension.cursor
+    decoded := by rw [decoderEq]; exact related.decoded }
+
 /-- Every currently implemented live-cell relation is stable through fresh
 allocation when the relation records its complete read extent. -/
 theorem LiveCellRel.prefixExtension
@@ -399,6 +475,9 @@ theorem LiveCellRel.prefixExtension
         objectRelated.headerOwned headerRead
       exact .constructor descriptor objectEq objectAfter headerAfter headerKind refCount
         persistent live
+  | boxed descriptor objectEq objectRelated refCount persistent live =>
+      exact .boxed descriptor objectEq (objectRelated.prefixExtension extension)
+        refCount persistent live
   | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
         decoded refCount persistent live =>
       obtain ⟨heap, _, _, minimum, _, _⟩ :=
@@ -436,6 +515,9 @@ theorem LiveCellRel.witnessExtension
       exact .constructor (extension.descriptors _ _ descriptor) objectEq
         (objectRelated.witnessExtension extension) headerRead headerKind refCount
         persistent live
+  | boxed descriptor objectEq objectRelated refCount persistent live =>
+      exact .boxed (extension.descriptors _ _ descriptor) objectEq objectRelated
+        refCount persistent live
   | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
@@ -448,6 +530,7 @@ theorem LiveCellRel.headerOwned
     address.value + headerBytes ≤ state.heapCursor := by
   cases related with
   | constructor _ _ objectRelated _ _ _ _ _ => exact objectRelated.headerOwned
+  | boxed _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
   | natural _ _ headerRead _ _ _ extent _ _ _ _ _ =>
       have minimum :=
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1

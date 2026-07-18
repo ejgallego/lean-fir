@@ -29,6 +29,7 @@ operation that allocated the object and is not stored as a semantic value in
 linear memory. -/
 inductive AllocationDescriptor where
   | constructor (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+  | boxed (kind : BoxedScalarKind)
   | promotedTag (payload : UInt64)
   | natural (value : Nat)
   deriving Inhabited, BEq, Repr
@@ -82,6 +83,13 @@ def RefinementWitness.bindNatural (witness : RefinementWitness)
   { witness with
       locations := (location, address) :: witness.locations
       descriptors := (address, .natural value) :: witness.descriptors }
+
+def RefinementWitness.bindBoxed (witness : RefinementWitness)
+    (location : Location) (address : Word32)
+    (kind : BoxedScalarKind) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .boxed kind) :: witness.descriptors }
 
 @[simp] theorem RefinementWitness.lookup_bindLocation_self
     (witness : RefinementWitness) (location : Location) (address : Word32) :
@@ -140,6 +148,34 @@ theorem RefinementWitness.lookup_bindConstructor_descriptor_other
       some (.natural value) := by
   simp [RefinementWitness.bindNatural, DescriptorMap.lookup?]
 
+@[simp] theorem RefinementWitness.lookup_bindBoxed_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (kind : BoxedScalarKind) :
+    (witness.bindBoxed location address kind).locations.lookup? location =
+      some address := by
+  simp [RefinementWitness.bindBoxed, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindBoxed_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (kind : BoxedScalarKind) :
+    (witness.bindBoxed location address kind).descriptors.lookup? address =
+      some (.boxed kind) := by
+  simp [RefinementWitness.bindBoxed, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_bindBoxed_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (kind : BoxedScalarKind) (different : other ≠ location) :
+    (witness.bindBoxed location address kind).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindBoxed, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindBoxed_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (kind : BoxedScalarKind) (different : address.value ≠ other.value) :
+    (witness.bindBoxed location address kind).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindBoxed, DescriptorMap.lookup?, different]
+
 /-- Lookup-level monotonicity of proof-only refinement metadata. Allocation
 operations establish this relation before transporting value and heap-cell
 relations to an extended witness. -/
@@ -196,6 +232,33 @@ theorem RefinementWitness.bindConstructor_extends
   · intro old descriptor found
     rw [witness.lookup_bindConstructor_descriptor_other location address old info
       fieldKinds (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding one fresh heap box extends all previously visible proof metadata. -/
+theorem RefinementWitness.bindBoxed_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (kind : BoxedScalarKind)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindBoxed location address kind) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_ }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindBoxed_location_other location old address kind different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindBoxed_descriptor_other location address old kind
+      (descriptorFresh old descriptor found)]
     exact found
 
 /-- The lookup-visible part of a witness is injective and every related word
@@ -274,6 +337,64 @@ theorem RefinementWitness.WellFormed.bindConstructor
       exact promotedAddressFresh payload right promotedFound
     · rw [witness.lookup_bindConstructor_location_other location old address info
         fieldKinds isNew] at locationFound
+      exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
+
+/-- A fresh boxed location preserves the same heap-address injectivity and
+location/promoted-tag partition as a fresh constructor. -/
+theorem RefinementWitness.WellFormed.bindBoxed
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (kind : BoxedScalarKind)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress) :
+    (witness.bindBoxed location address kind).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := ?_ }
+  · intro old oldAddress found
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindBoxed, LocationMap.lookup?] at found
+      cases found
+      exact addressHeap
+    · rw [witness.lookup_bindBoxed_location_other location old address kind isNew] at found
+      exact valid.locationHeap old oldAddress found
+  · intro left right common leftFound rightFound
+    by_cases leftNew : left = location
+    · subst left
+      simp [RefinementWitness.bindBoxed, LocationMap.lookup?] at leftFound
+      have commonEq : common = address := leftFound.symm
+      subst common
+      by_cases rightNew : right = location
+      · exact rightNew.symm
+      · rw [witness.lookup_bindBoxed_location_other location right address kind
+          rightNew] at rightFound
+        exact False.elim ((locationAddressFresh right address rightFound) rfl)
+    · rw [witness.lookup_bindBoxed_location_other location left address kind
+        leftNew] at leftFound
+      by_cases rightNew : right = location
+      · subst right
+        simp [RefinementWitness.bindBoxed, LocationMap.lookup?] at rightFound
+        have commonEq : common = address := rightFound.symm
+        subst common
+        exact False.elim ((locationAddressFresh left address leftFound) rfl)
+      · rw [witness.lookup_bindBoxed_location_other location right address kind
+          rightNew] at rightFound
+        exact valid.locationInjective left right common leftFound rightFound
+  · intro old payload left right locationFound promotedFound
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindBoxed, LocationMap.lookup?] at locationFound
+      have leftEq : left = address := locationFound.symm
+      subst left
+      exact promotedAddressFresh payload right promotedFound
+    · rw [witness.lookup_bindBoxed_location_other location old address kind isNew]
+        at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
 
 inductive HeapReferenceRel (witness : RefinementWitness) :
@@ -415,5 +536,12 @@ theorem ValueRel.new_promoted_tag (witness : RefinementWitness)
     ValueRel (witness.promoteTag payload address) .tagged (.word32 address)
       (.object (.tagged payload)) :=
   .tagged (.promoted (RefinementWitness.lookup_promoteTag_self witness payload address))
+
+theorem ValueRel.new_boxed_result (witness : RefinementWitness)
+    (location : Location) (address : Word32) (kind : BoxedScalarKind) :
+    ValueRel (witness.bindBoxed location address kind) .tobject (.word32 address)
+      (.object (.heap location)) :=
+  .tobject (.heap (.mapped
+    (RefinementWitness.lookup_bindBoxed_location witness location address kind)))
 
 end Fir.Wasm.Concrete

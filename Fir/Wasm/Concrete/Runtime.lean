@@ -67,6 +67,165 @@ def readTag (state : MemoryState) (word : Word32) : Except ConcreteError UInt64 
         throw (.source .expectedConstructor)
   | .sentinel | .invalid => throw (.source .expectedConstructor)
 
+/-- Concrete, typed payload accepted by FIR integer boxing. This deliberately
+excludes floats until the shared semantic runtime has float scalar values. -/
+inductive BoxedScalar where
+  | uint8 (value : UInt8)
+  | uint16 (value : UInt16)
+  | uint32 (value : UInt32)
+  | uint64 (value : UInt64)
+  | usize (value : UInt64)
+  deriving Inhabited, BEq, Repr
+
+def BoxedScalar.kind : BoxedScalar → BoxedScalarKind
+  | .uint8 _ => .uint8
+  | .uint16 _ => .uint16
+  | .uint32 _ => .uint32
+  | .uint64 _ => .uint64
+  | .usize _ => .usize
+
+def BoxedScalar.payload : BoxedScalar → UInt64
+  | .uint8 value => value.toUInt64
+  | .uint16 value => value.toUInt64
+  | .uint32 value => value.toUInt64
+  | .uint64 value | .usize value => value
+
+def BoxedScalar.semanticValue : BoxedScalar → Value
+  | .uint8 value => .scalar (.uint8 value)
+  | .uint16 value => .scalar (.uint16 value)
+  | .uint32 value => .scalar (.uint32 value)
+  | .uint64 value => .scalar (.uint64 value)
+  | .usize value => .usize value
+
+def BoxedScalar.lane : BoxedScalar → LaneValue
+  | .uint8 value => .word32 (Word32.ofUInt8 value)
+  | .uint16 value => .word32 (Word32.ofUInt16 value)
+  | .uint32 value => .word32 (Word32.ofUInt32 value)
+  | .uint64 value | .usize value => .word64 value
+
+def BoxedScalar.ofPayload : BoxedScalarKind → UInt64 → BoxedScalar
+  | .uint8, payload => .uint8 payload.toUInt8
+  | .uint16, payload => .uint16 payload.toUInt16
+  | .uint32, payload => .uint32 payload.toUInt32
+  | .uint64, payload => .uint64 payload
+  | .usize, payload => .usize payload
+
+@[simp] theorem BoxedScalar.ofPayload_kind_payload (scalar : BoxedScalar) :
+    BoxedScalar.ofPayload scalar.kind scalar.payload = scalar := by
+  cases scalar <;> simp [BoxedScalar.kind, BoxedScalar.payload, BoxedScalar.ofPayload]
+
+def BoxedScalarKind.semanticType : BoxedScalarKind → Lean.Expr
+  | .uint8 => LCNF.ImpureType.uint8
+  | .uint16 => LCNF.ImpureType.uint16
+  | .uint32 => LCNF.ImpureType.uint32
+  | .uint64 => LCNF.ImpureType.uint64
+  | .usize => LCNF.ImpureType.usize
+
+/-- Every concrete scalar lane carries exactly its semantic integer value at
+the W6 ABI boundary. -/
+theorem BoxedScalar.valueRel (witness : RefinementWitness) (scalar : BoxedScalar) :
+    ValueRel witness scalar.kind.abiKind scalar.lane scalar.semanticValue := by
+  cases scalar with
+  | uint8 value => exact .uint8 rfl
+  | uint16 value => exact .uint16 rfl
+  | uint32 value => exact .uint32 rfl
+  | uint64 value => exact .uint64
+  | usize value => exact .usize
+
+/-- Allocate one canonical heap-backed box. `boxScalar` calls this only above
+FIR's semantic tagged limit; keeping it public exposes the exact allocation
+and payload-write boundary to the refinement proof. -/
+def allocateBoxedScalar (state : MemoryState) (scalar : BoxedScalar) :
+    Except ConcreteError (MemoryState × Word32) := do
+  let kind := scalar.kind
+  let (state, address) ← liftMemory <|
+    state.allocateObject .boxed target.semanticSlotBytes false kind.code
+      (UInt32.ofNat kind.payloadBytes)
+  let memory ← liftMemory <| state.memory.writeUInt64
+    (address.value + headerBytes) scalar.payload
+  return ({ state with memory }, address)
+
+/-- Decode one checked heap-backed box. The stored kind, meaningful width,
+reserved auxiliaries, allocation extent, and zero-extended payload must all be
+canonical before the semantic scalar is reconstructed. -/
+def readHeapBoxedScalar (state : MemoryState) (address : Word32) (header : Header) :
+    Except ConcreteError BoxedScalar := do
+  let some kind := BoxedScalarKind.ofCode? header.aux0 |
+    throw (.target (.unknownBoxedScalarKind header.aux0))
+  unless !header.persistent do
+    throw (.target (.malformedBoxedHeader address.value))
+  unless header.aux1 == UInt32.ofNat kind.payloadBytes do
+    throw (.target (.malformedBoxedHeader address.value))
+  unless header.aux2 == 0 && header.aux3 == 0 do
+    throw (.target (.malformedBoxedHeader address.value))
+  unless header.allocationBytes.toNat =
+      align8 (headerBytes + target.semanticSlotBytes) do
+    throw (.target (.malformedBoxedHeader address.value))
+  let payload ← liftMemory <| state.memory.readUInt64 (address.value + headerBytes)
+  let scalar := BoxedScalar.ofPayload kind payload
+  unless scalar.payload == payload do
+    throw (.target (.malformedBoxedHeader address.value))
+  return scalar
+
+theorem readHeapBoxedScalar_forAllocation
+    (state : MemoryState) (address : Word32) (scalar : BoxedScalar)
+    (payloadRead : state.memory.readUInt64 (address.value + headerBytes) =
+      .ok scalar.payload) :
+    readHeapBoxedScalar state address
+      (Header.forAllocation .boxed
+        (align8 (headerBytes + target.semanticSlotBytes)) false scalar.kind.code
+          (UInt32.ofNat scalar.kind.payloadBytes)) = .ok scalar := by
+  have payloadRead' :
+      state.memory.readUInt64 (address.value + 32) = .ok scalar.payload := by
+    simpa [headerBytes] using payloadRead
+  unfold readHeapBoxedScalar
+  simp [Header.forAllocation, target, headerBytes, align8, payloadRead']
+  simp only [liftMemory, Bind.bind, Except.bind]
+  rw [BoxedScalar.ofPayload_kind_payload]
+  simp
+  rfl
+
+/-- Decode a semantic box result. Tagged values use the requested result kind,
+matching `scalarFromType`; a heap-backed box returns its stored kind and value,
+matching FIR's intentionally type-erased heap `unbox` branch. -/
+def readBoxedScalar (state : MemoryState) (expected : BoxedScalarKind)
+    (object : Word32) : Except ConcreteError BoxedScalar := do
+  match object.classify with
+  | .immediate =>
+      let some payload := object.decodeImmediate? |
+        throw (.target (.invalidObjectAddress object))
+      return BoxedScalar.ofPayload expected (UInt64.ofNat payload)
+  | .heap =>
+      let header ← liftMemory <| state.readLiveHeader object
+      if header.kind == .boxed then
+        readHeapBoxedScalar state object header
+      else if header.kind == .natural && header.persistent &&
+          header.aux0 == promotedTagMarker then
+        return BoxedScalar.ofPayload expected (← readTag state object)
+      else
+        throw (.source .expectedScalar)
+  | .sentinel | .invalid => throw (.source .expectedObject)
+
+/-- Concrete FIR boxing. The allocation choice follows the source semantic
+tagged limit, not the narrower wasm32 immediate limit. The existing
+`encodeTagged` refinement owns the intermediate persistent representation. -/
+def boxScalar (state : MemoryState) (scalar : BoxedScalar) :
+    Except ConcreteError (MemoryState × Word32) :=
+  if scalar.payload.toNat ≤ maxTaggedPayload then
+    encodeTagged state scalar.payload
+  else
+    allocateBoxedScalar state scalar
+
+theorem boxScalar_of_tagged (state : MemoryState) (scalar : BoxedScalar)
+    (tagged : scalar.payload.toNat ≤ maxTaggedPayload) :
+    boxScalar state scalar = encodeTagged state scalar.payload := by
+  simp [boxScalar, tagged]
+
+theorem boxScalar_of_heap (state : MemoryState) (scalar : BoxedScalar)
+    (heap : maxTaggedPayload < scalar.payload.toNat) :
+    boxScalar state scalar = allocateBoxedScalar state scalar := by
+  simp [boxScalar, Nat.not_le.mpr heap]
+
 /-- Address of one eight-byte constructor object slot. -/
 def objectFieldAddress (base index : Nat) : Nat :=
   base + headerBytes + target.semanticSlotBytes * index

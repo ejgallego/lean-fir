@@ -79,6 +79,33 @@ def Word32.zero : Word32 := ⟨0, by decide⟩
 def Word32.ofNat? (value : Nat) : Option Word32 :=
   if h : value < wordModulus then some ⟨value, h⟩ else none
 
+/-- Canonical wasm32 lane for one source `UInt8`. -/
+def Word32.ofUInt8 (value : UInt8) : Word32 :=
+  ⟨value.toNat, by
+    have bound := value.toNat_lt
+    simp [wordModulus] at bound ⊢
+    omega⟩
+
+/-- Canonical wasm32 lane for one source `UInt16`. -/
+def Word32.ofUInt16 (value : UInt16) : Word32 :=
+  ⟨value.toNat, by
+    have bound := value.toNat_lt
+    simp [wordModulus] at bound ⊢
+    omega⟩
+
+/-- Canonical wasm32 lane for one source `UInt32`. -/
+def Word32.ofUInt32 (value : UInt32) : Word32 :=
+  ⟨value.toNat, by simpa [wordModulus] using value.toNat_lt⟩
+
+@[simp] theorem Word32.ofUInt8_value (value : UInt8) :
+    (Word32.ofUInt8 value).value = value.toNat := rfl
+
+@[simp] theorem Word32.ofUInt16_value (value : UInt16) :
+    (Word32.ofUInt16 value).value = value.toNat := rfl
+
+@[simp] theorem Word32.ofUInt32_value (value : UInt32) :
+    (Word32.ofUInt32 value).value = value.toNat := rfl
+
 inductive ObjectWordClass where
   | sentinel
   | immediate
@@ -164,6 +191,50 @@ def ObjectKind.code : ObjectKind → UInt32
   | .opaque => 8
   | .freed => 255
 
+/-- Integer scalar kinds accepted by FIR's semantic boxing operation. The
+codes are stored in `boxed` header `aux0`; floats stay outside this enum until
+the shared FIR runtime has matching semantic scalar constructors. -/
+inductive BoxedScalarKind where
+  | uint8
+  | uint16
+  | uint32
+  | uint64
+  | usize
+  deriving Inhabited, BEq, DecidableEq, Repr
+
+def BoxedScalarKind.code : BoxedScalarKind → UInt32
+  | .uint8 => 1
+  | .uint16 => 2
+  | .uint32 => 3
+  | .uint64 => 4
+  | .usize => 5
+
+def BoxedScalarKind.ofCode? (code : UInt32) : Option BoxedScalarKind :=
+  if code == BoxedScalarKind.uint8.code then some .uint8
+  else if code == BoxedScalarKind.uint16.code then some .uint16
+  else if code == BoxedScalarKind.uint32.code then some .uint32
+  else if code == BoxedScalarKind.uint64.code then some .uint64
+  else if code == BoxedScalarKind.usize.code then some .usize
+  else none
+
+def BoxedScalarKind.abiKind : BoxedScalarKind → AbiKind
+  | .uint8 => .uint8
+  | .uint16 => .uint16
+  | .uint32 => .uint32
+  | .uint64 => .uint64
+  | .usize => .usize
+
+/-- Number of meaningful low payload bytes in a canonical boxed slot. The
+slot itself remains eight bytes so every semantic value slot has one target
+extent under `wasm32-lean64`. -/
+def BoxedScalarKind.payloadBytes : BoxedScalarKind → Nat
+  | .uint8 | .uint16 | .uint32 => 4
+  | .uint64 | .usize => 8
+
+@[simp] theorem BoxedScalarKind.ofCode_code (kind : BoxedScalarKind) :
+    BoxedScalarKind.ofCode? kind.code = some kind := by
+  cases kind <;> decide
+
 def headerBytes : Nat := 32
 
 def headerKindOffset : Nat := 0
@@ -208,6 +279,11 @@ def concreteBytes : AbiKind → Nat
   | .object | .tagged | .tobject | .erased | .reuseToken
   | .uint8 | .uint16 | .uint32 | .float32 => 4
   | .uint64 | .usize | .float => 8
+
+@[simp] theorem BoxedScalarKind.payloadBytes_eq_concreteBytes
+    (kind : BoxedScalarKind) :
+    kind.payloadBytes = concreteBytes kind.abiKind := by
+  cases kind <;> rfl
 
 theorem concreteBytes_le_slot (kind : AbiKind) :
     concreteBytes kind ≤ target.semanticSlotBytes := by
