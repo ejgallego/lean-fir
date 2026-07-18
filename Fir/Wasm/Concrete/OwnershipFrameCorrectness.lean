@@ -895,6 +895,81 @@ theorem PromotedTagRel.allocationFrame
       by rw [frame.cursor]; exact extent, payloadFits⟩
     decoded := by rw [decoderEq]; exact related.decoded }
 
+/-- One extent-preserving header write plus a new target-cell relation is
+enough to perform the matching semantic replacement and rebuild the complete
+whole-heap refinement. This is the common spatial boundary for count rewrites
+and canonical release. -/
+theorem LiveHeapRel.setCell_of_headerWrite
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell replacement : HeapCell} {targetDescriptor : AllocationDescriptor}
+    {oldHeader updatedHeader : Header} {memory : LinearMemory}
+    (related : LiveHeapRel before witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (targetFound : witness.descriptors.lookup? address = some targetDescriptor)
+    (oldRead : Header.read before.memory address = .ok oldHeader)
+    (resultEq : after = { before with memory })
+    (headerInBounds : address.value + headerBytes ≤ before.memory.size)
+    (written : updatedHeader.write before.memory address = .ok memory)
+    (sameExtent : updatedHeader.allocationBytes = oldHeader.allocationBytes)
+    (finalValid : after.FrontierInvariant)
+    (targetRelated : CellRel after witness address replacement) :
+    ∃ nextRuntime,
+      setCell runtime location replacement = .ok nextRuntime ∧
+      LiveHeapRel after witness nextRuntime := by
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.descriptorSpatial_of_headerWrite targetFound oldRead resultEq
+      headerInBounds written sameExtent
+  have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
+    intro left right equal
+    cases left
+    cases right
+    simp_all
+  have cellFrame : ∀ other otherAddress otherCell,
+      other ≠ location →
+      findCell? runtime.heap other = some otherCell →
+      witness.locations.lookup? other = some otherAddress →
+      CellRel before witness otherAddress otherCell →
+      CellRel after witness otherAddress otherCell := by
+    intro other otherAddress otherCell otherNe foundOther mappedOther otherRelated
+    obtain ⟨otherDescriptor, otherDescriptorFound⟩ := otherRelated.descriptor
+    have different : address.value ≠ otherAddress.value := by
+      intro equal
+      have addressEq : address = otherAddress := wordEq address otherAddress equal
+      subst otherAddress
+      have locationEq := related.witnessWellFormed.locationInjective location other
+        address mapped mappedOther
+      exact otherNe locationEq.symm
+    obtain ⟨otherHeader, otherHeaderRead, _, _, _⟩ :=
+      related.descriptorRegion otherAddress otherDescriptor otherDescriptorFound
+    have frame := related.allocationFrame_of_headerWrite_other targetFound
+      otherDescriptorFound different oldRead otherHeaderRead resultEq headerInBounds
+        written
+    exact otherRelated.allocationFrame otherHeaderRead frame
+  have promotedFrame : ∀ payload other,
+      witness.promotedTags.Contains payload other →
+      PromotedTagRel after witness payload other := by
+    intro payload other promotedMapped
+    have promoted := related.promoted payload other promotedMapped
+    obtain ⟨promotedHeader, promotedHeaderRead, _, _, _, _, _, _⟩ :=
+      promoted.header
+    obtain ⟨_, promotedRawRead, _, _, _, _⟩ :=
+      MemoryState.PrefixExtension.readLiveHeader_facts before other promotedHeader
+        promotedHeaderRead
+    have differentWord : address ≠ other :=
+      related.witnessWellFormed.locationPromotionDisjoint location payload address
+        other mapped promotedMapped
+    have different : address.value ≠ other.value := by
+      intro equal
+      exact differentWord (wordEq address other equal)
+    have frame := related.allocationFrame_of_headerWrite_other targetFound
+      promoted.descriptor different oldRead promotedRawRead resultEq headerInBounds
+        written
+    exact promoted.allocationFrame promotedHeaderRead frame
+  exact related.setCell_of_frames mapped found finalValid targetRelated
+    descriptorRegion descriptorDisjoint cellFrame promotedFrame
+
 /-- Uniform ordinary-header facts needed to expose the exact common-header
 write behind a live-cell ownership transition. -/
 theorem LiveCellRel.ordinaryHeader
@@ -1046,5 +1121,55 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
     oneLt check
   exact ⟨result, nextRuntime, operation, by rw [semanticEq, semanticUpdate],
     finalRelated⟩
+
+/-- Whole-heap source/concrete refinement for count-one boxes and heap
+naturals. The concrete allocation becomes a canonical dead cell, every
+disjoint allocation is framed, and the semantic heap records the matching
+zero-count/dead replacement. -/
+theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (one : cell.rc = 1) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnce state address check = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨targetDescriptor, targetDescriptorFound⟩ := targetRelated.descriptor
+  obtain ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
+      finalValid, deadRelated⟩ :=
+    targetRelated.decrementReferenceOnce_leaf_one leafCell related.frontier one check
+  obtain ⟨_, rawRead, _, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  have sameExtent : header.forRelease.allocationBytes = header.allocationBytes := by
+    rfl
+  let replacement : HeapCell := { cell with rc := 0, live := false }
+  have targetAfter : CellRel result witness address replacement :=
+    .dead (by simp [replacement]) (by simp [replacement])
+      ⟨targetDescriptor, targetDescriptorFound⟩ deadRelated
+  obtain ⟨nextRuntime, semanticUpdate, finalRelated⟩ :=
+    related.setCell_of_headerWrite mapped found targetDescriptorFound rawRead
+      resultEq headerInBounds headerWrite sameExtent finalValid targetAfter
+  have semanticEq := targetRelated.decValueOnce_leaf_one_eq leafCell runtime location
+    found one check
+  exact ⟨result, nextRuntime, operation,
+    by rw [semanticEq, show { cell with rc := 0, live := false } = replacement by rfl,
+      semanticUpdate], finalRelated⟩
 
 end Fir.Wasm.Concrete

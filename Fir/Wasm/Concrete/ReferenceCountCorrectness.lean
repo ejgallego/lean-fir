@@ -342,8 +342,10 @@ theorem releaseHeader
     (valid : state.FrontierInvariant)
     (headerRead : state.readLiveHeader address = .ok header)
     (headerOwned : address.value + headerBytes ≤ state.heapCursor) :
-    ∃ result,
+    ∃ result memory,
       writeLiveHeader state address header.forRelease = .ok result ∧
+      result = { state with memory } ∧
+      header.forRelease.write state.memory address = .ok memory ∧
       result.FrontierInvariant ∧
       DeadCellRel result address := by
   obtain ⟨heap, _, _, minimum, aligned, extentInMemory⟩ :=
@@ -365,7 +367,7 @@ theorem releaseHeader
       headerInBounds headerWrite
   have finalValid : result.FrontierInvariant :=
     valid.writeHeader headerOwned headerWrite
-  refine ⟨result, operation, finalValid, ?_⟩
+  refine ⟨result, memory, operation, rfl, headerWrite, finalValid, ?_⟩
   exact {
     header := ⟨header.forRelease, headerReadAfter, heap,
       by simp [Header.forRelease], by simp [Header.forRelease],
@@ -392,11 +394,14 @@ theorem decrementReferenceOnce_leaf_one
     (refCount : header.refCount.toNat = 1)
     (owned : readOwnedReferences state address header = .ok [])
     (check : Bool) :
-    ∃ result,
+    ∃ result memory,
       decrementReferenceOnce state address check = .ok result ∧
+      result = { state with memory } ∧
+      header.forRelease.write state.memory address = .ok memory ∧
       result.FrontierInvariant ∧
       DeadCellRel result address := by
-  obtain ⟨result, released, finalValid, deadRelated⟩ :=
+  obtain ⟨result, memory, released, resultEq, headerWrite, finalValid,
+      deadRelated⟩ :=
     releaseHeader valid headerRead headerOwned
   have heap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
@@ -417,7 +422,7 @@ theorem decrementReferenceOnce_leaf_one
     rw [owned]
     rw [released]
     rfl
-  exact ⟨result, operation, finalValid, deadRelated⟩
+  exact ⟨result, memory, operation, resultEq, headerWrite, finalValid, deadRelated⟩
 
 /-- A common-header rewrite leaves the recursive natural payload decoder
 unchanged because every limb starts after the 32-byte header. -/
@@ -1359,8 +1364,11 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
     (valid : state.FrontierInvariant) (one : cell.rc = 1) (check : Bool) :
-    ∃ result,
+    ∃ result header memory,
       decrementReferenceOnce state address check = .ok result ∧
+      state.readLiveHeader address = .ok header ∧
+      result = { state with memory } ∧
+      header.forRelease.write state.memory address = .ok memory ∧
       result.FrontierInvariant ∧
       DeadCellRel result address := by
   cases related with
@@ -1380,9 +1388,13 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         rw [refCount, one]
       have owned : readOwnedReferences state address header = .ok [] := by
         simp [readOwnedReferences, objectRelated.headerKind]
-      exact Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid
-        objectRelated.headerRead objectRelated.headerOwned notPromoted
-        objectRelated.ordinary countOne owned check
+      obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
+          deadRelated⟩ :=
+        Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid
+          objectRelated.headerRead objectRelated.headerOwned notPromoted
+          objectRelated.ordinary countOne owned check
+      exact ⟨result, header, memory, operation, objectRelated.headerRead,
+        resultEq, headerWrite, finalValid, deadRelated⟩
   | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
         extent limbsFit decoded refCount persistent live =>
       have notPromoted : header.isPromotedTag = false := by
@@ -1391,10 +1403,14 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         rw [refCount, one]
       have owned : readOwnedReferences state address header = .ok [] := by
         simp [readOwnedReferences, headerKind]
-      exact Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid headerRead
-        (LiveCellRel.natural descriptor objectEq headerRead headerKind ordinary marker
-          extent limbsFit decoded refCount persistent live).headerOwned
-        notPromoted ordinary countOne owned check
+      obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
+          deadRelated⟩ :=
+        Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid headerRead
+          (LiveCellRel.natural descriptor objectEq headerRead headerKind ordinary marker
+            extent limbsFit decoded refCount persistent live).headerOwned
+          notPromoted ordinary countOne owned check
+      exact ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
+        finalValid, deadRelated⟩
 
 /-- Complete local increment theorem for every live-cell representation in
 the current W6 heap relation. -/
@@ -1572,7 +1588,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_refines_one
         setCell runtime location { cell with rc := 0, live := false } ∧
       result.FrontierInvariant ∧
       DeadCellRel result address := by
-  obtain ⟨result, operation, finalValid, deadRelated⟩ :=
+  obtain ⟨result, _, _, operation, _, _, _, finalValid, deadRelated⟩ :=
     related.decrementReferenceOnce_leaf_one leafCell valid one check
   exact ⟨result, operation,
     related.decValueOnce_leaf_one_eq leafCell runtime location found one check,

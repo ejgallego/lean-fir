@@ -1203,6 +1203,17 @@ and reconstructs `LiveHeapRel` for the resulting runtime. Count-one release is
 the next immediate whole-heap case; it reuses the same frame assembly while
 changing the target to the canonical dead-cell relation.
 
+W6.3n completes that count-one leaf case and factors its reusable boundary.
+Successful canonical release now exposes the exact backing memory and
+`Header.forRelease` write in addition to the dead-cell postcondition. A generic
+whole-heap header-write assembler turns any extent-preserving write plus a new
+target `CellRel` into the matching semantic `setCell`, deriving all ordinary,
+promoted, and descriptor frames from disjointness. Boxes and heap naturals at
+count one instantiate it with the canonical freed header and the semantic
+zero-count/dead cell. Recursive constructor release is now the remaining W6.3
+ownership case; it must compose this target release with ordered decrements of
+the constructor's owned children.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
