@@ -772,9 +772,10 @@ products.  The checked suite includes all five scalar maxima, parameterized
 maximum-value round trips for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and
 `USize`, plus a nonempty `List Nat` containing a heap natural.  That last case
 reconstructs the initial constructor graph and executes the compiler-produced
-`getTag` import before returning `UInt64`.  A sibling case returns Lean 4.32's
-unboxed Boolean as `uint8`; both the LCNF and V8 schema decoders accept only
-zero and one for that representation.  Native Lean remains the source oracle.
+`getTag` import before returning `UInt64`.  Sibling nonempty and empty cases
+return Lean 4.32's unboxed Boolean as `uint8`, covering both one and zero; the
+LCNF and V8 schema decoders accept only those values for that representation.
+Native Lean remains the source oracle.
 Talos can subsequently consume the exact same module and inputs, with V8 as
 the reference Wasm engine:
 
