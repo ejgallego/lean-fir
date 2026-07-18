@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-decLocation-opaque-proof-boundary
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-18
 reproduction: Fir/LeanIR/Runtime.lean
-regression: none
+regression: Fir/LeanIR/Runtime.lean
 ---
 
 # Summary
@@ -70,4 +70,13 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved by replacing the opaque `partial def` with structurally recursive
+`decLocationFuel` and a public `decLocation` wrapper whose fuel is bounded by
+the semantic heap length. The parent is still marked dead before recursive
+children are visited, so successful behavior and cycle faults retain their
+existing ordering.
+
+`decLocation_above_one` is the permanent proof regression: it reduces the
+public operation to the exact `setCell` update required by W6 ownership
+refinement. Existing interpreter and differential suites cover deletion,
+recursive release, reset, and reuse behavior after the definition change.

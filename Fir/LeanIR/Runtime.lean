@@ -205,21 +205,47 @@ def incLocation (runtime : RuntimeState) (location amount : Nat) :
     return runtime
   setCell runtime location { cell with rc := cell.rc + amount }
 
-partial def decLocation (runtime : RuntimeState) (location : Location) :
-    Except RuntimeFault RuntimeState := do
-  let cell ← getLiveCell runtime location
-  if cell.persistent then
-    return runtime
-  if cell.rc = 0 then
-    throw (.referenceCountUnderflow location)
-  if cell.rc > 1 then
-    setCell runtime location { cell with rc := cell.rc - 1 }
-  else
-    let runtime ← setCell runtime location { cell with rc := 0, live := false }
-    cell.object.ownedValues.foldlM (init := runtime) fun runtime value =>
-      match value with
-      | .object (.heap child) => decLocation runtime child
-      | _ => .ok runtime
+/-- Proof-visible recursive decrement. Every nested release consumes one unit
+of depth; siblings reuse the remaining depth while threading heap updates. -/
+def decLocationFuel : Nat → RuntimeState → Location → Except RuntimeFault RuntimeState
+  | 0, _, _ => .error (.malformed "reference-count release fuel exhausted")
+  | fuel + 1, runtime, location => do
+      let cell ← getLiveCell runtime location
+      if cell.persistent then
+        return runtime
+      if cell.rc = 0 then
+        throw (.referenceCountUnderflow location)
+      if cell.rc > 1 then
+        setCell runtime location { cell with rc := cell.rc - 1 }
+      else
+        let runtime ← setCell runtime location { cell with rc := 0, live := false }
+        cell.object.ownedValues.foldlM (init := runtime) fun runtime value =>
+          match value with
+          | .object (.heap child) => decLocationFuel fuel runtime child
+          | _ => .ok runtime
+
+/-- The heap length bounds the depth of any successful release chain: a
+visited cell is marked dead before its children, so a cycle faults rather than
+revisiting a live node. -/
+def decLocation (runtime : RuntimeState) (location : Location) :
+    Except RuntimeFault RuntimeState :=
+  decLocationFuel (runtime.heap.length + 1) runtime location
+
+/-- Regression boundary for W6 ownership refinement: the nonrecursive
+above-one branch exposes its exact semantic state update. -/
+theorem decLocation_above_one
+    (runtime : RuntimeState) (location : Location) (cell : HeapCell)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) :
+    decLocation runtime location =
+      setCell runtime location { cell with rc := cell.rc - 1 } := by
+  have nonzero : cell.rc ≠ 0 := by omega
+  unfold decLocation
+  simp only [decLocationFuel, getLiveCell, found, live, ↓reduceIte,
+    Bind.bind, Except.bind]
+  rw [if_neg (by simp [ordinary])]
+  rw [if_neg nonzero, if_pos oneLt]
 
 def incValue (runtime : RuntimeState) (value : Value) (amount : Nat) (check : Bool) :
     Except RuntimeFault RuntimeState :=
