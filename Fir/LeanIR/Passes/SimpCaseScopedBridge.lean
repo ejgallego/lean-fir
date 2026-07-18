@@ -608,15 +608,6 @@ theorem ScopedCodeTrifactor.phaseFactored
     ScopedCodePhaseFactored validCase index source target :=
   ⟨.threePhase factor⟩
 
-/-- A phase factor together with the structural identity needed to align its
-schedule with sibling subtrees. Keeping the identity as evidence avoids
-assuming a global reflexivity theorem for the selector-indexed `CodeRel`. -/
-structure ScopedCodePhaseResult
-    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
-    (source target : LCNF.Code .impure) where
-  factor : ScopedCodePhaseFactor validCase index source target
-  targetRefl : CodeRel validCase target target
-
 /-- Pad a two-phase result with an explicit final structural identity. A
 genuine three-phase result is already normalized. -/
 def ScopedCodePhaseFactor.toTrifactor
@@ -633,11 +624,6 @@ def ScopedCodePhaseFactor.toTrifactor
       structuralAfter := targetRefl
     }
   | .threePhase factor => factor
-
-def ScopedCodePhaseResult.trifactor
-    (result : ScopedCodePhaseResult validCase index source target) :
-    ScopedCodeTrifactor validCase index source target :=
-  result.factor.toTrifactor result.targetRefl
 
 /-- Forget the final structural leg and expose the prefix consumed by the
 existing structural/alpha constructor lifting proof. -/
@@ -685,6 +671,20 @@ structure ScopedAlphaBireflexive (index : ScopeIndex)
     (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
     index.backwardRho index.targetScope index.sourceScope code code
 
+/-- A phase factor together with the structural and alpha identities needed
+to align its schedule with sibling subtrees and append later case rounds. -/
+structure ScopedCodePhaseResult
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) where
+  factor : ScopedCodePhaseFactor validCase index source target
+  targetRefl : CodeRel validCase target target
+  targetAlpha : ScopedAlphaBireflexive index target
+
+def ScopedCodePhaseResult.trifactor
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodeTrifactor validCase index source target :=
+  result.factor.toTrifactor result.targetRefl
+
 /-- Traversal-facing phase relation. Besides source hygiene it returns a
 structural identity for the target, allowing independently transformed
 children to be padded to the common structural/alpha/structural schedule. -/
@@ -698,6 +698,137 @@ theorem ScopedCodePhaseResult.phaseFactored
     (result : ScopedCodePhaseResult validCase index source target) :
     ScopedCodePhaseFactored validCase index source target :=
   ⟨result.factor⟩
+
+/-- Identity phase round used to pad a shorter sibling trace. Both identity
+proofs are explicit because neither selector-indexed structural reflexivity
+nor scoped alpha reflexivity is valid without evidence. -/
+def ScopedCodePhaseResult.identity
+    (structural : CodeRel validCase code code)
+    (alpha : ScopedAlphaBireflexive index code) :
+    ScopedCodePhaseResult validCase index code code := {
+  factor := .twoPhase {
+    middle := code
+    structural := structural
+    alphaForward := alpha.forward
+    alphaBackward := alpha.backward
+  }
+  targetRefl := structural
+  targetAlpha := alpha
+}
+
+/-- Nonempty sequence of local phase rounds. Nested case simplifiers append
+rounds instead of trying to compress an unbounded trace back into one
+two/three-phase factor. -/
+inductive ScopedCodePhaseTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    LCNF.Code .impure → LCNF.Code .impure → Type where
+  | single (round : ScopedCodePhaseResult validCase index source target) :
+      ScopedCodePhaseTrace validCase index source target
+  | trans (round : ScopedCodePhaseResult validCase index source middle)
+      (rest : ScopedCodePhaseTrace validCase index middle target) :
+      ScopedCodePhaseTrace validCase index source target
+
+theorem ScopedCodePhaseTrace.targetRefl
+    (trace : ScopedCodePhaseTrace validCase index source target) :
+    CodeRel validCase target target :=
+  match trace with
+  | .single round => round.targetRefl
+  | .trans _ rest => rest.targetRefl
+
+theorem ScopedCodePhaseTrace.targetAlpha
+    (trace : ScopedCodePhaseTrace validCase index source target) :
+    ScopedAlphaBireflexive index target :=
+  match trace with
+  | .single round => round.targetAlpha
+  | .trans _ rest => rest.targetAlpha
+
+def ScopedCodePhaseTrace.rounds
+    (trace : ScopedCodePhaseTrace validCase index source target) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+/-- Sequential composition retains every intermediate phase round. -/
+def ScopedCodePhaseTrace.append
+    (left : ScopedCodePhaseTrace validCase index source middle)
+    (right : ScopedCodePhaseTrace validCase index middle target) :
+    ScopedCodePhaseTrace validCase index source target :=
+  match left with
+  | .single round => .trans round right
+  | .trans round rest => .trans round (rest.append right)
+
+/-- Append a semantically inert round, making endpoint padding explicit. -/
+def ScopedCodePhaseTrace.pad
+    (trace : ScopedCodePhaseTrace validCase index source target) :
+    ScopedCodePhaseTrace validCase index source target :=
+  trace.append (.single
+    (.identity trace.targetRefl trace.targetAlpha))
+
+theorem ScopedCodePhaseTrace.rounds_append
+    (left : ScopedCodePhaseTrace validCase index source middle)
+    (right : ScopedCodePhaseTrace validCase index middle target) :
+    (left.append right).rounds = left.rounds + right.rounds := by
+  induction left with
+  | single round => rfl
+  | trans round rest ih =>
+      simp [ScopedCodePhaseTrace.append, ScopedCodePhaseTrace.rounds, ih,
+        Nat.add_assoc]
+
+@[simp] theorem ScopedCodePhaseTrace.rounds_pad
+    (trace : ScopedCodePhaseTrace validCase index source target) :
+    trace.pad.rounds = trace.rounds + 1 := by
+  rw [ScopedCodePhaseTrace.pad, ScopedCodePhaseTrace.rounds_append]
+  rfl
+
+def ScopedCodePhaseResult.trace
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodePhaseTrace validCase index source target :=
+  .single result
+
+def ScopedCodePhaseTraced
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    Nonempty (ScopedCodePhaseTrace validCase index source target)
+
+theorem ScopedCodePhaseResult.traced
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  ⟨result.trace⟩
+
+theorem ScopedCodePhaseTrace.traced
+    (trace : ScopedCodePhaseTrace validCase index source target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  ⟨trace⟩
+
+theorem scopedCodePhaseTraced_trans
+    (left : ScopedCodePhaseTraced validCase index source middle)
+    (right : ScopedCodePhaseTraced validCase index middle target) :
+    ScopedCodePhaseTraced validCase index source target := by
+  rcases left with ⟨left⟩
+  rcases right with ⟨right⟩
+  exact (left.append right).traced
+
+theorem scopedCodePhaseTraced_pad
+    (related : ScopedCodePhaseTraced validCase index source target) :
+    ScopedCodePhaseTraced validCase index source target := by
+  rcases related with ⟨trace⟩
+  exact trace.pad.traced
+
+/-- Root-hygiene presentation used by one-round traversal laws. -/
+def ScopedCodePhaseTracedOnAlphaReflexive
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedAlphaBireflexive index source →
+      ScopedCodePhaseTraced validCase index source target
+
+theorem scopedCodePhaseTracedOnAlphaReflexive_of_result
+    (related : ScopedCodePhaseResultOnAlphaReflexive
+      validCase index source target) :
+    ScopedCodePhaseTracedOnAlphaReflexive
+      validCase index source target := by
+  intro reflexive
+  rcases related reflexive with ⟨result⟩
+  exact result.traced
 
 mutual
 
@@ -1897,6 +2028,20 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
           (.let declaration childFactor.structuralAfter)
       }
       targetRefl := .aligned (.let declaration childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | letE declaration leftFresh rightFresh leftJoinFresh
+              rightJoinFresh _ =>
+              exact .letE declaration leftFresh rightFresh leftJoinFresh
+                rightJoinFresh childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | letE declaration leftFresh rightFresh leftJoinFresh
+              rightJoinFresh _ =>
+              exact .letE declaration leftFresh rightFresh leftJoinFresh
+                rightJoinFresh childResult.targetAlpha.backward
     }⟩
   jp := by
     intro index fvarId binderName params type leftBody rightBody
@@ -1946,6 +2091,27 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned (.jp fvarId binderName params type
         bodyResult.targetRefl continuationResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | jp leftFresh rightFresh bodyShape _ =>
+              exact .jp leftFresh rightFresh
+                (paramBodyRelated_replaceCode (index := index) bodyShape
+                  (by simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+                      LCNF.FunDecl.value] using
+                    bodyResult.targetAlpha.forward))
+                continuationResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | jp leftFresh rightFresh bodyShape _ =>
+              exact .jp leftFresh rightFresh
+                (paramBodyRelated_replaceCode_backward (index := index)
+                  bodyShape
+                  (by simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+                      LCNF.FunDecl.value] using
+                    bodyResult.targetAlpha.backward))
+                continuationResult.targetAlpha.backward
     }⟩
   jmp := by
     intro index fvarId args parent
@@ -1954,6 +2120,7 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
     exact ⟨{
       factor := .twoPhase factor
       targetRefl := .aligned (.jmp fvarId args)
+      targetAlpha := parent
     }⟩
   ret := by
     intro index fvarId parent
@@ -1962,6 +2129,7 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
     exact ⟨{
       factor := .twoPhase factor
       targetRefl := .aligned (.return fvarId)
+      targetAlpha := parent
     }⟩
   unreach := by
     intro index type parent
@@ -1970,6 +2138,7 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
     exact ⟨{
       factor := .twoPhase factor
       targetRefl := .aligned (.unreach type)
+      targetAlpha := parent
     }⟩
   oset := by
     intro index fvarId fieldIndex value left right child parent
@@ -1997,6 +2166,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned
         (.oset fvarId fieldIndex value childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | oset object field _ =>
+              exact .oset object field childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | oset object field _ =>
+              exact .oset object field childResult.targetAlpha.backward
     }⟩
   uset := by
     intro index fvarId fieldIndex value left right child parent
@@ -2024,6 +2203,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned
         (.uset fvarId fieldIndex value childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | uset object field _ =>
+              exact .uset object field childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | uset object field _ =>
+              exact .uset object field childResult.targetAlpha.backward
     }⟩
   sset := by
     intro index fvarId width offset value type left right child parent
@@ -2051,6 +2240,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned
         (.sset fvarId width offset value type childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | sset object field _ =>
+              exact .sset object field childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | sset object field _ =>
+              exact .sset object field childResult.targetAlpha.backward
     }⟩
   setTag := by
     intro index fvarId tag left right child parent
@@ -2078,6 +2277,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned
         (.setTag fvarId tag childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | setTag object _ =>
+              exact .setTag object childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | setTag object _ =>
+              exact .setTag object childResult.targetAlpha.backward
     }⟩
   inc := by
     intro index fvarId amount check persistent left right child parent
@@ -2105,6 +2314,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned
         (.inc fvarId amount check persistent childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | inc object _ =>
+              exact .inc object childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | inc object _ =>
+              exact .inc object childResult.targetAlpha.backward
     }⟩
   dec := by
     intro index fvarId amount check persistent objects left right child parent
@@ -2133,6 +2352,16 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
       }
       targetRefl := .aligned (.dec fvarId amount check persistent objects
         childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | dec object _ =>
+              exact .dec object childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | dec object _ =>
+              exact .dec object childResult.targetAlpha.backward
     }⟩
   del := by
     intro index fvarId left right child parent
@@ -2159,11 +2388,21 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
           (.del fvarId childFactor.structuralAfter)
       }
       targetRefl := .aligned (.del fvarId childResult.targetRefl)
+      targetAlpha := by
+        constructor
+        · cases parent.forward with
+          | terminal impossible => cases impossible
+          | del object _ =>
+              exact .del object childResult.targetAlpha.forward
+        · cases parent.backward with
+          | terminal impossible => cases impossible
+          | del object _ =>
+              exact .del object childResult.targetAlpha.backward
     }⟩
 
 /-- The phase-aware recursive boundary has the same local-kernel reduction as
 the older two-phase relation. The stronger kernel result additionally records
-target structural identity for schedule alignment. -/
+target structural and alpha identities for schedule alignment. -/
 theorem scopedCodePhaseResult_caseBoundary_iff_kernel :
     ScopedCaseBoundarySound
         (ScopedCodePhaseResultOnAlphaReflexive validCase) ↔
@@ -2174,7 +2413,7 @@ theorem scopedCodePhaseResult_caseBoundary_iff_kernel :
 
 /-- End-to-end recursive traversal from a phase-aware local case kernel.
 The result exposes the honest two/three-phase classification while retaining
-the target identity only as internal traversal evidence. -/
+the target identities only as internal traversal evidence. -/
 theorem shadowCode_scopedPhaseFactored_of_caseKernel
     (caseKernel : ScopedCaseKernelLaws
       (ScopedCodePhaseResultOnAlphaReflexive validCase))

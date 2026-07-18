@@ -98,6 +98,61 @@ theorem structuralAlphaStructuralSamePhaseCorrectOn
       (externals := externals) (entries := entries) witness.structuralAfter
       entry member args admissible.2 observation)
 
+/-- Nonempty sequence of whole-program structural/alpha/structural rounds.
+This is the semantic counterpart of nested scoped phase traces. -/
+inductive StructuralAlphaStructuralTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    ImpureProgram → ImpureProgram → Type where
+  | single
+      (round : StructuralAlphaStructuralPrograms validCase before after) :
+      StructuralAlphaStructuralTrace validCase before after
+  | trans
+      (round : StructuralAlphaStructuralPrograms validCase before middle)
+      (rest : StructuralAlphaStructuralTrace validCase middle after) :
+      StructuralAlphaStructuralTrace validCase before after
+
+def StructuralAlphaStructuralTrace.rounds
+    (trace : StructuralAlphaStructuralTrace validCase before after) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+def StructuralAlphaStructuralTrace.append
+    (left : StructuralAlphaStructuralTrace validCase before middle)
+    (right : StructuralAlphaStructuralTrace validCase middle after) :
+    StructuralAlphaStructuralTrace validCase before after :=
+  match left with
+  | .single round => .trans round right
+  | .trans round rest => .trans round (rest.append right)
+
+/-- Every structural round retains its own pair of readiness obligations. -/
+def StructuralAlphaStructuralTrace.Admissible (externals : ExternalSpec)
+    (trace : StructuralAlphaStructuralTrace validCase before after)
+    (entry : Name) (args : Array Value) : Prop :=
+  match trace with
+  | .single round =>
+      StructuralAlphaStructuralAdmissible externals round entry args
+  | .trans round rest =>
+      StructuralAlphaStructuralAdmissible externals round entry args ∧
+        rest.Admissible externals entry args
+
+/-- Arbitrarily many phase rounds compose without collapsing intermediate
+structural or alpha edges. -/
+theorem structuralAlphaStructuralTraceSamePhaseCorrectOn
+    (trace : StructuralAlphaStructuralTrace validCase before after) :
+    SamePhaseCorrectOn (Impure.semantics externals) before after entries
+      (trace.Admissible externals) := by
+  induction trace with
+  | single round =>
+      exact structuralAlphaStructuralSamePhaseCorrectOn round
+  | trans round rest ih =>
+      intro entry member args admissible observation
+      exact
+        (structuralAlphaStructuralSamePhaseCorrectOn
+          (externals := externals) (entries := entries) round
+          entry member args admissible.1 observation).trans
+        (ih entry member args admissible.2 observation)
+
 /-- Evidence for the transparent compiler shadow followed by an alpha step.
 `caseSound` remains explicit because Lean 4.32's actual recursive simpCase
 implementation is private and opaque to downstream kernel proofs. -/

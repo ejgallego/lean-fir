@@ -101,6 +101,19 @@ def alphaSingletonFoldValidCase
 
 #guard shadowSimplifyCases alphaSingletonFoldCases == alphaLeft
 
+/-- Nested phase-depth fixture. Recursive traversal first turns the false arm
+from a folded singleton into `alphaLeft`; the parent table then alpha-folds
+that result with `alphaRight` and eliminates its own singleton. -/
+def nestedPhaseDepthCases : LCNF.Cases .impure :=
+  .mk `NestedBool objType c #[
+    .ctorAlt falseInfo alphaSingletonFoldCode,
+    .ctorAlt trueInfo alphaRight]
+
+def nestedPhaseDepthCode : LCNF.Code .impure :=
+  .cases nestedPhaseDepthCases
+
+#guard shadowCode? 3 nestedPhaseDepthCode == some alphaLeft
+
 /-!
 `Code.alphaEqv` relies on the compiler invariant that every local `FVarId` is
 globally fresh within a declaration. Reusing `x` below makes the Boolean test
@@ -805,7 +818,29 @@ def alphaSingletonFoldPhaseResult :
       alphaSingletonFoldCode alphaLeft := {
   factor := .threePhase alphaSingletonFoldThreePhaseFactor
   targetRefl := alphaLeftStructuralRefl
+  targetAlpha := alphaLeftAlphaBireflexiveAtFoldScope
 }
+
+def alphaSingletonFoldTrace :
+    ScopedCodePhaseTrace alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft :=
+  alphaSingletonFoldPhaseResult.trace
+
+def alphaSingletonFoldPaddedTrace :
+    ScopedCodePhaseTrace alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft :=
+  alphaSingletonFoldTrace.pad
+
+#guard alphaSingletonFoldTrace.rounds == 1
+#guard alphaSingletonFoldPaddedTrace.rounds == 2
+
+theorem alphaSingletonFoldPaddedTrace_endpointStructural :
+    CodeRel alphaSingletonFoldValidCase alphaLeft alphaLeft :=
+  alphaSingletonFoldPaddedTrace.targetRefl
+
+theorem alphaSingletonFoldPaddedTrace_endpointAlpha :
+    ScopedAlphaBireflexive alphaFoldScopeIndex alphaLeft :=
+  alphaSingletonFoldPaddedTrace.targetAlpha
 
 /-- Concrete phase-aware case boundary for the compiler's combined
 fold-and-eliminate result. -/
@@ -1435,6 +1470,90 @@ theorem alphaSingletonComposedCorrect :
         alphaSingletonStructuralAlphaStructural) :=
   structuralAlphaStructuralSamePhaseCorrectOn
     alphaSingletonStructuralAlphaStructural
+
+theorem alphaLeftParamBodyReflexiveForward :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList
+      alphaLeft alphaLeft := by
+  apply ParamBodyRelated.cons
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · apply ParamBodyRelated.cons
+    · exact xFreshForC
+    · exact xFreshForC
+    · intro old oldScoped; simp at oldScoped
+    · intro old oldScoped; simp at oldScoped
+    · exact .nil alphaLeftAlphaBireflexiveAtFoldScope.forward
+
+theorem alphaLeftParamBodyReflexiveBackward :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList
+      alphaLeft alphaLeft := by
+  apply ParamBodyRelated.cons
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · intro old oldScoped; simp at oldScoped
+  · apply ParamBodyRelated.cons
+    · exact xFreshForC
+    · exact xFreshForC
+    · intro old oldScoped; simp at oldScoped
+    · intro old oldScoped; simp at oldScoped
+    · exact .nil alphaLeftAlphaBireflexiveAtFoldScope.backward
+
+theorem alphaSingletonAfterProgramsStructuralRefl :
+    ProgramRelated (CodeRel alphaSingletonFoldValidCase)
+      alphaSingletonAfterProgram alphaSingletonAfterProgram := by
+  exact .cons {
+    name_eq := rfl
+    levelParams_eq := rfl
+    type_eq := rfl
+    params_eq := rfl
+    safe_eq := rfl
+    value := .code alphaLeftStructuralRefl
+    recursive_eq := rfl
+    inlineAttr_eq := rfl
+  } .nil
+
+theorem alphaSingletonAfterProgramsAlphaBirelated :
+    ProgramsBirelated alphaSingletonAfterProgram
+      alphaSingletonAfterProgram := {
+  forward := alphaFoldProgramsRelatedOfParamBody
+    alphaLeftParamBodyReflexiveForward
+  backward := alphaFoldProgramsRelatedOfParamBody
+    alphaLeftParamBodyReflexiveBackward
+}
+
+def alphaSingletonIdentityRound :
+    StructuralAlphaStructuralPrograms alphaSingletonFoldValidCase
+      alphaSingletonAfterProgram alphaSingletonAfterProgram := {
+  structuralMiddle := alphaSingletonAfterProgram
+  alphaMiddle := alphaSingletonAfterProgram
+  structuralBefore := alphaSingletonAfterProgramsStructuralRefl
+  alpha := alphaSingletonAfterProgramsAlphaBirelated
+  structuralAfter := alphaSingletonAfterProgramsStructuralRefl
+}
+
+def alphaSingletonTwoRoundTrace :
+    StructuralAlphaStructuralTrace alphaSingletonFoldValidCase
+      alphaSingletonBeforeProgram alphaSingletonAfterProgram :=
+  .trans alphaSingletonStructuralAlphaStructural
+    (.single alphaSingletonIdentityRound)
+
+#guard alphaSingletonTwoRoundTrace.rounds == 2
+
+/-- Multi-round semantic regression: the real folded-singleton round composes
+with an explicit identity round without collapsing either phase boundary. -/
+theorem alphaSingletonTwoRoundCorrect :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      alphaSingletonBeforeProgram alphaSingletonAfterProgram alphaFoldEntries
+      (alphaSingletonTwoRoundTrace.Admissible externals) :=
+  structuralAlphaStructuralTraceSamePhaseCorrectOn
+    alphaSingletonTwoRoundTrace
 
 theorem alphaFoldAlphaProgramsBirelated :
     ProgramsBirelated alphaFoldIntermediateProgram alphaFoldAfterProgram := {
@@ -2186,6 +2305,7 @@ def checkFixtures : CoreM Unit := do
   checkActualSimpCase `nestedFoldAlphaSingleton nestedAlphaSingletonFoldCode
     nestedAlphaSingletonFoldExpected
   checkActualSimpCase `mixedPhaseJoin mixedPhaseJoinSource mixedPhaseJoinTarget
+  checkActualSimpCase `nestedPhaseDepth nestedPhaseDepthCode alphaLeft
   checkActualAgreement 512 recursiveTraversalCorpus
 
 elab "#check_simp_case_fixtures" : command =>

@@ -98,7 +98,8 @@ classifies the old two-phase and corrected three-phase paths; and
 `ScopedSingletonPhaseEvidence` exposes both direct and folded singletons.
 
 `ScopedCodePhaseResult` adds the target structural identity needed to align
-independently transformed children. The generic
+independently transformed children and now also retains target alpha identity
+for later multi-round padding. The generic
 `scopedCodePhaseResultOnAlphaReflexive_traversalLaws` now covers every
 non-case constructor, including a `jp` whose body is three-phase and whose
 continuation is two-phase. `scopedCodePhaseResult_caseBoundary_iff_kernel`
