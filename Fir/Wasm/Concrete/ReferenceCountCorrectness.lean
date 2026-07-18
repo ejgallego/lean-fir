@@ -912,6 +912,46 @@ theorem LiveCellRel.persistent_eq_false
       rw [← persistent]
       exact ordinary
 
+/-- Above one, the source ownership operation takes the same nonrecursive
+count-rewrite step for every ordinary cell in the concrete heap relation. -/
+theorem LiveCellRel.decValueOnce_above_one_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (oneLt : 1 < cell.rc) (check : Bool) :
+    Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+      setCell runtime location { cell with rc := cell.rc - 1 } := by
+  unfold Fir.LeanIR.Impure.decValueOnce
+  exact Fir.LeanIR.Impure.decLocation_above_one runtime location cell found
+    related.live_eq_true related.persistent_eq_false oneLt
+
+/-- The boxed above-one decrement crosses the complete local refinement
+boundary: concrete and source execution perform the same count update, and
+the resulting concrete cell still decodes as that updated semantic cell. -/
+theorem LiveCellRel.decrementReferenceOnce_boxed_refines_above_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+      cell.object = .boxed kind.semanticType scalar.semanticValue)
+    (valid : state.FrontierInvariant)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (oneLt : 1 < cell.rc) (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        setCell runtime location { cell with rc := cell.rc - 1 } ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc - 1 } := by
+  obtain ⟨result, operation, finalValid, relatedAfter⟩ :=
+    related.decrementReferenceOnce_boxed_above_one boxedCell valid oneLt check
+  exact ⟨result, operation,
+    related.decValueOnce_above_one_eq runtime location found oneLt check,
+    finalValid, relatedAfter⟩
+
 /-- Every currently represented ordinary live cell takes the same semantic
 increment step; the object-specific concrete theorem only has to frame its
 payload decoder. -/

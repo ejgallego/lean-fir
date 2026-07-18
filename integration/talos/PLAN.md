@@ -1107,6 +1107,16 @@ behavior. Proof work found
 reset, and reuse composition require an isolated proof-visible runtime refactor
 on `main` before the remaining W6.3 proofs proceed.
 
+W6.3e resolves that proof boundary at a deliberate resynchronization
+checkpoint. Shared commit `587e339` replaces the opaque semantic decrement
+with an extensionally equivalent fuel-indexed definition and publishes the
+above-one equation. The Wasm branch rebased exactly onto that commit and
+passed a full Lean Beam dependency resync, root build, and Talos build before
+dependent proof work resumed. The first composed theorem now proves that a
+boxed cell above one takes the same source and concrete count update and
+retains its decoded payload relation. Natural and constructor above-one
+framing are next, followed by the zero transition and recursive release.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
