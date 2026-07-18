@@ -337,6 +337,23 @@ def incrementedMixedConstructor : Except ConcreteError (MemoryState × Word32) :
             usize == 0 && scalar == 0
       | _, _, _, _, _ => false
 
+/-- Constructor decrement above one retains every mixed payload region. -/
+def decrementedMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← incrementedMixedConstructor
+  let state ← decrementReferenceOnce state object true
+  return (state, object)
+
+#guard match decrementedMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readTag state object,
+          readObjectField state object 0, readUSizeField state object 0,
+          readScalarUInt64Field state object 2 0 with
+      | .ok header, .ok tag, .ok field, .ok usize, .ok scalar =>
+          header.refCount == 2 && tag == 3 && field.value == 23 &&
+            usize == 0 && scalar == 0
+      | _, _, _, _, _ => false
+
 #guard match concreteMixedConstructor with
   | .error _ => false
   | .ok (state, object) =>
@@ -462,6 +479,22 @@ def incrementedLargeNatural : Except ConcreteError (MemoryState × Word32) := do
           readIsShared state object with
       | .ok header, .ok value, .ok shared =>
           header.kind == .natural && header.refCount == 5 &&
+            value == Fir.LeanIR.Impure.maxTaggedPayload + 1 && shared == 1
+      | _, _, _ => false
+
+/-- Natural decrement above one frames every stored limb. -/
+def decrementedLargeNatural : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← incrementedLargeNatural
+  let state ← decrementReferenceOnce state object true
+  return (state, object)
+
+#guard match decrementedLargeNatural with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readNatural state object,
+          readIsShared state object with
+      | .ok header, .ok value, .ok shared =>
+          header.kind == .natural && header.refCount == 4 &&
             value == Fir.LeanIR.Impure.maxTaggedPayload + 1 && shared == 1
       | _, _, _ => false
 

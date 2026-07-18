@@ -1117,6 +1117,17 @@ boxed cell above one takes the same source and concrete count update and
 retains its decoded payload relation. Natural and constructor above-one
 framing are next, followed by the zero transition and recursive release.
 
+W6.3f completes the nonrecursive decrement matrix. Common-header count
+replacement is now factored independently of the ownership operation;
+constructor fields and natural limbs prove that frame once, then increment and
+decrement select their respective runtime branches around it. A uniform
+`LiveCellRel` theorem covers constructors, boxes, and heap naturals, and its
+source/concrete composition uses the shared semantic above-one equation.
+Executable regressions decrement shared mixed constructors and large naturals
+while rechecking all decoded payload regions. The next boundary is count one:
+introduce dead-cell refinement, prove leaf deletion, and then lift recursive
+constructor release.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
