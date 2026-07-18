@@ -945,6 +945,29 @@ theorem mixedPhaseJoinFactored :
   rcases related mixedPhaseJoinAlphaBireflexive with ⟨result⟩
   exact result.phaseFactored
 
+/-- Unequal-depth trace regression: the join body carries a real phase round
+plus one padded round, while the unchanged continuation carries one round.
+The generic join-point trace law pads only the continuation before zipping. -/
+theorem mixedDepthJoinTraced :
+    ScopedCodePhaseTraced alphaSingletonFoldValidCase alphaFoldScopeIndex
+      mixedPhaseJoinSource mixedPhaseJoinTarget := by
+  have body : ScopedCodePhaseTracedOnAlphaReflexive
+      alphaSingletonFoldValidCase
+      (alphaFoldScopeIndex.pushParams #[])
+      alphaSingletonFoldCode alphaLeft := by
+    intro _
+    simpa [ScopeIndex.pushParams, ScopeIndex.pushParamList] using
+      alphaSingletonFoldPaddedTrace.traced
+  have continuation : ScopedCodePhaseTracedOnAlphaReflexive
+      alphaSingletonFoldValidCase
+      (alphaFoldScopeIndex.pushJoin mixedPhaseJoinId)
+      (.unreach objType) (.unreach objType) :=
+    scopedCodePhaseTracedOnAlphaReflexive_of_result
+      (scopedCodePhaseResultOnAlphaReflexive_traversalLaws.unreach
+        (alphaFoldScopeIndex.pushJoin mixedPhaseJoinId) objType)
+  exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.jp
+    body continuation) mixedPhaseJoinAlphaBireflexive
+
 theorem selectedBranchAlphaBireflexiveAtFoldScope :
     ScopedAlphaBireflexive alphaFoldScopeIndex selectedBranch := {
   forward := .terminal (.ret ⟨by native_decide, by native_decide,

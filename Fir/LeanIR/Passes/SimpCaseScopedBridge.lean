@@ -830,6 +830,83 @@ theorem scopedCodePhaseTracedOnAlphaReflexive_of_result
   rcases related reflexive with ⟨result⟩
   exact result.traced
 
+/-- Lift every round of a trace through one syntactic context. The target
+alpha identity produced by one lifted round supplies the source hygiene for
+the next, so no global alpha reflexivity theorem is needed. -/
+theorem ScopedCodePhaseTrace.lift
+    (wrap : LCNF.Code .impure → LCNF.Code .impure)
+    (roundLift : ∀ {left right},
+      ScopedCodePhaseResult validCase childIndex left right →
+      ScopedAlphaBireflexive parentIndex (wrap left) →
+      Nonempty (ScopedCodePhaseResult validCase parentIndex
+        (wrap left) (wrap right)))
+    (trace : ScopedCodePhaseTrace validCase childIndex source target)
+    (parent : ScopedAlphaBireflexive parentIndex (wrap source)) :
+    ScopedCodePhaseTraced validCase parentIndex
+      (wrap source) (wrap target) := by
+  induction trace with
+  | single round =>
+      rcases roundLift round parent with ⟨lifted⟩
+      exact lifted.traced
+  | trans round rest ih =>
+      rcases roundLift round parent with ⟨liftedRound⟩
+      rcases ih liftedRound.targetAlpha with ⟨liftedRest⟩
+      exact (ScopedCodePhaseTrace.trans liftedRound liftedRest).traced
+
+/-- Lift two independently transformed children through one binary context.
+If one trace ends first, its explicit endpoint identities generate inert
+rounds while the other trace continues. -/
+theorem ScopedCodePhaseTrace.zip
+    (wrap : LCNF.Code .impure → LCNF.Code .impure →
+      LCNF.Code .impure)
+    (roundLift : ∀ {leftSource leftTarget rightSource rightTarget},
+      ScopedCodePhaseResult validCase leftIndex leftSource leftTarget →
+      ScopedCodePhaseResult validCase rightIndex rightSource rightTarget →
+      ScopedAlphaBireflexive parentIndex
+        (wrap leftSource rightSource) →
+      Nonempty (ScopedCodePhaseResult validCase parentIndex
+        (wrap leftSource rightSource) (wrap leftTarget rightTarget)))
+    (leftTrace : ScopedCodePhaseTrace validCase leftIndex
+      leftSource leftTarget)
+    (rightTrace : ScopedCodePhaseTrace validCase rightIndex
+      rightSource rightTarget)
+    (parent : ScopedAlphaBireflexive parentIndex
+      (wrap leftSource rightSource)) :
+    ScopedCodePhaseTraced validCase parentIndex
+      (wrap leftSource rightSource) (wrap leftTarget rightTarget) := by
+  induction leftTrace generalizing rightSource rightTarget with
+  | single leftRound =>
+      cases rightTrace with
+      | single rightRound =>
+          rcases roundLift leftRound rightRound parent with ⟨lifted⟩
+          exact lifted.traced
+      | trans rightRound rightRest =>
+          rcases roundLift leftRound rightRound parent with ⟨liftedRound⟩
+          rcases rightRest.lift
+              (wrap := fun right => wrap _ right)
+              (roundLift := fun nextRound nextParent =>
+                roundLift
+                  (.identity leftRound.targetRefl leftRound.targetAlpha)
+                  nextRound nextParent)
+              liftedRound.targetAlpha with ⟨liftedRest⟩
+          exact (ScopedCodePhaseTrace.trans liftedRound liftedRest).traced
+  | trans leftRound leftRest ih =>
+      cases rightTrace with
+      | single rightRound =>
+          rcases roundLift leftRound rightRound parent with ⟨liftedRound⟩
+          rcases leftRest.lift
+              (wrap := fun left => wrap left _)
+              (roundLift := fun nextRound nextParent =>
+                roundLift nextRound
+                  (.identity rightRound.targetRefl rightRound.targetAlpha)
+                  nextParent)
+              liftedRound.targetAlpha with ⟨liftedRest⟩
+          exact (ScopedCodePhaseTrace.trans liftedRound liftedRest).traced
+      | trans rightRound rightRest =>
+          rcases roundLift leftRound rightRound parent with ⟨liftedRound⟩
+          rcases ih rightRest liftedRound.targetAlpha with ⟨liftedRest⟩
+          exact (ScopedCodePhaseTrace.trans liftedRound liftedRest).traced
+
 mutual
 
   /-- Alpha reflexivity plus lexical evidence for every syntactic recursive
@@ -2399,6 +2476,227 @@ theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
           | del object _ =>
               exact .del object childResult.targetAlpha.backward
     }⟩
+
+/-- Arbitrary phase traces lift through every non-case constructor. Unary
+contexts map each round directly; join points zip body and continuation
+traces, padding the shorter trace with explicit identity rounds. -/
+theorem scopedCodePhaseTracedOnAlphaReflexive_traversalLaws :
+    ScopedTraversalLaws
+      (ScopedCodePhaseTracedOnAlphaReflexive validCase) where
+  letE := by
+    intro index declaration left right child parent
+    have childReflexive : ScopedAlphaBireflexive
+        (index.pushVar declaration.fvarId) left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | letE _ _ _ _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | letE _ _ _ _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code => .let declaration code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.letE
+          (fun _ => ⟨round⟩) root)
+      parent
+  jp := by
+    intro index fvarId binderName params type leftBody rightBody
+      leftContinuation rightContinuation body continuation parent
+    have bodyReflexive : ScopedAlphaBireflexive
+        (index.pushParams params) leftBody := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | jp _ _ body _ =>
+            simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+              LCNF.FunDecl.value] using
+              (paramBodyRelated_finalCode (index := index) body)
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | jp _ _ body _ =>
+            simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+              LCNF.FunDecl.value] using
+              (paramBodyRelated_finalCode_backward (index := index) body)
+    have continuationReflexive : ScopedAlphaBireflexive
+        (index.pushJoin fvarId) leftContinuation := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | jp _ _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | jp _ _ _ continuation => exact continuation
+    rcases body bodyReflexive with ⟨bodyTrace⟩
+    rcases continuation continuationReflexive with ⟨continuationTrace⟩
+    exact bodyTrace.zip continuationTrace
+      (wrap := fun body continuation =>
+        .jp (.mk fvarId binderName params type body) continuation)
+      (roundLift := fun bodyRound continuationRound root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.jp
+          (fun _ => ⟨bodyRound⟩) (fun _ => ⟨continuationRound⟩) root)
+      parent
+  jmp := by
+    intro index fvarId args parent
+    exact (scopedCodePhaseTracedOnAlphaReflexive_of_result
+      (scopedCodePhaseResultOnAlphaReflexive_traversalLaws.jmp
+        index fvarId args)) parent
+  ret := by
+    intro index fvarId parent
+    exact (scopedCodePhaseTracedOnAlphaReflexive_of_result
+      (scopedCodePhaseResultOnAlphaReflexive_traversalLaws.ret
+        index fvarId)) parent
+  unreach := by
+    intro index type parent
+    exact (scopedCodePhaseTracedOnAlphaReflexive_of_result
+      (scopedCodePhaseResultOnAlphaReflexive_traversalLaws.unreach
+        index type)) parent
+  oset := by
+    intro index fvarId fieldIndex value left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | oset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | oset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code => .oset fvarId fieldIndex value code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.oset
+          (fun _ => ⟨round⟩) root)
+      parent
+  uset := by
+    intro index fvarId fieldIndex value left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | uset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | uset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code => .uset fvarId fieldIndex value code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.uset
+          (fun _ => ⟨round⟩) root)
+      parent
+  sset := by
+    intro index fvarId width offset value type left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | sset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | sset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code =>
+        .sset fvarId width offset value type code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.sset
+          (fun _ => ⟨round⟩) root)
+      parent
+  setTag := by
+    intro index fvarId tag left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | setTag _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | setTag _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code => .setTag fvarId tag code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.setTag
+          (fun _ => ⟨round⟩) root)
+      parent
+  inc := by
+    intro index fvarId amount check persistent left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | inc _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | inc _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code =>
+        .inc fvarId amount check persistent code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.inc
+          (fun _ => ⟨round⟩) root)
+      parent
+  dec := by
+    intro index fvarId amount check persistent objects left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | dec _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | dec _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code =>
+        .dec fvarId amount check persistent objects code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.dec
+          (fun _ => ⟨round⟩) root)
+      parent
+  del := by
+    intro index fvarId left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | del _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | del _ continuation => exact continuation
+    rcases child childReflexive with ⟨trace⟩
+    exact trace.lift
+      (wrap := fun code => .del fvarId code)
+      (roundLift := fun round root =>
+        scopedCodePhaseResultOnAlphaReflexive_traversalLaws.del
+          (fun _ => ⟨round⟩) root)
+      parent
+
+/-- Recursive correctness for the trace relation reduces exactly to a local
+case-kernel law, just as it does for the one-round result relation. -/
+theorem scopedCodePhaseTraced_caseBoundary_iff_kernel :
+    ScopedCaseBoundarySound
+        (ScopedCodePhaseTracedOnAlphaReflexive validCase) ↔
+      ScopedCaseKernelLaws
+        (ScopedCodePhaseTracedOnAlphaReflexive validCase) :=
+  scopedCaseBoundarySound_iff_kernel
+    scopedCodePhaseTracedOnAlphaReflexive_traversalLaws
+
+/-- End-to-end recursive traversal from a trace-producing local case kernel.
+Unlike the fixed phase factor theorem, the conclusion retains every nested
+round in execution order. -/
+theorem shadowCode_scopedPhaseTraced_of_caseKernel
+    (caseKernel : ScopedCaseKernelLaws
+      (ScopedCodePhaseTracedOnAlphaReflexive validCase))
+    (reflexive : ScopedAlphaBireflexive index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  (shadowCode_scopedRelated_of_caseKernel
+    scopedCodePhaseTracedOnAlphaReflexive_traversalLaws caseKernel run)
+      reflexive
 
 /-- The phase-aware recursive boundary has the same local-kernel reduction as
 the older two-phase relation. The stronger kernel result additionally records

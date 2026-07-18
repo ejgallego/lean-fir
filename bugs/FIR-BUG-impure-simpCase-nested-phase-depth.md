@@ -90,5 +90,12 @@ identity padding, and has endpoint/round-count regressions.
 composition theorem for arbitrarily many rounds. `nestedPhaseDepthCode` is
 checked against both the transparent shadow and actual Lean pass.
 
-Full resolution still requires lifting the scoped trace through recursive
-syntax and consuming it in the case-kernel shape laws.
+`ScopedCodePhaseTrace.lift` now maps every round through unary recursive
+syntax. `ScopedCodePhaseTrace.zip` aligns two child traces and pads only the
+shorter endpoint; `scopedCodePhaseTracedOnAlphaReflexive_traversalLaws`
+instantiates this construction for every non-case constructor, with an
+unequal-depth join-point regression in `mixedDepthJoinTraced`.
+
+Full resolution still requires consuming the trace in the case-kernel shape
+laws, including recursive alternative alignment before the parent case round
+is appended.
