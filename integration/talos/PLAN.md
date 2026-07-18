@@ -865,8 +865,12 @@ adjacent verified 32-bit lanes, including exact round trips and a disjoint
 guarantee. Common headers are now structurally written as eight adjacent lanes;
 their generic sequence postcondition proves every indexed word, unchanged
 memory size, disjoint-read framing, and exact `Header.write`/`Header.read`
-round trips. The next preservation step composes this header result through
-object allocation and payload writes to establish `LiveHeapRel` extension.
+round trips. Successful monotone allocation now has an exact postcondition for
+the grown memory, aligned address/cursor, wasm32 address-space bound, heap-word
+classification, and in-bounds extent. Object allocation composes that result
+with the header proof and passes the complete checked `readLiveHeader` path.
+The next preservation step frames headers across payload writes and packages
+constructor allocation as a `LiveHeapRel` extension.
 
 ## Parallel agent packages
 

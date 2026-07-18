@@ -408,22 +408,26 @@ def MemoryState.allocate (state : MemoryState) (requestedBytes : Nat) :
   let memory := state.memory.growToFit requestedEnd
   return ({ memory, heapCursor := requestedEnd }, address)
 
+def Header.forAllocation (kind : ObjectKind) (allocationBytes : Nat)
+    (persistent := false) (aux0 : UInt32 := 0) (aux1 : UInt32 := 0)
+    (aux2 : UInt32 := 0) (aux3 : UInt32 := 0) : Header := {
+  kind
+  persistent
+  live := true
+  refCount := if persistent then 0 else 1
+  allocationBytes := UInt32.ofNat allocationBytes
+  aux0
+  aux1
+  aux2
+  aux3 }
+
 def MemoryState.allocateObject (state : MemoryState) (kind : ObjectKind)
     (payloadBytes : Nat) (persistent := false) (aux0 : UInt32 := 0)
     (aux1 : UInt32 := 0) (aux2 : UInt32 := 0) (aux3 : UInt32 := 0) :
     Except MemoryError (MemoryState × Word32) := do
   let allocationBytes := align8 (headerBytes + payloadBytes)
   let (state, address) ← state.allocate allocationBytes
-  let header : Header := {
-    kind
-    persistent
-    live := true
-    refCount := if persistent then 0 else 1
-    allocationBytes := UInt32.ofNat allocationBytes
-    aux0
-    aux1
-    aux2
-    aux3 }
+  let header := Header.forAllocation kind allocationBytes persistent aux0 aux1 aux2 aux3
   let memory ← header.write state.memory address
   return ({ state with memory }, address)
 
