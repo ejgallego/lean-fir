@@ -118,16 +118,16 @@ def comparableObservationJson (observation : Observation) : Json :=
     ("trace", Json.arr (comparable.trace.map externalEventJson))]
 
 def oracleObservation (fixture : CorpusFixture) : Except String Observation :=
-  match runDifferential fixture.program `main fixture.args with
+  match runDifferential fixture.program `main fixture.args fixture.externals with
   | .related source _ => .ok source
-  | result => .error s!"W3 oracle rejected {fixture.name}: {result.describe}"
+  | result => .error s!"FIR oracle rejected {fixture.name}: {result.describe}"
 
 def emitOracle (fixture : CorpusFixture) (outputDirectory : System.FilePath) : IO Unit := do
   let observation ← IO.ofExcept (oracleObservation fixture)
   IO.FS.createDirAll outputDirectory
   let path := outputDirectory / s!"{fixture.name}.expected.json"
   IO.FS.writeFile path (comparableObservationJson observation).compress
-  IO.println s!"{fixture.name}: wrote live W3 observation to {path}"
+  IO.println s!"{fixture.name}: wrote live FIR observation to {path}"
 
 def usage : String :=
   "usage: fir-wasm-oracle all <output-directory>"

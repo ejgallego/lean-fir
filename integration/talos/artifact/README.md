@@ -17,10 +17,11 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-World and trace observations remain empty in this artifact corpus. The W5
-semantic Talos backend now accepts external declarations and tests their
-world/trace behavior, but this independent emitter/Node lane has not yet added
-an effect-producing artifact fixture and host manifest entry.
+The W5 corpus also covers an effect-producing external call and a zero-argument
+external cached across two source calls. V8 and Talos agree on the returned
+values, the single cache miss, world advancement, and the exact external trace.
+Direct calls, saturated and underapplied closures, and recursion execute as
+ordinary Wasm calls around the semantic closure metadata imports.
 Compiler-produced source fixtures also cover heap-backed string and `List Nat`
 arguments through the explicit initial-runtime manifest. The semantic host is
 shared with the repository's native↔V8 validation adapter.
@@ -74,8 +75,8 @@ derived from the compiled entry; changing them changes only the manifest, not
 the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
 `uint8(n)`, `uint16(n)`, `uint32(n)`, `uint64(n)`, and `usize(n)` arguments,
 plus `string("…")` and `natList([…])`, with range and schema checks before
-compilation. External declarations and recursive source programs remain
-explicit follow-up work.
+compilation. Join-point-bearing source programs remain an explicit fragment
+follow-up even when their individual runtime operations are supported.
 
 The lane-local source fixture executes compiler-produced identity declarations
 for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` at their boundary values.

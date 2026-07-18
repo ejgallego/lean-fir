@@ -9,6 +9,14 @@ import {
   manifestValue,
 } from "../../../scripts/wasm_semantic_host.mjs";
 
+const artifactExternalRegistry = {
+  external: ({ args, world }) => ({ value: args[0], world: world + 1 }),
+  cachedBinaryExternal: ({ world }) => ({
+    value: { kind: "scalar", scalarKind: "uint64", value: 91n },
+    world: world + 1,
+  }),
+};
+
 export async function runArtifact(manifestPath) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const expectedPath = join(dirname(manifestPath), `${manifest.fixture}.expected.json`);
@@ -17,7 +25,7 @@ export async function runArtifact(manifestPath) {
   const bytes = await readFile(wasmPath);
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed standard WebAssembly validation`);
 
-  const host = new SemanticHost(manifest.initialRuntime);
+  const host = new SemanticHost(manifest.initialRuntime, artifactExternalRegistry);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);

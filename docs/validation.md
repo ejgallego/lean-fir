@@ -779,6 +779,13 @@ The first W5 additions compile a dependency-bearing polymorphic box/unbox call
 and a packed constructor initialized through `uset`/`sset`, projected through
 `uproj`, and released through `dec`.  Source artifact compilation retains
 captured helpers internally while exporting only the selected entry.
+Compiler-generated direct calls, captured and underapplied closures, recursive
+empty and traversal paths, and an exact `Nat.add` external now run in V8 as
+well.  The independent artifact corpus separately compares external
+world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
+Large odd naturals remain excluded from this adapter because the version-1
+validation protocol encodes `Nat` as an inexact JSON number; the limitation is
+tracked by `FIR-BUG-wasm-none-json-nat-precision`.
 Native Lean remains the source oracle.
 Talos can subsequently consume the exact same module and inputs, with V8 as
 the reference Wasm engine:

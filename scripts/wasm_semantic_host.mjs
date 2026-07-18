@@ -123,14 +123,18 @@ function runtimeHeapObject(object) {
 }
 
 export class SemanticHost {
-  constructor(initialRuntime = undefined) {
+  constructor(initialRuntime = undefined, externalRegistry = undefined) {
     this.nextHandle = 1;
     this.handles = new Map();
     this.valueHandles = new Map();
     this.nextLocation = 0;
     this.heap = [];
+    this.globals = new Map();
     this.world = 0;
     this.trace = [];
+    this.externalRegistry = externalRegistry instanceof Map
+      ? new Map(externalRegistry)
+      : new Map(Object.entries(externalRegistry ?? {}));
     if (initialRuntime !== undefined) {
       this.loadInitialRuntime(initialRuntime);
     }
@@ -300,12 +304,16 @@ export class SemanticHost {
     return { kind: "heap", location };
   }
 
+  natural(value) {
+    const payload = BigInt(value);
+    return payload <= MAX_TAGGED_PAYLOAD
+      ? { kind: "tagged", payload }
+      : this.alloc({ kind: "natural", value: payload });
+  }
+
   literal(operation) {
     if (operation.kind === "naturalLiteral") {
-      const payload = BigInt(operation.value);
-      const value = payload <= MAX_TAGGED_PAYLOAD
-        ? { kind: "tagged", payload }
-        : this.alloc({ kind: "natural", value: payload });
+      const value = this.natural(operation.value);
       return this.encode(operation.result, value);
     }
     if (operation.kind === "stringLiteral") {
@@ -376,6 +384,106 @@ export class SemanticHost {
       });
     }
     return this.encode(operation.result, field.value);
+  }
+
+  cacheSet(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "cacheSet host arity mismatch");
+    const value = this.decode(operation.value, physicalArgs[0]);
+    this.globals.set(operation.declaration, value);
+    return this.encode(operation.value, value);
+  }
+
+  partialApply(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, operation.fields.length,
+      "partial application host arity mismatch");
+    assert.equal(operation.fixed, operation.fields.length,
+      "partial application manifest fixed-count mismatch");
+    assert.ok(operation.fixed < operation.arity,
+      "partial application must leave at least one argument");
+    const fixed = operation.fields.map((kind, index) =>
+      this.decode(kind, physicalArgs[index]));
+    const value = this.alloc({
+      kind: "closure",
+      function: operation.function,
+      arity: operation.arity,
+      fixed,
+    });
+    return this.encode(operation.result, value);
+  }
+
+  closureData(source) {
+    if (source.kind !== "heap") {
+      throw new SemanticFault({ kind: "expectedClosure" });
+    }
+    const object = this.liveCell(source.location).object;
+    if (object.kind !== "closure") {
+      throw new SemanticFault({ kind: "expectedClosure" });
+    }
+    return object;
+  }
+
+  closureMatches(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "closure match host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    const closure = this.closureData(source);
+    return closure.function === operation.function &&
+      closure.arity === operation.arity && closure.fixed.length === operation.fixed
+      ? 1
+      : 0;
+  }
+
+  closureProj(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "closure projection host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    const closure = this.closureData(source);
+    if (closure.function !== operation.function || closure.arity !== operation.arity ||
+        closure.fixed.length !== operation.fixed) {
+      throw new Error("FIR target failure: closure metadata mismatch");
+    }
+    const value = closure.fixed[operation.index];
+    assert.notEqual(value, undefined, "closure projection index is out of bounds");
+    return this.encode(operation.result, value);
+  }
+
+  external(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, operation.params.length,
+      "external host arity mismatch");
+    const args = operation.params.map((kind, index) =>
+      this.decode(kind, physicalArgs[index]));
+    const implementation = this.externalRegistry.get(operation.declaration);
+    if (implementation === undefined) {
+      throw new SemanticFault({
+        kind: "externalFailure",
+        name: operation.declaration,
+        message: "no external implementation installed",
+      });
+    }
+    const response = implementation({
+      declaration: operation.declaration,
+      args,
+      host: this,
+      world: this.world,
+    });
+    assert.ok(response && typeof response === "object",
+      `external ${operation.declaration} returned no response`);
+    assert.ok(response.value && typeof response.value === "object",
+      `external ${operation.declaration} returned no semantic value`);
+    assert.ok(response.world === undefined ||
+      (Number.isSafeInteger(response.world) && response.world >= 0),
+    `external ${operation.declaration} returned an invalid world`);
+    if (response.world !== undefined) {
+      this.world = response.world;
+    }
+    this.trace.push({
+      name: operation.declaration,
+      args: args.map((value) => this.valueJson(value)),
+      result: this.valueJson(response.value),
+    });
+    assert.ok(operation.results.length <= 1,
+      "external semantic host supports at most one result");
+    return operation.results.length === 0
+      ? undefined
+      : this.encode(operation.results[0], response.value);
   }
 
   box(operation, physicalArgs) {
@@ -672,6 +780,14 @@ export class SemanticHost {
         return (...args) => this.usizeProj(operation, args);
       case "scalarProj":
         return (...args) => this.scalarProj(operation, args);
+      case "cacheSet":
+        return (...args) => this.cacheSet(operation, args);
+      case "partialApply":
+        return (...args) => this.partialApply(operation, args);
+      case "closureMatches":
+        return (...args) => this.closureMatches(operation, args);
+      case "closureProj":
+        return (...args) => this.closureProj(operation, args);
       case "box":
         return (...args) => this.box(operation, args);
       case "unbox":
@@ -696,6 +812,8 @@ export class SemanticHost {
         return (...args) => this.reset(operation, args);
       case "reuse":
         return (...args) => this.reuse(operation, args);
+      case "external":
+        return (...args) => this.external(operation, args);
       case "getTag":
         return (...args) => this.getTag(args);
       default:
@@ -764,6 +882,13 @@ export class SemanticHost {
           kind: "boxed",
           type: scalarTypeRepr(object.scalarKind),
           value: this.valueJson(object.value),
+        };
+      case "closure":
+        return {
+          kind: "closure",
+          function: object.function,
+          arity: object.arity,
+          fixed: object.fixed.map((value) => this.valueJson(value)),
         };
       case "string":
         return { kind: "string", value: object.value };

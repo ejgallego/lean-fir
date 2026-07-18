@@ -32,6 +32,15 @@ function naturalValue(host, value, context) {
   return object.value;
 }
 
+const validationExternalRegistry = {
+  "Nat.add": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Nat.add external arity mismatch");
+    const left = naturalValue(host, args[0], "Nat.add left operand");
+    const right = naturalValue(host, args[1], "Nat.add right operand");
+    return { value: host.natural(left + right), world };
+  },
+};
+
 function semanticDatum(schema, value, host, context) {
   if (typeof schema === "string") {
     switch (schema) {
@@ -262,7 +271,7 @@ for (const caseId of selectedCases) {
   assert.equal(compilerManifest.arguments.length, descriptor.args.length,
     `${caseId} manifest invocation arity mismatch`);
   assert.ok(Array.isArray(compilerManifest.imports), `${caseId} imports must be an array`);
-  const host = new SemanticHost(compilerManifest.initialRuntime);
+  const host = new SemanticHost(compilerManifest.initialRuntime, validationExternalRegistry);
   const physicalArguments = compilerManifest.params.map((kind, index) => {
     const semanticArgument = manifestValue(compilerManifest.arguments[index]);
     assert.deepStrictEqual(

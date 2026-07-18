@@ -159,4 +159,87 @@ function ctorRuntime() {
   assert.equal(host.liveCell(1).live, true);
 }
 
-console.log("PASS W5 semantic host projections/boxing/mutation/ownership/reuse");
+{
+  const host = new SemanticHost();
+  const captured = host.encode("tobject", tagged(21));
+  const closurePhysical = host.importFunction({
+    kind: "partialApply",
+    function: "callee",
+    arity: 2,
+    fixed: 1,
+    fields: ["tobject"],
+    result: "tobject",
+  })(captured);
+  assert.equal(host.importFunction({
+    kind: "closureMatches", function: "callee", arity: 2, fixed: 1,
+  })(closurePhysical), 1);
+  assert.equal(host.importFunction({
+    kind: "closureMatches", function: "other", arity: 2, fixed: 1,
+  })(closurePhysical), 0);
+  const projected = host.importFunction({
+    kind: "closureProj",
+    function: "callee",
+    arity: 2,
+    fixed: 1,
+    index: 0,
+    result: "tobject",
+  })(closurePhysical);
+  assert.deepStrictEqual(host.decode("tobject", projected), tagged(21));
+  const closure = host.decode("tobject", closurePhysical);
+  assert.deepStrictEqual(host.objectJson(host.liveCell(closure.location).object), {
+    kind: "closure",
+    function: "callee",
+    arity: 2,
+    fixed: [{
+      kind: "object",
+      reference: { kind: "tagged", payload: "21" },
+    }],
+  });
+}
+
+{
+  const host = new SemanticHost(undefined, {
+    echo: ({ args, world }) => ({ value: args[0], world: world + 1 }),
+  });
+  const maximum = scalar("uint64", 0xffffffffffffffffn);
+  const physical = host.encode("uint64", maximum);
+  const cached = host.importFunction({
+    kind: "cacheSet", declaration: "echo", value: "uint64",
+  })(physical);
+  assert.deepStrictEqual(host.decode("uint64", cached), maximum);
+  assert.deepStrictEqual(host.globals.get("echo"), maximum);
+  const result = host.importFunction({
+    kind: "external",
+    declaration: "echo",
+    params: ["uint64"],
+    results: ["uint64"],
+  })(physical);
+  assert.deepStrictEqual(host.decode("uint64", result), maximum);
+  assert.equal(host.world, 1);
+  assert.deepStrictEqual(host.trace, [{
+    name: "echo",
+    args: [{
+      kind: "scalar",
+      scalar: { kind: "uint64", value: "18446744073709551615" },
+    }],
+    result: {
+      kind: "scalar",
+      scalar: { kind: "uint64", value: "18446744073709551615" },
+    },
+  }]);
+}
+
+{
+  const host = new SemanticHost();
+  assert.throws(
+    () => host.importFunction({
+      kind: "external",
+      declaration: "missing",
+      params: [],
+      results: ["uint64"],
+    })(),
+    (error) => error instanceof SemanticFault && error.fault.kind === "externalFailure",
+  );
+}
+
+console.log("PASS W5 semantic host runtime/external/cache/closure operations");

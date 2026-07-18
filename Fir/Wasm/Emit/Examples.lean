@@ -13,6 +13,7 @@ structure CorpusFixture where
   name : String
   program : Fir.LeanIR.ImpureProgram
   args : Array Value := #[]
+  externals : ExternalImpl := rejectExternals
 
 def abiDirectLiteralProgram (type : Lean.Expr) (literal : LCNF.LitValue) :
     Fir.LeanIR.ImpureProgram :=
@@ -74,6 +75,13 @@ def abiCachedExternalProgram : Fir.LeanIR.ImpureProgram :=
           (.fap `cachedBinaryExternal #[])) <|
         .return y)] }
 
+def cachedBinaryExternalImpl : ExternalImpl where
+  call _ runtime := .ok {
+    value := .scalar (.uint64 91)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world + 1 }
+
 def initialFixtures : List CorpusFixture := [
   { name := "literal", program := abiLiteralProgram },
   { name := "erased", program := abiErasedProgram },
@@ -105,6 +113,13 @@ def initialFixtures : List CorpusFixture := [
   { name := "reset-reuse", program := abiResetReuseProgram },
   { name := "shared-reset-reuse", program := abiSharedResetProgram },
   { name := "delete-fault", program := deletedProgram },
+  { name := "direct-call", program := Fir.Wasm.abiDirectCallProgram },
+  { name := "closure-call", program := Fir.Wasm.abiClosureCallProgram },
+  { name := "closure-underapply", program := Fir.Wasm.abiClosureUnderApplyProgram },
+  { name := "recursive-call", program := Fir.Wasm.abiRecursiveCallProgram },
+  { name := "external-echo", program := externalProgram, externals := echoExternal },
+  { name := "cached-external", program := abiCachedExternalProgram,
+    externals := cachedBinaryExternalImpl },
   { name := "string-heap", program := abiStringHeapProgram },
   { name := "natural-heap", program := abiNaturalHeapProgram },
   { name := "nested-heap", program := abiNestedHeapProgram },
