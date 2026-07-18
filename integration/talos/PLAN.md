@@ -1378,6 +1378,14 @@ later constructor proof combine this complete old-payload erase with the
 existing object-field writer and final header rewrite without inspecting the
 recursive implementation again.
 
+W6.3af lifts that byte postcondition to runtime invariants. A scrub beginning
+at `address + headerBytes` frames every common-header word and therefore
+preserves both raw `Header.read` and checked `readLiveHeader`. When the scrub
+ends before the heap cursor it also preserves `FrontierInvariant`, including
+zero bytes beyond the cursor. In-place reuse can now treat payload erasure as
+a verified framed transition before installing fields and replacement header
+metadata.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -63,4 +63,73 @@ theorem LinearMemory.zeroBytes_post (memory result : LinearMemory)
   cases written
   exact post
 
+/-- Scrubbing beginning at the payload boundary leaves every common-header
+word unchanged. -/
+theorem Header.read_of_zeroBytes_payload (before after : LinearMemory)
+    (address : Word32) (count : Nat)
+    (post : ZeroBytesPost before after (address.value + headerBytes) count) :
+    Header.read after address = Header.read before address := by
+  have wordFrame (offset : Nat) (insideHeader : offset + 4 ≤ headerBytes) :
+      after.readUInt32 (address.value + offset) =
+        before.readUInt32 (address.value + offset) := by
+    unfold LinearMemory.readUInt32
+    rw [post.frame (address.value + offset) (by omega)]
+    rw [post.frame (address.value + offset + 1) (by omega)]
+    rw [post.frame (address.value + offset + 2) (by omega)]
+    rw [post.frame (address.value + offset + 3) (by omega)]
+  unfold Header.read
+  dsimp only
+  rw [wordFrame headerKindOffset (by decide)]
+  rw [wordFrame headerFlagsOffset (by decide)]
+  rw [wordFrame headerRefCountOffset (by decide)]
+  rw [wordFrame headerAllocationBytesOffset (by decide)]
+  rw [wordFrame headerAux0Offset (by decide)]
+  rw [wordFrame headerAux1Offset (by decide)]
+  rw [wordFrame headerAux2Offset (by decide)]
+  rw [wordFrame headerAux3Offset (by decide)]
+
+theorem MemoryState.readLiveHeader_of_zeroBytes_payload
+    (state : MemoryState) (result : LinearMemory) (address : Word32)
+    (count : Nat)
+    (post : ZeroBytesPost state.memory result
+      (address.value + headerBytes) count) :
+    ({ state with memory := result } : MemoryState).readLiveHeader address =
+      state.readLiveHeader address := by
+  have headerFrame := Header.read_of_zeroBytes_payload state.memory result
+    address count post
+  unfold MemoryState.readLiveHeader
+  dsimp only
+  rw [headerFrame, post.size]
+
+/-- A payload scrub wholly inside the allocated prefix preserves the global
+frontier invariant. -/
+theorem MemoryState.FrontierInvariant.zeroBytes
+    {state : MemoryState} {result : LinearMemory} {address count : Nat}
+    (valid : state.FrontierInvariant)
+    (beforeFrontier : address + count ≤ state.heapCursor)
+    (written : state.memory.zeroBytes address count = .ok result) :
+    ({ state with memory := result } : MemoryState).FrontierInvariant := by
+  have inBounds : address + count ≤ state.memory.size :=
+    Nat.le_trans beforeFrontier valid.cursorInBounds
+  have post := state.memory.zeroBytes_post result address count inBounds written
+  refine {
+    cursorAligned := valid.cursorAligned
+    cursorInBounds := by simpa [post.size] using valid.cursorInBounds
+    unusedZero := ?_ }
+  intro byte afterCursor finalInBounds
+  change state.heapCursor ≤ byte at afterCursor
+  change byte < result.size at finalInBounds
+  have oldInBounds : byte < state.memory.size := by
+    rw [← post.size]
+    exact finalInBounds
+  have oldZero := valid.unusedZero byte afterCursor oldInBounds
+  have framed := post.frame byte (.inr
+    (Nat.le_trans beforeFrontier afterCursor))
+  cases resultByte : result[byte]? with
+  | none => simp [LinearMemory.readByte, resultByte, oldZero] at framed
+  | some value =>
+      simp [LinearMemory.readByte, resultByte, oldZero] at framed
+      subst value
+      rfl
+
 end Fir.Wasm.Concrete
