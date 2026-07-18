@@ -1271,12 +1271,21 @@ W6.3t fixes the fuel-order discrepancy found while pairing the recursive
 folds. Bug card `FIR-BUG-wasm-none-release-fuel-preempts-nonheap-noop` records
 that concrete release previously exhausted fuel before classifying a checked
 tagged or erased child, whereas semantic ownership traversal skips those
-values without recursion. Concrete release now classifies first: checked
-immediates and sentinels are no-ops at every fuel, invalid and unchecked words
-retain their faults, and only heap recursion consumes fuel. Zero-fuel guards
-cover both no-op representations and the retained heap-exhaustion branch.
-This restores the local per-field correspondence needed by the paired-fold
-simulation without weakening the heap recursion bound.
+values without recursion. Checked immediates and sentinels are now no-ops at
+every fuel, invalid and unchecked words retain their faults, and ordinary heap
+recursion still exhausts at zero. Zero-fuel guards cover both direct no-op
+representations and the retained ordinary-heap exhaustion branch.
+
+W6.3u completes that correction for semantic tags with promoted physical
+encodings. The promoted header is decoded before the ordinary-heap fuel gate,
+so both immediate and promoted tags have a common all-fuel checked-no-op
+theorem; zero-fuel regression coverage now includes the promoted allocation.
+`OwnershipValueRel.releaseStep` then eliminates every ABI-admissible ownership
+slot into exactly two cases: a semantic heap child with the matching witness
+address, or a concrete checked no-op matching the semantic fold. Scalar and
+reuse-token cases are ruled out by `AbiKind.isObjectField`. This is the local
+per-field correspondence needed by the paired-fold simulation without
+weakening the heap recursion bound.
 
 ## Parallel agent packages
 

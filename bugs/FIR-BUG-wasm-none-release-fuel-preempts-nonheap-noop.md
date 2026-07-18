@@ -84,10 +84,13 @@ none
 
 ## Resolution and regression
 
-Resolved in W6.3t by classifying the concrete word before consulting recursive
-fuel. Checked immediate and sentinel words now return the threaded state for
-every fuel value; invalid and unchecked words keep their source faults; only a
-heap word at zero fuel returns `.target .releaseFuelExhausted`. The permanent
-example guards cover zero-fuel erased and immediate no-ops plus zero-fuel heap
-exhaustion, and `decrementReferenceOnceFuel_sentinel` exposes the all-fuel
-equation used by the ownership-fold proof.
+Resolved across W6.3t–W6.3u by distinguishing non-owning representations
+before ordinary heap recursion consults fuel. Checked immediate and sentinel
+words return the threaded state for every fuel value; a heap-addressed
+promoted tag is decoded and takes the same all-fuel no-op path; invalid and
+unchecked words keep their source faults; and an ordinary heap word at zero
+fuel still returns `.target .releaseFuelExhausted`. Permanent example guards
+cover zero-fuel erased, immediate, and promoted no-ops plus zero-fuel ordinary
+heap exhaustion. `decrementReferenceOnceFuel_sentinel` and
+`LiveHeapRel.decrementReferenceOnceFuel_tagged` expose the equations used by
+the ownership-fold proof.

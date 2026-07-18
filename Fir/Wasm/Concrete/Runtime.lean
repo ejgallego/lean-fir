@@ -506,15 +506,26 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
 /-- Fuel-indexed recursive release. Each nested heap object consumes one unit;
 siblings reuse the remaining depth while threading the updated memory. Tagged
 and erased checked no-ops do not consume heap-recursion fuel. -/
-def decrementReferenceOnceFuel (fuel : Nat) (state : MemoryState)
-    (object : Word32) (check : Bool) : Except ConcreteError MemoryState :=
-  match object.classify with
-  | .immediate =>
-      if check then return state else throw (.source .expectedHeapReference)
-  | .heap =>
-      match fuel with
-      | 0 => throw (.target .releaseFuelExhausted)
-      | fuel + 1 => do
+def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
+    Except ConcreteError MemoryState
+  | 0, state, object, check => do
+      match object.classify with
+      | .immediate =>
+          if check then return state else throw (.source .expectedHeapReference)
+      | .heap =>
+          let header ← liftMemory <| state.readLiveHeader object
+          if header.isPromotedTag then
+            if check then return state else throw (.source .expectedHeapReference)
+          else
+            throw (.target .releaseFuelExhausted)
+      | .sentinel =>
+          if check then return state else throw (.source .expectedObject)
+      | .invalid => throw (.source .expectedObject)
+  | fuel + 1, state, object, check => do
+      match object.classify with
+      | .immediate =>
+          if check then return state else throw (.source .expectedHeapReference)
+      | .heap =>
           let header ← liftMemory <| state.readLiveHeader object
           if header.isPromotedTag then
             if check then return state else throw (.source .expectedHeapReference)
@@ -530,9 +541,9 @@ def decrementReferenceOnceFuel (fuel : Nat) (state : MemoryState)
             let state ← writeLiveHeader state object header.forRelease
             owned.foldlM (init := state) fun state child =>
               decrementReferenceOnceFuel fuel state child true
-  | .sentinel =>
-      if check then return state else throw (.source .expectedObject)
-  | .invalid => throw (.source .expectedObject)
+      | .sentinel =>
+          if check then return state else throw (.source .expectedObject)
+      | .invalid => throw (.source .expectedObject)
 
 /-- One concrete decrement, including the zero transition and recursive
 release of constructor-owned object fields. The parent is marked dead before

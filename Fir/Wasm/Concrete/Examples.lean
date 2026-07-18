@@ -321,6 +321,16 @@ words do not consult heap-recursion fuel. -/
       state.heapCursor == heapBase && state.memory.size == wasmPageBytes
   | .error _ => false
 
+#guard match promotedTagged with
+  | .ok (state, object) =>
+      match decrementReferenceOnceFuel 0 state object true with
+      | .ok result =>
+          match readTag result object with
+          | .ok payload => payload.toNat == maxImmediatePayload + 1
+          | .error _ => false
+      | .error _ => false
+  | .error _ => false
+
 /-- Install the largest representable common-header count so the next
 increment exercises the checked target-overflow boundary. -/
 def boxedUInt64MaxAtRefCountMax : Except ConcreteError (MemoryState × Word32) := do

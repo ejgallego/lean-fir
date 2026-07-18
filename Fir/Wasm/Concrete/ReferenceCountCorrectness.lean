@@ -31,7 +31,17 @@ theorem decrementReferenceOnceFuel_ok_mono
       | zero => exact operation
       | succ more =>
           cases classEq : object.classify with
-          | heap => simp [decrementReferenceOnceFuel, classEq] at operation
+          | heap =>
+              cases headerEq : state.readLiveHeader object with
+              | error failure =>
+                  simp [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                    Bind.bind, Except.bind] at operation
+              | ok header =>
+                  by_cases promoted : header.isPromotedTag = true
+                  · simpa [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                      Bind.bind, Except.bind, promoted] using operation
+                  · simp [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                      Bind.bind, Except.bind, promoted] at operation
           | sentinel | immediate | invalid =>
               simpa [decrementReferenceOnceFuel, classEq] using operation
   | succ fuel ih =>
@@ -410,20 +420,21 @@ theorem LiveHeapRel.incrementReference_tagged
       rw [if_pos isPromoted]
       cases check <;> rfl
 
-/-- Checked decrements retain the same tagged-value split as increments. -/
-theorem LiveHeapRel.decrementReferenceOnce_tagged
+/-- Checked tagged decrements are independent of heap-recursion fuel for both
+the immediate and promoted physical encodings. -/
+theorem LiveHeapRel.decrementReferenceOnceFuel_tagged
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload)
-    (check : Bool) :
-    decrementReferenceOnce state word check =
+    (fuel : Nat) (check : Bool) :
+    decrementReferenceOnceFuel fuel state word check =
       if check then .ok state else .error (.source .expectedHeapReference) := by
   cases tagged with
   | immediate actualPayload fits =>
-      simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
-      simp [Word32.classify_encodeImmediate]
-      cases check <;> rfl
+      cases fuel <;>
+        simp [decrementReferenceOnceFuel, Word32.classify_encodeImmediate] <;>
+        cases check <;> rfl
   | promoted found =>
       have promoted := related.promoted payload word found
       obtain ⟨header, headerRead, headerKind, persistent, _, marker, _, _⟩ :=
@@ -435,13 +446,58 @@ theorem LiveHeapRel.decrementReferenceOnce_tagged
         unfold Header.isPromotedTag
         rw [headerKind, persistent, marker]
         decide
-      simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
-      rw [addressHeap]
-      simp only
-      rw [headerRead]
-      simp only [Bind.bind, Except.bind, liftMemory]
-      rw [if_pos isPromoted]
-      cases check <;> rfl
+      cases fuel <;>
+        simp only [decrementReferenceOnceFuel] <;>
+        rw [addressHeap] <;>
+        simp only <;>
+        rw [headerRead] <;>
+        simp only [Bind.bind, Except.bind, liftMemory] <;>
+        rw [if_pos isPromoted] <;>
+        cases check <;> rfl
+
+/-- Checked decrements retain the same tagged-value split as increments. -/
+theorem LiveHeapRel.decrementReferenceOnce_tagged
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload)
+    (check : Bool) :
+    decrementReferenceOnce state word check =
+      if check then .ok state else .error (.source .expectedHeapReference) := by
+  unfold decrementReferenceOnce
+  exact related.decrementReferenceOnceFuel_tagged tagged _ check
+
+/-- One ABI-admissible ownership slot is either the exact concrete address of
+a semantic heap child, or a checked concrete no-op matching the semantic
+ownership fold's non-heap branch. -/
+theorem OwnershipValueRel.releaseStep
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value}
+    (heap : LiveHeapRel state witness runtime)
+    (ownership : OwnershipValueRel witness word value) (fuel : Nat) :
+    match value with
+    | .object (.heap location) =>
+        witness.locations.lookup? location = some word
+    | _ => decrementReferenceOnceFuel fuel state word true = .ok state := by
+  cases ownership with
+  | intro kind admissible valueRelated =>
+      cases valueRelated with
+      | object heapRelated =>
+          cases heapRelated with
+          | mapped found => exact found
+      | tagged taggedRelated =>
+          simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap heapRelated =>
+              cases heapRelated with
+              | mapped found => exact found
+          | tagged taggedRelated =>
+              simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+      | erased =>
+          exact decrementReferenceOnceFuel_sentinel fuel state Word32.zero (by rfl) true
+      | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
+          simp [AbiKind.isObjectField] at admissible
 
 /-- Shared header-level postcondition for ordinary successful increments. It
 separates the common-header write from object-kind-specific payload framing. -/
