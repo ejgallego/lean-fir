@@ -12,9 +12,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_TOOLCHAIN = "leanprover/lean4:v4.32.0"
-EXPECTED_SOURCE_SHA256 = (
-    "f62bf73971d21483f1e285ecc74980bdc12baa0bf5c494fed4dc5d021aeded43"
-)
+EXPECTED_SOURCE_SHA256 = {
+    Path("Lean/Compiler/LCNF/AlphaEqv.lean"):
+        "f62bf73971d21483f1e285ecc74980bdc12baa0bf5c494fed4dc5d021aeded43",
+    Path("Lean/Compiler/LCNF/SimpCase.lean"):
+        "270df8851deb0a5f4c6a656377e83e2cf237e76f70a36301239781839122620b",
+}
 EXPECTED_AXIOMS = {
     (Path("Fir/LeanIR/Passes/AlphaEqvTrusted.lean"), "lean432UpstreamBridge"),
 }
@@ -70,14 +73,11 @@ def lean_code(text: str) -> str:
     return "".join(output)
 
 
-def upstream_source() -> Path:
+def upstream_source(relative: Path) -> Path:
     lean = Path(
         subprocess.check_output(["elan", "which", "lean"], text=True).strip()
     )
-    return (
-        lean.parent.parent
-        / "src/lean/Lean/Compiler/LCNF/AlphaEqv.lean"
-    )
+    return lean.parent.parent / "src/lean" / relative
 
 
 def main() -> int:
@@ -88,16 +88,17 @@ def main() -> int:
             f"lean-toolchain is {toolchain!r}, expected {EXPECTED_TOOLCHAIN!r}"
         )
 
-    source = upstream_source()
-    if not source.is_file():
-        errors.append(f"missing pinned upstream source: {source}")
-    else:
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        if digest != EXPECTED_SOURCE_SHA256:
-            errors.append(
-                "Lean AlphaEqv source hash changed: "
-                f"got {digest}, expected {EXPECTED_SOURCE_SHA256}"
-            )
+    for relative, expected_digest in EXPECTED_SOURCE_SHA256.items():
+        source = upstream_source(relative)
+        if not source.is_file():
+            errors.append(f"missing pinned upstream source: {source}")
+        else:
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            if digest != expected_digest:
+                errors.append(
+                    f"Lean {relative.name} source hash changed: "
+                    f"got {digest}, expected {expected_digest}"
+                )
 
     actual_axioms: set[tuple[Path, str]] = set()
     for path in sorted((ROOT / "Fir").rglob("*.lean")):
@@ -121,8 +122,8 @@ def main() -> int:
         return 1
 
     print(
-        "Validated Lean 4.32 AlphaEqv source hash and exactly one registered "
-        "trusted axiom."
+        "Validated Lean 4.32 AlphaEqv/SimpCase source hashes and exactly one "
+        "registered trusted axiom."
     )
     return 0
 

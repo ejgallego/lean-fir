@@ -8,7 +8,7 @@ phase: impure
 pass: simpCase-0
 discovered-by: proof
 first-seen: 2026-07-17
-reproduction: Fir/LeanIR/Passes/SimpCaseCorrectness.lean
+reproduction: Fir/LeanIR/Passes/SimpCaseCompilerBridge.lean#CaseBoundarySound
 regression: Fir/LeanIR/Passes/SimpCaseExamples.lean#checkFixtures
 ---
 
@@ -68,8 +68,14 @@ whole-code induction blocked.
 FIR proves semantic correctness for selected-arm elimination, unreachable-arm
 removal, singleton elimination, and bidirectional alpha-equivalent default
 folding. `SimpCaseExamples.checkFixtures` also executes Lean's actual pass and
-checks representative outputs. The missing public transformation graph is the
-remaining link between those two facts.
+checks representative outputs. `SimpCaseCompilerBridge` now ships a total,
+fuel-indexed shadow of the returned-syntax traversal and proves that every
+non-case recursive edge, declaration, and declaration array lifts to
+`ProgramRelated CodeRel`; the only remaining kernel premise is the named
+`CaseBoundarySound` obligation. The executable regression compares the actual
+pass with that shadow over the rewrite fixtures, a nested closed program, and
+an array spanning every impure `Code` constructor. The missing public
+transformation graph is the remaining link between those facts.
 
 ## Semantic impact
 
@@ -89,7 +95,12 @@ recursive code/declaration traversal.
 
 Keep the semantic rewrite theorems in FIR, exercise the real pass with
 compiler-generated fixtures, and make the unproved correspondence boundary
-explicit. Do not duplicate the effectful compiler pass or add a trusted axiom.
+explicit. FIR's transparent shadow copies only the returned-syntax
+calculation, omits the compiler-state `eraseCode` effects, reports fuel
+exhaustion instead of using `partial`, and reduces the kernel boundary to
+`CaseBoundarySound`. `scripts/validate_trusted_assumptions.py` pins the audited
+Lean 4.32 `SimpCase.lean` source hash. Do not duplicate the effectful compiler
+pass or add a trusted axiom.
 
 ## Upstream tracking
 
@@ -97,7 +108,8 @@ none
 
 ## Resolution and regression
 
-Unresolved. Once the kernels or graph theorems are public, prove
-`filterUnreachable` equal to `removeUnreachable`, connect `addDefaultAlt` to
-bidirectional alpha equivalence, and compose the public recursive traversal
-with `SimpCaseCorrectness`.
+Unresolved, but narrowed to one case-node contract. Once the kernels or graph
+theorems are public, prove `filterUnreachable` equal to `removeUnreachable`,
+connect `addDefaultAlt` to bidirectional alpha equivalence, discharge
+`CaseBoundarySound`, and replace the executable actual-vs-shadow check with a
+kernel correspondence theorem.

@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.SimpCaseRelation
+import Fir.LeanIR.Passes.SimpCaseCompilerBridge
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
 
@@ -13,6 +13,7 @@ open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Passes.NonLockstep
 open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseRelation
 
 /-!
@@ -611,11 +612,12 @@ theorem closed_singleton_default_generic_relation_correct
 /-- Execute Lean's actual recursive pass over the declaration fixture. This
 keeps the compiler/specification bridge executable while the upstream pass
 graph remains private. -/
-def checkActualClosedTraversal : CoreM Unit := do
-  let output ← LCNF.CompilerM.run
-    (LCNF.simpCase.run sourceProgram.decls) (phase := .impure)
-  unless output == targetProgram.decls do
-    throwError "simpCase did not produce the proved closed target program"
+theorem closedShadowRun :
+    shadowProgram? 4 sourceProgram = some targetProgram := by
+  rfl
+
+def checkActualClosedTraversal : CoreM Unit :=
+  checkActualAgreement 4 sourceProgram
 
 elab "#check_closed_simp_case_traversal" : command =>
   liftCoreM checkActualClosedTraversal

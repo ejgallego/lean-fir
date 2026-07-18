@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
+import Fir.LeanIR.Passes.SimpCaseCompilerBridge
 import Fir.LeanIR.Passes.SimpCaseCorrectness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
@@ -12,6 +13,7 @@ open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseCorrectness
 
 def selectedBranch : LCNF.Code .impure :=
@@ -1006,17 +1008,27 @@ def fixtureDecl (name : Name) (code : LCNF.Code .impure) : LCNF.Decl .impure :=
   decl name #[param c, param x] objType (.code code)
 
 def checkActualSimpCase (name : Name) (before expected : LCNF.Code .impure) : CoreM Unit := do
+  let beforeProgram : ImpureProgram :=
+    { decls := #[fixtureDecl name before] }
+  checkActualAgreement 512 beforeProgram
   let output ← LCNF.CompilerM.run
-    (LCNF.simpCase.run #[fixtureDecl name before]) (phase := .impure)
+    (LCNF.simpCase.run beforeProgram.decls) (phase := .impure)
   let some after := output[0]? | throwError "simpCase fixture {name} produced no declaration"
   let .code actual := after.value | throwError "simpCase fixture {name} ceased to be code"
   unless actual == expected do
     throwError "simpCase fixture {name} did not produce the specification result"
 
+/-- One declaration per impure code constructor used by the alpha-equivalence
+regression corpus.  The pass and shadow must agree across the whole array. -/
+def recursiveTraversalCorpus : ImpureProgram :=
+  { decls := alphaEqvRegressionCodes.mapIdx fun index code =>
+      fixtureDecl (Name.mkSimple s!"simpCaseShadow{index}") code }
+
 def checkFixtures : CoreM Unit := do
   checkActualSimpCase `singletonDefault singletonDefaultCode selectedBranch
   checkActualSimpCase `filterUnreachable filterUnreachableCode selectedBranch
   checkActualSimpCase `foldAlphaEquivalent alphaFoldCode alphaFoldExpected
+  checkActualAgreement 512 recursiveTraversalCorpus
 
 elab "#check_simp_case_fixtures" : command =>
   liftCoreM checkFixtures
