@@ -1496,6 +1496,16 @@ concrete decrement with FIR's public `decValueOnce` over those lists, carrying
 `LiveHeapRel` through every successful step. The remaining unique-reset proof
 is now operation decomposition and recomposition around these boundaries.
 
+W6.3at proves that a successful unique reset enters the explicit reuse
+protocol. `resetObject_refines_unique` decomposes FIR reset into its semantic
+cell replacement and released-child fold, matches those steps with the
+concrete prefix snapshot, bulk clear, and public decrement fold, and then
+recomposes the exact concrete operation equation. The final cleared heap is a
+strict `LiveHeapRel` under the protocol descriptor, and the nonempty concrete
+token remains related to the same semantic location. The discrepancy card
+stays open until in-place reuse consumes this protocol state and restores the
+ordinary replacement-constructor descriptor.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -870,6 +870,32 @@ theorem OwnershipValuesRel.foldlM_public_refines
               ih heap semanticOperation
             exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
 
+/-- One saved ownership slot remains related when reset shadows the target
+constructor descriptor. -/
+theorem OwnershipValueRel.rebindConstructor
+    {witness : RefinementWitness} {word : Word32} {value : Value}
+    (related : OwnershipValueRel witness word value)
+    (address : Word32) (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    OwnershipValueRel (witness.rebindConstructor address info fieldKinds)
+      word value := by
+  cases related with
+  | intro kind admissible valueRelated =>
+      exact .intro kind admissible
+        (valueRelated.rebindConstructor address info fieldKinds)
+
+/-- Saved ownership prefixes transport pointwise through the protocol
+descriptor rebind without changing their traversal order. -/
+theorem OwnershipValuesRel.rebindConstructor
+    {witness : RefinementWitness} {words : List Word32} {values : List Value}
+    (related : OwnershipValuesRel witness words values)
+    (address : Word32) (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    OwnershipValuesRel (witness.rebindConstructor address info fieldKinds)
+      words values := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons (head.rebindConstructor address info fieldKinds) ih
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated
@@ -1019,6 +1045,177 @@ theorem LiveHeapRel.resetObject_refines_nonunique
     rw [if_pos fallback, concreteDec]
     rfl
   exact ⟨result, concreteReset, finalRelated, .reuseNone⟩
+
+/-- A unique constructor reset enters the explicit reset/reuse protocol. The
+cleared target and every released child remain related under the rebound
+protocol descriptor, and the returned nonempty token keeps the same semantic
+location identity. -/
+theorem LiveHeapRel.resetObject_refines_unique
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {object : ConstructorObject} {count : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (countFits : count ≤ object.objectFields.size)
+    (semanticOperation :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .ok (nextRuntime, .reuseToken (some location))) :
+    ∃ result info fieldKinds,
+      resetObject state count address = .ok (result, address) ∧
+      LiveHeapRel result
+        (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)) nextRuntime ∧
+      ResetReuseProtocolRel state result witness runtime nextRuntime location
+        address cell object count ∧
+      ValueRel
+        (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count))
+        .reuseToken (.word32 address) (.reuseToken (some location)) := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | @constructor info fieldKinds semantic header _ descriptor objectEq objectRelated
+      headerRead headerKind refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      injection objectEq with semanticEq
+      subst semantic
+      let replacement : HeapCell :=
+        { cell with object := .ctor (resetProtocolObject object count) }
+      obtain ⟨middleRuntime, semanticSet, _, _, _, _⟩ :=
+        setCell_spec_of_find runtime location cell replacement found
+      have semanticFold :
+          (object.objectFields.extract 0 count).foldlM
+              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              middleRuntime = .ok nextRuntime := by
+        unfold Fir.LeanIR.Impure.reset at semanticOperation
+        simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+          at semanticOperation
+        rw [if_neg (by simp [ordinary, unique])] at semanticOperation
+        rw [constructor] at semanticOperation
+        simp only at semanticOperation
+        rw [if_neg (Nat.not_lt.mpr countFits)] at semanticOperation
+        have semanticOperation' : (do
+            let next ← setCell runtime location replacement
+            let next ← (object.objectFields.extract 0 count).foldlM
+              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              next
+            return (next, Value.reuseToken (some location))) =
+              .ok (nextRuntime, Value.reuseToken (some location)) := by
+          simpa only [replacement, resetProtocolObject, live, Bind.bind, Except.bind]
+            using semanticOperation
+        rw [semanticSet] at semanticOperation'
+        simp only [Bind.bind, Except.bind] at semanticOperation'
+        cases foldEq : (object.objectFields.extract 0 count).foldlM
+            (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+            middleRuntime with
+        | error fault =>
+            rw [foldEq] at semanticOperation'
+            contradiction
+        | ok finalRuntime =>
+            rw [foldEq] at semanticOperation'
+            have pairEq := Except.ok.inj semanticOperation'
+            have runtimeEq : finalRuntime = nextRuntime := congrArg Prod.fst pairEq
+            subst finalRuntime
+            rfl
+      obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+        objectRelated.readOwnedPrefix count countFits
+      have fieldsBeforeFrontier : objectFieldAddress address.value count ≤
+          state.heapCursor := by
+        have aligned := align8_ge
+          (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+            info.ssize)
+        have activeExtent := objectRelated.extent
+        have countFitsInfo : count ≤ info.size := by
+          rw [← objectRelated.semanticObjectFields]
+          exact countFits
+        simp [objectFieldAddress, ConstructorLayout.ofInfo, target] at aligned activeExtent ⊢
+        omega
+      have fieldsInBounds : objectFieldAddress address.value (0 + count) ≤
+          state.memory.size := by
+        simp only [Nat.zero_add]
+        exact Nat.le_trans fieldsBeforeFrontier related.frontier.cursorInBounds
+      obtain ⟨fieldMemory, fieldWrite, fieldPost⟩ :=
+        writeObjectFields_spec state.memory address.value 0
+          (List.replicate count taggedZero) (by simpa using fieldsInBounds)
+      obtain ⟨protocolRuntime, protocolSet, protocolHeap⟩ :=
+        LiveHeapRel.writeObjectFields_resetPrefix state fieldMemory witness runtime
+          location address cell header info fieldKinds object count related mapped found
+          descriptor constructor objectRelated headerRead headerKind refCount persistent
+          cellLive countFits fieldWrite
+      have protocolRuntimeEq : protocolRuntime = middleRuntime := by
+        exact Except.ok.inj (protocolSet.symm.trans semanticSet)
+      subst protocolRuntime
+      have semanticFoldList :
+          (object.objectFields.extract 0 count).toList.foldlM
+              (init := middleRuntime)
+              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true) =
+            .ok nextRuntime := by
+        simpa only [Array.foldlM_toList] using semanticFold
+      have protocolOwnership := ownershipRelated.rebindConstructor address info
+        (resetProtocolFieldKinds fieldKinds count)
+      obtain ⟨result, concreteFold, finalHeap⟩ :=
+        protocolOwnership.foldlM_public_refines protocolHeap semanticFoldList
+      obtain ⟨addressHeap, _, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+      obtain ⟨objectHeader, objectHeaderRead, _, _, _, _, objectCount, _, _⟩ :=
+        objectRelated.header
+      rw [headerRead] at objectHeaderRead
+      have objectHeaderEq := Except.ok.inj objectHeaderRead
+      subst objectHeader
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      have headerOne : header.refCount = 1 := by
+        apply UInt32.toNat.inj
+        simpa [unique] using refCount
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.constructor == ObjectKind.natural) = false :=
+          by decide
+        simp [Header.isPromotedTag, headerKind, different]
+      have countFitsInfo : count ≤ info.size := by
+        rw [← objectRelated.semanticObjectFields]
+        exact countFits
+      have headerKindCheck : (header.kind == ObjectKind.constructor) = true := by
+        rw [headerKind]
+        decide
+      have concreteReset : resetObject state count address = .ok (result, address) := by
+        unfold resetObject
+        rw [addressHeap, headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted, headerOrdinary, headerOne])]
+        rw [if_pos headerKindCheck]
+        rw [objectCount, if_neg (Nat.not_lt.mpr countFitsInfo)]
+        rw [ownedRead, fieldWrite]
+        simp only
+        rw [concreteFold]
+        rfl
+      have protocol : ResetReuseProtocolRel state result witness runtime nextRuntime
+          location address cell object count := {
+        relatedBefore := related
+        mapped
+        found
+        live
+        ordinary
+        unique
+        constructor
+        countFits
+        concreteReset
+        semanticReset := semanticOperation }
+      exact ⟨result, info, fieldKinds, concreteReset, finalHeap, protocol,
+        protocol.tokenRelated_rebindConstructor info
+          (resetProtocolFieldKinds fieldKinds count)⟩
+  | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | natural descriptor objectEq headerRead headerKind ordinaryHeader marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
 
 /-- Consuming an empty reuse token is exactly fresh constructor allocation.
 For a nonempty layout, the existing allocation theorem supplies the extended
