@@ -1351,6 +1351,15 @@ the old references in order, and returns the allocation address. Executable
 guards cover all three empty-token cases and the unique transition. The next
 slice proves that prefix write and child fold preserve `LiveHeapRel`.
 
+W6.3ac records the protocol invariant exposed by that unique-path proof.
+`FIR-BUG-wasm-none-reset-cleared-object-protocol` shows that FIR reset installs
+tagged zero even in a slot whose normal descriptor may be heap-only `.object`
+or `.erased`; strict `ValueRel` correctly cannot treat that temporary word as
+a normal value of either kind. The executable reset is unchanged and no ABI
+relation is weakened. The proof must instead make the reset-to-reuse protocol
+explicit (or establish an equivalent composed boundary) before the unique
+path can claim whole-heap preservation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
