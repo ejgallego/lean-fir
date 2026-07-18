@@ -1170,6 +1170,17 @@ old frontier, and constructor, boxed-scalar, and promoted-tag allocation all
 instantiate it. Ownership framing can now derive non-aliasing from the global
 relation rather than accepting it as a theorem premise.
 
+W6.3k completes the semantic/global bookkeeping half of ownership framing.
+Dead `CellRel`s retain the allocation descriptor that remains associated with
+their released address. A structural `replaceCell` theorem proves that
+successful semantic replacement changes the target lookup and preserves every
+other location; its `setCell` corollary also preserves `nextLocation`.
+`LiveHeapRel.setCell_of_frames` then assembles the full postcondition from the
+new target relation plus non-target concrete cell, promoted-tag, and descriptor
+frames. The remaining work is purely spatial: show that one disjoint common-
+header write supplies those frame premises for the above-one and leaf-one
+ownership branches.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

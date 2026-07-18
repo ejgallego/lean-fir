@@ -7,6 +7,159 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- Exact semantic-heap frame produced by replacing the first cell at one
+location. The target lookup changes and every other lookup is preserved. -/
+structure HeapReplacePost (before after : Heap) (location : Location)
+    (replacement : HeapCell) : Prop where
+  replaced : replaceCell before location replacement = some after
+  target : findCell? after location = some replacement
+  frame : ∀ other, other ≠ location →
+    findCell? after other = findCell? before other
+
+theorem replaceCell_spec_of_find
+    (heap : Heap) (location : Location) (current replacement : HeapCell)
+    (found : findCell? heap location = some current) :
+    ∃ after, HeapReplacePost heap after location replacement := by
+  induction heap with
+  | nil => simp [findCell?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, cell⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        refine ⟨(location, replacement) :: rest, ?_, ?_, ?_⟩
+        · simp [replaceCell]
+        · simp [findCell?]
+        · intro other different
+          simp [findCell?, Ne.symm different]
+      · have tailFound : findCell? rest location = some current := by
+          simpa [findCell?, here] using found
+        obtain ⟨after, post⟩ := ih tailFound
+        refine ⟨(candidate, cell) :: after, ?_, ?_, ?_⟩
+        · simp [replaceCell, here, post.replaced]
+        · simp [findCell?, here, post.target]
+        · intro other different
+          by_cases atHead : candidate = other
+          · subst candidate
+            simp [findCell?]
+          · simp [findCell?, atHead, post.frame other different]
+
+/-- `setCell` succeeds whenever its source lookup succeeded and exposes the
+same target/other-location frame at the `RuntimeState` boundary. -/
+theorem setCell_spec_of_find
+    (runtime : RuntimeState) (location : Location) (current replacement : HeapCell)
+    (found : findCell? runtime.heap location = some current) :
+    ∃ result,
+      setCell runtime location replacement = .ok result ∧
+      findCell? result.heap location = some replacement ∧
+      (∀ other, other ≠ location →
+        findCell? result.heap other = findCell? runtime.heap other) ∧
+      result.nextLocation = runtime.nextLocation := by
+  obtain ⟨after, post⟩ := replaceCell_spec_of_find runtime.heap location current
+    replacement found
+  refine ⟨{ runtime with heap := after }, ?_, post.target, post.frame, rfl⟩
+  unfold setCell
+  rw [post.replaced]
+
+/-- Assemble a whole-heap postcondition from one semantic `setCell` step, one
+new target-cell relation, and concrete frame proofs for every non-target
+allocation. This lemma contains no ownership policy; increment, decrement,
+and release instantiate the same global bookkeeping boundary. -/
+theorem LiveHeapRel.setCell_of_frames
+    {state result : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell replacement : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (frontier : result.FrontierInvariant)
+    (targetRelated : CellRel result witness address replacement)
+    (descriptorRegion : ∀ other descriptor,
+      witness.descriptors.lookup? other = some descriptor →
+      ∃ header,
+        Header.read result.memory other = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        other.value + header.allocationBytes.toNat ≤ result.heapCursor)
+    (descriptorDisjoint : ∀ left right leftDescriptor rightDescriptor,
+      witness.descriptors.lookup? left = some leftDescriptor →
+      witness.descriptors.lookup? right = some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read result.memory left = .ok leftHeader →
+        Header.read result.memory right = .ok rightHeader →
+        left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value)
+    (cellFrame : ∀ other otherAddress otherCell,
+      other ≠ location →
+      findCell? runtime.heap other = some otherCell →
+      witness.locations.lookup? other = some otherAddress →
+      CellRel state witness otherAddress otherCell →
+      CellRel result witness otherAddress otherCell)
+    (promotedFrame : ∀ payload other,
+      witness.promotedTags.Contains payload other →
+      PromotedTagRel result witness payload other) :
+    ∃ nextRuntime,
+      setCell runtime location replacement = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨nextRuntime, updated, targetFound, otherFound, nextLocation⟩ :=
+    setCell_spec_of_find runtime location cell replacement found
+  refine ⟨nextRuntime, updated, ?_⟩
+  refine {
+    frontier
+    witnessWellFormed := related.witnessWellFormed
+    locationsBeforeNext := ?_
+    descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
+    semanticToConcrete := ?_
+    concreteToSemantic := ?_
+    promoted := promotedFrame }
+  · intro other otherCell foundAfter
+    by_cases isTarget : other = location
+    · subst other
+      rw [targetFound] at foundAfter
+      have cellEq := Option.some.inj foundAfter
+      subst otherCell
+      rw [nextLocation]
+      exact related.locationsBeforeNext location cell found
+    · have foundBefore : findCell? runtime.heap other = some otherCell := by
+        rw [← otherFound other isTarget]
+        exact foundAfter
+      rw [nextLocation]
+      exact related.locationsBeforeNext other otherCell foundBefore
+  · intro other descriptor descriptorFound
+    obtain ⟨header, _, minimum, _, extent⟩ :=
+      descriptorRegion other descriptor descriptorFound
+    omega
+  · intro other otherCell foundAfter
+    by_cases isTarget : other = location
+    · subst other
+      rw [targetFound] at foundAfter
+      have cellEq := Option.some.inj foundAfter
+      subst otherCell
+      exact ⟨address, mapped, targetRelated⟩
+    · have foundBefore : findCell? runtime.heap other = some otherCell := by
+        rw [← otherFound other isTarget]
+        exact foundAfter
+      obtain ⟨otherAddress, otherMapped, otherRelated⟩ :=
+        related.semanticToConcrete other otherCell foundBefore
+      exact ⟨otherAddress, otherMapped,
+        cellFrame other otherAddress otherCell isTarget foundBefore otherMapped
+          otherRelated⟩
+  · intro other otherAddress otherMapped
+    by_cases isTarget : other = location
+    · subst other
+      have addressEq := Option.some.inj (mapped.symm.trans otherMapped)
+      subst otherAddress
+      exact ⟨replacement, targetFound, targetRelated⟩
+    · obtain ⟨otherCell, foundBefore, otherRelated⟩ :=
+        related.concreteToSemantic other otherAddress otherMapped
+      exact ⟨otherCell, by
+          rw [otherFound other isTarget]
+          exact foundBefore,
+        cellFrame other otherAddress otherCell isTarget foundBefore otherMapped
+          otherRelated⟩
+
 /-- Ownership checks see both physical encodings of a semantic tagged value
 as tagged: checked increments are no-ops and unchecked increments fail with
 the source `expectedHeapReference` fault. -/

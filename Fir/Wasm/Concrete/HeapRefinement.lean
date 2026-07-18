@@ -579,6 +579,8 @@ inductive CellRel (state : MemoryState) (witness : RefinementWitness)
   | live (related : LiveCellRel state witness address cell) :
       CellRel state witness address cell
   | dead (semanticCount : cell.rc = 0) (semanticDead : cell.live = false)
+      (descriptor : ∃ allocation,
+        witness.descriptors.lookup? address = some allocation)
       (related : DeadCellRel state address) :
       CellRel state witness address cell
 
@@ -589,7 +591,26 @@ theorem CellRel.headerOwned
     address.value + headerBytes ≤ state.heapCursor := by
   cases related with
   | live liveRelated => exact liveRelated.headerOwned
-  | dead _ _ deadRelated => exact deadRelated.headerOwned
+  | dead _ _ _ deadRelated => exact deadRelated.headerOwned
+
+theorem LiveCellRel.descriptor
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell) :
+    ∃ descriptor, witness.descriptors.lookup? address = some descriptor := by
+  cases related with
+  | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | natural descriptor _ _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+
+theorem CellRel.descriptor
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : CellRel state witness address cell) :
+    ∃ descriptor, witness.descriptors.lookup? address = some descriptor := by
+  cases related with
+  | live liveRelated => exact liveRelated.descriptor
+  | dead _ _ descriptor _ => exact descriptor
 
 theorem CellRel.prefixExtension
     {before after : MemoryState} {witness : RefinementWitness}
@@ -599,8 +620,8 @@ theorem CellRel.prefixExtension
     CellRel after witness address cell := by
   cases related with
   | live liveRelated => exact .live (liveRelated.prefixExtension extension)
-  | dead count dead deadRelated =>
-      exact .dead count dead (deadRelated.prefixExtension extension)
+  | dead count dead descriptor deadRelated =>
+      exact .dead count dead descriptor (deadRelated.prefixExtension extension)
 
 theorem CellRel.witnessExtension
     {state : MemoryState} {before after : RefinementWitness}
@@ -610,7 +631,10 @@ theorem CellRel.witnessExtension
     CellRel state after address cell := by
   cases related with
   | live liveRelated => exact .live (liveRelated.witnessExtension extension)
-  | dead count dead deadRelated => exact .dead count dead deadRelated
+  | dead count dead descriptor deadRelated =>
+      exact .dead count dead
+        ⟨descriptor.choose, extension.descriptors _ _ descriptor.choose_spec⟩
+        deadRelated
 
 /-- A whole-cell relation known semantically live exposes its complete live
 payload relation. -/
@@ -621,7 +645,7 @@ theorem CellRel.live_of_eq_true
     LiveCellRel state witness address cell := by
   cases related with
   | live liveRelated => exact liveRelated
-  | dead _ dead _ => simp_all
+  | dead _ dead _ _ => simp_all
 
 /-- A promoted tag is a concrete allocation without a semantic heap location.
 It must decode to the original tagged payload and retain persistent/no-RC
