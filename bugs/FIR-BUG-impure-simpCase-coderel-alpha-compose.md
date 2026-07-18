@@ -126,6 +126,16 @@ These existential witnesses remain proposition-valued through `Nonempty`.
 `ScopedRetainedCaseShapeLaws` is separate, so genuine default folding remains
 the only private-output witness.
 
+A two-constructor regression subsequently exposed that a genuine fold can
+itself produce a singleton which `simplifyCases` immediately eliminates.
+Distinct alpha-renamed bodies cannot inhabit the one-middle
+`ScopedSingletonSelectionConvergence` interface. The negative theorem and the
+correct structural/alpha/structural witness are tracked by
+`FIR-BUG-impure-simpCase-singleton-fold-factor-order`. Consequently the old
+selection-survival assembly remains valid for direct singletons, while folded
+singletons must use the new three-phase local classification until that
+relation is lifted through recursive traversal.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
@@ -175,3 +185,10 @@ complete reduced interface through a non-case parent. Concrete folded tables
 still need the private `addDefaultAlt` output equation; connecting that fact
 and the shadow theorem to the actual private pass remains the separate
 upstream proof-interface issue.
+
+The local relation now also represents fold-created singleton elimination as
+`ScopedCodeTrifactor`: structural selector preparation, bidirectional alpha
+folding, and final structural elimination. Both the impossibility of the old
+fixed middle and the positive three-phase witness are permanent regressions.
+The next proof slice must lift `ScopedCodePhaseFactored` into the generic
+recursive boundary rather than force it back into `ScopedCodeFactored`.

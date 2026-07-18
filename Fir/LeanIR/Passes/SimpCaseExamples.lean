@@ -69,6 +69,38 @@ def alphaFoldCode : LCNF.Code .impure :=
 def alphaFoldExpected : LCNF.Code .impure :=
   .cases alphaFoldAfterCases
 
+/-- Two alpha-equivalent arms exercise the path where `addDefaultAlt` first
+folds the table to one default and `simplifyCases` then eliminates that
+singleton in the same local rewrite. -/
+def alphaSingletonFoldCases : LCNF.Cases .impure :=
+  .mk `Bool objType c #[
+    .ctorAlt falseInfo alphaLeft,
+    .ctorAlt trueInfo alphaRight]
+
+def alphaSingletonFoldCode : LCNF.Code .impure :=
+  .cases alphaSingletonFoldCases
+
+/-- Structural preparation retains the two distinct bodies while replacing
+the second constructor selector by a default. This makes all raw selections
+line up with the following alpha fold. -/
+def alphaSingletonStructuralCases : LCNF.Cases .impure :=
+  .mk `Bool objType c #[
+    .ctorAlt falseInfo alphaLeft,
+    .default alphaRight]
+
+/-- The alpha phase chooses the representative retained by Lean's fold. -/
+def alphaSingletonFoldedCases : LCNF.Cases .impure :=
+  .mk `Bool objType c #[.default alphaLeft]
+
+def alphaSingletonFoldValidCase
+    (cases : LCNF.Cases .impure) (tag : Nat) : Prop :=
+  (cases = alphaSingletonFoldCases ∨
+      cases = alphaSingletonStructuralCases ∨
+      cases = alphaSingletonFoldedCases) ∧
+    (tag = 0 ∨ tag = 1)
+
+#guard shadowSimplifyCases alphaSingletonFoldCases == alphaLeft
+
 /-!
 `Code.alphaEqv` relies on the compiler invariant that every local `FVarId` is
 globally fresh within a declaration. Reusing `x` below makes the Boolean test
@@ -537,6 +569,183 @@ def alphaFoldScopeIndex : ScopeIndex := {
   targetJoins := []
 }
 
+/-- The current structural-then-alpha singleton interface is too strong for
+the compiler's combined fold-and-eliminate path. Both valid source tags must
+share one structural intermediate, but `CodeRel` cannot rename their distinct
+leading binders. -/
+theorem alphaSingletonFold_hasNoStructuralConvergence :
+    ¬ Nonempty (ScopedSingletonSelectionConvergence
+      alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCases alphaLeft) := by
+  rintro ⟨converges⟩
+  have falseSelected :=
+    converges.structuralSelected 0 ⟨Or.inl rfl, Or.inl rfl⟩
+  have trueSelected :=
+    converges.structuralSelected 1 ⟨Or.inl rfl, Or.inr rfl⟩
+  change ElimSelectionRel alphaSingletonFoldValidCase converges.middle
+    (some alphaLeft) at falseSelected
+  change ElimSelectionRel alphaSingletonFoldValidCase converges.middle
+    (some alphaRight) at trueSelected
+  cases falseSelected with
+  | some falseRelated =>
+      cases trueSelected with
+      | some trueRelated =>
+          rcases codeRel_let_target_shape falseRelated with ⟨left, leftEq⟩
+          rcases codeRel_let_target_shape trueRelated with ⟨right, rightEq⟩
+          rw [rightEq] at leftEq
+          injection leftEq with declarationEq continuationEq
+          have identifiers : alphaRightId = alphaLeftId := congrArg
+            (fun declaration : LCNF.LetDecl .impure => declaration.fvarId)
+            declarationEq
+          have names := congrArg FVarId.name identifiers
+          exact absurd names (by native_decide)
+
+theorem alphaLeftAlphaBireflexiveAtFoldScope :
+    ScopedAlphaBireflexive alphaFoldScopeIndex alphaLeft := by
+  constructor
+  · apply CodeRelated.letE
+    · exact ⟨rfl, .lit (.nat 5)⟩
+    · exact alphaLeftFreshForParams
+    · exact alphaLeftFreshForParams
+    · intro old oldScoped
+      simp [alphaFoldScopeIndex] at oldScoped
+    · intro old oldScoped
+      simp [alphaFoldScopeIndex] at oldScoped
+    · exact .terminal (.ret ⟨by native_decide, by native_decide,
+        fVarRelated_insert_self alphaFoldParamRho alphaLeftId alphaLeftId⟩)
+  · apply CodeRelated.letE
+    · exact ⟨rfl, .lit (.nat 5)⟩
+    · exact alphaLeftFreshForParams
+    · exact alphaLeftFreshForParams
+    · intro old oldScoped
+      simp [alphaFoldScopeIndex] at oldScoped
+    · intro old oldScoped
+      simp [alphaFoldScopeIndex] at oldScoped
+    · exact .terminal (.ret ⟨by native_decide, by native_decide,
+        fVarRelated_insert_self alphaFoldParamRho alphaLeftId alphaLeftId⟩)
+
+theorem alphaRightLeftCodeRelatedAtFoldScope :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c] alphaRight alphaLeft :=
+  codeRelated_of_local_accepts alphaRightLeftSideConditionsAtParams
+    ⟨2, by native_decide⟩
+
+theorem alphaLeftRightCodeRelatedAtFoldScope :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c] alphaLeft alphaRight :=
+  codeRelated_of_local_accepts alphaLeftRightSideConditionsAtParams
+    ⟨2, by native_decide⟩
+
+theorem alphaSingletonStructuralBefore :
+    CodeRel alphaSingletonFoldValidCase alphaSingletonFoldCode
+      (.cases alphaSingletonStructuralCases) := by
+  apply CodeRel.aligned
+  apply HeadRel.cases
+  intro tag valid
+  rcases valid.2 with rfl | rfl
+  · change SelectionRel alphaSingletonFoldValidCase
+      (some alphaLeft) (some alphaLeft)
+    exact .some (.aligned (.let
+      (letDecl alphaLeftId objType (.lit (.nat 5)))
+      (.aligned (.return alphaLeftId))))
+  · change SelectionRel alphaSingletonFoldValidCase
+      (some alphaRight) (some alphaRight)
+    exact .some (.aligned (.let
+      (letDecl alphaRightId objType (.lit (.nat 5)))
+      (.aligned (.return alphaRightId))))
+
+theorem alphaSingletonAlphaForward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (.cases alphaSingletonStructuralCases)
+      (.cases alphaSingletonFoldedCases) := by
+  apply CodeRelated.cases
+  · refine ⟨by native_decide, by native_decide, ?_⟩
+    unfold alphaFoldParamRho
+    apply (fVarRelated_insert_of_name_ne
+      (({} : FVarIdMap FVarId).insert c c) x x c c
+      (by native_decide)).2
+    exact fVarRelated_insert_self ({} : FVarIdMap FVarId) c c
+  · intro tag
+    by_cases zero : tag = 0
+    · subst tag
+      change CaseSelectionRelated (leftJoins := []) (rightJoins := [])
+        alphaFoldParamRho [x, c] [x, c]
+        (some alphaLeft) (some alphaLeft)
+      exact .some alphaLeftAlphaBireflexiveAtFoldScope.forward
+    · have zeroSymm : 0 ≠ tag := Ne.symm zero
+      simpa [alphaSingletonStructuralCases, alphaSingletonFoldedCases,
+        LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+        falseInfo, zeroSymm]
+        using CaseSelectionRelated.some
+          alphaRightLeftCodeRelatedAtFoldScope
+
+theorem alphaSingletonAlphaBackward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (.cases alphaSingletonFoldedCases)
+      (.cases alphaSingletonStructuralCases) := by
+  apply CodeRelated.cases
+  · refine ⟨by native_decide, by native_decide, ?_⟩
+    unfold alphaFoldParamRho
+    apply (fVarRelated_insert_of_name_ne
+      (({} : FVarIdMap FVarId).insert c c) x x c c
+      (by native_decide)).2
+    exact fVarRelated_insert_self ({} : FVarIdMap FVarId) c c
+  · intro tag
+    by_cases zero : tag = 0
+    · subst tag
+      change CaseSelectionRelated (leftJoins := []) (rightJoins := [])
+        alphaFoldParamRho [x, c] [x, c]
+        (some alphaLeft) (some alphaLeft)
+      exact .some alphaLeftAlphaBireflexiveAtFoldScope.backward
+    · have zeroSymm : 0 ≠ tag := Ne.symm zero
+      simpa [alphaSingletonStructuralCases, alphaSingletonFoldedCases,
+        LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+        falseInfo, zeroSymm]
+        using CaseSelectionRelated.some
+          alphaLeftRightCodeRelatedAtFoldScope
+
+theorem alphaSingletonStructuralAfter :
+    CodeRel alphaSingletonFoldValidCase
+      (.cases alphaSingletonFoldedCases) alphaLeft := by
+  apply CodeRel.eliminate alphaSingletonFoldedCases alphaLeft
+  intro tag valid
+  change ElimSelectionRel alphaSingletonFoldValidCase alphaLeft
+    (some alphaLeft)
+  exact .some (.aligned (.let
+    (letDecl alphaLeftId objType (.lit (.nat 5)))
+    (.aligned (.return alphaLeftId))))
+
+/-- Positive counterpart to the negative convergence theorem: the exact
+compiler path is representable once the final singleton elimination is a
+separate structural phase. -/
+def alphaSingletonFoldThreePhaseFactor :
+    ScopedCodeTrifactor alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft := {
+  structuralMiddle := .cases alphaSingletonStructuralCases
+  alphaMiddle := .cases alphaSingletonFoldedCases
+  structuralBefore := alphaSingletonStructuralBefore
+  alphaForward := alphaSingletonAlphaForward
+  alphaBackward := alphaSingletonAlphaBackward
+  structuralAfter := alphaSingletonStructuralAfter
+}
+
+theorem alphaSingletonFoldThreePhased :
+    ScopedCodeThreePhased alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft :=
+  alphaSingletonFoldThreePhaseFactor.threePhased
+
+def alphaSingletonFoldPhaseEvidence :
+    ScopedSingletonPhaseEvidence alphaSingletonFoldValidCase
+      alphaFoldScopeIndex alphaSingletonFoldCases alphaLeft :=
+  .folded alphaSingletonFoldThreePhaseFactor
+
+theorem alphaSingletonFoldPhaseFactored :
+    ScopedCodePhaseFactored alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft :=
+  alphaSingletonFoldPhaseEvidence.phaseFactored
+
 theorem selectedBranchAlphaBireflexiveAtFoldScope :
     ScopedAlphaBireflexive alphaFoldScopeIndex selectedBranch := {
   forward := .terminal (.ret ⟨by native_decide, by native_decide,
@@ -588,6 +797,16 @@ def singletonDefaultSelectionConvergence :
   alphaForward := selectedBranchAlphaBireflexiveAtFoldScope.forward
   alphaBackward := selectedBranchAlphaBireflexiveAtFoldScope.backward
 }
+
+def singletonDefaultDirectPhaseEvidence :
+    ScopedSingletonPhaseEvidence singletonDefaultValidCase
+      alphaFoldScopeIndex singletonDefaultCases selectedBranch :=
+  .direct singletonDefaultSelectionConvergence
+
+theorem singletonDefaultDirectPhaseFactored :
+    ScopedCodePhaseFactored singletonDefaultValidCase alphaFoldScopeIndex
+      singletonDefaultCode selectedBranch :=
+  singletonDefaultDirectPhaseEvidence.phaseFactored
 
 theorem singletonDefaultPreparedSelectionConverges :
     Nonempty (ScopedSingletonSelectionConvergence singletonDefaultValidCase
@@ -889,8 +1108,8 @@ theorem nestedEmptyCaseFactored_of_shapes
   shadowCode_scopedFactoredTree_of_shapes shapes nestedEmptyCaseAlphaTree
     nestedEmptyCaseShadowRun
 
-/-- The same recursive regression through the reduced phase interface: small
-outputs use survival, while only retained outputs consult the fold law. -/
+/-- The same recursive empty-table regression through the reduced two-phase
+interface. This path consults neither singleton nor retained folding evidence. -/
 theorem nestedEmptyCaseFactored_of_selectionSurvival
     (survival : ScopedCaseSelectionSurvivalLaws noCaseTagValid)
     (retained : ScopedRetainedCaseShapeLaws noCaseTagValid) :
@@ -1696,6 +1915,7 @@ def checkFixtures : CoreM Unit := do
   checkActualSimpCase `singletonDefault singletonDefaultCode selectedBranch
   checkActualSimpCase `filterUnreachable filterUnreachableCode selectedBranch
   checkActualSimpCase `foldAlphaEquivalent alphaFoldCode alphaFoldExpected
+  checkActualSimpCase `foldAlphaSingleton alphaSingletonFoldCode alphaLeft
   checkActualAgreement 512 recursiveTraversalCorpus
 
 elab "#check_simp_case_fixtures" : command =>

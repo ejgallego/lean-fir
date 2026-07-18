@@ -131,6 +131,15 @@ prepared table and supplies one convergent intermediate for a singleton.
 from this invariant plus `ScopedRetainedCaseShapeLaws`; the latter is the only
 interface that retains the genuine default-fold output witness.
 
+The concrete two-arm fold path revealed an additional downstream distinction:
+`addDefaultAlt` may create a singleton and `simplifyCases` then eliminates it.
+When the two bodies differ only by alpha-renamed binders, no single structural
+middle can serve every valid source tag. FIR now records this path with
+`ScopedCodeTrifactor` and `ScopedSingletonPhaseEvidence.folded`; the executable
+fixture confirms both the transparent shadow and Lean's actual pass output.
+This does not widen the upstream trust boundary, but the new three-phase
+relation still needs a generic traversal lift.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -162,8 +171,9 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to compiler correspondence and the folded-table
-output equation consumed by the phase-specific shape law. Downstream
+Unresolved, but narrowed to compiler correspondence, the folded-table output
+equation consumed by the phase-specific shape law, and the generic lift of a
+fold-created singleton's final structural phase. Downstream
 structural-then-alpha composition, full-tree traversal, existential
 alternative materialization, small-output survival, shape-law assembly, and
 the kernel-to-boundary lift are reusable. The unreachable-filter and no-fold

@@ -551,6 +551,74 @@ structure ScopedCodeBifactor
     (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
     index.backwardRho index.targetScope index.sourceScope target middle
 
+/-- Three-phase payload for compiler paths that perform a structural rewrite,
+an alpha-changing rewrite, and another structural rewrite in one local
+kernel call. The second structural leg is necessary when `addDefaultAlt`
+creates a singleton which `simplifyCases` immediately eliminates. -/
+structure ScopedCodeTrifactor
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) where
+  structuralMiddle : LCNF.Code .impure
+  alphaMiddle : LCNF.Code .impure
+  structuralBefore : CodeRel validCase source structuralMiddle
+  alphaForward : CodeRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope
+    structuralMiddle alphaMiddle
+  alphaBackward : CodeRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope
+    alphaMiddle structuralMiddle
+  structuralAfter : CodeRel validCase alphaMiddle target
+
+/-- Proposition-valued presentation of the corrected three-phase payload.
+It is deliberately separate from `ScopedCodeFactored` until the generic
+traversal and semantic composition layers consume the final structural leg. -/
+def ScopedCodeThreePhased
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    Nonempty (ScopedCodeTrifactor validCase index source target)
+
+theorem ScopedCodeTrifactor.threePhased
+    (factor : ScopedCodeTrifactor validCase index source target) :
+    ScopedCodeThreePhased validCase index source target :=
+  ⟨factor⟩
+
+/-- Honest local phase classification. Existing case paths remain the
+two-phase structural/alpha factor; combined fold-and-eliminate paths carry
+the additional final structural leg. -/
+inductive ScopedCodePhaseFactor
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) : Type where
+  | twoPhase (factor : ScopedCodeBifactor validCase index source target)
+  | threePhase (factor : ScopedCodeTrifactor validCase index source target)
+
+def ScopedCodePhaseFactored
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    Nonempty (ScopedCodePhaseFactor validCase index source target)
+
+theorem ScopedCodeBifactor.phaseFactored
+    (factor : ScopedCodeBifactor validCase index source target) :
+    ScopedCodePhaseFactored validCase index source target :=
+  ⟨.twoPhase factor⟩
+
+theorem ScopedCodeTrifactor.phaseFactored
+    (factor : ScopedCodeTrifactor validCase index source target) :
+    ScopedCodePhaseFactored validCase index source target :=
+  ⟨.threePhase factor⟩
+
+/-- A structural relation cannot rename the declaration at a leading value
+binding. This small inversion lemma makes factor-order counterexamples
+independent of dependent elimination over a larger evidence structure. -/
+theorem codeRel_let_target_shape
+    (related : CodeRel validCase (.let declaration continuation) target) :
+    ∃ right, target = .let declaration right := by
+  cases related with
+  | aligned head =>
+      cases head with
+      | «let» declaration continuation => exact ⟨_, rfl⟩
+
 /-- Proposition-valued presentation suitable for the generic scoped traversal
 interface, with the structural intermediate existentially hidden. -/
 def ScopedCodeFactored
@@ -1067,6 +1135,28 @@ def ScopedSingletonSelectionConvergence.eliminated
   alphaBackward := converges.alphaBackward
 }
 
+/-- Corrected local singleton classification. A pre-existing singleton uses
+one common structural branch. A singleton created by alpha folding records
+the final structural elimination as a third phase. -/
+inductive ScopedSingletonPhaseEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) (target : LCNF.Code .impure) : Type where
+  | direct (converges : ScopedSingletonSelectionConvergence
+      validCase index source target)
+  | folded (factor : ScopedCodeTrifactor validCase index
+      (.cases source) target)
+
+theorem ScopedSingletonPhaseEvidence.phaseFactored
+    (evidence : ScopedSingletonPhaseEvidence validCase index source target) :
+    ScopedCodePhaseFactored validCase index (.cases source) target := by
+  cases evidence with
+  | direct converges =>
+      exact (ScopedCodeBifactor.mk converges.middle
+        (.eliminate source converges.middle converges.structuralSelected)
+        converges.alphaForward converges.alphaBackward).phaseFactored
+  | folded factor =>
+      exact factor.phaseFactored
+
 /-- Empty prepared tables need no branch intermediate: once the phase rules
 out every valid source tag, `unreach` is the fixed structural and alpha
 intermediate. -/
@@ -1083,10 +1173,11 @@ theorem scopedEmptyCaseEvidence_of_noValid
     alphaBackward := .terminal .unreachable
   }⟩
 
-/-- The sole phase-specific assumption needed for small prepared tables.
-Pointwise branch factors have already been materialized. An empty result rules
-out every phase-valid source tag; a singleton result makes every such tag
-converge on one fixed intermediate. -/
+/-- Two-phase assumption for small prepared tables. Pointwise branch factors
+have already been materialized. An empty result rules out every phase-valid
+source tag; a direct singleton makes every such tag converge on one fixed
+intermediate. A singleton created by folding alpha-renamed bodies instead uses
+`ScopedSingletonPhaseEvidence.folded`. -/
 structure ScopedCaseSelectionSurvivalLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
@@ -1243,9 +1334,10 @@ structure ScopedRetainedCaseShapeLaws
       (.mk typeName resultType discr sourceAlts)
       targetAlts.toArray)
 
-/-- Materialize pointwise branch factors once, use the single phase survival
-invariant for the two eliminating outputs, and leave only the retained fold
-law as a separate compiler-facing premise. -/
+/-- Materialize pointwise branch factors once and assemble the original
+two-phase shape law. This covers empty and direct-singleton elimination;
+fold-created alpha-renamed singletons require the separate three-phase local
+classification above. -/
 theorem scopedCaseShapeLaws_of_selectionSurvival
     (survival : ScopedCaseSelectionSurvivalLaws validCase)
     (retained : ScopedRetainedCaseShapeLaws validCase) :
@@ -1287,8 +1379,8 @@ theorem scopedCaseAdmissibilityLaws_of_shapes
         exact .aligned
           (evidence.aligned root)
 
-/-- Direct phase constructor: small outputs use only selection survival;
-genuine retained/default-folding outputs remain in their own law. -/
+/-- Direct constructor for the two-phase subset: small outputs use fixed-middle
+selection survival and retained tables use their separate fold law. -/
 theorem scopedCaseAdmissibilityLaws_of_selectionSurvival
     (survival : ScopedCaseSelectionSurvivalLaws validCase)
     (retained : ScopedRetainedCaseShapeLaws validCase) :
@@ -1731,8 +1823,8 @@ theorem scopedCaseBoundarySoundTree_of_shapes
   scopedCaseBoundarySoundTree_of_admissibility
     (scopedCaseAdmissibilityLaws_of_shapes shapes)
 
-/-- Universal boundary where small outputs need only phase-valid selection
-survival and the retained law contains the sole genuine fold witness. -/
+/-- Universal boundary for the two-phase subset. It intentionally does not
+consume the final structural leg of a fold-created singleton. -/
 theorem scopedCaseBoundarySoundTree_of_selectionSurvival
     (survival : ScopedCaseSelectionSurvivalLaws validCase)
     (retained : ScopedRetainedCaseShapeLaws validCase) :
@@ -1771,8 +1863,9 @@ theorem shadowCode_scopedFactoredTree_of_shapes
   shadowCode_scopedFactoredTree
     (scopedCaseAdmissibilityLaws_of_shapes shapes) hygiene run
 
-/-- End-to-end recursive result with empty/singleton assumptions reduced to
-selection survival and genuine folding isolated in the retained law. -/
+/-- End-to-end recursive result for empty, direct-singleton, and retained
+two-phase cases. Fold-created singletons await the phase-factor traversal
+lift. -/
 theorem shadowCode_scopedFactoredTree_of_selectionSurvival
     (survival : ScopedCaseSelectionSurvivalLaws validCase)
     (retained : ScopedRetainedCaseShapeLaws validCase)
