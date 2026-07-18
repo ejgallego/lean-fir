@@ -218,6 +218,125 @@ theorem MemoryState.readLiveHeader_of_writeObjectFields
   dsimp only
   rw [headerFrame, post.size]
 
+/-- A bulk object-field write reads back every installed slot through the
+public checked constructor decoder. -/
+theorem readObjectField_of_writeObjectFields_at
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (index : Nat) (field : Word32)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (indexValid : index < header.aux1.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields)
+    (atIndex : fields[index]? = some field) :
+    readObjectField ({ state with memory } : MemoryState) address index =
+      .ok field := by
+  have heap : address.classify = .heap := by
+    have checked := headerRead
+    unfold MemoryState.readLiveHeader at checked
+    split at checked
+    next heap => exact heap
+    next => contradiction
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderAfter :
+      readConstructorHeader ({ state with memory } : MemoryState) address =
+        .ok header := by
+    unfold readConstructorHeader
+    simp [heap, headerAfter]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, headerKind]
+    rfl
+  have fieldRead : memory.readWord32 (objectFieldAddress address.value index) =
+      .ok field := by
+    simpa only [Nat.zero_add] using post.fieldAt index field atIndex
+  have paddingRead :
+      memory.readUInt32 (objectFieldAddress address.value index + 4) = .ok 0 := by
+    simpa only [Nat.zero_add] using post.paddingAt index field atIndex
+  have exactField : memory.readWord32
+      (address.value + headerBytes + target.semanticSlotBytes * index) =
+      .ok field := by
+    simpa [objectFieldAddress] using fieldRead
+  have exactPadding : memory.readUInt32
+      (address.value + headerBytes + target.semanticSlotBytes * index + 4) =
+      .ok 0 := by
+    simpa [objectFieldAddress] using paddingRead
+  unfold readObjectField
+  rw [constructorHeaderAfter]
+  simp only [Bind.bind, Except.bind]
+  simp [indexValid, exactField, exactPadding, liftMemory]
+  rfl
+
+/-- Slots at or beyond the bulk writer's half-open interval continue to
+decode exactly as before. -/
+theorem readObjectField_of_writeObjectFields_suffix
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (index : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (retained : fields.length ≤ index)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readObjectField ({ state with memory } : MemoryState) address index =
+      readObjectField state address index := by
+  have heap : address.classify = .heap := by
+    have checked := headerRead
+    unfold MemoryState.readLiveHeader at checked
+    split at checked
+    next heap => exact heap
+    next => contradiction
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore : readConstructorHeader state address = .ok header := by
+    unfold readConstructorHeader
+    simp [heap, headerRead]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, headerKind]
+    rfl
+  have constructorHeaderAfter :
+      readConstructorHeader ({ state with memory } : MemoryState) address =
+        .ok header := by
+    unfold readConstructorHeader
+    simp [heap, headerAfter]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, headerKind]
+    rfl
+  have lowFrame :
+      memory.readUInt32 (objectFieldAddress address.value index) =
+        state.memory.readUInt32 (objectFieldAddress address.value index) := by
+    apply post.wordFrame
+    right
+    simp [objectFieldAddress, target]
+    omega
+  have paddingFrame :
+      memory.readUInt32 (objectFieldAddress address.value index + 4) =
+        state.memory.readUInt32 (objectFieldAddress address.value index + 4) := by
+    apply post.wordFrame
+    right
+    simp [objectFieldAddress, target]
+    omega
+  have lowFrame' :
+      memory.readUInt32 (address.value + headerBytes +
+        target.semanticSlotBytes * index) =
+      state.memory.readUInt32 (address.value + headerBytes +
+        target.semanticSlotBytes * index) := by
+    simpa [objectFieldAddress] using lowFrame
+  have paddingFrame' :
+      memory.readUInt32 (address.value + headerBytes +
+        target.semanticSlotBytes * index + 4) =
+      state.memory.readUInt32 (address.value + headerBytes +
+        target.semanticSlotBytes * index + 4) := by
+    simpa [objectFieldAddress] using paddingFrame
+  unfold readObjectField
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  unfold LinearMemory.readWord32
+  rw [lowFrame', paddingFrame']
+
 /-- A payload writer contained in the allocated prefix preserves the global
 zero-frontier invariant. -/
 theorem MemoryState.FrontierInvariant.writeObjectFields

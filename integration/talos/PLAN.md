@@ -1442,6 +1442,14 @@ discharges its bounds and disjointness from the global descriptor invariant.
 The target reconstruction can now be isolated from transport of every other
 live, dead, boxed, natural, and promoted representation.
 
+W6.3am lifts that bulk prefix write through the public checked object-field
+decoder. Every installed prefix slot reads back its exact word with valid zero
+padding, while each slot at or beyond the written half-open interval decodes
+exactly as it did before the transition. The reset target proof can therefore
+split only on `index < count`: cleared slots use tagged-zero `.tobject`
+relations and retained suffix slots reuse their original relations, without
+unfolding the decoder or the recursive writer.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
