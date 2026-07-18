@@ -209,6 +209,19 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
       | .ok scalar => scalar == 0
       | .error _ => false
 
+#guard match concreteMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match writeScalarUInt8Field state object 2 3 255 with
+      | .error _ => false
+      | .ok result =>
+          match readScalarUInt8Field result object 2 3,
+              readTag result object, readObjectField result object 0,
+              readUSizeField result object 0 with
+          | .ok scalar, .ok tag, .ok field, .ok usize =>
+              scalar == 255 && tag == 3 && field.value == 23 && usize == 0
+          | _, _, _, _ => false
+
 #guard match allocateNatural MemoryState.initial
     (Fir.LeanIR.Impure.maxTaggedPayload + 1) with
   | .error _ => false

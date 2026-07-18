@@ -995,6 +995,13 @@ reads its zero-initialized first packed byte. Byte mutation, followed by the
 two-byte `UInt16` memory lane, is next; no concrete import switches to these
 operations before their mutation proofs land.
 
+W6.2g completes packed `UInt8` mutation. A checked byte store preserves memory
+size, the decoded header, every object and `USize` projection, and installs an
+exact semantic `UInt8` head-and-filter update. The executable regression
+writes `UInt8.max` into a nonzero packed offset and checks all framed regions.
+The two-byte `UInt16` lane is the remaining integer scalar representation
+before W6.2 moves to boxing and unboxing.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
