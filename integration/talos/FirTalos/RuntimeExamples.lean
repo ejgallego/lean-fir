@@ -117,6 +117,25 @@ def constructorTagHostWorks : Bool :=
 
 #guard constructorTagHostWorks
 
+def closureMetadataHostsWork : Bool :=
+  let captured : Value := .object (.tagged 21)
+  let handles : HandleTable := { entries := [(1, captured)], next := 2 }
+  let store := { emptyHostStore with host := { handles } }
+  let allocate := HostOperation.partialApply `first 2 1 #[.tobject] .tobject
+  match hostStep allocate store [.i32 1] with
+  | .Return [.i32 closure] store =>
+      match hostStep (.closureMatches `first 2 1) store [.i32 closure] with
+      | .Return [.i32 matched] store =>
+          matched == 1 &&
+            match hostStep (.closureProj `first 2 1 0 .tobject) store [.i32 closure] with
+            | .Return [.i32 projected] store =>
+                projected == 1 && store.host.trap?.isNone
+            | _ => false
+      | _ => false
+  | _ => false
+
+#guard closureMetadataHostsWork
+
 def badArityIsStructured : Bool :=
   match hostStep (.naturalLiteral 1 .tobject) emptyHostStore [.i32 0] with
   | .Trap store _ =>

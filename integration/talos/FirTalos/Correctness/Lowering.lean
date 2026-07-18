@@ -1515,4 +1515,138 @@ theorem wp_cacheSet_call
       physicalArgs sourceValue decoded encoded
   · simpa [hResults] using continued
 
+/-- Generated-stack rule for allocating a semantic partial-application
+closure. The host only records the function identity and captured values; it
+does not execute target code. -/
+theorem wp_partialApply_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (function : Lean.Name) (arity fixed : Nat) (fieldKinds : Array AbiKind)
+    (resultKind : AbiKind) (physicalArgs : List Wasm.Value)
+    (semanticArgs : Array Value) (sourceRuntime : RuntimeState)
+    (reference : ObjectRef) (after : HandleTable) (handle : Handle)
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.partialApply function arity fixed fieldKinds resultKind)))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (decoded : decodeArgs initial.host.handles fieldKinds physicalArgs =
+      .ok semanticArgs)
+    (allocated : alloc initial.host.runtime (.closure function arity semanticArgs) =
+      (sourceRuntime, reference))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind (.object reference) =
+      .ok (after, handle))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            runtime := sourceRuntime
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 handle :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [.i32 handle])
+    hImp hSat hi hContract hParams hStack
+  · exact hostStep_partialApply_of_decode_encode function arity fixed fieldKinds
+      resultKind initial physicalArgs semanticArgs sourceRuntime reference decoded
+      allocated usesHandle encoded
+  · simpa [hResults] using continued
+
+/-- A successful trampoline discriminator returns direct i32 one and leaves
+the semantic runtime and handle table unchanged. -/
+theorem wp_closureMatches_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (function : Lean.Name) (arity fixed : Nat)
+    (physicalArgs : List Wasm.Value) (closure : Value)
+    (captured : Array Value) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.closureMatches function arity fixed)))
+    (hParams : imp.params.length = 1)
+    (hArgCount : physicalArgs.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[closure])
+    (read : closureData initial.host.runtime closure =
+      .ok (function, arity, captured))
+    (fixedSize : captured.size = fixed)
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := .i32 1 :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [.i32 1])
+    hImp hSat hi hContract
+  · omega
+  · exact hStack
+  · exact hostStep_closureMatches_of_decode_read function arity fixed initial
+      physicalArgs closure captured decoded read fixedSize
+  · simpa [hResults] using continued
+
+/-- A successful capture projection is a pure semantic read followed by the
+ordinary ABI encoding of the captured value. -/
+theorem wp_closureProj_call
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {spec : Wasm.HostSpec RuntimeHost} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    (function : Lean.Name) (arity fixed index : Nat) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (closure sourceValue : Value)
+    (captured : Array Value) (after : HandleTable)
+    (physicalResult : Wasm.Value) (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (hostContract (.closureProj function arity fixed index resultKind)))
+    (hParams : imp.params.length = 1)
+    (hArgCount : physicalArgs.length = 1)
+    (hResults : imp.results.length = 1)
+    (hStack : locals.values = physicalArgs.reverse ++ tail)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[closure])
+    (read : closureData initial.host.runtime closure =
+      .ok (function, arity, captured))
+    (fixedSize : captured.size = fixed)
+    (projected : captured[index]? = some sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (after, physicalResult))
+    (continued :
+      Wasm.wp module rest Q
+        { initial with host := {
+            initial.host with
+            handles := after
+            fault? := none
+            targetFailure? := none } }
+        { locals with values := physicalResult :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply wp_host_call_on_stack_of_return
+    (physicalArgs := physicalArgs) (results := [physicalResult])
+    hImp hSat hi hContract
+  · omega
+  · exact hStack
+  · exact hostStep_closureProj_of_decode_read_encode function arity fixed index
+      resultKind initial physicalArgs closure sourceValue captured decoded read
+      fixedSize projected encoded
+  · simpa [hResults] using continued
+
 end FirTalos.Correctness

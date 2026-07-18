@@ -261,23 +261,29 @@ operations, and encode results back to Wasm values.
 Keeping the structured fault in host state allows a Talos trap to be related
 to `RuntimeFault` without making theorem statements depend on trap strings.
 
-### Closures are a separate gate
+### Closures use a Wasm-level trampoline
 
 Talos host functions cannot call back into a Wasm-defined function. Therefore
-the current `closureApply` import cannot be the final implementation of LCNF
+the legacy `closureApply` import is not the implementation of LCNF
 closures: delegating it to the FIR interpreter would make the backend theorem
 circular.
 
-The first correctness fragment excludes `pap` and closure-valued `fvar`
-applications. Before enabling them, choose and document one real dispatch
-design:
+The selected design is a generated Wasm-level trampoline. A closure remains a
+semantic heap value with its target name, total arity, and heterogeneous fixed
+arguments. Host calls may allocate that value, compare its metadata, and
+project a typed capture, but they never invoke a Wasm function. For every
+statically possible target, the lowerer emits a metadata test and typed capture
+projections. An underapplied branch allocates a new semantic closure containing
+the old captures followed by the new arguments; a saturated branch invokes the
+target through an ordinary Wasm direct call. Direct recursion therefore also
+uses ordinary Wasm calls.
 
-- a function table plus `call_indirect` and typed wrappers;
-- a uniform boxed calling convention and dispatcher; or
-- a Wasm-level trampoline protocol.
-
-The choice must specify heterogeneous captured values, oversaturated calls,
-recursive targets, and the representation of fixed arguments.
+The current proved fragment tracks closure provenance through local `pap` and
+closure-application chains. Its executable flow gate rejects oversaturation
+and application of closures arriving through unknown parameters. This keeps
+every generated projection and target call statically typed while leaving a
+future function-table or uniform boxed convention available as a wider ABI,
+not as a prerequisite for W5 correctness.
 
 ### Initializers use source-compatible lazy caching
 
@@ -633,6 +639,27 @@ zero-argument external twice and checks one external event, one world update,
 one semantic global, and equal returned values; a binary regression checks
 that the generated global-bearing module encodes successfully. This resolves
 `FIR-BUG-wasm-none-zero-arg-initializers`; no new bug card was required.
+
+W5.8 is complete. Internal direct calls lower to ordinary Wasm calls, including
+recursive targets. Partial applications allocate semantic closure objects;
+closure-valued `fvar` applications use the generated Wasm-level trampoline
+described above, which compares target/arity/fixed-count metadata, projects
+heterogeneous captures at their declared ABI kinds, either allocates an
+underapplication or invokes the saturated target, and leaves the legacy
+host-callback operation outside the supported fragment. The executable closure
+flow gate admits statically tracked local chains and rejects oversaturation or
+unknown closure provenance before lowering.
+
+Exact host-step equations and WP rules cover closure allocation, metadata
+matching, and capture projection. Transparent compiler equations expose `pap`
+and trampoline lowering, while the interprocedural source-call relation and
+checked-export theorem compose any finite internal-call execution with a proved
+continuation without exposing fuel in the public boundary. Differential
+regressions cover ABI-correct direct calls, one captured argument, genuine
+underapplication followed by saturation, and recursive list traversal; a
+negative regression checks that oversaturation remains rejected. All generated
+modules also pass binary encoding. No semantic mismatch or new bug card was
+found.
 
 ### A0: emit the first host-backed Wasm artifact
 

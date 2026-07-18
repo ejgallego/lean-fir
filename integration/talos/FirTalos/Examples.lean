@@ -64,6 +64,7 @@ def adaptsProgram? (program : Fir.LeanIR.ImpureProgram) : Bool :=
       | .error _ => false
 
 #guard adaptsProgram? Fir.LeanIR.InterpreterExamples.directCallProgram
+#guard adaptsProgram? Fir.Wasm.abiClosureCallProgram
 #guard adaptsProgram? Fir.LeanIR.InterpreterExamples.caseProgram
 #guard adaptsProgram? Fir.LeanIR.InterpreterExamples.joinProgram
 
@@ -116,8 +117,8 @@ def adaptProgram? (program : Fir.LeanIR.ImpureProgram) : Option AdaptedModule :=
 #guard match Fir.Wasm.lower Fir.LeanIR.InterpreterExamples.closureCallProgram with
   | .ok source =>
       match module source with
-      | .error (.invalidModule (.unsupportedClosure _)) => true
-      | _ => false
+      | .ok _ => true
+      | .error _ => false
   | .error _ => false
 
 #guard Fir.Wasm.literalModule?.any fun source =>

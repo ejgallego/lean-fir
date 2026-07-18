@@ -175,6 +175,75 @@ def compileArgs (context : Context) (args : Array (LCNF.Arg .impure)) :
     let (argument, kind) ← compileArg context arg
     return (instructions ++ argument, kinds.push kind)
 
+def directAbiKind? (type : Expr) : Option AbiKind :=
+  match abiKind? type with
+  | .ok (some kind) => some kind
+  | _ => none
+
+def parameterKinds? (params : Array (LCNF.Param .impure)) : Option (Array AbiKind) :=
+  params.mapM fun param => directAbiKind? param.type
+
+def kindsRefine (actual expected : Array AbiKind) : Bool :=
+  actual.size == expected.size &&
+    (actual.zip expected).all fun pair => pair.fst.refines pair.snd
+
+def compileFixedClosureFields (closureId : FVarId) (target : LCNF.Decl .impure)
+    (arity fixed : Nat) (kinds : Array AbiKind) : List Instruction :=
+  (List.range fixed).flatMap fun index =>
+    match kinds[index]? with
+    | some kind => [
+        .localGet closureId,
+        .call (.runtime (.closureProj target.name arity fixed index kind))]
+    | none => []
+
+def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
+    (argumentCode : List Instruction) (argumentKinds : Array AbiKind)
+    (target : LCNF.Decl .impure) (paramKinds : Array AbiKind)
+    (fixed : Nat) : Option (List Instruction × List Instruction) := do
+  if fixed >= paramKinds.size || fixed + argumentKinds.size > paramKinds.size then none else
+  let newFixed := fixed + argumentKinds.size
+  let expectedArgs := paramKinds.extract fixed newFixed
+  if !kindsRefine argumentKinds expectedArgs then none else
+  let matcher := [
+    .localGet closureId,
+    .call (.runtime (.closureMatches target.name paramKinds.size fixed))]
+  let fields :=
+    compileFixedClosureFields closureId target paramKinds.size fixed paramKinds ++
+      argumentCode
+  if newFixed < paramKinds.size then
+    if !resultKind.isObjectLike then none else
+    let body := fields ++ [
+      .call (.runtime (.partialApply target.name paramKinds.size newFixed
+        (paramKinds.extract 0 newFixed) resultKind)),
+      .localSet declId]
+    some (matcher, body)
+  else
+    let targetResult ← directAbiKind? target.type
+    if !targetResult.refines resultKind then none else
+    some (matcher, fields ++ [.call (.declaration target.name), .localSet declId])
+
+def compileClosureCandidatesForTarget (declId closureId : FVarId)
+    (resultKind : AbiKind)
+    (argumentCode : List Instruction) (argumentKinds : Array AbiKind)
+    (target : LCNF.Decl .impure) : List (List Instruction × List Instruction) :=
+  match parameterKinds? target.params with
+  | none => []
+  | some paramKinds =>
+      if argumentKinds.isEmpty || argumentKinds.size > paramKinds.size then [] else
+      (List.range (paramKinds.size - argumentKinds.size + 1)).filterMap fun fixed =>
+        compileClosureCandidateAt declId closureId resultKind argumentCode argumentKinds
+          target paramKinds fixed
+
+def compileClosureDispatch (context : Context) (declId closureId : FVarId)
+    (resultKind : AbiKind) (argumentCode : List Instruction)
+    (argumentKinds : Array AbiKind) : List Instruction :=
+  let candidates := context.program.decls.toList.flatMap fun target =>
+    compileClosureCandidatesForTarget declId closureId resultKind argumentCode
+      argumentKinds target
+  let dispatch := candidates.foldr (init := [.unreachable]) fun candidate rest =>
+    candidate.fst ++ [.ifElse candidate.snd rest]
+  dispatch ++ [.localGet declId]
+
 def getLocal (context : Context) (fvarId : FVarId) :
     Except CompileError (Instruction × AbiKind) :=
   match findLocalKind? context.localKinds fvarId with
@@ -203,8 +272,9 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
   | .fvar fvarId args =>
       let (function, _) ← getLocal context fvarId
       let (arguments, kinds) ← compileArgs context args
-      return function :: arguments ++
-        [.call (.runtime (.closureApply kinds #[resultKind]))]
+      if args.isEmpty then
+        return [function]
+      return compileClosureDispatch context decl.fvarId fvarId resultKind arguments kinds
   | .ctor info args =>
       unless constructorTagFitsI32 info do
         throw (.malformed s!"allocated constructor tag {info.cidx} does not fit the i32 tag ABI")
@@ -296,6 +366,51 @@ theorem compileLetValue_fap_cached
         .globalGet (2 * cacheIndex + 1) resultKind] := by
   simp [compileLetValue, letValueKind, kindEq, compileArgs, targetEq, paramsEq,
     cacheEq]
+  rfl
+
+/-- Transparent compiler equation for closure allocation by partial
+application. -/
+theorem compileLetValue_pap
+    (context : Context) (fvarId : FVarId) (type : Expr) (name : Name)
+    (args : Array (LCNF.Arg .impure)) (target : LCNF.Decl .impure)
+    (resultKind : AbiKind) (argumentCode : List Instruction)
+    (argumentKinds : Array AbiKind)
+    (kindEq : checkedAbiKind type = .ok resultKind)
+    (argumentsEq : compileArgs context args = .ok (argumentCode, argumentKinds))
+    (targetEq : context.program.findDecl? name = some target)
+    (fixedLt : args.size < target.params.size) :
+    compileLetValue context {
+      fvarId
+      binderName := fvarId.name
+      type
+      value := .pap name args } =
+      .ok (argumentCode ++ [
+        .call (.runtime (.partialApply name target.params.size args.size
+          argumentKinds resultKind))]) := by
+  simp [compileLetValue, letValueKind, kindEq, argumentsEq, targetEq,
+    Nat.not_le.mpr fixedLt]
+  rfl
+
+/-- Transparent compiler equation for nonempty closure application. The
+generated trampoline is pure Wasm control flow around semantic metadata and
+capture reads; target declarations remain ordinary direct calls. -/
+theorem compileLetValue_fvar_dispatch
+    (context : Context) (declId closureId : FVarId) (type : Expr)
+    (args : Array (LCNF.Arg .impure)) (resultKind closureKind : AbiKind)
+    (argumentCode : List Instruction) (argumentKinds : Array AbiKind)
+    (kindEq : checkedAbiKind type = .ok resultKind)
+    (closureEq : getLocal context closureId =
+      .ok (.localGet closureId, closureKind))
+    (argumentsEq : compileArgs context args = .ok (argumentCode, argumentKinds))
+    (nonempty : args.isEmpty = false) :
+    compileLetValue context {
+      fvarId := declId
+      binderName := declId.name
+      type
+      value := .fvar closureId args } =
+      .ok (compileClosureDispatch context declId closureId resultKind
+        argumentCode argumentKinds) := by
+  simp [compileLetValue, letValueKind, kindEq, closureEq, argumentsEq, nonempty]
   rfl
 
 def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .impure)) :

@@ -39,6 +39,10 @@ def differentialCorpus : List Fir.LeanIR.ImpureProgram := [
   abiMutationProgram,
   abiObjectMutationProgram,
   abiTagMutationProgram,
+  Fir.Wasm.abiDirectCallProgram,
+  Fir.Wasm.abiClosureCallProgram,
+  Fir.Wasm.abiClosureUnderApplyProgram,
+  Fir.Wasm.abiRecursiveCallProgram,
   rcProgram,
   persistentRcProgram,
   deletedProgram,
@@ -68,6 +72,19 @@ def differentialCorpus : List Fir.LeanIR.ImpureProgram := [
 
 #guard relatedReturn? (runDifferential abiTagMutationProgram `main #[])
   (.object (.tagged 99))
+
+#guard relatedReturn? (runDifferential Fir.Wasm.abiDirectCallProgram `main #[])
+  (.object (.tagged 11))
+
+#guard relatedReturn? (runDifferential Fir.Wasm.abiClosureCallProgram `main #[])
+  (.object (.tagged 21))
+
+#guard relatedReturn?
+  (runDifferential Fir.Wasm.abiClosureUnderApplyProgram `main #[])
+  (.object (.tagged 31))
+
+#guard relatedReturn? (runDifferential Fir.Wasm.abiRecursiveCallProgram `main #[])
+  (.object (.tagged 20))
 
 #guard relatedReturn? (runDifferential rcProgram `main #[])
   (.scalar (.uint8 0))

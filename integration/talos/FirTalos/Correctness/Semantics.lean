@@ -157,6 +157,24 @@ def SourceLazyLetResult (path : LazyCachePath) (context : Fir.Wasm.Context)
       env := bind sourceEnv decl.fvarId sourceValue
       runtime := nextRuntime }
 
+/-- Exact terminating source behavior for an internal named call or closure
+application. The existential step count admits recursive callees without
+placing fuel or a syntactic termination argument in the semantic boundary. -/
+def SourceCallLetResult (context : Fir.Wasm.Context)
+    (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) : Prop :=
+  ∃ count, ExecSteps externals count {
+      program := context.program
+      control := .code (.let decl continuation)
+      env := sourceEnv
+      runtime := sourceRuntime } {
+      program := context.program
+      control := .code continuation
+      env := bind sourceEnv decl.fvarId sourceValue
+      runtime := nextRuntime }
+
 /-- One successful non-binding source instruction step. Quantifying over the
 external implementation records that admitted mutation and ownership nodes are
 internal runtime effects, not external calls. -/
@@ -249,6 +267,31 @@ def LazyLetStepSimulates (path : LazyCachePath) (context : Fir.Wasm.Context)
     (targetStore nextStore : Wasm.Store RuntimeHost)
     (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat) : Prop :=
   SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion RuntimeHost)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+/-- Interprocedural semantic boundary for direct calls and generated closure
+trampolines. Concrete proofs compose ordinary Wasm call WP with the closure
+metadata/capture host rules; source recursion is summarized by its exact
+finite `ExecSteps` witness. -/
+def CallLetStepSimulates (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv RuntimeHost) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store RuntimeHost)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat) : Prop :=
+  SourceCallLetResult context externals sourceRuntime sourceEnv decl
       continuation nextRuntime sourceValue ∧
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals ∧
     StateRelated sourceFunction nextRuntime
@@ -611,6 +654,44 @@ theorem codeWP_lazyLet
       findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
     (step : LazyLetStepSimulates path context sourceFunction module hostEnv
       externals decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+      sourceValue targetStore nextStore targetLocals nextLocals resultIndex)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+        nextStore nextLocals tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
+/-- Recursive `CodeWP` rule for a terminating interprocedural call prefix.
+This covers both ordinary declaration calls (including recursion) and the
+non-circular closure trampoline. -/
+theorem codeWP_callLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store RuntimeHost}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step : CallLetStepSimulates context sourceFunction module hostEnv externals
+      decl continuation targetValue sourceRuntime nextRuntime sourceEnv
       sourceValue targetStore nextStore targetLocals nextLocals resultIndex)
     (continued :
       CodeWP context sourceModule sourceFunction labels module hostEnv

@@ -228,6 +228,33 @@ theorem SourceLazyLetResult.thenCodeEvaluates
   obtain ⟨count, steps⟩ := execSteps_compose lazySteps suffix
   exact ⟨count, final, steps, done⟩
 
+/-- A terminating internal or closure-call prefix, including a recursive
+callee, composes with the existing call-free continuation semantics. -/
+theorem SourceCallLetResult.thenCodeEvaluates
+    {context : Fir.Wasm.Context} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceValue resultValue : Value}
+    (sourceStep : SourceCallLetResult context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) continuation resultRuntime
+      resultValue) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+      (ReturnedObservation resultRuntime resultValue) := by
+  rcases sourceStep with ⟨prefixCount, callSteps⟩
+  have callSteps' :
+      ExecSteps externals prefixCount
+        (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
+        (sourceCodeState context nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation) := by
+    simpa [sourceCodeState] using callSteps
+  rcases continued.execEvaluates externals with
+    ⟨suffixCount, final, suffix, done⟩
+  obtain ⟨count, steps⟩ := execSteps_compose callSteps' suffix
+  exact ⟨count, final, steps, done⟩
+
 /--
 The case-specific W4 boundary. It records the source-selected branch and a
 transformer that installs any proof of that branch beneath the generated case
@@ -526,6 +553,45 @@ theorem SupportedExport.execCorrect_of_lazyLet
         .related (ReturnedObservation resultRuntime resultValue)
           (.returned resultValue resultRuntime))
     (sourceStep : SourceLazyLetResult path context initial.host.externals
+      initialRuntime [] decl continuation nextRuntime sourceValue)
+    (continued : CodeEvaluates context nextRuntime
+      (bind [] decl.fvarId sourceValue) continuation resultRuntime resultValue)
+    (correct :
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+        initialRuntime [] (.let decl continuation) spec.targetFunction.body
+        initial targetLocals []
+        (ReturnPost resultRuntime resultValue resultKind []))
+    (canonicalLocals : targetLocals = spec.targetFunction.toLocals []) :
+    ExecEvaluates initial.host.externals
+        (sourceCodeState context initialRuntime [] (.let decl continuation))
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ExportTerminatesWith hosts.env target.wasmModule exportName initial []
+        (RelatedPost #[resultKind]
+          (ReturnedObservation resultRuntime resultValue)) := by
+  constructor
+  · exact sourceStep.thenCodeEvaluates continued
+  · apply spec.terminatesWithRelated_of_return related
+    simpa [canonicalLocals] using correct
+
+/-- Whole-export W5.8 theorem for a terminating direct or closure-call
+prefix. Recursive calls use the exact finite source witness and ordinary
+fuel-free target call WP; no host callback executes a Wasm definition. -/
+theorem SupportedExport.execCorrect_of_callLet
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts} {exportName : String}
+    (spec : SupportedExport program context (.let decl continuation)
+      sourceModule sourceFunction target hosts exportName)
+    {initialRuntime nextRuntime resultRuntime : RuntimeState}
+    {initial : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {sourceValue resultValue : Value} {resultKind : AbiKind}
+    (related :
+      compareObservations (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime) =
+        .related (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime))
+    (sourceStep : SourceCallLetResult context initial.host.externals
       initialRuntime [] decl continuation nextRuntime sourceValue)
     (continued : CodeEvaluates context nextRuntime
       (bind [] decl.fvarId sourceValue) continuation resultRuntime resultValue)

@@ -56,7 +56,7 @@ def firstDuplicateFVar? : List FVarId → Option FVarId
       if rest.any (·.name == fvarId.name) then some fvarId else firstDuplicateFVar? rest
 
 def RuntimeOp.isClosure : RuntimeOp → Bool
-  | .partialApply .. | .closureApply .. => true
+  | .closureApply .. => true
   | _ => false
 
 def Function.signature (function : Function) : Signature :=

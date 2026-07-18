@@ -26,6 +26,11 @@ inductive HostOperation where
   | usizeProj (index : Nat)
   | scalarProj (width offset : Nat) (result : AbiKind)
   | cacheSet (declaration : Lean.Name) (value : AbiKind)
+  | partialApply (function : Lean.Name) (arity fixed : Nat)
+      (fields : Array AbiKind) (result : AbiKind)
+  | closureMatches (function : Lean.Name) (arity fixed : Nat)
+  | closureProj (function : Lean.Name) (arity fixed index : Nat)
+      (result : AbiKind)
   | box (scalar result : AbiKind)
   | unbox (scalar : AbiKind)
   | isShared
@@ -51,6 +56,12 @@ def HostOperation.runtimeOp : HostOperation → Option RuntimeOp
   | .usizeProj index => some (.usizeProj index)
   | .scalarProj width offset result => some (.scalarProj width offset result)
   | .cacheSet declaration value => some (.cacheSet declaration value)
+  | .partialApply function arity fixed fields result =>
+      some (.partialApply function arity fixed fields result)
+  | .closureMatches function arity fixed =>
+      some (.closureMatches function arity fixed)
+  | .closureProj function arity fixed index result =>
+      some (.closureProj function arity fixed index result)
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
@@ -79,6 +90,12 @@ def HostOperation.ofRuntime? : RuntimeOp → Option HostOperation
   | .usizeProj index => some (.usizeProj index)
   | .scalarProj width offset result => some (.scalarProj width offset result)
   | .cacheSet declaration value => some (.cacheSet declaration value)
+  | .partialApply function arity fixed fields result =>
+      some (.partialApply function arity fixed fields result)
+  | .closureMatches function arity fixed =>
+      some (.closureMatches function arity fixed)
+  | .closureProj function arity fixed index result =>
+      some (.closureProj function arity fixed index result)
   | .box scalar result => some (.box scalar result)
   | .unbox scalar => some (.unbox scalar)
   | .isShared => some .isShared
@@ -140,6 +157,13 @@ private def targetTrap (store : Wasm.Store RuntimeHost) (failure : TargetFailure
   let store := { store with host := { store.host with targetFailure? := some failure } }
   .Trap store (structuredTrapMessage (.target failure))
 
+def closureData (runtime : RuntimeState) (value : Value) :
+    Except RuntimeFault (Lean.Name × Nat × Array Value) := do
+  let .object (.heap location) := value | throw .expectedClosure
+  let cell ← getLiveCell runtime location
+  let .closure function arity fixed := cell.object | throw .expectedClosure
+  return (function, arity, fixed)
+
 private def evaluate (operation : HostOperation) (runtime : RuntimeState)
     (externals : ExternalImpl) (args : Array Value) :
     Except StructuredTrap (RuntimeState × Array Value) :=
@@ -178,6 +202,33 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
   | .cacheSet declaration _ =>
       match args[0]? with
       | some value => .ok (runtime.setGlobal declaration value, #[value])
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .partialApply function arity _ _ _ =>
+      let (runtime, reference) := alloc runtime (.closure function arity args)
+      .ok (runtime, #[.object reference])
+  | .closureMatches function arity fixed =>
+      match args[0]? with
+      | some closure =>
+          match closureData runtime closure with
+          | .ok (actualFunction, actualArity, actualFixed) =>
+              let isMatch := actualFunction == function && actualArity == arity &&
+                actualFixed.size == fixed
+              .ok (runtime, #[.scalar (.uint32 (if isMatch then 1 else 0))])
+          | .error fault => .error (.source fault)
+      | none => .error (.target (.arityMismatch 1 args.size))
+  | .closureProj function arity fixed index _ =>
+      match args[0]? with
+      | some closure =>
+          match closureData runtime closure with
+          | .ok (actualFunction, actualArity, actualFixed) =>
+              if actualFunction != function || actualArity != arity ||
+                  actualFixed.size != fixed then
+                .error (.target .closureMetadataMismatch)
+              else
+                match actualFixed[index]? with
+                | some value => .ok (runtime, #[value])
+                | none => .error (.target (.arityMismatch (index + 1) actualFixed.size))
+          | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
   | .box scalar _ =>
       match runtimeScalarType? scalar, args[0]? with
@@ -346,6 +397,78 @@ theorem hostStep_cacheSet_of_decode_encode
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
     HostOperation.runtimeOp, RuntimeOp.signature, decoded,
     encodeResults_singleton_of_encodeValue encoded]
+
+theorem hostStep_partialApply_of_decode_encode
+    (function : Lean.Name) (arity fixed : Nat) (fieldKinds : Array AbiKind)
+    (resultKind : AbiKind) (initial : Wasm.Store RuntimeHost)
+    (physicalArgs : List Wasm.Value) (semanticArgs : Array Value)
+    (sourceRuntime : RuntimeState) (reference : ObjectRef)
+    {after : HandleTable} {handle : Handle}
+    (decoded : decodeArgs initial.host.handles fieldKinds physicalArgs =
+      .ok semanticArgs)
+    (allocated : alloc initial.host.runtime (.closure function arity semanticArgs) =
+      (sourceRuntime, reference))
+    (usesHandle : resultKind.usesHandle = true)
+    (encoded : initial.host.handles.encode resultKind (.object reference) =
+      .ok (after, handle)) :
+    hostStep (.partialApply function arity fixed fieldKinds resultKind)
+        initial physicalArgs =
+      .Return [.i32 handle] {
+        initial with host := {
+          initial.host with
+          runtime := sourceRuntime
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, allocated,
+    encodeResults_handle_singleton_of_encode usesHandle encoded]
+
+theorem hostStep_closureMatches_of_decode_read
+    (function : Lean.Name) (arity fixed : Nat)
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (closure : Value) (captured : Array Value)
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[closure])
+    (read : closureData initial.host.runtime closure =
+      .ok (function, arity, captured))
+    (fixedSize : captured.size = fixed) :
+    hostStep (.closureMatches function arity fixed) initial physicalArgs =
+      .Return [.i32 1] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, read, fixedSize,
+    encodeResults_singleton_of_encodeValue (by rfl :
+      encodeValue initial.host.handles .uint32 (.scalar (.uint32 1)) =
+        .ok (initial.host.handles, .i32 1))]
+
+theorem hostStep_closureProj_of_decode_read_encode
+    (function : Lean.Name) (arity fixed index : Nat) (resultKind : AbiKind)
+    (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)
+    (closure sourceValue : Value) (captured : Array Value)
+    {after : HandleTable} {physicalResult : Wasm.Value}
+    (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
+      .ok #[closure])
+    (read : closureData initial.host.runtime closure =
+      .ok (function, arity, captured))
+    (fixedSize : captured.size = fixed)
+    (projected : captured[index]? = some sourceValue)
+    (encoded : encodeValue initial.host.handles resultKind sourceValue =
+      .ok (after, physicalResult)) :
+    hostStep (.closureProj function arity fixed index resultKind)
+        initial physicalArgs =
+      .Return [physicalResult] {
+        initial with host := {
+          initial.host with
+          handles := after
+          fault? := none
+          targetFailure? := none } } := by
+  simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
+    HostOperation.runtimeOp, RuntimeOp.signature, decoded, read, fixedSize,
+    projected, encodeResults_singleton_of_encodeValue encoded]
 
 theorem hostStep_naturalLiteral_of_encode
     (initial : Wasm.Store RuntimeHost) (value : Nat) {after : HandleTable}

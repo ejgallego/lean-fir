@@ -109,15 +109,19 @@ certificate derives the local `CodeWP`, a successful source evaluation, and a
 real FIR `ExecEvaluates` run; `SupportedExport.execCorrect_of_simulation`
 combines that run with fuel-free correctness of the generated named export.
 All four fixtures use this API without fixture-specific `CodeWP` recursion.
-W5.1–W5.7 now cover scalar/`usize` projections, boxing and sharing, mutation,
+W5.1–W5.8 now cover scalar/`usize` projections, boxing and sharing, mutation,
 ownership, reset/reuse, semantic external calls, and source-compatible lazy
 global caching. Called zero-argument declarations use deterministic mutable
 flag/value globals; misses update both the semantic runtime and physical Wasm
 cache, while hits skip evaluation. Differential coverage checks that two calls
 produce one external event, and the proof surface covers exact cache host
 steps, hit/miss WP composition, recursive `CodeWP`, and the checked-export
-boundary. Closures, indirect dispatch, and recursion are the remaining W5
-slice.
+boundary. Internal direct and recursive calls now use ordinary Wasm calls.
+Statically tracked closures use a generated metadata trampoline with typed
+capture projection, semantic underapplication, and saturated direct dispatch;
+the supported gate rejects oversaturation and unknown closure provenance.
+Differential coverage includes direct, captured, underapplied, and recursive
+programs, completing the planned W5 semantic-backend slices.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

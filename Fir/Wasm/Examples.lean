@@ -62,6 +62,10 @@ def runtimeSignatureCases : Array (RuntimeOp × Signature) := #[
     { params := #[.tobject], results := #[.object] }),
   (.closureApply #[.uint32] #[.float],
     { params := #[.tobject, .uint32], results := #[.float] }),
+  (.closureMatches `f 2 1,
+    { params := #[.tobject], results := #[.uint32] }),
+  (.closureProj `f 2 1 0 .tobject,
+    { params := #[.tobject], results := #[.tobject] }),
   (.reset 1, { params := #[.tobject], results := #[.reuseToken] }),
   (.reuse pairInfo false #[.tobject, .tobject] .object,
     { params := #[.reuseToken, .tobject, .tobject], results := #[.object] }),
@@ -194,6 +198,117 @@ def voidProgram : Fir.LeanIR.ImpureProgram :=
   | .error _ => false
 
 #guard supportedProgram voidProgram
+
+def abiDirectIdDecl : LCNF.Decl .impure :=
+  decl `abiDirectId #[param x LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return x))
+
+def abiDirectCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiDirectIdDecl, decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 11))) <|
+      .let (letDecl r LCNF.ImpureType.tobject (.fap `abiDirectId #[.fvar x])) <|
+      .return r)] }
+
+def abiClosureFirstDecl : LCNF.Decl .impure :=
+  decl `abiClosureFirst #[param x LCNF.ImpureType.tobject,
+    param y LCNF.ImpureType.tobject] LCNF.ImpureType.tobject (.code (.return x))
+
+def abiClosureCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiClosureFirstDecl, decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 21))) <|
+      .let (letDecl c LCNF.ImpureType.tobject (.pap `abiClosureFirst #[.fvar x])) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 22))) <|
+      .let (letDecl r LCNF.ImpureType.tobject (.fvar c #[.fvar y])) <|
+      .return r)] }
+
+#guard supportedProgram abiDirectCallProgram
+#guard supportedProgram abiClosureCallProgram
+
+def underClosure : FVarId := ⟨`underClosure⟩
+def underClosure2 : FVarId := ⟨`underClosure2⟩
+def underThird : FVarId := ⟨`underThird⟩
+
+def abiClosureFirst3Decl : LCNF.Decl .impure :=
+  decl `abiClosureFirst3 #[param x LCNF.ImpureType.tobject,
+    param y LCNF.ImpureType.tobject, param underThird LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return x))
+
+def abiClosureUnderApplyProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiClosureFirst3Decl, decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 31))) <|
+      .let (letDecl underClosure LCNF.ImpureType.tobject
+        (.pap `abiClosureFirst3 #[.fvar x])) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 32))) <|
+      .let (letDecl underClosure2 LCNF.ImpureType.tobject
+        (.fvar underClosure #[.fvar y])) <|
+      .let (letDecl underThird LCNF.ImpureType.tobject (.lit (.nat 33))) <|
+      .let (letDecl r LCNF.ImpureType.tobject
+        (.fvar underClosure2 #[.fvar underThird])) <|
+      .return r)] }
+
+#guard supportedProgram abiClosureUnderApplyProgram
+
+def abiClosureOversaturatedProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiClosureFirstDecl, decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 41))) <|
+      .let (letDecl underClosure LCNF.ImpureType.tobject
+        (.pap `abiClosureFirst #[.fvar x])) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 42))) <|
+      .let (letDecl underThird LCNF.ImpureType.tobject (.lit (.nat 43))) <|
+      .let (letDecl r LCNF.ImpureType.tobject
+        (.fvar underClosure #[.fvar y, .fvar underThird])) <|
+      .return r)] }
+
+#guard !supportedProgram abiClosureOversaturatedProgram
+
+def recursionFallback : FVarId := ⟨`recursionFallback⟩
+def recursionList : FVarId := ⟨`recursionList⟩
+def recursionHead : FVarId := ⟨`recursionHead⟩
+def recursionTail : FVarId := ⟨`recursionTail⟩
+def recursionNil : FVarId := ⟨`recursionNil⟩
+def recursionOne : FVarId := ⟨`recursionOne⟩
+def recursionTwo : FVarId := ⟨`recursionTwo⟩
+
+def recursionNilInfo : LCNF.CtorInfo :=
+  { name := ``List.nil, cidx := 0, size := 0, usize := 0, ssize := 0 }
+
+def recursionConsInfo : LCNF.CtorInfo :=
+  { name := ``List.cons, cidx := 1, size := 2, usize := 0, ssize := 0 }
+
+def abiRecursiveLastDecl : LCNF.Decl .impure :=
+  { decl `abiRecursiveLast #[
+      param recursionFallback LCNF.ImpureType.tobject,
+      param recursionList LCNF.ImpureType.tobject]
+      LCNF.ImpureType.tobject (.code <|
+        .cases (.mk ``List LCNF.ImpureType.tobject recursionList #[
+          .ctorAlt recursionNilInfo (.return recursionFallback),
+          .ctorAlt recursionConsInfo <|
+            .let (letDecl recursionHead LCNF.ImpureType.tobject
+              (.oproj 0 recursionList)) <|
+            .let (letDecl recursionTail LCNF.ImpureType.tobject
+              (.oproj 1 recursionList)) <|
+            .let (letDecl r LCNF.ImpureType.tobject
+              (.fap `abiRecursiveLast #[.fvar recursionHead, .fvar recursionTail])) <|
+            .return r])) with
+    recursive := true }
+
+def abiRecursiveCallProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiRecursiveLastDecl,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl recursionOne LCNF.ImpureType.tobject (.lit (.nat 10))) <|
+        .let (letDecl recursionTwo LCNF.ImpureType.tobject (.lit (.nat 20))) <|
+        .let (letDecl recursionNil LCNF.ImpureType.tobject
+          (.ctor recursionNilInfo #[])) <|
+        .let (letDecl recursionTail LCNF.ImpureType.tobject
+          (.ctor recursionConsInfo #[.fvar recursionTwo, .fvar recursionNil])) <|
+        .let (letDecl recursionList LCNF.ImpureType.tobject
+          (.ctor recursionConsInfo #[.fvar recursionOne, .fvar recursionTail])) <|
+        .let (letDecl recursionFallback LCNF.ImpureType.tobject (.lit (.nat 0))) <|
+        .let (letDecl r LCNF.ImpureType.tobject
+          (.fap `abiRecursiveLast #[.fvar recursionFallback, .fvar recursionList])) <|
+        .return r)] }
+
+#guard supportedProgram abiRecursiveCallProgram
 
 def supportedUSizeProjectionProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedUSizeProjection #[param p objType] usizeType (.code <|
@@ -432,6 +547,7 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   ctorProjectionProgram,
   caseProgram,
   directCallProgram,
+  closureCallProgram,
   joinProgram,
   scalarBoxProgram,
   mutationProgram,
@@ -457,8 +573,8 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
 #guard match lower closureCallProgram with
   | .ok module =>
       match validateModule module with
-      | .error (.unsupportedClosure _) => true
-      | _ => false
+      | .ok _ => true
+      | .error _ => false
   | .error _ => false
 
 def fixtureFunction (body : List Instruction) (results : Array AbiKind := #[])

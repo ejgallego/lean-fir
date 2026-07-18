@@ -30,6 +30,7 @@ inductive TargetFailure where
   | invalidHandleTable (next : Nat)
   | arityMismatch (expected actual : Nat)
   | abiKindMismatch (kind : AbiKind)
+  | closureMetadataMismatch
   deriving Inhabited, BEq, Repr
 
 /-- A trap retains whether the fault came from source semantics or target machinery. -/

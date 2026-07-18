@@ -132,4 +132,9 @@ def encodeProgram (program : Fir.LeanIR.ImpureProgram) : Except String ByteArray
 standard Wasm module for the lazy-cache path. -/
 #guard (encodeProgram abiCachedExternalProgram).isOk
 
+#guard (encodeProgram Fir.Wasm.abiDirectCallProgram).isOk
+#guard (encodeProgram Fir.Wasm.abiClosureCallProgram).isOk
+#guard (encodeProgram Fir.Wasm.abiClosureUnderApplyProgram).isOk
+#guard (encodeProgram Fir.Wasm.abiRecursiveCallProgram).isOk
+
 end Fir.Wasm.Emit.Examples

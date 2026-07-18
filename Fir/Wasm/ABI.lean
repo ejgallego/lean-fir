@@ -191,6 +191,8 @@ inductive RuntimeOp where
   | partialApply (function : Name) (arity fixed : Nat) (fields : Array AbiKind)
       (result : AbiKind)
   | closureApply (args : Array AbiKind) (result : Array AbiKind)
+  | closureMatches (function : Name) (arity fixed : Nat)
+  | closureProj (function : Name) (arity fixed index : Nat) (result : AbiKind)
   | reset (objectFields : Nat)
   | reuse (info : LCNF.CtorInfo) (updateHeader : Bool) (fields : Array AbiKind)
       (result : AbiKind)
@@ -217,8 +219,12 @@ def RuntimeOp.abiWellFormed : RuntimeOp → Bool
   | .usizeProj _ => true
   | .scalarProj _ _ result => result.isScalar
   | .cacheSet _ value => value != .erased
-  | .partialApply _ arity fixed _ result => fixed < arity && result.isObjectLike
+  | .partialApply _ arity fixed fields result =>
+      fixed < arity && fields.size == fixed && result.isObjectLike
   | .closureApply _ results => results.size <= 1
+  | .closureMatches _ arity fixed => fixed < arity
+  | .closureProj _ arity fixed index result =>
+      fixed < arity && index < fixed && result != .erased
   | .reset _ => true
   | .reuse info _ fields result =>
       info.size == fields.size && fields.all AbiKind.isObjectField &&
@@ -240,6 +246,8 @@ def RuntimeOp.signature : RuntimeOp → Signature
   | .cacheSet _ value => { params := #[value], results := #[value] }
   | .partialApply _ _ _ fields result => { params := fields, results := #[result] }
   | .closureApply args result => { params := #[.tobject] ++ args, results := result }
+  | .closureMatches _ _ _ => { params := #[.tobject], results := #[.uint32] }
+  | .closureProj _ _ _ _ result => { params := #[.tobject], results := #[result] }
   | .reset _ => { params := #[.tobject], results := #[.reuseToken] }
   | .reuse _ _ fields result =>
       { params := #[.reuseToken] ++ fields, results := #[result] }
@@ -264,6 +272,8 @@ def RuntimeOp.stem : RuntimeOp → String
   | .cacheSet .. => "cache_set"
   | .partialApply .. => "pap"
   | .closureApply .. => "apply"
+  | .closureMatches .. => "closure_matches"
+  | .closureProj .. => "closure_proj"
   | .reset .. => "reset"
   | .reuse .. => "reuse"
   | .box .. => "box"
