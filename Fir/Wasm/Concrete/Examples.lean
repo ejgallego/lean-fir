@@ -253,6 +253,24 @@ def decrementedSharedBoxedUInt64Max :
             shared == 1
       | _, _, _ => false
 
+/-- Count one transitions to the canonical freed header rather than retaining
+stale boxed payload metadata. -/
+def releasedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← boxedUInt64Max
+  let state ← decrementReferenceOnce state object true
+  return (state, object)
+
+#guard match releasedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match Header.read state.memory object, state.readLiveHeader object with
+      | .ok header, .error (.deadObject deadAddress) =>
+          deadAddress == object && header.kind == .freed && !header.persistent &&
+            !header.live && header.refCount == 0 &&
+            header.aux0 == 0 && header.aux1 == 0 &&
+            header.aux2 == 0 && header.aux3 == 0
+      | _, _ => false
+
 /- Tagged references retain their no-ownership representation contract:
 checked increments are no-ops and unchecked increments reject them. -/
 #guard match smallTagged, promotedTagged with

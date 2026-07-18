@@ -525,8 +525,7 @@ def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
               { header with refCount := UInt32.ofNat (header.refCount.toNat - 1) }
           else
             let owned ← readOwnedReferences state object header
-            let state ← writeLiveHeader state object
-              { header with refCount := 0, live := false }
+            let state ← writeLiveHeader state object header.forRelease
             owned.foldlM (init := state) fun state child =>
               decrementReferenceOnceFuel fuel state child true
       | .sentinel | .invalid => throw (.source .expectedObject)

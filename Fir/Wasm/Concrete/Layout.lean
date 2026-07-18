@@ -263,6 +263,19 @@ structure Header where
   aux3 : UInt32 := 0
   deriving Inhabited, BEq, Repr
 
+/-- Canonical released-allocation header. The extent remains self-describing,
+while all live payload metadata is erased behind the dedicated kind. -/
+def Header.forRelease (header : Header) : Header := {
+  header with
+  kind := .freed
+  persistent := false
+  live := false
+  refCount := 0
+  aux0 := 0
+  aux1 := 0
+  aux2 := 0
+  aux3 := 0 }
+
 def align8 (bytes : Nat) : Nat := ((bytes + 7) / 8) * 8
 
 @[simp] theorem align8_mod (bytes : Nat) : align8 bytes % 8 = 0 := by

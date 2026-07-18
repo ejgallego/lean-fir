@@ -1128,6 +1128,15 @@ while rechecking all decoded payload regions. The next boundary is count one:
 introduce dead-cell refinement, prove leaf deletion, and then lift recursive
 constructor release.
 
+W6.3g repairs the concrete count-one encoding before that relation is stated.
+The invariant audit found `FIR-BUG-wasm-none-release-retains-live-kind`: the
+runtime cleared liveness but retained the old live payload kind, contrary to
+the frozen W6.0 freed-header contract. `Header.forRelease` now preserves only
+the self-describing allocation extent and canonicalizes kind, flags, count,
+and auxiliary words. A raw-header regression proves the dedicated `.freed`
+encoding while the public live-header decoder reports the expected dead-object
+failure. Dead-cell refinement can now target one exact representation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
