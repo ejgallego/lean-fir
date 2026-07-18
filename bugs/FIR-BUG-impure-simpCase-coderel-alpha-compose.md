@@ -96,16 +96,26 @@ alone cannot rule this case out. The universal theorem must therefore consume
 an explicit case-admissibility/kernel law connecting `validCase` to the
 source table and the simplifier result.
 
+The recursive proof also exposed an independent syntactic requirement. The
+alpha case relation is selector-based, so root reflexivity need not mention a
+shadowed alternative, while `shadowCode?` still transforms every array entry.
+`ScopedAlphaBireflexiveTree` now records hygiene for the complete syntax tree.
+`ScopedCaseAdmissibilityLaws` isolates the remaining phase fact at the
+nonrecursive simplifier boundary, and
+`scopedCaseBoundarySoundTree_of_admissibility` lifts it to the universal
+recursive boundary. `shadowCode_scopedFactoredTree` then factors any
+successful recursive shadow run under those explicit premises.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
 of a compiler miscompilation. The concrete alpha-default-folding fixture is
 covered both by the composed whole-program theorem and by the new scoped
 case-node contract. Closure through surrounding recursive syntax is now
-generic under explicit alpha-reflexivity evidence. Arbitrary alpha-folding
-shadow results still require a scoped case-kernel law carrying both hygiene
-and the phase-specific selection/admissibility facts; the boundary is not
-valid for an unconstrained `validCase`.
+generic under explicit full-tree alpha-reflexivity evidence. Arbitrary shadow
+results are covered by the universal theorem once the phase supplies
+`ScopedCaseAdmissibilityLaws`; the boundary remains intentionally invalid for
+an unconstrained `validCase`.
 
 ## Classification and triage
 
@@ -135,9 +145,9 @@ equivalence. `SimpCaseAlphaBridge` makes structural-then-alpha composition
 generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
 The scope-indexed case-boundary interface and concrete alpha-fold regression
-are now implemented, and explicit hygiene supplies the full non-case
-traversal-closure laws. The card stays confirmed for arbitrary recursive
-compiler traversal until every shadow case result satisfies the admissible
-case-kernel contract and that local contract is lifted to
-`ScopedCaseBoundarySound`. Connecting that shadow theorem to the actual
-private pass remains the separate upstream proof-interface issue.
+are now implemented. Full-tree hygiene supplies every recursive branch
+certificate, `ScopedCaseAdmissibilityLaws` supplies the phase-local selection
+facts, and the generic theorem lifts them through arbitrary recursive shadow
+traversal. The remaining proof work is to derive the admissibility law from a
+concrete compiler phase invariant. Connecting that shadow theorem to the
+actual private pass remains the separate upstream proof-interface issue.

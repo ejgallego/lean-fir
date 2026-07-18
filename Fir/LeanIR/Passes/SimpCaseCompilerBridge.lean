@@ -75,16 +75,71 @@ def shadowAddDefaultAlt (alts : Array (LCNF.Alt .impure)) :
           result := result.push alt
       return result.push (.default max.getCode)
 
+/-- Pure output projection of Lean's private unreachable-arm filter. -/
+def shadowFilterUnreachable (alts : Array (LCNF.Alt .impure)) :
+    Array (LCNF.Alt .impure) :=
+  alts.filter (!·.getCode matches .unreach ..)
+
+/-- Alternatives after both nonrecursive table rewrites. -/
+def shadowPrepareAlts (cases : LCNF.Cases .impure) :
+    Array (LCNF.Alt .impure) :=
+  shadowAddDefaultAlt (shadowFilterUnreachable cases.alts)
+
 /-- Pure output projection of Lean's private `simplifyCases`. -/
 def shadowSimplifyCases (cases : LCNF.Cases .impure) : LCNF.Code .impure :=
-  let alts := cases.alts.filter (!·.getCode matches .unreach ..)
-  let alts := shadowAddDefaultAlt alts
+  let alts := shadowPrepareAlts cases
   if alts.size == 0 then
     .unreach cases.resultType
   else if alts.size == 1 then
     alts[0]!.getCode
   else
     .cases (cases.updateAlts alts)
+
+theorem shadowReachablePredicate_eq (code : LCNF.Code .impure) :
+    (!code matches .unreach ..) =
+      !Fir.LeanIR.Passes.SimpCase.isUnreachable code := by
+  cases code <;> rfl
+
+/-- The transparent shadow's array filter is the executable presentation of
+FIR's already-proved list specification for unreachable-arm removal. -/
+theorem shadowRemoveUnreachable_eq_filter
+    (alts : List (LCNF.Alt .impure)) :
+    Fir.LeanIR.Passes.SimpCase.removeUnreachable alts =
+      alts.filter (fun alt =>
+        !Fir.LeanIR.Passes.SimpCase.isUnreachable alt.getCode) := by
+  induction alts with
+  | nil => rfl
+  | cons alt rest ih =>
+      cases h : Fir.LeanIR.Passes.SimpCase.isUnreachable alt.getCode <;>
+        simp [Fir.LeanIR.Passes.SimpCase.removeUnreachable, h, ih]
+
+theorem shadowFilterUnreachable_toList
+    (alts : Array (LCNF.Alt .impure)) :
+    (shadowFilterUnreachable alts).toList =
+      Fir.LeanIR.Passes.SimpCase.removeUnreachable alts.toList := by
+  unfold shadowFilterUnreachable
+  rw [Array.toList_filter, shadowRemoveUnreachable_eq_filter]
+  apply List.filter_congr
+  intro alt member
+  exact shadowReachablePredicate_eq alt.getCode
+
+theorem shadowSimplifyCases_eq_unreach
+    (empty : (shadowPrepareAlts cases).size = 0) :
+    shadowSimplifyCases cases = .unreach cases.resultType := by
+  simp [shadowSimplifyCases, empty]
+
+theorem shadowSimplifyCases_eq_singleton
+    (singleton : (shadowPrepareAlts cases).size = 1) :
+    shadowSimplifyCases cases =
+      (shadowPrepareAlts cases)[0]!.getCode := by
+  simp [shadowSimplifyCases, singleton]
+
+theorem shadowSimplifyCases_eq_cases
+    (nonempty : (shadowPrepareAlts cases).size ≠ 0)
+    (nonsingleton : (shadowPrepareAlts cases).size ≠ 1) :
+    shadowSimplifyCases cases =
+      .cases (cases.updateAlts (shadowPrepareAlts cases)) := by
+  simp [shadowSimplifyCases, nonempty, nonsingleton]
 
 /-- Transform one alternative with a supplied recursive code transformer.
 Factoring this nonrecursive layer out makes the case-kernel proof inspectable

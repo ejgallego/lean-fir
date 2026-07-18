@@ -575,6 +575,174 @@ structure ScopedAlphaBireflexive (index : ScopeIndex)
     (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
     index.backwardRho index.targetScope index.sourceScope code code
 
+mutual
+
+  /-- Alpha reflexivity plus lexical evidence for every syntactic recursive
+  child. `CodeRelated.cases` is selector-based and therefore cannot by itself
+  expose shadowed alternatives, while the compiler traverses and compares
+  every array entry. -/
+  inductive ScopedAlphaBireflexiveTree :
+      (index : ScopeIndex) → LCNF.Code .impure → Prop where
+    | letE
+        (root : ScopedAlphaBireflexive index (.let declaration continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree
+          (index.pushVar declaration.fvarId) continuation) :
+        ScopedAlphaBireflexiveTree index (.let declaration continuation)
+    | jp
+        (root : ScopedAlphaBireflexive index
+          (.jp (.mk fvarId binderName params type body) continuation))
+        (bodyTree : ScopedAlphaBireflexiveTree (index.pushParams params) body)
+        (continuationTree : ScopedAlphaBireflexiveTree
+          (index.pushJoin fvarId) continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.jp (.mk fvarId binderName params type body) continuation)
+    | jmp
+        (root : ScopedAlphaBireflexive index (.jmp fvarId args)) :
+        ScopedAlphaBireflexiveTree index (.jmp fvarId args)
+    | cases
+        (root : ScopedAlphaBireflexive index (.cases cases))
+        (alternativesTree : ScopedAlphaBireflexiveAlts index cases.alts.toList) :
+        ScopedAlphaBireflexiveTree index (.cases cases)
+    | ret
+        (root : ScopedAlphaBireflexive index (.return fvarId)) :
+        ScopedAlphaBireflexiveTree index (.return fvarId)
+    | unreach
+        (root : ScopedAlphaBireflexive index (.unreach type)) :
+        ScopedAlphaBireflexiveTree index (.unreach type)
+    | oset
+        (root : ScopedAlphaBireflexive index
+          (.oset fvarId fieldIndex value continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.oset fvarId fieldIndex value continuation)
+    | uset
+        (root : ScopedAlphaBireflexive index
+          (.uset fvarId fieldIndex value continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.uset fvarId fieldIndex value continuation)
+    | sset
+        (root : ScopedAlphaBireflexive index
+          (.sset fvarId width offset value type continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.sset fvarId width offset value type continuation)
+    | setTag
+        (root : ScopedAlphaBireflexive index
+          (.setTag fvarId tag continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index (.setTag fvarId tag continuation)
+    | inc
+        (root : ScopedAlphaBireflexive index
+          (.inc fvarId amount check persistent continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.inc fvarId amount check persistent continuation)
+    | dec
+        (root : ScopedAlphaBireflexive index
+          (.dec fvarId amount check persistent objects continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index
+          (.dec fvarId amount check persistent objects continuation)
+    | del
+        (root : ScopedAlphaBireflexive index (.del fvarId continuation))
+        (continuationTree : ScopedAlphaBireflexiveTree index continuation) :
+        ScopedAlphaBireflexiveTree index (.del fvarId continuation)
+
+  /-- Pointwise hygiene/reflexivity for the complete alternative array,
+  including entries hidden by an earlier duplicate selector. -/
+  inductive ScopedAlphaBireflexiveAlts :
+      (index : ScopeIndex) → List (LCNF.Alt .impure) → Prop where
+    | nil : ScopedAlphaBireflexiveAlts index []
+    | ctor
+        (bodyTree : ScopedAlphaBireflexiveTree index code)
+        (rest : ScopedAlphaBireflexiveAlts index alts) :
+        ScopedAlphaBireflexiveAlts index (.ctorAlt info code :: alts)
+    | default
+        (bodyTree : ScopedAlphaBireflexiveTree index code)
+        (rest : ScopedAlphaBireflexiveAlts index alts) :
+        ScopedAlphaBireflexiveAlts index (.default code :: alts)
+
+end
+
+theorem ScopedAlphaBireflexiveTree.root
+    (evidence : ScopedAlphaBireflexiveTree index code) :
+    ScopedAlphaBireflexive index code := by
+  cases evidence <;> assumption
+
+theorem ScopedAlphaBireflexiveAlts.forward
+    (evidence : ScopedAlphaBireflexiveAlts index alts) :
+    AltsRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope alts alts := by
+  let rec go {index alts}
+      (evidence : ScopedAlphaBireflexiveAlts index alts) :
+      AltsRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope alts alts :=
+    match evidence with
+    | .nil => .nil
+    | .ctor bodyTree rest =>
+        .cons (.ctor bodyTree.root.forward) (go rest)
+    | .default bodyTree rest =>
+        .cons (.default bodyTree.root.forward) (go rest)
+  exact go evidence
+
+theorem ScopedAlphaBireflexiveAlts.backward
+    (evidence : ScopedAlphaBireflexiveAlts index alts) :
+    AltsRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope alts alts := by
+  let rec go {index alts}
+      (evidence : ScopedAlphaBireflexiveAlts index alts) :
+      AltsRelated
+        (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+        index.backwardRho index.targetScope index.sourceScope alts alts :=
+    match evidence with
+    | .nil => .nil
+    | .ctor bodyTree rest =>
+        .cons (.ctor bodyTree.root.backward) (go rest)
+    | .default bodyTree rest =>
+        .cons (.default bodyTree.root.backward) (go rest)
+  exact go evidence
+
+theorem scopedAlphaBireflexiveTree_cases
+    (forwardDiscr : ScopedFVarRelated index.forwardRho
+      index.sourceScope index.targetScope cases.discr cases.discr)
+    (backwardDiscr : ScopedFVarRelated index.backwardRho
+      index.targetScope index.sourceScope cases.discr cases.discr)
+    (alternatives : ScopedAlphaBireflexiveAlts index cases.alts.toList) :
+    ScopedAlphaBireflexiveTree index (.cases cases) :=
+  .cases {
+    forward := .cases forwardDiscr fun _ => chooseAlt_related alternatives.forward
+    backward := .cases backwardDiscr fun _ => chooseAlt_related alternatives.backward
+  } alternatives
+
+/-- Project the discriminator relation from a case-to-case alpha proof. The
+`terminal` branch is index-impossible but must be discharged explicitly when
+eliminating `CodeRelated`. -/
+theorem codeRelated_cases_discr
+    (related : CodeRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope (.cases left) (.cases right)) :
+    ScopedFVarRelated rho leftScope rightScope left.discr right.discr := by
+  cases related with
+  | terminal related => cases related
+  | cases discr _ => exact discr
+
+/-- Project semantic branch selection from a case-to-case alpha proof. -/
+theorem codeRelated_cases_selected
+    (related : CodeRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope (.cases left) (.cases right)) :
+    ∀ tag, CaseSelectionRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
+      (chooseAlt tag left.alts.toList) (chooseAlt tag right.alts.toList) := by
+  cases related with
+  | terminal related => cases related
+  | cases _ selected => exact selected
+
 /-- A universally well-scoped presentation of the factor relation. Ill-scoped
 indices are not asserted to relate anything; callers provide alpha reflexivity
 at the source position they actually traverse. -/
@@ -583,6 +751,173 @@ def ScopedCodeFactoredOnAlphaReflexive
   fun index source target =>
     ScopedAlphaBireflexive index source →
       ScopedCodeFactored validCase index source target
+
+/-- Full-tree presentation used by the case kernel. Unlike root
+alpha-reflexivity, this premise supplies a proof for every recursively
+transformed alternative, including semantically shadowed entries. -/
+def ScopedCodeFactoredOnAlphaTree
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedAlphaBireflexiveTree index source →
+      ScopedCodeFactored validCase index source target
+
+/-- Pointwise factors after applying the full-tree certificate to every
+recursive alternative premise produced by the traversal. -/
+inductive ScopedAltFactored
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor
+      (body : ScopedCodeFactored validCase index left right) :
+      ScopedAltFactored validCase index
+        (.ctorAlt info left) (.ctorAlt info right)
+  | default
+      (body : ScopedCodeFactored validCase index left right) :
+      ScopedAltFactored validCase index (.default left) (.default right)
+
+abbrev ScopedAltsFactored
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :=
+  ListRel (ScopedAltFactored validCase index)
+
+theorem scopedAltsFactored_of_tree
+    (related : ScopedAltsRelated
+      (ScopedCodeFactoredOnAlphaTree validCase) index source target)
+    (tree : ScopedAlphaBireflexiveAlts index source) :
+    ScopedAltsFactored validCase index source target := by
+  induction related with
+  | nil =>
+      exact .nil
+  | cons head tail ih =>
+      cases head with
+      | ctor body =>
+          cases tree with
+          | ctor bodyTree rest =>
+              exact .cons (.ctor (body bodyTree)) (ih rest)
+      | default body =>
+          cases tree with
+          | default bodyTree rest =>
+              exact .cons (.default (body bodyTree)) (ih rest)
+
+/-- Selection-local evidence for a simplifier result that remains a case
+table. The structural leg only needs tags accepted by the phase predicate;
+the alpha leg relates all semantic selections in both directions. -/
+structure ScopedAlignedCaseEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Cases .impure) : Type where
+  middleAlts : Array (LCNF.Alt .impure)
+  structuralSelected : ∀ tag, validCase source tag →
+    SelectionRel validCase (chooseAlt tag source.alts.toList)
+      (chooseAlt tag middleAlts.toList)
+  alphaForwardDiscr : ScopedFVarRelated index.forwardRho
+    index.sourceScope index.targetScope source.discr target.discr
+  alphaForwardSelected : ∀ tag,
+    CaseSelectionRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope
+      (chooseAlt tag middleAlts.toList)
+      (chooseAlt tag target.alts.toList)
+  alphaBackwardDiscr : ScopedFVarRelated index.backwardRho
+    index.targetScope index.sourceScope target.discr source.discr
+  alphaBackwardSelected : ∀ tag,
+    CaseSelectionRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope
+      (chooseAlt tag target.alts.toList)
+      (chooseAlt tag middleAlts.toList)
+
+theorem ScopedAlignedCaseEvidence.factored
+    (evidence : ScopedAlignedCaseEvidence validCase index source target) :
+    ScopedCodeFactored validCase index (.cases source) (.cases target) := by
+  cases source with
+  | mk typeName resultType discr sourceAlts =>
+      exact ⟨{
+        middle := .cases
+          (.mk typeName resultType discr evidence.middleAlts)
+        structural := .aligned (.cases typeName resultType discr
+          sourceAlts evidence.middleAlts evidence.structuralSelected)
+        alphaForward := .cases evidence.alphaForwardDiscr
+          evidence.alphaForwardSelected
+        alphaBackward := .cases evidence.alphaBackwardDiscr
+          evidence.alphaBackwardSelected
+      }⟩
+
+/-- Selection-local evidence for zero/singleton simplification, where the
+source case table is eliminated to one structural intermediate before the
+alpha leg reaches the compiler result. -/
+structure ScopedEliminatedCaseEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) (target : LCNF.Code .impure) : Type where
+  middle : LCNF.Code .impure
+  structuralSelected : ∀ tag, validCase source tag →
+    ElimSelectionRel validCase middle
+      (chooseAlt tag source.alts.toList)
+  alphaForward : CodeRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope middle target
+  alphaBackward : CodeRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope target middle
+
+theorem ScopedEliminatedCaseEvidence.factored
+    (evidence : ScopedEliminatedCaseEvidence
+      validCase index source target) :
+    ScopedCodeFactored validCase index (.cases source) target :=
+  ⟨{
+    middle := evidence.middle
+    structural := .eliminate source evidence.middle
+      evidence.structuralSelected
+    alphaForward := evidence.alphaForward
+    alphaBackward := evidence.alphaBackward
+  }⟩
+
+/-- Output-shape classification for one admissible nonrecursive case-kernel
+step. -/
+inductive ScopedCaseFactorEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) : LCNF.Code .impure → Prop where
+  | aligned
+      (evidence : ScopedAlignedCaseEvidence validCase index source target) :
+      ScopedCaseFactorEvidence validCase index source (.cases target)
+  | eliminated
+      (evidence : ScopedEliminatedCaseEvidence validCase index source target) :
+      ScopedCaseFactorEvidence validCase index source target
+
+theorem ScopedCaseFactorEvidence.factored
+    (evidence : ScopedCaseFactorEvidence validCase index source target) :
+    ScopedCodeFactored validCase index (.cases source) target := by
+  cases evidence with
+  | aligned aligned => exact aligned.factored
+  | eliminated eliminated => exact eliminated.factored
+
+/-- Exact phase/admissibility interface for the local simplifier. Recursive
+branch transformation is already proved pointwise; implementations supply the
+selection facts that rule out invalid empty/singleton eliminations and the
+bidirectional alpha facts used by default folding. -/
+structure ScopedCaseAdmissibilityLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  simplify : ∀ {fuel : Nat} {index : ScopeIndex} {typeName : Name}
+      {resultType : Expr} {discr : FVarId}
+      {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    sourceAlts.toList.mapM (shadowAltUsing? (shadowCode? fuel)) =
+        some targetAlts →
+    ScopedAltsFactored validCase index sourceAlts.toList targetAlts →
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedCaseFactorEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowSimplifyCases
+        (.mk typeName resultType discr targetAlts.toArray))
+
+theorem scopedCaseKernelLaws_of_admissibility
+    (admissible : ScopedCaseAdmissibilityLaws validCase) :
+    ScopedCaseKernelLaws (ScopedCodeFactoredOnAlphaTree validCase) where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun related tree
+    cases tree with
+    | cases root alternativesTree =>
+        exact (admissible.simplify altsRun
+          (scopedAltsFactored_of_tree related alternativesTree) root).factored
 
 /-- Peel unchanged parameters to expose the code relation at their final
 scope index. -/
@@ -917,6 +1252,110 @@ theorem scopedCodeFactoredOnAlphaReflexive_traversalLaws :
           alphaForward := .del forwardObject factor.alphaForward
           alphaBackward := .del backwardObject factor.alphaBackward
         }⟩
+
+/-- Full-tree hygiene is stable through every non-case traversal constructor.
+The existing root-reflexive laws do the semantic lifting; the tree supplies
+the exact child certificate at each recursive call. -/
+theorem scopedCodeFactoredOnAlphaTree_traversalLaws :
+    ScopedTraversalLaws (ScopedCodeFactoredOnAlphaTree validCase) where
+  letE := by
+    intro index declaration left right child tree
+    cases tree with
+    | letE root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.letE
+          (fun _ => child childTree)) root
+  jp := by
+    intro index fvarId binderName params type leftBody rightBody
+      leftContinuation rightContinuation body continuation tree
+    cases tree with
+    | jp root bodyTree continuationTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.jp
+          (fun _ => body bodyTree)
+          (fun _ => continuation continuationTree)) root
+  jmp := by
+    intro index fvarId args tree
+    exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.jmp
+      index fvarId args) tree.root
+  ret := by
+    intro index fvarId tree
+    exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.ret
+      index fvarId) tree.root
+  unreach := by
+    intro index type tree
+    exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.unreach
+      index type) tree.root
+  oset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | oset root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.oset
+          (fun _ => child childTree)) root
+  uset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | uset root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.uset
+          (fun _ => child childTree)) root
+  sset := by
+    intro index fvarId width offset value type left right child tree
+    cases tree with
+    | sset root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.sset
+          (fun _ => child childTree)) root
+  setTag := by
+    intro index fvarId tag left right child tree
+    cases tree with
+    | setTag root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.setTag
+          (fun _ => child childTree)) root
+  inc := by
+    intro index fvarId amount check persistent left right child tree
+    cases tree with
+    | inc root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.inc
+          (fun _ => child childTree)) root
+  dec := by
+    intro index fvarId amount check persistent objects left right child tree
+    cases tree with
+    | dec root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.dec
+          (fun _ => child childTree)) root
+  del := by
+    intro index fvarId left right child tree
+    cases tree with
+    | del root childTree =>
+        exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.del
+          (fun _ => child childTree)) root
+
+/-- Universal recursive boundary derived from the explicit local
+selection/admissibility contract. -/
+theorem scopedCaseBoundarySoundTree_of_admissibility
+    (admissible : ScopedCaseAdmissibilityLaws validCase) :
+    ScopedCaseBoundarySound (ScopedCodeFactoredOnAlphaTree validCase) :=
+  scopedCaseBoundarySound_of_kernel
+    scopedCodeFactoredOnAlphaTree_traversalLaws
+    (scopedCaseKernelLaws_of_admissibility admissible)
+
+/-- Arbitrary recursive shadow traversal once the local case kernel consumes
+full-tree scope/hygiene evidence. -/
+theorem shadowCode_scopedFactoredTree_of_caseKernel
+    (caseKernel : ScopedCaseKernelLaws
+      (ScopedCodeFactoredOnAlphaTree validCase))
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodeFactored validCase index source target :=
+  (shadowCode_scopedRelated_of_caseKernel
+    scopedCodeFactoredOnAlphaTree_traversalLaws caseKernel run) hygiene
+
+/-- End-to-end arbitrary recursive shadow result under complete lexical
+hygiene and the phase-specific local case admissibility laws. -/
+theorem shadowCode_scopedFactoredTree
+    (admissible : ScopedCaseAdmissibilityLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodeFactored validCase index source target :=
+  shadowCode_scopedFactoredTree_of_caseKernel
+    (scopedCaseKernelLaws_of_admissibility admissible) hygiene run
 
 /-- The remaining proof input is now strictly local to
 `shadowSimplifyCases`: recursive alternative bodies and every surrounding

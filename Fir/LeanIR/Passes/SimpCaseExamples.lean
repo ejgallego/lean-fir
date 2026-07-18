@@ -552,6 +552,41 @@ def alphaFoldScopedCodeFactor :
   alphaBackward := alphaFoldCasesAlphaBackward
 }
 
+/-- The alpha-default fixture through the selection-local admissibility
+interface used by the universal case-kernel theorem. -/
+def alphaFoldAlignedEvidence :
+    ScopedAlignedCaseEvidence alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldBeforeCases alphaFoldAfterCases := {
+  middleAlts := alphaFoldIntermediateCases.alts
+  structuralSelected := by
+    intro tag valid
+    rcases valid with ⟨_, rfl⟩
+    change SelectionRel alphaFoldValidCase (some alphaRight) (some alphaRight)
+    exact .some alphaFoldRightStructuralRefl
+  alphaForwardDiscr :=
+    codeRelated_cases_discr
+      (left := alphaFoldIntermediateCases) (right := alphaFoldAfterCases)
+      alphaFoldCasesAlphaForward
+  alphaForwardSelected :=
+    codeRelated_cases_selected alphaFoldCasesAlphaForward
+  alphaBackwardDiscr :=
+    codeRelated_cases_discr
+      (left := alphaFoldAfterCases) (right := alphaFoldIntermediateCases)
+      alphaFoldCasesAlphaBackward
+  alphaBackwardSelected :=
+    codeRelated_cases_selected alphaFoldCasesAlphaBackward
+}
+
+theorem alphaFoldCaseFactorEvidence :
+    ScopedCaseFactorEvidence alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldBeforeCases alphaFoldExpected :=
+  .aligned alphaFoldAlignedEvidence
+
+theorem alphaFoldAdmissibilityFactor :
+    ScopedCodeFactored alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldCode alphaFoldExpected :=
+  alphaFoldCaseFactorEvidence.factored
+
 #guard shadowCode? 2 alphaFoldCode == some alphaFoldExpected
 
 /-- Unlike the old scope-free `CaseBoundarySound`, the scoped case contract
@@ -624,6 +659,11 @@ theorem emptyCaseAlphaBireflexive :
     · intro tag
       exact .none
 
+theorem emptyCaseAlphaTree :
+    ScopedAlphaBireflexiveTree emptyCaseScopeIndex
+      (.cases emptyCaseTable) :=
+  .cases emptyCaseAlphaBireflexive .nil
+
 theorem emptyCaseShadowRun :
     shadowCode? 1 (.cases emptyCaseTable) = some (.unreach objType) := by
   rfl
@@ -656,6 +696,37 @@ theorem scopedCaseBoundaryNotUnconditional :
   have factored := boundary 0 emptyCaseScopeIndex emptyCaseTable
     (.unreach objType) emptyCaseShadowRun emptyCaseAlphaBireflexive
   exact emptyCaseNotFactored factored
+
+/-- Full syntactic hygiene covers every arm, but it cannot manufacture a
+selected arm for an inconsistent phase predicate. -/
+theorem scopedCaseBoundaryTreeNotUnconditional :
+    ¬ ScopedCaseBoundarySound
+      (ScopedCodeFactoredOnAlphaTree everyCaseTagValid) := by
+  intro boundary
+  have factored := boundary 0 emptyCaseScopeIndex emptyCaseTable
+    (.unreach objType) emptyCaseShadowRun emptyCaseAlphaTree
+  exact emptyCaseNotFactored factored
+
+def noCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
+  False
+
+/-- The same kernel result becomes admissible when the phase predicate makes
+the empty source table unreachable. -/
+def emptyCaseEliminationEvidence :
+    ScopedEliminatedCaseEvidence noCaseTagValid emptyCaseScopeIndex
+      emptyCaseTable (.unreach objType) := {
+  middle := .unreach objType
+  structuralSelected := by
+    intro tag impossible
+    exact False.elim impossible
+  alphaForward := .terminal .unreachable
+  alphaBackward := .terminal .unreachable
+}
+
+theorem emptyCaseFactoredWithPhaseEvidence :
+    ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
+      (.cases emptyCaseTable) (.unreach objType) :=
+  emptyCaseEliminationEvidence.factored
 
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])

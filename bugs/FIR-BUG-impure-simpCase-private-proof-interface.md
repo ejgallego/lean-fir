@@ -97,8 +97,19 @@ lifts the structural/alpha factor through every recursive non-case
 constructor. `ScopedCaseKernelLaws` now separates successful recursive branch
 transformation from the nonrecursive `shadowSimplifyCases` step, and its
 equivalence theorem lifts that local law to the old universal boundary.
-The remaining generic shadow obligation is therefore the admissible local
-case-kernel law—not an unconditional theorem for arbitrary `validCase`.
+`ScopedAlphaBireflexiveTree` supplies hygiene for every syntactic alternative,
+including selector-shadowed entries. `ScopedCaseAdmissibilityLaws` packages
+the admissible local case result, and the kernel now proves both the universal
+`ScopedCaseBoundarySound` consequence and factoring of arbitrary successful
+recursive shadow runs. The remaining phase obligation is to construct this
+law from its concrete case-table invariant—not to assert an unconditional
+theorem for arbitrary `validCase`.
+
+The transparent bridge also names the unreachable filter and prepared
+alternative array, proves the filter equal to FIR's list specification, and
+exports equations for the empty, singleton, and retained-case output shapes.
+These lemmas reduce the next phase proof to selection and default-fold facts;
+they do not widen the trusted compiler-correspondence boundary.
 
 ## Semantic impact
 
@@ -131,11 +142,10 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to compiler correspondence and the admissible scoped
-case-kernel contract. Downstream structural-then-alpha composition,
-scope-indexed non-case traversal, pointwise alternative traversal, and the
-kernel-to-boundary lift are reusable. Once the kernels or graph theorems are
-public, prove `filterUnreachable` equal to `removeUnreachable`, connect
-`addDefaultAlt` to `ScopedCodeBifactor` under the phase selection invariant,
-and replace executable actual-vs-shadow checks with a kernel correspondence
-theorem.
+Unresolved, but narrowed to compiler correspondence and construction of the
+phase-specific scoped admissibility law. Downstream structural-then-alpha
+composition, full-tree traversal, pointwise alternative factoring, and the
+kernel-to-boundary lift are reusable. The unreachable-filter correspondence
+is now kernel-proved. Once the private kernels or graph theorems are public,
+connect the actual `addDefaultAlt` result to the same phase law and replace
+executable actual-vs-shadow checks with a kernel correspondence theorem.
