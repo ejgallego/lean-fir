@@ -56,6 +56,48 @@ theorem structuralThenAlphaSamePhaseCorrectOn
       (externals := externals) (entries := entries) witness.alpha
       entry member args observation)
 
+/-- A pass result with the phase schedule used by folded singletons:
+structural simplification, bidirectional alpha equivalence, then a final
+structural simplification. -/
+structure StructuralAlphaStructuralPrograms
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (before after : ImpureProgram) where
+  structuralMiddle : ImpureProgram
+  alphaMiddle : ImpureProgram
+  structuralBefore : ProgramRelated (CodeRel validCase)
+    before structuralMiddle
+  alpha : ProgramsBirelated structuralMiddle alphaMiddle
+  structuralAfter : ProgramRelated (CodeRel validCase) alphaMiddle after
+
+/-- Each structural leg carries its own reachable-readiness obligation. The
+intervening alpha phase remains admissible for every entry argument. -/
+def StructuralAlphaStructuralAdmissible (externals : ExternalSpec)
+    (witness : StructuralAlphaStructuralPrograms validCase before after)
+    (entry : Name) (args : Array Value) : Prop :=
+  ReachablyReadyAdmissible externals validCase before
+      witness.structuralMiddle entry args ∧
+    ReachablyReadyAdmissible externals validCase witness.alphaMiddle
+      after entry args
+
+/-- Semantic composition for the honest structural/alpha/structural schedule.
+No extra trust is needed: both structural legs reuse the non-lockstep theorem,
+and the middle phase reuses bidirectional alpha correctness. -/
+theorem structuralAlphaStructuralSamePhaseCorrectOn
+    (witness : StructuralAlphaStructuralPrograms validCase before after) :
+    SamePhaseCorrectOn (Impure.semantics externals) before after entries
+      (StructuralAlphaStructuralAdmissible externals witness) := by
+  intro entry member args admissible observation
+  exact
+    ((SimpCaseRelation.samePhaseCorrectOn_reachablyReady
+      (externals := externals) (entries := entries) witness.structuralBefore
+      entry member args admissible.1 observation).trans
+    (AlphaEqv.samePhaseCorrect_of_programsBirelated
+      (externals := externals) (entries := entries) witness.alpha
+      entry member args observation)).trans
+    (SimpCaseRelation.samePhaseCorrectOn_reachablyReady
+      (externals := externals) (entries := entries) witness.structuralAfter
+      entry member args admissible.2 observation)
+
 /-- Evidence for the transparent compiler shadow followed by an alpha step.
 `caseSound` remains explicit because Lean 4.32's actual recursive simpCase
 implementation is private and opaque to downstream kernel proofs. -/

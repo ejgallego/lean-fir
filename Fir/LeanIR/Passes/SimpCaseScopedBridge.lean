@@ -608,6 +608,48 @@ theorem ScopedCodeTrifactor.phaseFactored
     ScopedCodePhaseFactored validCase index source target :=
   ⟨.threePhase factor⟩
 
+/-- A phase factor together with the structural identity needed to align its
+schedule with sibling subtrees. Keeping the identity as evidence avoids
+assuming a global reflexivity theorem for the selector-indexed `CodeRel`. -/
+structure ScopedCodePhaseResult
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) where
+  factor : ScopedCodePhaseFactor validCase index source target
+  targetRefl : CodeRel validCase target target
+
+/-- Pad a two-phase result with an explicit final structural identity. A
+genuine three-phase result is already normalized. -/
+def ScopedCodePhaseFactor.toTrifactor
+    (factor : ScopedCodePhaseFactor validCase index source target)
+    (targetRefl : CodeRel validCase target target) :
+    ScopedCodeTrifactor validCase index source target :=
+  match factor with
+  | .twoPhase factor => {
+      structuralMiddle := factor.middle
+      alphaMiddle := target
+      structuralBefore := factor.structural
+      alphaForward := factor.alphaForward
+      alphaBackward := factor.alphaBackward
+      structuralAfter := targetRefl
+    }
+  | .threePhase factor => factor
+
+def ScopedCodePhaseResult.trifactor
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodeTrifactor validCase index source target :=
+  result.factor.toTrifactor result.targetRefl
+
+/-- Forget the final structural leg and expose the prefix consumed by the
+existing structural/alpha constructor lifting proof. -/
+def ScopedCodeTrifactor.beforeAlpha
+    (factor : ScopedCodeTrifactor validCase index source target) :
+    ScopedCodeBifactor validCase index source factor.alphaMiddle := {
+  middle := factor.structuralMiddle
+  structural := factor.structuralBefore
+  alphaForward := factor.alphaForward
+  alphaBackward := factor.alphaBackward
+}
+
 /-- A structural relation cannot rename the declaration at a leading value
 binding. This small inversion lemma makes factor-order counterexamples
 independent of dependent elimination over a larger evidence structure. -/
@@ -642,6 +684,20 @@ structure ScopedAlphaBireflexive (index : ScopeIndex)
   backward : CodeRelated
     (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
     index.backwardRho index.targetScope index.sourceScope code code
+
+/-- Traversal-facing phase relation. Besides source hygiene it returns a
+structural identity for the target, allowing independently transformed
+children to be padded to the common structural/alpha/structural schedule. -/
+def ScopedCodePhaseResultOnAlphaReflexive
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedAlphaBireflexive index source →
+      Nonempty (ScopedCodePhaseResult validCase index source target)
+
+theorem ScopedCodePhaseResult.phaseFactored
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodePhaseFactored validCase index source target :=
+  ⟨result.factor⟩
 
 mutual
 
@@ -1806,6 +1862,329 @@ theorem scopedCodeFactoredOnAlphaTree_traversalLaws :
     | del root childTree =>
         exact (scopedCodeFactoredOnAlphaReflexive_traversalLaws.del
           (fun _ => child childTree)) root
+
+/-- Phase results lift through every non-case constructor. Each recursive
+result is normalized to structural/alpha/structural; its recorded target
+identity pads an older two-phase child when a sibling already needs the final
+structural leg. The existing two-phase traversal proof supplies the common
+prefix, so this theorem adds no new alpha assumptions. -/
+theorem scopedCodePhaseResultOnAlphaReflexive_traversalLaws :
+    ScopedTraversalLaws
+      (ScopedCodePhaseResultOnAlphaReflexive validCase) where
+  letE := by
+    intro index declaration left right child parent
+    have childReflexive : ScopedAlphaBireflexive
+        (index.pushVar declaration.fvarId) left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | letE _ _ _ _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | letE _ _ _ _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.letE
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .let declaration childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.let declaration childFactor.structuralAfter)
+      }
+      targetRefl := .aligned (.let declaration childResult.targetRefl)
+    }⟩
+  jp := by
+    intro index fvarId binderName params type leftBody rightBody
+      leftContinuation rightContinuation body continuation parent
+    have bodyReflexive : ScopedAlphaBireflexive
+        (index.pushParams params) leftBody := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | jp _ _ body _ =>
+            simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+              LCNF.FunDecl.value] using
+              (paramBodyRelated_finalCode (index := index) body)
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | jp _ _ body _ =>
+            simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+              LCNF.FunDecl.value] using
+              (paramBodyRelated_finalCode_backward (index := index) body)
+    have continuationReflexive : ScopedAlphaBireflexive
+        (index.pushJoin fvarId) leftContinuation := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | jp _ _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | jp _ _ _ continuation => exact continuation
+    rcases body bodyReflexive with ⟨bodyResult⟩
+    rcases continuation continuationReflexive with ⟨continuationResult⟩
+    let bodyFactor := bodyResult.trifactor
+    let continuationFactor := continuationResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.jp
+      (fun _ => bodyFactor.beforeAlpha.factored)
+      (fun _ => continuationFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .jp
+          (.mk fvarId binderName params type bodyFactor.alphaMiddle)
+          continuationFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned (.jp fvarId binderName params type
+          bodyFactor.structuralAfter continuationFactor.structuralAfter)
+      }
+      targetRefl := .aligned (.jp fvarId binderName params type
+        bodyResult.targetRefl continuationResult.targetRefl)
+    }⟩
+  jmp := by
+    intro index fvarId args parent
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.jmp
+      index fvarId args parent) with ⟨factor⟩
+    exact ⟨{
+      factor := .twoPhase factor
+      targetRefl := .aligned (.jmp fvarId args)
+    }⟩
+  ret := by
+    intro index fvarId parent
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.ret
+      index fvarId parent) with ⟨factor⟩
+    exact ⟨{
+      factor := .twoPhase factor
+      targetRefl := .aligned (.return fvarId)
+    }⟩
+  unreach := by
+    intro index type parent
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.unreach
+      index type parent) with ⟨factor⟩
+    exact ⟨{
+      factor := .twoPhase factor
+      targetRefl := .aligned (.unreach type)
+    }⟩
+  oset := by
+    intro index fvarId fieldIndex value left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | oset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | oset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.oset
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .oset fvarId fieldIndex value childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.oset fvarId fieldIndex value childFactor.structuralAfter)
+      }
+      targetRefl := .aligned
+        (.oset fvarId fieldIndex value childResult.targetRefl)
+    }⟩
+  uset := by
+    intro index fvarId fieldIndex value left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | uset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | uset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.uset
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .uset fvarId fieldIndex value childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.uset fvarId fieldIndex value childFactor.structuralAfter)
+      }
+      targetRefl := .aligned
+        (.uset fvarId fieldIndex value childResult.targetRefl)
+    }⟩
+  sset := by
+    intro index fvarId width offset value type left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | sset _ _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | sset _ _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.sset
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .sset fvarId width offset value type childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.sset fvarId width offset value type childFactor.structuralAfter)
+      }
+      targetRefl := .aligned
+        (.sset fvarId width offset value type childResult.targetRefl)
+    }⟩
+  setTag := by
+    intro index fvarId tag left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | setTag _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | setTag _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.setTag
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .setTag fvarId tag childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.setTag fvarId tag childFactor.structuralAfter)
+      }
+      targetRefl := .aligned
+        (.setTag fvarId tag childResult.targetRefl)
+    }⟩
+  inc := by
+    intro index fvarId amount check persistent left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | inc _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | inc _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.inc
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .inc fvarId amount check persistent childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.inc fvarId amount check persistent childFactor.structuralAfter)
+      }
+      targetRefl := .aligned
+        (.inc fvarId amount check persistent childResult.targetRefl)
+    }⟩
+  dec := by
+    intro index fvarId amount check persistent objects left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | dec _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | dec _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.dec
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .dec fvarId amount check persistent objects
+          childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned (.dec fvarId amount check persistent objects
+          childFactor.structuralAfter)
+      }
+      targetRefl := .aligned (.dec fvarId amount check persistent objects
+        childResult.targetRefl)
+    }⟩
+  del := by
+    intro index fvarId left right child parent
+    have childReflexive : ScopedAlphaBireflexive index left := by
+      constructor
+      · cases parent.forward with
+        | terminal impossible => cases impossible
+        | del _ continuation => exact continuation
+      · cases parent.backward with
+        | terminal impossible => cases impossible
+        | del _ continuation => exact continuation
+    rcases child childReflexive with ⟨childResult⟩
+    let childFactor := childResult.trifactor
+    rcases (scopedCodeFactoredOnAlphaReflexive_traversalLaws.del
+      (fun _ => childFactor.beforeAlpha.factored) parent) with ⟨lifted⟩
+    exact ⟨{
+      factor := .threePhase {
+        structuralMiddle := lifted.middle
+        alphaMiddle := .del fvarId childFactor.alphaMiddle
+        structuralBefore := lifted.structural
+        alphaForward := lifted.alphaForward
+        alphaBackward := lifted.alphaBackward
+        structuralAfter := .aligned
+          (.del fvarId childFactor.structuralAfter)
+      }
+      targetRefl := .aligned (.del fvarId childResult.targetRefl)
+    }⟩
+
+/-- The phase-aware recursive boundary has the same local-kernel reduction as
+the older two-phase relation. The stronger kernel result additionally records
+target structural identity for schedule alignment. -/
+theorem scopedCodePhaseResult_caseBoundary_iff_kernel :
+    ScopedCaseBoundarySound
+        (ScopedCodePhaseResultOnAlphaReflexive validCase) ↔
+      ScopedCaseKernelLaws
+        (ScopedCodePhaseResultOnAlphaReflexive validCase) :=
+  scopedCaseBoundarySound_iff_kernel
+    scopedCodePhaseResultOnAlphaReflexive_traversalLaws
+
+/-- End-to-end recursive traversal from a phase-aware local case kernel.
+The result exposes the honest two/three-phase classification while retaining
+the target identity only as internal traversal evidence. -/
+theorem shadowCode_scopedPhaseFactored_of_caseKernel
+    (caseKernel : ScopedCaseKernelLaws
+      (ScopedCodePhaseResultOnAlphaReflexive validCase))
+    (reflexive : ScopedAlphaBireflexive index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseFactored validCase index source target := by
+  rcases (shadowCode_scopedRelated_of_caseKernel
+    scopedCodePhaseResultOnAlphaReflexive_traversalLaws caseKernel run)
+      reflexive with ⟨result⟩
+  exact result.phaseFactored
 
 /-- Universal recursive boundary derived from the explicit local
 selection/admissibility contract. -/

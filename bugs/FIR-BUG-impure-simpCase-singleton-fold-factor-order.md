@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-simpCase-singleton-fold-factor-order
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -82,9 +82,9 @@ two, so the issue is classified as `fir-semantics`.
 Do not postulate `ScopedSingletonSelectionConvergence` for folded singletons.
 Use `ScopedSingletonPhaseEvidence.direct` for a pre-existing singleton and
 `ScopedSingletonPhaseEvidence.folded` with `ScopedCodeTrifactor` for a
-fold-created singleton. The resulting `ScopedCodePhaseFactored` evidence is a
-local proof boundary; it is not yet consumed by the universal traversal
-theorem.
+fold-created singleton. Recursive clients use
+`ScopedCodePhaseResultOnAlphaReflexive`; its target structural identity pads a
+two-phase child when a sibling needs the final structural phase.
 
 ## Upstream tracking
 
@@ -92,13 +92,25 @@ none
 
 ## Resolution and regression
 
-Partially resolved. `ScopedCodeTrifactor` explicitly records structural,
-alpha, and final structural legs; `ScopedCodePhaseFactor` classifies the old
-two-phase and corrected three-phase paths; and
+Resolved on the proof track. `ScopedCodeTrifactor` explicitly records
+structural, alpha, and final structural legs; `ScopedCodePhaseFactor`
+classifies the old two-phase and corrected three-phase paths; and
 `ScopedSingletonPhaseEvidence` exposes both direct and folded singletons.
-`alphaSingletonFoldThreePhaseFactor` is the positive kernel witness, while the
-negative convergence theorem prevents regression to the invalid factor order.
 
-Full resolution requires lifting `ScopedCodePhaseFactored` through the generic
-recursive traversal and composing its final structural relation in the
-semantic correctness theorem.
+`ScopedCodePhaseResult` adds the target structural identity needed to align
+independently transformed children. The generic
+`scopedCodePhaseResultOnAlphaReflexive_traversalLaws` now covers every
+non-case constructor, including a `jp` whose body is three-phase and whose
+continuation is two-phase. `scopedCodePhaseResult_caseBoundary_iff_kernel`
+reduces recursive correctness to the local phase-aware case kernel, and
+`shadowCode_scopedPhaseFactored_of_caseKernel` exposes the resulting phase
+factor.
+
+At whole-program scope, `StructuralAlphaStructuralPrograms` and
+`structuralAlphaStructuralSamePhaseCorrectOn` consume both structural legs
+with separate readiness obligations around the existing alpha theorem.
+`alphaSingletonComposedCorrect` instantiates that composition for the exact
+fold-created singleton fixture. The permanent regressions are
+`alphaSingletonFold_hasNoStructuralConvergence`,
+`nestedAlphaSingletonFoldPhaseFactored`, `mixedPhaseJoinFactored`, and the
+corresponding actual-pass fixture checks.
