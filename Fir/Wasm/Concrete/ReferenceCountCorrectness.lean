@@ -17,6 +17,108 @@ theorem decrementReferenceOnceFuel_sentinel
       if check then .ok state else .error (.source .expectedObject) := by
   cases check <;> simp [decrementReferenceOnceFuel, sentinel] <;> rfl
 
+/-- Type-erased ownership relation for one concrete constructor word. The ABI
+kind remains available to rule out scalar representations during recursive
+release. -/
+inductive OwnershipValueRel (witness : RefinementWitness) (word : Word32)
+    (value : Value) : Prop where
+  | intro (kind : AbiKind) (admissible : kind.isObjectField = true)
+      (related : ValueRel witness kind (.word32 word) value) :
+      OwnershipValueRel witness word value
+
+/-- Ordered correspondence between the concrete child words visited by
+recursive release and the semantic constructor values visited in the same
+left-to-right order. -/
+inductive OwnershipValuesRel (witness : RefinementWitness) :
+    List Word32 → List Value → Prop where
+  | nil : OwnershipValuesRel witness [] []
+  | cons (head : OwnershipValueRel witness word value)
+      (tail : OwnershipValuesRel witness words values) :
+      OwnershipValuesRel witness (word :: words) (value :: values)
+
+private theorem readOwnershipOfFn
+    {witness : RefinementWitness} {n : Nat}
+    (read : Fin n → Except ConcreteError Word32)
+    (semantic : Fin n → Value)
+    (each : ∀ index, ∃ word,
+      read index = .ok word ∧ OwnershipValueRel witness word (semantic index)) :
+    ∃ words,
+      List.ofFnM read = .ok words ∧
+      OwnershipValuesRel witness words (List.ofFn semantic) := by
+  induction n with
+  | zero =>
+      refine ⟨[], ?_, .nil⟩
+      rw [List.ofFnM_zero]
+      rfl
+  | succ n ih =>
+      obtain ⟨word, headRead, headRelated⟩ := each 0
+      have tailEach : ∀ index : Fin n, ∃ word,
+          read index.succ = .ok word ∧
+            OwnershipValueRel witness word (semantic index.succ) := by
+        intro index
+        exact each index.succ
+      obtain ⟨words, tailRead, tailRelated⟩ :=
+        ih (fun index => read index.succ) (fun index => semantic index.succ) tailEach
+      refine ⟨word :: words, ?_, ?_⟩
+      · rw [List.ofFnM_succ, headRead, tailRead]
+        rfl
+      · rw [List.ofFn_succ]
+        exact .cons headRelated tailRelated
+
+/-- A constructor's concrete ownership decoder returns exactly one
+ABI-admissible word for each semantic object field, in semantic fold order. -/
+theorem ConstructorObjectRel.readOwnedReferences
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject} {header : Header}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (headerRead : state.readLiveHeader address = .ok header) :
+    ∃ words,
+      Fir.Wasm.Concrete.readOwnedReferences state address header = .ok words ∧
+      OwnershipValuesRel witness words semantic.objectFields.toList := by
+  obtain ⟨actualHeader, actualRead, headerKind, _, _, _, objectCount, _, _⟩ :=
+    related.header
+  rw [headerRead] at actualRead
+  have headerEq := Except.ok.inj actualRead
+  subst actualHeader
+  have semanticLt (index : Fin info.size) :
+      index.val < semantic.objectFields.size := by
+    rw [related.semanticObjectFields]
+    exact index.isLt
+  let semanticAt : Fin info.size → Value := fun index =>
+    semantic.objectFields[index.val]'(semanticLt index)
+  have each : ∀ index : Fin info.size, ∃ word,
+      readObjectField state address index.val = .ok word ∧
+      OwnershipValueRel witness word (semanticAt index) := by
+    intro index
+    obtain ⟨kind, kindAt, admissible⟩ := related.fieldKind index.isLt
+    have valueAt : semantic.objectFields[index.val]? = some (semanticAt index) := by
+      unfold semanticAt
+      exact Array.getElem?_eq_getElem (semanticLt index)
+    obtain ⟨word, wordRead, valueRelated⟩ :=
+      related.objectFields index.val kind (semanticAt index) kindAt valueAt
+    exact ⟨word, wordRead, .intro kind admissible valueRelated⟩
+  obtain ⟨words, wordsRead, wordsRelated⟩ :=
+    readOwnershipOfFn (read := fun index : Fin info.size =>
+      readObjectField state address index.val) semanticAt each
+  have semanticList : List.ofFn semanticAt = semantic.objectFields.toList := by
+    apply List.ext_getElem?
+    intro index
+    simp only [List.getElem?_ofFn, Array.getElem?_toList]
+    by_cases indexLt : index < info.size
+    · have fieldLt : index < semantic.objectFields.size := by
+        rw [related.semanticObjectFields]
+        exact indexLt
+      simp [indexLt, fieldLt, semanticAt]
+    · have fieldNotLt : ¬index < semantic.objectFields.size := by
+        rw [related.semanticObjectFields]
+        exact indexLt
+      simp [indexLt, fieldNotLt]
+  unfold Fir.Wasm.Concrete.readOwnedReferences
+  rw [headerKind, objectCount]
+  rw [semanticList] at wordsRelated
+  exact ⟨words, wordsRead, wordsRelated⟩
+
 /-- Exact semantic-heap frame produced by replacing the first cell at one
 location. The target lookup changes and every other lookup is preserved. -/
 structure HeapReplacePost (before after : Heap) (location : Location)

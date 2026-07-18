@@ -1235,6 +1235,17 @@ every payload/header preservation theorem transports it. The indexed
 slice can state the owned-reference decoder correspondence without an external
 well-formedness premise.
 
+W6.3q establishes that decoder correspondence. Concrete constructor ownership
+enumeration is expressed as a `Fin`-indexed monadic traversal of the declared
+object-slot count, preserving its existing left-to-right behavior while
+exposing the bound at each read. `OwnershipValueRel` erases the physical ABI
+kind only after retaining its `isObjectField` proof, and
+`OwnershipValuesRel` lifts those pairs over ordered lists. The constructor
+decoder theorem now returns exactly one related concrete word for each
+semantic `objectFields` value in fold order. The remaining recursive step is
+to show that paired folds preserve `LiveHeapRel` as heap children decrement and
+tagged/erased fields take their checked no-op branches.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -497,7 +497,7 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
     Except ConcreteError (List Word32) :=
   match header.kind with
   | .constructor =>
-      (List.range header.aux1.toNat).mapM fun index =>
+      List.ofFnM fun index : Fin header.aux1.toNat =>
         readObjectField state object index
   | .closure => throw (.target (.unsupportedOwnershipKind .closure))
   | .freed => throw (.target (.unsupportedOwnershipKind .freed))
