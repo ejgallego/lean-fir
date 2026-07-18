@@ -50,7 +50,7 @@ def concreteClosureDispatch : ClosureDispatchTable :=
   #[`Concrete.closureTarget, `Concrete.otherTarget]
 
 def concreteClosureDescriptors : ClosureDescriptorTable :=
-  #[#[.object, .uint64, .uint8]]
+  #[#[.object, .uint64, .uint8], #[.object, .uint64]]
 
 def concreteMixedClosure : Except ConcreteError (MemoryState × Word32) :=
   allocateClosure MemoryState.initial concreteClosureDispatch concreteClosureDescriptors
@@ -106,6 +106,30 @@ def concreteMixedClosure : Except ConcreteError (MemoryState × Word32) :=
           concreteClosureDescriptors closure `Concrete.closureTarget 4 3 1 .object with
       | .error (.target .closureMetadataMismatch) => true
       | _ => false
+
+/-- Closure ownership consults `aux3`, skips scalar captures, and recursively
+releases the object captures in source order. -/
+def releasedOwnedClosure : Except ConcreteError (MemoryState × Word32 × Word32) := do
+  let tagged := Word32.encodeImmediate 1 (by decide)
+  let (state, child) ← allocateConstructor MemoryState.initial mixedConstructorInfo
+    #[tagged]
+  let (state, closure) ← allocateClosure state concreteClosureDispatch
+    concreteClosureDescriptors `Concrete.closureTarget 3 #[.object, .uint64]
+      #[.word32 child, .word64 42]
+  let header ← liftMemory <| state.readLiveHeader closure
+  let owned ← readOwnedReferences state closure header concreteClosureDescriptors
+  unless owned == [child] do
+    throw (.target .closureMetadataMismatch)
+  let state ← decrementReferenceOnce state closure true concreteClosureDescriptors
+  return (state, child, closure)
+
+#guard match releasedOwnedClosure with
+  | .error _ => false
+  | .ok (state, child, closure) =>
+      match state.readLiveHeader child, state.readLiveHeader closure with
+      | .error (.deadObject childAddress), .error (.deadObject closureAddress) =>
+          childAddress == child && closureAddress == closure
+      | _, _ => false
 
 example : ValueRel (witness := {}) .tobject
     (.word32 (Word32.encodeImmediate 42 (by decide)))

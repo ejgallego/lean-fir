@@ -490,16 +490,40 @@ def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError N
     throw (.source .expectedObject)
   liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
 
+/-- Decode the object-representation lanes in one static closure capture
+descriptor. Scalar lanes are skipped; object, tagged, `tobject`, and erased
+lanes retain source order so recursive release matches `HeapObject.children`. -/
+def readClosureOwnedReferences (state : MemoryState) (object : Word32)
+    (index : Nat) : List AbiKind → Except ConcreteError (List Word32)
+  | [] => .ok []
+  | kind :: rest => do
+      if kind.isObjectField then
+        let lane ← liftMemory <| state.memory.readClosureCapture
+          (closureCaptureAddress object.value index) kind
+        let .word32 word := lane |
+          throw (.target (.closureCaptureKindMismatch .i32 lane.valueType))
+        let words ← readClosureOwnedReferences state object (index + 1) rest
+        return word :: words
+      else
+        readClosureOwnedReferences state object (index + 1) rest
+
 /-- Load references owned by the current concrete object before marking it
-dead. Constructor object slots are the W6.3 recursive-release fragment;
-closure captures join this decoder with W6.4's typed capture layout. -/
-def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header) :
+dead. Constructors use their physical object-field count; closures recover
+their immutable ordered capture kinds through the checked `aux3` descriptor
+index. -/
+def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header)
+    (descriptors : ClosureDescriptorTable := #[]) :
     Except ConcreteError (List Word32) :=
   match header.kind with
   | .constructor =>
       List.ofFnM fun index : Fin header.aux1.toNat =>
         readObjectField state object index
-  | .closure => throw (.target (.unsupportedOwnershipKind .closure))
+  | .closure => do
+      let some captureKinds := descriptors.lookup? header.aux3 |
+        throw (.target (.unknownClosureDescriptorId header.aux3))
+      unless captureKinds.size == header.aux2.toNat do
+        throw (.target .closureMetadataMismatch)
+      readClosureOwnedReferences state object 0 captureKinds.toList
   | .freed => throw (.target (.unsupportedOwnershipKind .freed))
   | .boxed | .string | .natural | .integer | .byteArray | .opaque => .ok []
 
@@ -507,8 +531,8 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
 siblings reuse the remaining depth while threading the updated memory. Tagged
 and erased checked no-ops do not consume heap-recursion fuel. -/
 def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
-    Except ConcreteError MemoryState
-  | 0, state, object, check => do
+    (descriptors : ClosureDescriptorTable := #[]) → Except ConcreteError MemoryState
+  | 0, state, object, check, _ => do
       match object.classify with
       | .immediate =>
           if check then return state else throw (.source .expectedHeapReference)
@@ -521,7 +545,7 @@ def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
       | .sentinel =>
           if check then return state else throw (.source .expectedObject)
       | .invalid => throw (.source .expectedObject)
-  | fuel + 1, state, object, check => do
+  | fuel + 1, state, object, check, descriptors => do
       match object.classify with
       | .immediate =>
           if check then return state else throw (.source .expectedHeapReference)
@@ -537,28 +561,32 @@ def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
             writeLiveHeader state object
               { header with refCount := UInt32.ofNat (header.refCount.toNat - 1) }
           else
-            let owned ← readOwnedReferences state object header
+            let owned ← readOwnedReferences state object header descriptors
             let state ← writeLiveHeader state object header.forRelease
             owned.foldlM (init := state) fun state child =>
-              decrementReferenceOnceFuel fuel state child true
+              decrementReferenceOnceFuel fuel state child true descriptors
       | .sentinel =>
           if check then return state else throw (.source .expectedObject)
       | .invalid => throw (.source .expectedObject)
 
 /-- One concrete decrement, including the zero transition and recursive
-release of constructor-owned object fields. The parent is marked dead before
-children are visited, matching FIR's cycle-safe ordering. The allocated byte
-prefix provides a conservative bound on possible nesting depth. -/
+release of constructor fields or statically typed closure captures. The
+parent is marked dead before children are visited, matching FIR's cycle-safe
+ordering. The allocated byte prefix provides a conservative bound on possible
+nesting depth. -/
 def decrementReferenceOnce (state : MemoryState) (object : Word32)
-    (check : Bool) : Except ConcreteError MemoryState :=
+    (check : Bool) (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState :=
   decrementReferenceOnceFuel (state.heapCursor / headerBytes + 1) state object check
+    descriptors
 
 /-- FIR's multi-decrement repeats the one-step transition exactly; amount zero
 therefore leaves even a non-object operand untouched. -/
 def decrementReference (state : MemoryState) (object : Word32)
-    (amount : Nat) (check : Bool) : Except ConcreteError MemoryState :=
+    (amount : Nat) (check : Bool) (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState :=
   (List.replicate amount object).foldlM (init := state) fun state object =>
-    decrementReferenceOnce state object check
+    decrementReferenceOnce state object check descriptors
 
 /-- Mark one ordinary heap allocation dead without recursively releasing its
 owned fields. This is FIR's explicit `delete` operation, distinct from a
@@ -583,14 +611,15 @@ def taggedZero : Word32 :=
 heap cells return the empty token. A unique constructor preserves its
 allocation, snapshots and clears the requested object-field prefix, releases
 the old references in order, and returns its address as the reuse token. -/
-def resetObject (state : MemoryState) (count : Nat) (object : Word32) :
+def resetObject (state : MemoryState) (count : Nat) (object : Word32)
+    (descriptors : ClosureDescriptorTable := #[]) :
     Except ConcreteError (MemoryState × Word32) := do
   match object.classify with
   | .immediate => return (state, Word32.zero)
   | .heap =>
       let header ← liftMemory <| state.readLiveHeader object
       if header.isPromotedTag || header.persistent || header.refCount != 1 then
-        let state ← decrementReferenceOnce state object true
+        let state ← decrementReferenceOnce state object true descriptors
         return (state, Word32.zero)
       unless header.kind == .constructor do
         throw (.source .expectedConstructor)
@@ -604,7 +633,7 @@ def resetObject (state : MemoryState) (count : Nat) (object : Word32) :
           (List.replicate count taggedZero)
       let state := { state with memory }
       let state ← owned.foldlM (init := state) fun state child =>
-        decrementReferenceOnce state child true
+        decrementReferenceOnce state child true descriptors
       return (state, object)
   | .sentinel | .invalid => throw (.source .expectedObject)
 

@@ -1637,6 +1637,18 @@ allocation, prefix, and closure-cell transport proofs have been strengthened
 to use the descriptor table; the next slice consumes it in executable
 ownership traversal.
 
+W6.4i consumes the table in executable ownership traversal. The reusable
+capture address, typed slot decoder, and descriptor lookup now live below the
+ownership runtime rather than behind `ClosureRuntime`. `readOwnedReferences`
+recovers the exact `aux3` descriptor, checks its fixed-count agreement, skips
+scalar lanes, and returns object-representation words in source order.
+Descriptor metadata is threaded unchanged through recursive decrement,
+multi-decrement, and reset. An executable regression allocates a closure with
+one heap constructor and one `UInt64` capture, observes only the constructor
+as owned, then verifies that releasing the closure recursively frees both
+allocations. The next slice proves this filtered decoder corresponds to FIR's
+closure-owned-value fold and lifts the release into the heap relation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

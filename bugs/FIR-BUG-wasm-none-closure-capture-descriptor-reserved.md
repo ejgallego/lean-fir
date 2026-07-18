@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-closure-capture-descriptor-reserved
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -93,6 +93,10 @@ or wrong-sized entries, and typed projection rejects a same-width kind
 reinterpretation. `Fir/Wasm/Concrete/Examples.lean` guards successful index
 round-tripping plus both missing-descriptor and wrong-kind failures.
 
-The card remains confirmed until `readOwnedReferences` consumes the table and
-a permanent one-to-zero closure-release regression establishes recursive
-ownership behavior.
+W6.4i completes the executable fix. `readOwnedReferences` resolves `aux3`,
+checks descriptor length against the fixed count, filters object-like and
+erased lanes in source order, and recursive decrement threads the immutable
+table through every child. The permanent `releasedOwnedClosure` regression
+allocates a heap constructor plus a scalar capture inside a closure, observes
+only the constructor word as owned, and verifies that one-to-zero closure
+release marks both parent and child dead.

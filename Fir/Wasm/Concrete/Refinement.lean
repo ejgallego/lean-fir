@@ -42,6 +42,14 @@ Concrete closure headers store a checked index into this table so ownership
 traversal can distinguish object captures from scalar lanes at run time. -/
 abbrev ClosureDescriptorTable := Array (Array AbiKind)
 
+def ClosureDescriptorTable.resolve? (table : ClosureDescriptorTable)
+    (descriptor : Array AbiKind) : Option Nat :=
+  table.findIdx? (· == descriptor)
+
+def ClosureDescriptorTable.lookup? (table : ClosureDescriptorTable)
+    (id : UInt32) : Option (Array AbiKind) :=
+  table[id.toNat]?
+
 def LocationMap.lookup? : LocationMap → Location → Option Word32
   | [], _ => none
   | (candidate, address) :: rest, location =>

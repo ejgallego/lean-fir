@@ -386,6 +386,9 @@ structure ClosureLayout where
   allocationBytes : Nat
   deriving Inhabited, BEq
 
+def closureCaptureAddress (base index : Nat) : Nat :=
+  base + headerBytes + target.semanticSlotBytes * index
+
 def ClosureLayout.ofCaptures (captures : Array AbiKind) : ClosureLayout := {
   captures
   capturesOffset := headerBytes

@@ -15,14 +15,6 @@ def ClosureDispatchTable.lookup? (table : ClosureDispatchTable)
     (id : UInt32) : Option Lean.Name :=
   table[id.toNat]?
 
-def ClosureDescriptorTable.resolve? (table : ClosureDescriptorTable)
-    (descriptor : Array AbiKind) : Option Nat :=
-  table.findIdx? (· == descriptor)
-
-def ClosureDescriptorTable.lookup? (table : ClosureDescriptorTable)
-    (id : UInt32) : Option (Array AbiKind) :=
-  table[id.toNat]?
-
 def closureTargetId (table : ClosureDispatchTable) (function : Lean.Name) :
     Except ConcreteError UInt32 := do
   let some index := table.resolve? function |
@@ -34,9 +26,6 @@ def closureDescriptorId (table : ClosureDescriptorTable)
   let some index := table.resolve? descriptor |
     throw (.target (.unknownClosureDescriptor descriptor))
   uint32Field "closure capture descriptor id" index
-
-def closureCaptureAddress (base index : Nat) : Nat :=
-  base + headerBytes + target.semanticSlotBytes * index
 
 /-- Write one typed physical capture into its fixed eight-byte slot. Narrow
 lanes occupy the low word and require canonical zero padding. -/
@@ -53,24 +42,6 @@ def LinearMemory.writeClosureCapture (memory : LinearMemory) (address : Nat)
   | .f64, .float64Bits bits => memory.writeUInt64 address bits
   | expected, actual =>
       .error (.closureCaptureKindMismatch expected actual.valueType)
-
-def LinearMemory.readClosureCapture (memory : LinearMemory) (address : Nat)
-    (kind : AbiKind) : Except MemoryError LaneValue := do
-  match kind.valueType with
-  | .i32 =>
-      let word ← memory.readWord32 address
-      let padding ← memory.readUInt32 (address + 4)
-      unless padding == 0 do
-        throw (.nonzeroPadding (address + 4) padding.toNat)
-      return .word32 word
-  | .i64 => return .word64 (← memory.readUInt64 address)
-  | .f32 =>
-      let bits ← memory.readUInt32 address
-      let padding ← memory.readUInt32 (address + 4)
-      unless padding == 0 do
-        throw (.nonzeroPadding (address + 4) padding.toNat)
-      return .float32Bits bits
-  | .f64 => return .float64Bits (← memory.readUInt64 address)
 
 def LinearMemory.writeClosureCaptures (memory : LinearMemory) (base index : Nat) :
     List (AbiKind × LaneValue) → Except MemoryError LinearMemory

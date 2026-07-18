@@ -115,6 +115,26 @@ def readWord32 (memory : LinearMemory) (address : Nat) : Except MemoryError Word
     throw (.addressSpaceExhausted value.toNat)
   return word
 
+/-- Decode one typed eight-byte closure slot. Narrow lanes require canonical
+zero padding so object ownership cannot reinterpret unrelated upper bytes. -/
+def readClosureCapture (memory : LinearMemory) (address : Nat)
+    (kind : AbiKind) : Except MemoryError LaneValue := do
+  match kind.valueType with
+  | .i32 =>
+      let word ← memory.readWord32 address
+      let padding ← memory.readUInt32 (address + 4)
+      unless padding == 0 do
+        throw (.nonzeroPadding (address + 4) padding.toNat)
+      return .word32 word
+  | .i64 => return .word64 (← memory.readUInt64 address)
+  | .f32 =>
+      let bits ← memory.readUInt32 address
+      let padding ← memory.readUInt32 (address + 4)
+      unless padding == 0 do
+        throw (.nonzeroPadding (address + 4) padding.toNat)
+      return .float32Bits bits
+  | .f64 => return .float64Bits (← memory.readUInt64 address)
+
 def growToFit (memory : LinearMemory) (requiredBytes : Nat) : LinearMemory :=
   if requiredBytes ≤ memory.size then
     memory
