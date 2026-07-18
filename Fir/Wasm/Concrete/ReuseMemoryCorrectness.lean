@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.ObjectFieldsCorrectness
+import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -131,5 +131,43 @@ theorem MemoryState.FrontierInvariant.zeroBytes
       simp [LinearMemory.readByte, resultByte, oldZero] at framed
       subst value
       rfl
+
+/-- Scrubbing one allocation payload produces a complete allocation frame for
+every allocation whose full interval is disjoint from the target interval. -/
+theorem MemoryState.AllocationFrame.ofZeroBytes
+    {before after : MemoryState} {target other : Word32}
+    {targetBytes otherBytes : Nat} {memory : LinearMemory}
+    (resultEq : after = { before with memory })
+    (targetMinimum : headerBytes ≤ targetBytes)
+    (targetInBounds : target.value + targetBytes ≤ before.memory.size)
+    (written : before.memory.zeroBytes (target.value + headerBytes)
+      (targetBytes - headerBytes) = .ok memory)
+    (disjoint : target.value + targetBytes ≤ other.value ∨
+      other.value + otherBytes ≤ target.value) :
+    before.AllocationFrame after other otherBytes := by
+  have scrubEnd :
+      target.value + headerBytes + (targetBytes - headerBytes) =
+        target.value + targetBytes := by omega
+  have scrubInBounds :
+      target.value + headerBytes + (targetBytes - headerBytes) ≤
+        before.memory.size := by
+    rw [scrubEnd]
+    exact targetInBounds
+  have post := before.memory.zeroBytes_post memory
+    (target.value + headerBytes) (targetBytes - headerBytes) scrubInBounds written
+  subst after
+  refine ⟨rfl, post.size, ?_⟩
+  intro offset offsetLt
+  change memory.readByte (other.value + offset) =
+    before.memory.readByte (other.value + offset)
+  apply post.frame
+  cases disjoint with
+  | inl targetBefore =>
+      right
+      rw [scrubEnd]
+      omega
+  | inr otherBefore =>
+      left
+      omega
 
 end Fir.Wasm.Concrete

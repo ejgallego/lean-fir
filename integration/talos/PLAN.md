@@ -1386,6 +1386,14 @@ zero bytes beyond the cursor. In-place reuse can now treat payload erasure as
 a verified framed transition before installing fields and replacement header
 metadata.
 
+W6.3ag closes the spatial framing obligation for payload scrubbing.
+`MemoryState.AllocationFrame.ofZeroBytes` uses complete allocation-interval
+disjointness to preserve every byte of any non-target descriptor region while
+the target payload is erased. Together with W6.3af's header and frontier
+facts, the in-place reuse proof can transport all other live/dead/promoted
+relations through the scrub and focus its decoder reconstruction only on the
+target allocation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
