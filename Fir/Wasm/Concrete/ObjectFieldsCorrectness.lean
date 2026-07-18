@@ -218,6 +218,65 @@ theorem MemoryState.readLiveHeader_of_writeObjectFields
   dsimp only
   rw [headerFrame, post.size]
 
+/-- A successfully decoded live constructor header is accepted by the public
+constructor-header checker. -/
+theorem readConstructorHeader_eq_ok_of_readLiveHeader
+    (state : MemoryState) (address : Word32) (header : Header)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor) :
+    readConstructorHeader state address = .ok header := by
+  have heap : address.classify = .heap := by
+    have checked := headerRead
+    unfold MemoryState.readLiveHeader at checked
+    split at checked
+    next heap => exact heap
+    next => contradiction
+  unfold readConstructorHeader
+  simp [heap, headerRead]
+  simp only [Bind.bind, Except.bind]
+  simp [liftMemory, headerKind]
+  rfl
+
+/-- Every byte beginning at the end of a bulk object-field write is framed. -/
+theorem WriteObjectFieldsPost.readByte_suffix
+    {before after : LinearMemory} {base index : Nat} {fields : List Word32}
+    (post : WriteObjectFieldsPost before after base index fields)
+    (address : Nat)
+    (suffix : objectFieldAddress base (index + fields.length) ≤ address) :
+    after.readByte address = before.readByte address :=
+  post.byteFrame address (.inr suffix)
+
+/-- A 16-bit read beginning after a bulk object-field write is unchanged. -/
+theorem WriteObjectFieldsPost.readUInt16_suffix
+    {before after : LinearMemory} {base index : Nat} {fields : List Word32}
+    (post : WriteObjectFieldsPost before after base index fields)
+    (address : Nat)
+    (suffix : objectFieldAddress base (index + fields.length) ≤ address) :
+    after.readUInt16 address = before.readUInt16 address := by
+  unfold LinearMemory.readUInt16
+  rw [post.readByte_suffix address suffix]
+  rw [post.readByte_suffix (address + 1) (by omega)]
+
+/-- A 32-bit read beginning after a bulk object-field write is unchanged. -/
+theorem WriteObjectFieldsPost.readUInt32_suffix
+    {before after : LinearMemory} {base index : Nat} {fields : List Word32}
+    (post : WriteObjectFieldsPost before after base index fields)
+    (address : Nat)
+    (suffix : objectFieldAddress base (index + fields.length) ≤ address) :
+    after.readUInt32 address = before.readUInt32 address :=
+  post.wordFrame address (.inr suffix)
+
+/-- A 64-bit read beginning after a bulk object-field write is unchanged. -/
+theorem WriteObjectFieldsPost.readUInt64_suffix
+    {before after : LinearMemory} {base index : Nat} {fields : List Word32}
+    (post : WriteObjectFieldsPost before after base index fields)
+    (address : Nat)
+    (suffix : objectFieldAddress base (index + fields.length) ≤ address) :
+    after.readUInt64 address = before.readUInt64 address := by
+  unfold LinearMemory.readUInt64
+  rw [post.readUInt32_suffix address suffix]
+  rw [post.readUInt32_suffix (address + 4) (by omega)]
+
 /-- A bulk object-field write reads back every installed slot through the
 public checked constructor decoder. -/
 theorem readObjectField_of_writeObjectFields_at
@@ -336,6 +395,241 @@ theorem readObjectField_of_writeObjectFields_suffix
   simp only [Bind.bind, Except.bind]
   unfold LinearMemory.readWord32
   rw [lowFrame', paddingFrame']
+
+/-- A bounded bulk object-field prefix write leaves every checked `USize`
+projection unchanged. -/
+theorem readUSizeField_of_writeObjectFields
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (index : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (writtenFits : fields.length ≤ header.aux1.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readUSizeField ({ state with memory } : MemoryState) address index =
+      readUSizeField state address index := by
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore :=
+    readConstructorHeader_eq_ok_of_readLiveHeader state address header headerRead
+      headerKind
+  have constructorHeaderAfter :=
+    readConstructorHeader_eq_ok_of_readLiveHeader
+      ({ state with memory } : MemoryState) address header headerAfter headerKind
+  have payloadFrame : memory.readUInt64
+        (address.value + headerBytes +
+          target.semanticSlotBytes * (header.aux1.toNat + index)) =
+      state.memory.readUInt64
+        (address.value + headerBytes +
+          target.semanticSlotBytes * (header.aux1.toNat + index)) := by
+    apply post.readUInt64_suffix
+    simp [objectFieldAddress, target]
+    omega
+  unfold readUSizeField
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  rw [payloadFrame]
+
+/-- A bounded bulk object-field prefix write leaves every checked packed-byte
+projection unchanged. -/
+theorem readScalarUInt8Field_of_writeObjectFields
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (slotIndex byteOffset : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (writtenFits : fields.length ≤ header.aux1.toNat)
+    (slotIndexEq : slotIndex = header.aux1.toNat + header.aux2.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readScalarUInt8Field ({ state with memory } : MemoryState) address
+        slotIndex byteOffset =
+      readScalarUInt8Field state address slotIndex byteOffset := by
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore :=
+    readConstructorHeader_eq_ok_of_readLiveHeader state address header headerRead
+      headerKind
+  have constructorHeaderAfter :=
+    readConstructorHeader_eq_ok_of_readLiveHeader
+      ({ state with memory } : MemoryState) address header headerAfter headerKind
+  have payloadFrame : memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes * slotIndex +
+          byteOffset) =
+      state.memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes * slotIndex +
+          byteOffset) := by
+    apply post.readByte_suffix
+    simp [objectFieldAddress, target, slotIndexEq]
+    omega
+  have payloadFrame' : memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) =
+      state.memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) := by
+    simpa [slotIndexEq] using payloadFrame
+  unfold readScalarUInt8Field
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  by_cases fieldFits : byteOffset + 1 ≤ header.aux3.toNat
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    change liftMemory (memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset)) =
+      liftMemory (state.memory.readByte
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset))
+    rw [payloadFrame']
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    rfl
+
+/-- A bounded bulk object-field prefix write leaves every checked packed
+16-bit projection unchanged. -/
+theorem readScalarUInt16Field_of_writeObjectFields
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (slotIndex byteOffset : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (writtenFits : fields.length ≤ header.aux1.toNat)
+    (slotIndexEq : slotIndex = header.aux1.toNat + header.aux2.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readScalarUInt16Field ({ state with memory } : MemoryState) address
+        slotIndex byteOffset =
+      readScalarUInt16Field state address slotIndex byteOffset := by
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore :=
+    readConstructorHeader_eq_ok_of_readLiveHeader state address header headerRead
+      headerKind
+  have constructorHeaderAfter :=
+    readConstructorHeader_eq_ok_of_readLiveHeader
+      ({ state with memory } : MemoryState) address header headerAfter headerKind
+  have payloadFrame : memory.readUInt16
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) =
+      state.memory.readUInt16
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) := by
+    apply post.readUInt16_suffix
+    simp [objectFieldAddress, target]
+    omega
+  unfold readScalarUInt16Field
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  by_cases fieldFits : byteOffset + 2 ≤ header.aux3.toNat
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    change liftMemory (memory.readUInt16
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset)) =
+      liftMemory (state.memory.readUInt16
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset))
+    rw [payloadFrame]
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    rfl
+
+/-- A bounded bulk object-field prefix write leaves every checked packed
+32-bit projection unchanged. -/
+theorem readScalarUInt32Field_of_writeObjectFields
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (slotIndex byteOffset : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (writtenFits : fields.length ≤ header.aux1.toNat)
+    (slotIndexEq : slotIndex = header.aux1.toNat + header.aux2.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readScalarUInt32Field ({ state with memory } : MemoryState) address
+        slotIndex byteOffset =
+      readScalarUInt32Field state address slotIndex byteOffset := by
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore :=
+    readConstructorHeader_eq_ok_of_readLiveHeader state address header headerRead
+      headerKind
+  have constructorHeaderAfter :=
+    readConstructorHeader_eq_ok_of_readLiveHeader
+      ({ state with memory } : MemoryState) address header headerAfter headerKind
+  have payloadFrame : memory.readUInt32
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) =
+      state.memory.readUInt32
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) := by
+    apply post.readUInt32_suffix
+    simp [objectFieldAddress, target]
+    omega
+  unfold readScalarUInt32Field
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  by_cases fieldFits : byteOffset + 4 ≤ header.aux3.toNat
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    change liftMemory (memory.readUInt32
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset)) =
+      liftMemory (state.memory.readUInt32
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset))
+    rw [payloadFrame]
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    rfl
+
+/-- A bounded bulk object-field prefix write leaves every checked packed
+64-bit projection unchanged. -/
+theorem readScalarUInt64Field_of_writeObjectFields
+    (state : MemoryState) (memory : LinearMemory) (address : Word32)
+    (header : Header) (fields : List Word32) (slotIndex byteOffset : Nat)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (writtenFits : fields.length ≤ header.aux1.toNat)
+    (slotIndexEq : slotIndex = header.aux1.toNat + header.aux2.toNat)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0 fields) :
+    readScalarUInt64Field ({ state with memory } : MemoryState) address
+        slotIndex byteOffset =
+      readScalarUInt64Field state address slotIndex byteOffset := by
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      fields post]
+    exact headerRead
+  have constructorHeaderBefore :=
+    readConstructorHeader_eq_ok_of_readLiveHeader state address header headerRead
+      headerKind
+  have constructorHeaderAfter :=
+    readConstructorHeader_eq_ok_of_readLiveHeader
+      ({ state with memory } : MemoryState) address header headerAfter headerKind
+  have payloadFrame : memory.readUInt64
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) =
+      state.memory.readUInt64
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset) := by
+    apply post.readUInt64_suffix
+    simp [objectFieldAddress, target]
+    omega
+  unfold readScalarUInt64Field
+  rw [constructorHeaderAfter, constructorHeaderBefore]
+  simp only [Bind.bind, Except.bind]
+  by_cases fieldFits : byteOffset + 8 ≤ header.aux3.toNat
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    change liftMemory (memory.readUInt64
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset)) =
+      liftMemory (state.memory.readUInt64
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + header.aux2.toNat) + byteOffset))
+    rw [payloadFrame]
+  · simp [scalarFieldAddress, slotIndexEq, fieldFits]
+    rfl
 
 /-- A payload writer contained in the allocated prefix preserves the global
 zero-frontier invariant. -/

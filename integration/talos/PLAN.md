@@ -1450,6 +1450,13 @@ split only on `index < count`: cleared slots use tagged-zero `.tobject`
 relations and retained suffix slots reuse their original relations, without
 unfolding the decoder or the recursive writer.
 
+W6.3an closes the non-object half of that target reconstruction. The writer's
+byte frame now derives reusable 16-, 32-, and 64-bit suffix-read laws, and a
+bounded cleared prefix is proven invisible to checked `USize` plus packed
+`UInt8`/`UInt16`/`UInt32`/`UInt64` projections. Reset can therefore rebuild the
+protocol target by changing only its object-field clause; all header, extent,
+`USize`, and scalar observations transport unchanged.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
