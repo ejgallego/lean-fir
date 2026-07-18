@@ -1,0 +1,162 @@
+import assert from "node:assert/strict";
+
+import {
+  SemanticFault,
+  SemanticHost,
+} from "../../../scripts/wasm_semantic_host.mjs";
+
+function scalar(kind, value) {
+  return { kind: "scalar", scalarKind: kind, value: BigInt(value) };
+}
+
+function tagged(payload) {
+  return { kind: "tagged", payload: BigInt(payload) };
+}
+
+function ctorRuntime() {
+  return {
+    nextLocation: 2,
+    heap: [
+      {
+        location: 0,
+        rc: 1,
+        persistent: false,
+        live: true,
+        object: {
+          kind: "ctor",
+          tag: "4",
+          objectFields: [
+            { kind: "object", reference: { kind: "heap", location: 1 } },
+            { kind: "object", reference: { kind: "tagged", payload: "7" } },
+          ],
+          usizeFields: ["3"],
+          scalarFields: [
+            { width: 4, offset: 0, value: { kind: "uint32", value: "9" } },
+          ],
+        },
+      },
+      {
+        location: 1,
+        rc: 1,
+        persistent: false,
+        live: true,
+        object: { kind: "natural", value: "9223372036854775808" },
+      },
+    ],
+  };
+}
+
+{
+  const host = new SemanticHost(ctorRuntime());
+  const root = host.encode("object", { kind: "heap", location: 0 });
+  const projected = host.importFunction({ kind: "objectProj", index: 1, result: "tobject" })(root);
+  assert.deepStrictEqual(host.decode("tobject", projected), tagged(7));
+  assert.equal(host.importFunction({ kind: "usizeProj", index: 0 })(root), 3n);
+  assert.equal(host.importFunction({
+    kind: "scalarProj", width: 4, offset: 0, result: "uint32",
+  })(root), 9);
+
+  host.importFunction({ kind: "objectSet", index: 1, field: "tobject" })(
+    root, host.encode("tobject", tagged(11)));
+  host.importFunction({ kind: "usizeSet", index: 0 })(
+    root, host.encode("usize", { kind: "usize", value: 12n }));
+  host.importFunction({ kind: "scalarSet", width: 4, offset: 0, field: "uint32" })(
+    root, host.encode("uint32", scalar("uint32", 13)));
+  host.importFunction({ kind: "setTag", tag: "14" })(root);
+  assert.deepStrictEqual(
+    host.decode("tobject", host.importFunction({
+      kind: "objectProj", index: 1, result: "tobject",
+    })(root)),
+    tagged(11),
+  );
+  assert.equal(host.importFunction({ kind: "usizeProj", index: 0 })(root), 12n);
+  assert.equal(host.importFunction({
+    kind: "scalarProj", width: 4, offset: 0, result: "uint32",
+  })(root), 13);
+  assert.equal(host.importFunction({ kind: "getTag" })(root), 14);
+}
+
+{
+  const host = new SemanticHost();
+  const maximum = scalar("uint64", 0xffffffffffffffffn);
+  const boxed = host.importFunction({ kind: "box", scalar: "uint64", result: "tobject" })(
+    host.encode("uint64", maximum));
+  const boxedValue = host.decode("tobject", boxed);
+  assert.equal(boxedValue.kind, "heap");
+  assert.deepStrictEqual(host.objectJson(host.liveCell(boxedValue.location).object), {
+    kind: "boxed",
+    type: "Lean.Expr.const `UInt64 []",
+    value: {
+      kind: "scalar",
+      scalar: { kind: "uint64", value: "18446744073709551615" },
+    },
+  });
+  const unboxed = host.importFunction({ kind: "unbox", scalar: "uint64" })(boxed);
+  assert.deepStrictEqual(host.decode("uint64", unboxed), maximum);
+  assert.equal(host.importFunction({ kind: "isShared" })(boxed), 0);
+  host.importFunction({ kind: "inc", amount: 1, check: false })(boxed);
+  assert.equal(host.importFunction({ kind: "isShared" })(boxed), 1);
+  host.importFunction({ kind: "dec", amount: 1, check: false, objectFields: null })(boxed);
+  assert.equal(host.importFunction({ kind: "isShared" })(boxed), 0);
+
+  const immediate = host.importFunction({ kind: "box", scalar: "uint32", result: "tobject" })(
+    host.encode("uint32", scalar("uint32", 0xffffffffn)));
+  assert.equal(host.decode("tobject", immediate).kind, "tagged");
+  assert.equal(host.importFunction({ kind: "isShared" })(immediate), 1);
+}
+
+{
+  const host = new SemanticHost(ctorRuntime());
+  const root = host.encode("object", { kind: "heap", location: 0 });
+  const tokenPhysical = host.importFunction({ kind: "reset", objectFields: 1 })(root);
+  const token = host.decode("reuseToken", tokenPhysical);
+  assert.deepStrictEqual(token, { kind: "reuseToken", location: 0 });
+  assert.throws(
+    () => host.liveCell(1),
+    (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
+  );
+  const reused = host.importFunction({
+    kind: "reuse",
+    name: "Replacement.mk",
+    tag: "9",
+    size: 1,
+    usize: 0,
+    ssize: 0,
+    updateHeader: true,
+    fields: ["tobject"],
+    result: "object",
+  })(tokenPhysical, host.encode("tobject", tagged(13)));
+  assert.deepStrictEqual(host.decode("object", reused), { kind: "heap", location: 0 });
+  assert.equal(host.importFunction({ kind: "getTag" })(reused), 9);
+  assert.deepStrictEqual(
+    host.decode("tobject", host.importFunction({
+      kind: "objectProj", index: 0, result: "tobject",
+    })(reused)),
+    tagged(13),
+  );
+}
+
+{
+  const host = new SemanticHost(ctorRuntime());
+  const root = host.encode("object", { kind: "heap", location: 0 });
+  host.importFunction({ kind: "dec", amount: 1, check: false, objectFields: 2 })(root);
+  for (const location of [0, 1]) {
+    assert.throws(
+      () => host.liveCell(location),
+      (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
+    );
+  }
+}
+
+{
+  const host = new SemanticHost(ctorRuntime());
+  const root = host.encode("object", { kind: "heap", location: 0 });
+  host.importFunction({ kind: "delete" })(root);
+  assert.throws(
+    () => host.liveCell(0),
+    (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
+  );
+  assert.equal(host.liveCell(1).live, true);
+}
+
+console.log("PASS W5 semantic host projections/boxing/mutation/ownership/reuse");

@@ -4,6 +4,22 @@ const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
 
+function scalarTypeRepr(kind) {
+  const typeName = kind === "usize"
+    ? "USize"
+    : kind === "uint8"
+      ? "UInt8"
+      : kind === "uint16"
+        ? "UInt16"
+        : kind === "uint32"
+          ? "UInt32"
+          : kind === "uint64"
+            ? "UInt64"
+            : undefined;
+  assert.ok(typeName, `unsupported boxed scalar kind: ${kind}`);
+  return `Lean.Expr.const \`${typeName} []`;
+}
+
 export class SemanticFault extends Error {
   constructor(fault) {
     super(`FIR semantic fault: ${fault.kind}`);
@@ -90,7 +106,11 @@ function runtimeHeapObject(object) {
         tag: BigInt(object.tag),
         objectFields: object.objectFields.map(runtimeValue),
         usizeFields: object.usizeFields.map(BigInt),
-        scalarFields: object.scalarFields,
+        scalarFields: object.scalarFields.map((field) => ({
+          width: field.width,
+          offset: field.offset,
+          value: { kind: "scalar", ...runtimeScalarValue(field.value) },
+        })),
       };
     case "string":
       assert.equal(typeof object.value, "string", "runtime string value must be a string");
@@ -315,16 +335,290 @@ export class SemanticHost {
   objectProj(operation, physicalArgs) {
     assert.equal(physicalArgs.length, 1, "object projection host arity mismatch");
     const source = this.decode("tobject", physicalArgs[0]);
-    assert.equal(source.kind, "heap", "object projection expected a heap constructor");
-    const cell = this.liveCell(source.location);
-    assert.equal(cell.object.kind, "ctor", "object projection expected a constructor");
-    const value = cell.object.objectFields[operation.index];
+    const object = this.constructorObject(source);
+    const value = object.objectFields[operation.index];
     if (value === undefined) {
       throw new SemanticFault({
         kind: "objectFieldOutOfBounds",
         index: operation.index,
-        size: cell.object.objectFields.length,
+        size: object.objectFields.length,
       });
+    }
+    return this.encode(operation.result, value);
+  }
+
+  usizeProj(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "usize projection host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    const object = this.constructorObject(source);
+    const value = object.usizeFields[operation.index];
+    if (value === undefined) {
+      throw new SemanticFault({
+        kind: "usizeFieldOutOfBounds",
+        index: operation.index,
+        size: object.usizeFields.length,
+      });
+    }
+    return this.encode("usize", { kind: "usize", value });
+  }
+
+  scalarProj(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "scalar projection host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    const object = this.constructorObject(source);
+    const field = object.scalarFields.find((candidate) =>
+      candidate.width === operation.width && candidate.offset === operation.offset);
+    if (field === undefined) {
+      throw new SemanticFault({
+        kind: "scalarFieldMissing",
+        width: operation.width,
+        offset: operation.offset,
+      });
+    }
+    return this.encode(operation.result, field.value);
+  }
+
+  box(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "box host arity mismatch");
+    const scalar = this.decode(operation.scalar, physicalArgs[0]);
+    assert.ok(scalar.kind === "scalar" || scalar.kind === "usize",
+      "box expected a scalar value");
+    const payload = scalar.value;
+    const value = payload <= MAX_TAGGED_PAYLOAD
+      ? { kind: "tagged", payload }
+      : this.alloc({ kind: "boxed", scalarKind: operation.scalar, value: scalar });
+    return this.encode(operation.result, value);
+  }
+
+  unbox(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "unbox host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    let value;
+    if (source.kind === "tagged") {
+      value = operation.scalar === "usize"
+        ? { kind: "usize", value: source.payload }
+        : { kind: "scalar", scalarKind: operation.scalar, value: source.payload };
+    } else {
+      const object = this.liveCell(source.location).object;
+      if (object.kind !== "boxed") {
+        throw new SemanticFault({ kind: "expectedScalar" });
+      }
+      value = object.value;
+    }
+    return this.encode(operation.scalar, value);
+  }
+
+  isShared(physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "isShared host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    const shared = source.kind === "tagged" || (() => {
+      const cell = this.liveCell(source.location);
+      return cell.persistent || cell.rc !== 1;
+    })();
+    return this.encode("uint8", {
+      kind: "scalar",
+      scalarKind: "uint8",
+      value: shared ? 1n : 0n,
+    });
+  }
+
+  objectSet(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 2, "object mutation host arity mismatch");
+    const source = this.decode("object", physicalArgs[0]);
+    const field = this.decode(operation.field, physicalArgs[1]);
+    const object = this.constructorObject(source);
+    if (operation.index >= object.objectFields.length) {
+      throw new SemanticFault({
+        kind: "objectFieldOutOfBounds",
+        index: operation.index,
+        size: object.objectFields.length,
+      });
+    }
+    object.objectFields[operation.index] = field;
+  }
+
+  usizeSet(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 2, "usize mutation host arity mismatch");
+    const source = this.decode("object", physicalArgs[0]);
+    const field = this.decode("usize", physicalArgs[1]);
+    const object = this.constructorObject(source);
+    if (operation.index >= object.usizeFields.length) {
+      throw new SemanticFault({
+        kind: "usizeFieldOutOfBounds",
+        index: operation.index,
+        size: object.usizeFields.length,
+      });
+    }
+    object.usizeFields[operation.index] = field.value;
+  }
+
+  scalarSet(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 2, "scalar mutation host arity mismatch");
+    const source = this.decode("object", physicalArgs[0]);
+    const field = this.decode(operation.field, physicalArgs[1]);
+    if (field.kind !== "scalar") {
+      throw new SemanticFault({ kind: "expectedScalar" });
+    }
+    const object = this.constructorObject(source);
+    object.scalarFields = [
+      { width: operation.width, offset: operation.offset, value: field },
+      ...object.scalarFields.filter((old) =>
+        old.width !== operation.width || old.offset !== operation.offset),
+    ];
+  }
+
+  setTag(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "setTag host arity mismatch");
+    const source = this.decode("object", physicalArgs[0]);
+    this.constructorObject(source).tag = BigInt(operation.tag);
+  }
+
+  ownedValues(object) {
+    switch (object.kind) {
+      case "ctor":
+        return object.objectFields;
+      case "boxed":
+        return [object.value];
+      case "closure":
+        return object.fixed;
+      default:
+        return [];
+    }
+  }
+
+  incLocation(location, amount) {
+    const cell = this.liveCell(location);
+    if (!cell.persistent) {
+      cell.rc += amount;
+    }
+  }
+
+  decLocation(location) {
+    const cell = this.liveCell(location);
+    if (cell.persistent) {
+      return;
+    }
+    if (cell.rc === 0) {
+      throw new SemanticFault({ kind: "referenceCountUnderflow", location });
+    }
+    if (cell.rc > 1) {
+      cell.rc -= 1;
+      return;
+    }
+    cell.rc = 0;
+    cell.live = false;
+    for (const value of this.ownedValues(cell.object)) {
+      if (value.kind === "heap") {
+        this.decLocation(value.location);
+      }
+    }
+  }
+
+  inc(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "inc host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    if (source.kind === "heap") {
+      this.incLocation(source.location, operation.amount);
+    } else if (!operation.check) {
+      throw new SemanticFault({ kind: "expectedHeapReference" });
+    }
+  }
+
+  decValueOnce(source, check) {
+    if (source.kind === "heap") {
+      this.decLocation(source.location);
+    } else if (source.kind === "tagged") {
+      if (!check) {
+        throw new SemanticFault({ kind: "expectedHeapReference" });
+      }
+    } else {
+      throw new SemanticFault({ kind: "expectedObject" });
+    }
+  }
+
+  dec(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "dec host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    for (let index = 0; index < operation.amount; ++index) {
+      this.decValueOnce(source, operation.check);
+    }
+  }
+
+  delete(physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "delete host arity mismatch");
+    const source = this.decode("object", physicalArgs[0]);
+    const cell = this.liveCell(source.location);
+    cell.rc = 0;
+    cell.live = false;
+  }
+
+  reset(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, 1, "reset host arity mismatch");
+    const source = this.decode("tobject", physicalArgs[0]);
+    let token;
+    if (source.kind === "tagged") {
+      token = { kind: "reuseToken", location: null };
+    } else {
+      const cell = this.liveCell(source.location);
+      if (cell.persistent || cell.rc !== 1) {
+        this.decLocation(source.location);
+        token = { kind: "reuseToken", location: null };
+      } else {
+        if (cell.object.kind !== "ctor") {
+          throw new SemanticFault({ kind: "expectedConstructor" });
+        }
+        if (operation.objectFields > cell.object.objectFields.length) {
+          throw new SemanticFault({
+            kind: "objectFieldOutOfBounds",
+            index: operation.objectFields,
+            size: cell.object.objectFields.length,
+          });
+        }
+        const released = cell.object.objectFields.slice(0, operation.objectFields);
+        for (let index = 0; index < operation.objectFields; ++index) {
+          cell.object.objectFields[index] = { kind: "tagged", payload: 0n };
+        }
+        for (const field of released) {
+          this.decValueOnce(field, true);
+        }
+        token = { kind: "reuseToken", location: source.location };
+      }
+    }
+    return this.encode("reuseToken", token);
+  }
+
+  reuse(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, operation.fields.length + 1,
+      "reuse host arity mismatch");
+    const token = this.decode("reuseToken", physicalArgs[0]);
+    const fields = operation.fields.map((kind, index) =>
+      this.decode(kind, physicalArgs[index + 1]));
+    assert.equal(operation.size, fields.length, "reuse manifest size mismatch");
+    let value;
+    if (token.location === null) {
+      const tag = BigInt(operation.tag);
+      value = operation.size === 0 && operation.usize === 0 && operation.ssize === 0
+        ? { kind: "tagged", payload: tag }
+        : this.alloc({
+            kind: "ctor",
+            tag,
+            objectFields: fields,
+            usizeFields: Array.from({ length: operation.usize }, () => 0n),
+            scalarFields: [],
+          });
+    } else {
+      const cell = this.liveCell(token.location);
+      if (cell.object.kind !== "ctor") {
+        throw new SemanticFault({ kind: "expectedConstructor" });
+      }
+      cell.object = {
+        kind: "ctor",
+        tag: operation.updateHeader ? BigInt(operation.tag) : cell.object.tag,
+        objectFields: fields,
+        usizeFields: Array.from({ length: operation.usize }, () => 0n),
+        scalarFields: [],
+      };
+      value = { kind: "heap", location: token.location };
     }
     return this.encode(operation.result, value);
   }
@@ -345,8 +639,21 @@ export class SemanticHost {
 
   liveCell(location) {
     const cell = this.heap.find((candidate) => candidate.location === location);
-    assert.ok(cell?.live, `dead or unknown FIR heap location ${location}`);
+    if (!cell?.live) {
+      throw new SemanticFault({ kind: "deadObject", location });
+    }
     return cell;
+  }
+
+  constructorObject(value) {
+    if (value.kind !== "heap") {
+      throw new SemanticFault({ kind: "expectedConstructor" });
+    }
+    const cell = this.liveCell(value.location);
+    if (cell.object.kind !== "ctor") {
+      throw new SemanticFault({ kind: "expectedConstructor" });
+    }
+    return cell.object;
   }
 
   importFunction(operation) {
@@ -361,6 +668,34 @@ export class SemanticHost {
         return (...args) => this.allocCtor(operation, args);
       case "objectProj":
         return (...args) => this.objectProj(operation, args);
+      case "usizeProj":
+        return (...args) => this.usizeProj(operation, args);
+      case "scalarProj":
+        return (...args) => this.scalarProj(operation, args);
+      case "box":
+        return (...args) => this.box(operation, args);
+      case "unbox":
+        return (...args) => this.unbox(operation, args);
+      case "isShared":
+        return (...args) => this.isShared(args);
+      case "objectSet":
+        return (...args) => this.objectSet(operation, args);
+      case "usizeSet":
+        return (...args) => this.usizeSet(operation, args);
+      case "scalarSet":
+        return (...args) => this.scalarSet(operation, args);
+      case "setTag":
+        return (...args) => this.setTag(operation, args);
+      case "inc":
+        return (...args) => this.inc(operation, args);
+      case "dec":
+        return (...args) => this.dec(operation, args);
+      case "delete":
+        return (...args) => this.delete(args);
+      case "reset":
+        return (...args) => this.reset(operation, args);
+      case "reuse":
+        return (...args) => this.reuse(operation, args);
       case "getTag":
         return (...args) => this.getTag(args);
       default:
@@ -415,7 +750,20 @@ export class SemanticHost {
           tag: object.tag.toString(),
           objectFields: object.objectFields.map((value) => this.valueJson(value)),
           usizeFields: object.usizeFields.map((value) => value.toString()),
-          scalarFields: object.scalarFields,
+          scalarFields: object.scalarFields.map((field) => ({
+            width: field.width,
+            offset: field.offset,
+            value: {
+              kind: field.value.scalarKind,
+              value: field.value.value.toString(),
+            },
+          })),
+        };
+      case "boxed":
+        return {
+          kind: "boxed",
+          type: scalarTypeRepr(object.scalarKind),
+          value: this.valueJson(object.value),
         };
       case "string":
         return { kind: "string", value: object.value };
@@ -436,11 +784,9 @@ export class SemanticHost {
       }
       seen.add(location);
       const cell = this.liveCell(location);
-      if (cell.object.kind === "ctor") {
-        for (const value of cell.object.objectFields) {
-          if (value.kind === "heap") {
-            pending.unshift(value.location);
-          }
+      for (const value of this.ownedValues(cell.object)) {
+        if (value.kind === "heap") {
+          pending.unshift(value.location);
         }
       }
     }

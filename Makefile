@@ -18,6 +18,7 @@ validate:
 
 validate-v8:
 	python3 scripts/validate_interpreters.py \
+		--case boxed-uint32 --case packed-project-usize \
 		--case uint8-max --case uint16-max --case uint32-max \
 		--case uint64-max --case usize-max \
 		--case uint8-roundtrip --case uint16-roundtrip \

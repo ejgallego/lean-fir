@@ -7,11 +7,14 @@ a small semantic FIR host.
 The corpus covers erased and maximum-width unsigned results and entry arguments, tagged
 argument handles, tagged and heap-allocated natural literals, heap strings, constructor
 allocation and projection, exact and default constructor cases, and a transitively
-reachable constructor graph. Each `.wasm` file is accompanied by a manifest that derives
+reachable constructor graph. W5 fixtures additionally execute packed `USize` and scalar
+projection/mutation, object and tag mutation, reference counting, unique and shared
+reset/reuse, and the structured dead-object fault after deletion. Each `.wasm` file is
+accompanied by a manifest that derives
 its entry parameter and result ABI, records its semantic inputs, and describes its semantic
 runtime imports. The separate `FirWasmOracleMain.lean` program runs the same named corpus
-through the W3 FIR/Talos differential oracle and writes its comparable observations beside
-the artifacts. The Node runner compares V8 directly with those live W3 results; no expected
+through the current FIR/Talos semantic oracle and writes its comparable observations beside
+the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
 World and trace observations remain empty in this artifact corpus. The W5
@@ -28,9 +31,9 @@ Run the complete lane-local check with:
 ./check.sh
 ```
 
-This builds the Lean emitter, runs the W3 oracle through Lean, emits the corpus and oracle
+This builds the Lean emitter, runs the semantic oracle through Lean, emits the corpus and oracle
 results twice, byte-compares all outputs, validates and instantiates every module in Node,
-executes `main`, and compares the V8 observation with W3. It requires Lean 4.32, the
+executes `main`, and compares the V8 observation with FIR. It requires Lean 4.32, the
 worktree-local Talos setup, and Node; no external WAT or WebAssembly CLI is required. The
 oracle uses `lean --run` so a fresh worktree does not native-compile the full upstream Wasm
 semantics just to check this corpus.

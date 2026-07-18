@@ -109,6 +109,7 @@ node --input-type=module -e '
   _build/source-uint64-id.wasm \
   _build/source-string-input.wasm \
   _build/source-nat-list-case.wasm
+node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
