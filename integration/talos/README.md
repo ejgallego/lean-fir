@@ -135,19 +135,21 @@ the oracle while concrete heap-state and operation refinements are proved one
 vertical slice at a time.
 
 The plan also defines A0, an independent artifact lane that can run alongside
-W4. A0 owns new emitter and external-engine runner paths and produces the
-first standards-consumable, host-backed Wasm artifact for the W3 corpus. It
-must consume the frozen semantic ABI unchanged; concrete linear-memory layout
-and production ABI compatibility remain W6 work.
+the proof and concrete-runtime lanes. A0 owns emitter and external-engine
+runner paths and produces standards-consumable, host-backed Wasm artifacts for
+the W3--W5 semantic corpus. It consumes the frozen semantic ABI unchanged;
+concrete linear-memory layout and production ABI compatibility remain W6 work.
 
 The A0 corpus compares successful returns, entry arguments, reachable heaps,
-and structured runtime faults against live W3 observations. Semantic host
+world/trace effects, and structured runtime faults against live FIR
+observations. Semantic host
 faults use the same constructor-and-fields JSON shape as the Lean oracle;
 runner assertions and target-integrity failures remain fatal harness errors.
 Compiler-produced source artifacts may also carry an `initialRuntime` manifest
 object. The V8 host reconstructs its FIR heap before turning semantic object
-arguments into opaque `i32` handles; this currently covers a real string input,
-while string identity awaits the W4 ownership-operation gate.
+arguments into opaque `i32` handles; this covers a real string input, and W5
+ownership operations are available to compiler-produced programs as semantic
+imports as well.
 Structured source invocation also covers `List Nat` constructor graphs. The
 fixture includes a natural beyond the tagged-immediate range, checks the full
 reconstructed list, and executes a compiler-produced constructor case through
@@ -161,3 +163,15 @@ accepting only zero and one at both the LCNF and V8 schema boundaries.
 schema-driven API checks argument datums and the emitted result lane, carries
 case dependencies into capture, and preserves the case ID in the artifact
 manifest.
+
+The W5 adaptation is complete for the semantic-backend contract. Manifest
+serialization and the shared Node host cover every W5 operation emitted by the
+supported backend, including cache set, externals, closure construction and
+metadata, and generated direct, recursive, saturated, and underapplied calls.
+The older `closureApply` host callback remains rejected deliberately: W5 uses
+generated metadata trampolines and direct dispatch instead. Join-point-bearing
+source declarations and additional initial-runtime heap-object encodings are
+corpus/adapter expansion work, not missing W5 runtime operations. The default
+native--V8 matrix contains 21 compiler-produced cases, while the independent
+Talos--V8 artifact lane compares 34 fixtures. Large odd `Nat` values are kept
+out of the JSON adapter until `FIR-BUG-wasm-none-json-nat-precision` is fixed.

@@ -189,6 +189,9 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 | 2026-07-17 | A0 schema-driven source invocation | validation and integration owners | ready | `compileValidationInvocation` encodes corpus schemas/datums, checks the declared result schema against the emitted ABI lane, and chooses the scalar or initial-runtime manifest path. `#fir_wasm_emit_case "…"` resolves entry, dependencies, arguments, and schemas from one corpus case. The five scalar source fixtures and `FirValidationWasm` now share this boundary. No shared semantic contract changed. |
 | 2026-07-17 | A0 shared semantic host | validation and integration owners | landed | The artifact and validation V8 runners now share one manifest/runtime/handle/import implementation. The native↔V8 matrix admits `nat-list-nonempty`, audits its entire initial heap against the corpus schema, and executes the compiler-produced `getTag` import. The additive common corpus case landed separately as `09d3c06`; no semantic ABI changed. |
 | 2026-07-17 | A0 scalar Boolean results | validation and integration owners | landed | `nat-list-nonempty-bool` exposed `FIR-BUG-impure-none-bool-result-scalar`: Lean 4.32 returns `Bool` as scalar `UInt8`, while validation accepted only tagged objects. Shared commit `f9cdeb2` admits exactly scalar zero/one in LCNF observations; the Wasm schema and V8 decoder now mirror that boundary. The native↔LCNF and native↔V8 matrices retain nonempty/true and empty/false cases as regressions. |
+| 2026-07-18 | A0 W5 manifests and host | proof, concrete-runtime, and integration owners | landed | Commits `9ec5b43`, `29986dd`, and `3ed7432` serialize the W5 semantic-import vocabulary, keep captured source dependencies internal, and implement projection, boxing/sharing, mutation, ownership, and reset/reuse in the shared Node host. The default native↔V8 matrix grew from 13 to 15 compiler-produced cases. No shared semantic contract changed. |
+| 2026-07-18 | A0 W5 calls and effects | proof, concrete-runtime, and integration owners | landed | Commit `c1ff015` completes the artifact adaptation for cache operations, exact semantic externals, closure metadata, and generated direct, recursive, saturated, and underapplied calls. The default native↔V8 matrix now checks 21 compiler-produced cases; the independent Talos↔V8 lane checks 34 exact fixtures, including external world/trace effects and one-miss/two-call lazy caching. Legacy `closureApply` remains outside the W5 generated backend by design. No shared semantic contract changed. |
+| 2026-07-18 | A0 large-Nat JSON boundary | validation and integration owners | carded | `FIR-BUG-wasm-none-json-nat-precision` records that the version-1 corpus protocol encodes arbitrary `Nat` datums as JSON numbers, so Node cannot audit odd values above `2^53` exactly. Small `Nat.add` is retained in the default matrix; large odd cases fail closed rather than weakening the audit. |
 
 Shared-contract changes in these A0 slices are the additive common
 `nat-list-nonempty` case in `09d3c06` and the scalar-Boolean observation
@@ -196,14 +199,15 @@ boundary plus regression case in `f9cdeb2`. The runtime step semantics and
 `AbiKind` vocabulary are unchanged. W4 has repaired and proved the
 natural-literal invariant; A0's former rejection regression is now a successful
 source-to-engine test and the bug card is fixed.
-A0 has now separated module generation from fixture invocation and covers all
+A0 has separated module generation from fixture invocation and covers all
 unsigned integer and `USize` parameter kinds with explicit ABI schemas. Its
 initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
-vocabulary as the W3 observation oracle. Its next heap-returning source slice
-depends on W4 admitting and proving the compiler-produced ownership operation;
-the shared semantic host and the first initial-runtime validation case are now
-landed. Independent A0 work can next broaden schema-directed results whose
-compiler-produced LCNF is already inside the proved supported fragment.
+vocabulary as the FIR observation oracle. The W5 semantic-import vocabulary is
+fully adapted in the shared host and manifest, including ownership, effects,
+caches, and generated calls. Independent A0 work can now broaden
+schema-directed results and initial-runtime encodings whose compiler-produced
+LCNF is already inside the supported fragment; join-point admission and the
+large-`Nat` JSON protocol fix remain explicit follow-ups.
 
 ## Architecture decisions
 

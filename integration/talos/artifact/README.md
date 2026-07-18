@@ -1,6 +1,6 @@
 # FIR Wasm artifact lane
 
-This package turns the initial supported FIR corpus into deterministic WebAssembly 1.0
+This package turns the supported W3--W5 semantic FIR corpus into deterministic WebAssembly 1.0
 binary artifacts, then runs those artifacts in Node's standard `WebAssembly` engine with
 a small semantic FIR host.
 
