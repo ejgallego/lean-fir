@@ -834,6 +834,23 @@ projected field. The remaining W6.1 proof slice must relate the decoded heap
 contents and allocator extension, then lift constructor allocation/projection
 to the W2 host contracts before any semantic import is replaced.
 
+W6.1c establishes the decoded live-heap proof boundary. Allocation descriptors
+record constructor field kinds, promoted payloads, or large-natural values as
+ghost metadata; they are paired with the semantic-location/address bijection
+but never stored as source data. `LiveCellRel` now covers exactly concrete
+constructors and large naturals, `PromotedTagRel` accounts for concrete-only
+persistent tag allocations, and bidirectional `LiveHeapRel` requires every
+mapped live semantic cell to have a decoded concrete implementation and every
+concrete mapping to name the corresponding semantic cell.
+
+Projection theorems extract a typed `ValueRel` from a related constructor for
+object fields and an exact `USize` relation for `uproj`. Result-extension
+theorems cover fresh constructor and natural addresses. Large-natural decoding
+reconstructs the original arbitrary `Nat` from its little-endian limbs. The
+next proof step is preservation: prove the checked allocator and payload
+writes extend `LiveHeapRel`, then package those results as concrete refinements
+of the W2 allocation/projection contracts.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

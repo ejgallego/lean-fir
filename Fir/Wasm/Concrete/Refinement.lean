@@ -24,6 +24,17 @@ abbrev LocationMap := List (Location × Word32)
 
 abbrev PromotedTags := List (UInt64 × Word32)
 
+/-- Proof-only metadata used to decode typed payloads. It is derived from the
+operation that allocated the object and is not stored as a semantic value in
+linear memory. -/
+inductive AllocationDescriptor where
+  | constructor (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+  | promotedTag (payload : UInt64)
+  | natural (value : Nat)
+  deriving Inhabited, BEq, Repr
+
+abbrev DescriptorMap := List (Word32 × AllocationDescriptor)
+
 def LocationMap.lookup? : LocationMap → Location → Option Word32
   | [], _ => none
   | (candidate, address) :: rest, location =>
@@ -34,6 +45,11 @@ def PromotedTags.lookup? : PromotedTags → UInt64 → Option Word32
   | (candidate, address) :: rest, payload =>
       if candidate = payload then some address else lookup? rest payload
 
+def DescriptorMap.lookup? : DescriptorMap → Word32 → Option AllocationDescriptor
+  | [], _ => none
+  | (candidate, descriptor) :: rest, address =>
+      if candidate.value = address.value then some descriptor else lookup? rest address
+
 /-- Ghost data used only by the refinement proof. `locations` relates semantic
 heap locations to concrete linear-memory addresses. `promotedTags` records
 large semantic immediates represented as persistent natural objects because
@@ -41,6 +57,7 @@ they do not fit in a 31-bit wasm32 immediate word. -/
 structure RefinementWitness where
   locations : LocationMap := []
   promotedTags : PromotedTags := []
+  descriptors : DescriptorMap := []
   deriving Inhabited, Repr
 
 def RefinementWitness.bindLocation (witness : RefinementWitness)
@@ -49,7 +66,22 @@ def RefinementWitness.bindLocation (witness : RefinementWitness)
 
 def RefinementWitness.promoteTag (witness : RefinementWitness)
     (payload : UInt64) (address : Word32) : RefinementWitness :=
-  { witness with promotedTags := (payload, address) :: witness.promotedTags }
+  { witness with
+      promotedTags := (payload, address) :: witness.promotedTags
+      descriptors := (address, .promotedTag payload) :: witness.descriptors }
+
+def RefinementWitness.bindConstructor (witness : RefinementWitness)
+    (location : Location) (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .constructor info fieldKinds) :: witness.descriptors }
+
+def RefinementWitness.bindNatural (witness : RefinementWitness)
+    (location : Location) (address : Word32) (value : Nat) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .natural value) :: witness.descriptors }
 
 @[simp] theorem RefinementWitness.lookup_bindLocation_self
     (witness : RefinementWitness) (location : Location) (address : Word32) :
@@ -60,6 +92,37 @@ def RefinementWitness.promoteTag (witness : RefinementWitness)
     (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
     (witness.promoteTag payload address).promotedTags.lookup? payload = some address := by
   simp [RefinementWitness.promoteTag, PromotedTags.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_promoteTag_descriptor
+    (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
+    (witness.promoteTag payload address).descriptors.lookup? address =
+      some (.promotedTag payload) := by
+  simp [RefinementWitness.promoteTag, DescriptorMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindConstructor_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.bindConstructor location address info fieldKinds).locations.lookup? location =
+      some address := by
+  simp [RefinementWitness.bindConstructor, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindConstructor_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.bindConstructor location address info fieldKinds).descriptors.lookup? address =
+      some (.constructor info fieldKinds) := by
+  simp [RefinementWitness.bindConstructor, DescriptorMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindNatural_location
+    (witness : RefinementWitness) (location : Location) (address : Word32) (value : Nat) :
+    (witness.bindNatural location address value).locations.lookup? location = some address := by
+  simp [RefinementWitness.bindNatural, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindNatural_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32) (value : Nat) :
+    (witness.bindNatural location address value).descriptors.lookup? address =
+      some (.natural value) := by
+  simp [RefinementWitness.bindNatural, DescriptorMap.lookup?]
 
 /-- The lookup-visible part of a witness is injective and every related word
 is a concrete heap address. This avoids baking proof-only location identities

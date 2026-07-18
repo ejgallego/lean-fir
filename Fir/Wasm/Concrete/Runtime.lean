@@ -143,6 +143,15 @@ private def writeNaturalLimbs (memory : LinearMemory) (base index : Nat) :
         (base + headerBytes + target.semanticSlotBytes * index) limb
       writeNaturalLimbs memory base (index + 1) rest
 
+private def readNaturalLimbs (memory : LinearMemory) (base index : Nat) :
+    Nat → Except MemoryError Nat
+  | 0 => .ok 0
+  | count + 1 => do
+      let limb ← memory.readUInt64
+        (base + headerBytes + target.semanticSlotBytes * index)
+      let rest ← readNaturalLimbs memory base (index + 1) count
+      return limb.toNat + UInt64.size * rest
+
 /-- Concrete natural literal allocation. Values within the source semantic
 tagged range use `encodeTagged`; larger values use a little-endian array of
 64-bit limbs in a normal reference-counted natural allocation. -/
@@ -159,6 +168,15 @@ def allocateNatural (state : MemoryState) (value : Nat) :
     let memory ← liftMemory <|
       writeNaturalLimbs state.memory address.value 0 limbs
     return ({ state with memory }, address)
+
+def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError Nat := do
+  unless object.classify = .heap do
+    throw (.source .expectedObject)
+  let header ← liftMemory <| state.readLiveHeader object
+  unless header.kind == .natural && !header.persistent &&
+      header.aux0 == bigNaturalMarker do
+    throw (.source .expectedObject)
+  liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
 
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
     (fits : payload.toNat ≤ maxImmediatePayload) :

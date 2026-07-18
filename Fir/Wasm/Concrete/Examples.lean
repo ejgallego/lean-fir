@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.Runtime
+import Fir.Wasm.Concrete.HeapRefinement
 
 namespace Fir.Wasm.Concrete
 
@@ -155,12 +155,13 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
     (Fir.LeanIR.Impure.maxTaggedPayload + 1) with
   | .error _ => false
   | .ok (state, object) =>
-      match state.readLiveHeader object with
-      | .error _ => false
-      | .ok header =>
+      match state.readLiveHeader object, readNatural state object with
+      | .error _, _ | _, .error _ => false
+      | .ok header, .ok value =>
           header.kind == .natural && !header.persistent &&
             header.refCount == 1 && header.aux0 == bigNaturalMarker &&
-            header.aux1 == 1
+            header.aux1 == 1 &&
+            value == Fir.LeanIR.Impure.maxTaggedPayload + 1
 
 #guard naturalLimbs (UInt64.size + 5) == [5, 1]
 
