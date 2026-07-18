@@ -425,6 +425,47 @@ def resetMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
               field == taggedZero && taggedZero.value == 1
         | _, _ => false
 
+def reusedMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
+  let (state, token) ← resetMixedConstructor
+  reuseObject state token { mixedConstructorInfo with cidx := 9 } true
+    #[Word32.encodeImmediate 13 (by decide)]
+
+#guard match reusedMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readTag state object,
+          readObjectField state object 0, readUSizeField state object 0,
+          readScalarUInt64Field state object 2 0 with
+      | .ok header, .ok tag, .ok field, .ok usize, .ok scalar =>
+          header.allocationBytes == 56 && header.refCount == 1 && tag == 9 &&
+            field.value == 27 && usize == 0 && scalar == 0
+      | _, _, _, _, _ => false
+
+#guard match reuseObject MemoryState.initial Word32.zero mixedConstructorInfo false
+    #[Word32.encodeImmediate 17 (by decide)] with
+  | .ok (state, object) =>
+      object.value == heapBase &&
+        match readObjectField state object 0 with
+        | .ok field => field.value == 35
+        | .error _ => false
+  | .error _ => false
+
+def oversizedReuseInfo : LCNF.CtorInfo := {
+  name := `Concrete.oversizedReuse
+  cidx := 10
+  size := 4
+  usize := 0
+  ssize := 0 }
+
+#guard match resetMixedConstructor with
+  | .error _ => false
+  | .ok (state, token) =>
+      match reuseObject state token oversizedReuseInfo true
+          (Array.replicate 4 taggedZero) with
+      | .error (.target (.reuseAllocationTooSmall available required)) =>
+          available == 56 && required == 64
+      | _ => false
+
 /- Actual heap recursion still consumes fuel and faults at depth zero. -/
 #guard match concreteMixedConstructor with
   | .ok (state, object) =>

@@ -1360,6 +1360,16 @@ relation is weakened. The proof must instead make the reset-to-reuse protocol
 explicit (or establish an equivalent composed boundary) before the unique
 path can claim whole-heap preservation.
 
+W6.3ad adds the complete concrete reuse engine and proves its empty-token
+allocation path. Token zero delegates to verified constructor allocation. An
+address token validates a live constructor and retained capacity, zeroes the
+complete old payload, writes replacement object fields, rebuilds constructor
+metadata while preserving the allocation extent, and returns the same
+address. Oversized replacement fails closed; the compiler's grow path already
+uses delete plus fresh allocation. Guards cover fresh, in-place tag-changing,
+payload-zeroing, and too-small cases. The nonempty empty-token theorem reuses
+W6.1's witness extension and whole-heap allocation refinement.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

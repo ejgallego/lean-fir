@@ -608,6 +608,61 @@ def resetObject (state : MemoryState) (count : Nat) (object : Word32) :
       return (state, object)
   | .sentinel | .invalid => throw (.source .expectedObject)
 
+/-- Replace a byte interval with zeros. Reuse applies this to the complete old
+payload before writing the new constructor fields, so stale `USize`, packed,
+and trailing object data cannot leak through a smaller replacement layout. -/
+def LinearMemory.zeroBytes (memory : LinearMemory) (address : Nat) : Nat →
+    Except MemoryError LinearMemory
+  | 0 => .ok memory
+  | count + 1 => do
+      let memory ← memory.writeByte address 0
+      memory.zeroBytes (address + 1) count
+
+/-- Consume a concrete reuse token. Word zero selects fresh allocation. A
+nonzero token must name a live constructor allocation large enough for the
+replacement layout; its physical extent is retained while payload and header
+metadata are rebuilt in place. -/
+def reuseObject (state : MemoryState) (token : Word32) (info : LCNF.CtorInfo)
+    (updateHeader : Bool) (fields : Array Word32) :
+    Except ConcreteError (MemoryState × Word32) := do
+  if token == Word32.zero then
+    allocateConstructor state info fields
+  else
+    unless token.classify = .heap do
+      throw (.source .expectedReuseToken)
+    unless fields.size = info.size do
+      throw (.source (.malformed
+        s!"reuse for {info.name} expected {info.size} object fields, got {fields.size}"))
+    let header ← liftMemory <| state.readLiveHeader token
+    unless header.kind == .constructor do
+      throw (.source .expectedConstructor)
+    let layout := ConstructorLayout.ofInfo info
+    unless layout.allocationBytes ≤ header.allocationBytes.toNat do
+      throw (.target (.reuseAllocationTooSmall header.allocationBytes.toNat
+        layout.allocationBytes))
+    let tag ← if updateHeader then
+      uint32Field "constructor tag" info.cidx
+    else
+      pure header.aux0
+    let objectFields ← uint32Field "object-field count" info.size
+    let usizeFields ← uint32Field "usize-field count" info.usize
+    let scalarBytes ← uint32Field "scalar byte count" info.ssize
+    let memory ← liftMemory <| state.memory.zeroBytes
+      (token.value + headerBytes) (header.allocationBytes.toNat - headerBytes)
+    let memory ← liftMemory <|
+      writeObjectFields memory token.value 0 fields.toList
+    let replacement : Header := {
+      header with
+      kind := .constructor
+      persistent := false
+      live := true
+      aux0 := tag
+      aux1 := objectFields
+      aux2 := usizeFields
+      aux3 := scalarBytes }
+    let memory ← liftMemory <| replacement.write memory token
+    return ({ state with memory }, token)
+
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
     (fits : payload.toNat ≤ maxImmediatePayload) :
     encodeTagged state payload =

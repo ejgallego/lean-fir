@@ -20,6 +20,7 @@ inductive MemoryError where
   | deadObject (address : Word32)
   | unsupportedOwnershipKind (kind : ObjectKind)
   | releaseFuelExhausted
+  | reuseAllocationTooSmall (available required : Nat)
   deriving BEq, Repr
 
 abbrev LinearMemory := Array UInt8

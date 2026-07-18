@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
+import Fir.Wasm.Concrete.ConstructorHeapCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -116,5 +117,53 @@ theorem LiveHeapRel.resetObject_refines_nonunique
     rw [if_pos fallback, concreteDec]
     rfl
   exact ⟨result, concreteReset, finalRelated, .reuseNone⟩
+
+/-- Consuming an empty reuse token is exactly fresh constructor allocation.
+For a nonempty layout, the existing allocation theorem supplies the extended
+witness, complete heap relation, and returned heap reference. -/
+theorem LiveHeapRel.reuseObject_none_refines_nonempty
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (fields : Array Word32)
+    (semanticFields : Array Value) (address : Word32) (updateHeader : Bool)
+    (related : LiveHeapRel state witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (reused : reuseObject state Word32.zero info updateHeader fields =
+      .ok (result, address)) :
+    let nextWitness :=
+      witness.bindConstructor runtime.nextLocation address info fieldKinds
+    LiveHeapRel result nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken none) info updateHeader
+        semanticFields =
+          .ok (semanticConstructorResult runtime info semanticFields,
+            .object (.heap runtime.nextLocation)) := by
+  have allocated : allocateConstructor state info fields = .ok (result, address) := by
+    unfold reuseObject at reused
+    rw [if_pos (by decide)] at reused
+    exact reused
+  obtain ⟨heapRelated, valueRelated⟩ :=
+    allocateConstructor_nonempty_liveHeapRel state result witness runtime info
+      fieldKinds fields semanticFields address related arity semanticArity
+      fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits objectFieldsFit
+      usizeFieldsFit scalarBytesFit allocated
+  exact ⟨heapRelated, valueRelated, by
+    simpa [Fir.LeanIR.Impure.reuse] using
+      allocCtor_nonempty_eq runtime info semanticFields semanticArity nonempty⟩
 
 end Fir.Wasm.Concrete
