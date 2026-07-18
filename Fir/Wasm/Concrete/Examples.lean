@@ -271,6 +271,31 @@ def releasedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
             header.aux2 == 0 && header.aux3 == 0
       | _, _ => false
 
+/-- Explicit deletion uses the same canonical freed header but does not run
+the recursive ownership fold. -/
+def deletedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← boxedUInt64Max
+  let state ← deleteObject state object
+  return (state, object)
+
+#guard match deletedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match Header.read state.memory object, state.readLiveHeader object with
+      | .ok header, .error (.deadObject deadAddress) =>
+          deadAddress == object && header.kind == .freed && !header.live &&
+            header.refCount == 0
+      | _, _ => false
+
+#guard match smallTagged, promotedTagged with
+  | .ok (immediateState, immediate), .ok (promotedState, promoted) =>
+      match deleteObject immediateState immediate,
+          deleteObject promotedState promoted with
+      | .error (.source .expectedHeapReference),
+          .error (.source .expectedHeapReference) => true
+      | _, _ => false
+  | _, _ => false
+
 /- Tagged references retain their no-ownership representation contract:
 checked increments are no-ops and unchecked increments reject them. -/
 #guard match smallTagged, promotedTagged with

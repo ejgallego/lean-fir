@@ -1333,6 +1333,14 @@ each successful successor step preserving the stable witness mapping. The
 complete checked `.dec amount` ownership path is therefore related. W6.3 now
 turns to concrete deletion and both reset/reuse paths.
 
+W6.3aa adds explicit concrete deletion. `deleteObject` accepts only an
+ordinary live heap allocation, rejects immediate and promoted tagged values,
+and installs the canonical freed header without traversing owned fields.
+`LiveHeapRel.deleteObject_refines` frames that header write across every other
+allocation and relates it to FIR `deleteValue`'s zero-count/dead update.
+Executable guards cover the successful box deletion and both tagged rejection
+paths. Reset and reuse are now the remaining W6.3 runtime operations.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

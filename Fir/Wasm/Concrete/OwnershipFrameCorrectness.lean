@@ -1463,4 +1463,60 @@ theorem LiveHeapRel.decrementReference_refines
           rw [firstConcrete]
           exact restConcrete
 
+/-- Explicit deletion installs the canonical concrete freed header and the
+matching semantic zero-count/dead cell without releasing owned children. -/
+theorem LiveHeapRel.deleteObject_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticOperation :
+      Fir.LeanIR.Impure.deleteValue runtime (.object (.heap location)) =
+        .ok nextRuntime) :
+    ∃ result,
+      deleteObject state address = .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [Fir.LeanIR.Impure.deleteValue, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at semanticOperation
+    | true => rfl
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, rawRead, notPromoted, _, _⟩ :=
+    targetRelated.ordinaryHeader
+  obtain ⟨descriptor, descriptorFound⟩ := targetRelated.descriptor
+  obtain ⟨released, memory, releasedOperation, releasedEq, headerWrite,
+      finalValid, deadRelated⟩ :=
+    releaseHeader related.frontier headerRead targetRelated.headerOwned
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  let replacement : HeapCell := { cell with rc := 0, live := false }
+  have targetAfter : CellRel released witness address replacement :=
+    .dead (by simp [replacement]) (by simp [replacement])
+      ⟨descriptor, descriptorFound⟩ deadRelated
+  obtain ⟨deletedRuntime, semanticDelete, finalRelated⟩ :=
+    related.setCell_of_headerWrite mapped found descriptorFound rawRead releasedEq
+      headerInBounds headerWrite rfl finalValid targetAfter
+  have semanticSet : setCell runtime location replacement = .ok nextRuntime := by
+    simp only [Fir.LeanIR.Impure.deleteValue, getLiveCell, found, live,
+      ↓reduceIte, Bind.bind, Except.bind] at semanticOperation
+    exact semanticOperation
+  have runtimeEq := Except.ok.inj (semanticDelete.symm.trans semanticSet)
+  subst deletedRuntime
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  have concreteDelete : deleteObject state address = .ok released := by
+    unfold deleteObject
+    rw [addressHeap]
+    simp only [↓reduceIte, Bind.bind, Except.bind]
+    rw [headerRead]
+    simp only [liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    exact releasedOperation
+  exact ⟨released, concreteDelete, finalRelated⟩
+
 end Fir.Wasm.Concrete

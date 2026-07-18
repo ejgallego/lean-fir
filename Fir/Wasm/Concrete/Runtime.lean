@@ -560,6 +560,19 @@ def decrementReference (state : MemoryState) (object : Word32)
   (List.replicate amount object).foldlM (init := state) fun state object =>
     decrementReferenceOnce state object check
 
+/-- Mark one ordinary heap allocation dead without recursively releasing its
+owned fields. This is FIR's explicit `delete` operation, distinct from a
+reference-count decrement. Promoted tags retain tagged-value behavior and are
+therefore rejected as heap references. -/
+def deleteObject (state : MemoryState) (object : Word32) :
+    Except ConcreteError MemoryState := do
+  unless object.classify = .heap do
+    throw (.source .expectedHeapReference)
+  let header ← liftMemory <| state.readLiveHeader object
+  if header.isPromotedTag then
+    throw (.source .expectedHeapReference)
+  writeLiveHeader state object header.forRelease
+
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
     (fits : payload.toNat ≤ maxImmediatePayload) :
     encodeTagged state payload =
