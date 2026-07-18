@@ -1434,6 +1434,14 @@ transport through descriptor rebinding. This makes the temporary target a
 normal decoded constructor under protocol-only proof metadata, so the existing
 recursive decrement refinement can drive the child-release fold unchanged.
 
+W6.3al supplies the spatial frame for reset's bulk prefix clear.
+`MemoryState.AllocationFrame.ofWriteObjectFields` proves that every complete
+allocation disjoint from the target's retained physical interval is byte-for-
+byte unchanged, and `LiveHeapRel.allocationFrame_of_writeObjectFields_other`
+discharges its bounds and disjointness from the global descriptor invariant.
+The target reconstruction can now be isolated from transport of every other
+live, dead, boxed, natural, and promoted representation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

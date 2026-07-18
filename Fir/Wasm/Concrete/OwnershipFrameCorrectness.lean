@@ -53,6 +53,43 @@ theorem MemoryState.AllocationFrame.ofHeaderWrite
   · left
     omega
 
+/-- A checked constructor object-field writer produces a complete allocation
+frame for every allocation disjoint from the target's retained physical
+extent. -/
+theorem MemoryState.AllocationFrame.ofWriteObjectFields
+    {before after : MemoryState} {target other : Word32}
+    {targetBytes otherBytes : Nat} {fields : List Word32}
+    {memory : LinearMemory}
+    (resultEq : after = { before with memory })
+    (targetInBounds : target.value + targetBytes ≤ before.memory.size)
+    (fieldsInTarget : objectFieldAddress target.value fields.length ≤
+      target.value + targetBytes)
+    (written : writeObjectFields before.memory target.value 0 fields =
+      .ok memory)
+    (disjoint : target.value + targetBytes ≤ other.value ∨
+      other.value + otherBytes ≤ target.value) :
+    before.AllocationFrame after other otherBytes := by
+  have fieldsInBounds :
+      objectFieldAddress target.value (0 + fields.length) ≤
+        before.memory.size := by
+    simp only [Nat.zero_add]
+    exact Nat.le_trans fieldsInTarget targetInBounds
+  have post := writeObjectFields_post before.memory memory target.value 0 fields
+    fieldsInBounds written
+  subst after
+  refine ⟨rfl, post.size, ?_⟩
+  intro offset offsetWithin
+  change memory.readByte (other.value + offset) =
+    before.memory.readByte (other.value + offset)
+  apply post.byteFrame
+  rcases disjoint with targetBefore | otherBefore
+  · right
+    simp only [Nat.zero_add]
+    exact Nat.le_trans fieldsInTarget (by omega)
+  · left
+    simp [objectFieldAddress, Fir.Wasm.Concrete.target]
+    omega
+
 private theorem MemoryState.AllocationFrame.readUInt32Raw
     {before after : MemoryState} {address : Word32} {bytes offset : Nat}
     (frame : before.AllocationFrame after address bytes)
@@ -119,6 +156,43 @@ theorem LiveHeapRel.allocationFrame_of_headerWrite_other
     otherDescriptor targetFound otherFound different targetHeader otherHeader
       targetRead otherRead
   exact .ofHeaderWrite resultEq headerInBounds written targetMinimum disjoint
+
+/-- The global descriptor invariant discharges the retained-extent premises
+needed to frame any non-target allocation through a bulk object-field write. -/
+theorem LiveHeapRel.allocationFrame_of_writeObjectFields_other
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress otherAddress : Word32}
+    {targetDescriptor otherDescriptor : AllocationDescriptor}
+    {targetHeader otherHeader : Header} {fields : List Word32}
+    {memory : LinearMemory}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound : witness.descriptors.lookup? targetAddress =
+      some targetDescriptor)
+    (otherFound : witness.descriptors.lookup? otherAddress =
+      some otherDescriptor)
+    (different : targetAddress.value ≠ otherAddress.value)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (otherRead : Header.read before.memory otherAddress = .ok otherHeader)
+    (resultEq : after = { before with memory })
+    (fieldsInTarget : objectFieldAddress targetAddress.value fields.length ≤
+      targetAddress.value + targetHeader.allocationBytes.toNat)
+    (written : writeObjectFields before.memory targetAddress.value 0 fields =
+      .ok memory) :
+    before.AllocationFrame after otherAddress
+      otherHeader.allocationBytes.toNat := by
+  obtain ⟨regionHeader, regionRead, _, _, targetExtent⟩ :=
+    related.descriptorRegion targetAddress targetDescriptor targetFound
+  rw [targetRead] at regionRead
+  have headerEq := Except.ok.inj regionRead
+  subst regionHeader
+  have targetInBounds :
+      targetAddress.value + targetHeader.allocationBytes.toNat ≤
+        before.memory.size :=
+    Nat.le_trans targetExtent related.frontier.cursorInBounds
+  have disjoint := related.descriptorDisjoint targetAddress otherAddress
+    targetDescriptor otherDescriptor targetFound otherFound different
+      targetHeader otherHeader targetRead otherRead
+  exact .ofWriteObjectFields resultEq targetInBounds fieldsInTarget written disjoint
 
 /-- Replacing one descriptor header without changing its allocation extent
 preserves the global descriptor-region and disjointness invariants. -/
