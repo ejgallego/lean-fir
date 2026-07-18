@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.ReferenceCountCorrectness
+import Fir.Wasm.Concrete.ClosureHeapCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -502,6 +503,142 @@ theorem MemoryState.AllocationFrame.readLiveHeader
     after.readLiveHeader address = before.readLiveHeader address := by
   unfold MemoryState.readLiveHeader
   rw [frame.readHeader minimum, frame.memorySize]
+
+/-- A complete allocation frame preserves the checked closure-header decoder.
+The decoder has no payload observations beyond the common header. -/
+theorem MemoryState.AllocationFrame.readClosureHeader
+    {before after : MemoryState} {address : Word32} {bytes : Nat}
+    (frame : before.AllocationFrame after address bytes)
+    (minimum : headerBytes ≤ bytes) :
+    Fir.Wasm.Concrete.readClosureHeader after address =
+      Fir.Wasm.Concrete.readClosureHeader before address := by
+  unfold Fir.Wasm.Concrete.readClosureHeader
+  rw [frame.readLiveHeader minimum]
+
+/-- Closure metadata adds only immutable module-table lookups to the framed
+checked header, so it transports through the same complete allocation frame. -/
+theorem MemoryState.AllocationFrame.readClosureMetadata
+    {before after : MemoryState} {address : Word32} {bytes : Nat}
+    (frame : before.AllocationFrame after address bytes)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (minimum : headerBytes ≤ bytes) :
+    Fir.Wasm.Concrete.readClosureMetadata after dispatch descriptors address =
+      Fir.Wasm.Concrete.readClosureMetadata before dispatch descriptors address := by
+  unfold Fir.Wasm.Concrete.readClosureMetadata
+  rw [frame.readClosureHeader minimum]
+
+/-- Every observation made by a locally related closure stays inside its
+declared complete allocation, so a complete frame preserves the decoder. -/
+theorem ClosureObjectRel.allocationFrame
+    {before after : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {bytes : Nat}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {semantic : Array Value}
+    (related : ClosureObjectRel before witness dispatch descriptors address
+      function arity captureKinds semantic)
+    (frame : before.AllocationFrame after address bytes)
+    (minimum : headerBytes ≤ bytes)
+    (capturesFit : headerBytes + target.semanticSlotBytes * semantic.size ≤ bytes) :
+    ClosureObjectRel after witness dispatch descriptors address function arity
+      captureKinds semantic := by
+  refine {
+    descriptor := related.descriptor
+    metadata := ?_
+    captureKindsSize := related.captureKindsSize
+    captures := ?_ }
+  · obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
+        metadataFixed, metadataKinds⟩ := related.metadata
+    exact ⟨metadata, by
+      rw [frame.readClosureMetadata dispatch descriptors minimum]
+      exact metadataRead,
+      metadataFunction, metadataArity, metadataFixed, metadataKinds⟩
+  · intro index kind value kindAt valueAt
+    obtain ⟨lane, readBefore, laneRelated⟩ :=
+      related.captures index kind value kindAt valueAt
+    obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+    have slotFits : headerBytes + target.semanticSlotBytes * index + 8 ≤ bytes := by
+      simp [target] at capturesFit ⊢
+      omega
+    refine ⟨lane, ?_, laneRelated⟩
+    rw [LinearMemory.readClosureCapture_of_byteFrame
+      before.memory after.memory (closureCaptureAddress address.value index) kind]
+    · exact readBefore
+    · intro offset offsetLt
+      change after.memory.readByte
+          (address.value + headerBytes + target.semanticSlotBytes * index + offset) =
+        before.memory.readByte
+          (address.value + headerBytes + target.semanticSlotBytes * index + offset)
+      rw [show address.value + headerBytes + target.semanticSlotBytes * index + offset =
+          address.value +
+            (headerBytes + target.semanticSlotBytes * index + offset) by omega]
+      exact frame.readByte _ (by omega)
+
+/-- A complete descriptor-allocation frame preserves the packaged semantic
+closure cell, including its module metadata and every typed capture. -/
+theorem ClosureCellRel.allocationFrame
+    {before after : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell} {regionHeader : Header}
+    (related : ClosureCellRel before witness address cell)
+    (headerRead : Header.read before.memory address = .ok regionHeader)
+    (frame : before.AllocationFrame after address
+      regionHeader.allocationBytes.toNat) :
+    ClosureCellRel after witness address cell := by
+  cases related with
+  | @closure function arity captureKinds captures actualHeader _ objectEq
+      objectRelated liveHeaderRead headerKind descriptorLookup ordinary fixedCount
+      extent refCount persistent live =>
+      obtain ⟨heap, rawRead, _, minimum, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts before address actualHeader
+          liveHeaderRead
+      rw [headerRead] at rawRead
+      have headerEq := Except.ok.inj rawRead
+      subst regionHeader
+      have requiredFits :
+          align8 (headerBytes +
+            target.semanticSlotBytes * actualHeader.aux2.toNat) ≤
+              actualHeader.allocationBytes.toNat := by
+        obtain ⟨metadata, metadataRead, _, _, _, _⟩ := objectRelated.metadata
+        have closureHeaderSuccess : ∃ decoded,
+            Fir.Wasm.Concrete.readClosureHeader before address = .ok decoded := by
+          cases result : Fir.Wasm.Concrete.readClosureHeader before address with
+          | error failure =>
+              unfold Fir.Wasm.Concrete.readClosureMetadata at metadataRead
+              simp only [result, Bind.bind, Except.bind] at metadataRead
+              contradiction
+          | ok decoded => exact ⟨decoded, rfl⟩
+        obtain ⟨decoded, decodedRead⟩ := closureHeaderSuccess
+        have check := decodedRead
+        unfold Fir.Wasm.Concrete.readClosureHeader at check
+        simp only [heap, if_true] at check
+        rw [liveHeaderRead] at check
+        simp only [liftMemory, Bind.bind, Except.bind] at check
+        have kindCheck : (actualHeader.kind == ObjectKind.closure) = true := by
+          rw [headerKind]
+          decide
+        rw [kindCheck] at check
+        simp only [if_true] at check
+        split at check
+        · rename_i valid
+          have validProp : actualHeader.aux2.toNat < actualHeader.aux1.toNat ∧
+              align8 (headerBytes +
+                target.semanticSlotBytes * actualHeader.aux2.toNat) ≤
+                  actualHeader.allocationBytes.toNat := by
+            simpa using valid
+          exact validProp.2
+        · contradiction
+      have capturesFit :
+          headerBytes + target.semanticSlotBytes * captures.size ≤
+            actualHeader.allocationBytes.toNat := by
+        rw [← fixedCount]
+        exact Nat.le_trans (align8_ge _) requiredFits
+      have headerAfter : after.readLiveHeader address = .ok actualHeader := by
+        rw [frame.readLiveHeader minimum]
+        exact liveHeaderRead
+      exact .closure objectEq
+        (objectRelated.allocationFrame frame minimum capturesFit)
+        headerAfter headerKind descriptorLookup ordinary fixedCount
+        (by rw [frame.cursor]; exact extent) refCount persistent live
 
 theorem MemoryState.AllocationFrame.readNaturalLimbs
     {before after : MemoryState} {address : Word32} {bytes : Nat}
