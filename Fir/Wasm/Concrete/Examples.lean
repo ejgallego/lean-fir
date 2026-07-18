@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.HeapRefinement
+import Fir.Wasm.Concrete.GlobalCorrectness
 import Fir.Wasm.Concrete.ClosureRuntime
 
 namespace Fir.Wasm.Concrete
@@ -10,6 +10,25 @@ open Fir.LeanIR.Impure
 #guard target.pointerLane == .i32
 #guard target.usizeLane == .i64
 #guard target.semanticSlotBytes == 8
+
+def exampleGlobals : ConcreteGlobals :=
+  ConcreteGlobals.declare [(`cachedValue, .uint32)]
+
+#guard match exampleGlobals.read `cachedValue .uint32 with
+  | .error (.targetGlobal (.uninitializedGlobal `cachedValue)) => true
+  | _ => false
+
+#guard match exampleGlobals.write `cachedValue .uint32
+    (.word32 (Word32.ofUInt32 17)) with
+  | .error _ => false
+  | .ok globals =>
+      match globals.read `cachedValue .uint32 with
+      | .ok (.word32 value) => value.value == 17
+      | _ => false
+
+#guard match exampleGlobals.read `cachedValue .uint64 with
+  | .error (.targetGlobal (.kindMismatch `cachedValue .uint32 .uint64)) => true
+  | _ => false
 
 #guard (Word32.encodeImmediate? 0).map (·.value) == some 1
 #guard (Word32.encodeImmediate? maxImmediatePayload).map (·.value) ==

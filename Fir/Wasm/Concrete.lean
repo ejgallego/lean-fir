@@ -26,3 +26,4 @@ import Fir.Wasm.Concrete.ClosureOwnershipCorrectness
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 import Fir.Wasm.Concrete.ReuseMemoryCorrectness
 import Fir.Wasm.Concrete.ResetReuseCorrectness
+import Fir.Wasm.Concrete.GlobalCorrectness

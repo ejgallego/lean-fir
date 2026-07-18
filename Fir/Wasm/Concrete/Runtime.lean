@@ -11,10 +11,19 @@ inductive ConcreteAddressFault where
   | referenceCountUnderflow (address : Word32)
   deriving BEq, Repr
 
+/-- Failures introduced by the generated mutable-global boundary rather than
+by FIR evaluation or linear-memory decoding. -/
+inductive ConcreteGlobalError where
+  | unknownGlobal (name : Lean.Name)
+  | kindMismatch (name : Lean.Name) (expected actual : AbiKind)
+  | uninitializedGlobal (name : Lean.Name)
+  deriving BEq, Repr
+
 inductive ConcreteError where
   | source (fault : RuntimeFault)
   | sourceAddress (fault : ConcreteAddressFault)
   | target (failure : MemoryError)
+  | targetGlobal (failure : ConcreteGlobalError)
   deriving BEq, Repr
 
 def liftMemory {α : Type} : Except MemoryError α → Except ConcreteError α

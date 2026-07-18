@@ -1675,6 +1675,33 @@ and live status. `allocateClosure_cellRel` exposes the resulting frontier and
 cell relation as one public vertical postcondition. The next slice can add a
 single `LiveCellRel.closure` constructor backed by this package.
 
+W6.4l adds that structural closure case. `LiveCellRel` is exhaustive over
+constructors, closures, boxed scalars, promoted tags, and naturals; closure
+allocation now extends the whole live heap, and all generic prefix, witness,
+reference-count, and reset/reuse frames preserve the new case. This removes
+the former proof boundary where closures had a local decoder theorem but no
+place in the global heap invariant.
+
+W6.4m closes descriptor-aware closure release. A count-one closure first
+marks its parent allocation dead, then recursively releases exactly the
+object-like captures selected by its static descriptor, in source order.
+Scalar and reuse-token captures are proved semantic ownership no-ops rather
+than being silently reinterpreted as object words. Public decrement and reset
+thread the immutable descriptor table through their complete-heap refinement
+proofs. The former standalone closure reference-count module is consolidated
+into the common reference-count correctness layer.
+
+W6.4n begins the generated-runtime boundary with mutable globals. Static
+declarations allocate typed slots whose companion initialization flags start
+clear; checked reads distinguish unknown, mismatched, and uninitialized
+globals, while checked writes retain declaration order and frame every other
+slot. A bidirectional pointwise relation proves initial empty-cache
+refinement, semantic `setGlobal` preservation, and successful typed reads.
+`ConcreteRuntimeRel` layers this table plus world and external trace over the
+existing `LiveHeapRel`, so later W6.5 effects can reuse the heap proofs rather
+than duplicating them. The next checkpoint adds the external request/response
+contract and structured effect/fault correspondence.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
