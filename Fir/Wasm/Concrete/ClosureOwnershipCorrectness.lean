@@ -36,6 +36,107 @@ theorem ValueRel.ownershipOfObjectField
   | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize =>
       simp [AbiKind.isObjectField] at admissible
 
+/-- A capture rejected by the concrete ownership filter cannot be a semantic
+heap reference, so FIR's recursive-release step is the identity on it. -/
+private theorem ValueRel.releaseNoOp_of_notObjectField
+    {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
+    {value : Value} (related : ValueRel witness kind lane value)
+    (rejected : kind.isObjectField = false) (fuel : Nat)
+    (runtime : RuntimeState) :
+    (match value with
+    | .object (.heap child) =>
+        Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+    | _ => .ok runtime) = .ok runtime := by
+  cases related with
+  | object | tagged | tobject | erased =>
+      simp [AbiKind.isObjectField] at rejected
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+
+/-- Filtering statically non-owning closure captures preserves FIR's release
+fold because every omitted typed value takes the semantic no-op branch. -/
+private theorem closureOwnedValues_foldlM_eq_of_each
+    (witness : RefinementWitness) (kinds : List AbiKind) (values : List Value)
+    (sizeEq : kinds.length = values.length)
+    (each : ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+      kinds[offset]? = some kind →
+      values[offset]? = some value →
+      ∃ lane, ValueRel witness kind lane value)
+    (fuel : Nat) (runtime : RuntimeState) :
+    values.foldlM (init := runtime) (fun next value =>
+      match value with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel next child
+      | _ => .ok next) =
+    (closureOwnedValues kinds values).foldlM (init := runtime) (fun next value =>
+      match value with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel next child
+      | _ => .ok next) := by
+  induction kinds generalizing values runtime with
+  | nil =>
+      cases values with
+      | nil => rfl
+      | cons value values => simp at sizeEq
+  | cons kind kinds ih =>
+      cases values with
+      | nil => simp at sizeEq
+      | cons value values =>
+          have tailSize : kinds.length = values.length := by
+            simpa using sizeEq
+          obtain ⟨lane, headRelated⟩ := each 0 kind value (by simp) (by simp)
+          have tailEach : ∀ (offset : Nat) (tailKind : AbiKind) (tailValue : Value),
+              kinds[offset]? = some tailKind →
+              values[offset]? = some tailValue →
+              ∃ lane, ValueRel witness tailKind lane tailValue := by
+            intro offset tailKind tailValue kindAt valueAt
+            exact each (offset + 1) tailKind tailValue (by simpa using kindAt)
+              (by simpa using valueAt)
+          by_cases admissible : kind.isObjectField = true
+          · simp only [closureOwnedValues, admissible, if_true, List.foldlM_cons]
+            cases headOperation :
+                (match value with
+                | .object (.heap child) =>
+                    Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+                | _ => .ok runtime) with
+            | error fault => rfl
+            | ok next => exact ih values tailSize tailEach next
+          · have rejected : kind.isObjectField = false := by
+              cases found : kind.isObjectField <;> simp_all
+            have headNoOp :=
+              headRelated.releaseNoOp_of_notObjectField rejected fuel runtime
+            simp only [closureOwnedValues, rejected, List.foldlM_cons]
+            rw [headNoOp]
+            exact ih values tailSize tailEach runtime
+
+/-- The semantic release fold over every closure capture agrees with the
+concrete ownership decoder's filtered capture order. -/
+theorem ClosureObjectRel.foldlM_closureOwnedValues
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {captures : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds captures)
+    (fuel : Nat) (runtime : RuntimeState) :
+    captures.toList.foldlM (init := runtime) (fun next value =>
+      match value with
+      | .object (.heap child) =>
+          Fir.LeanIR.Impure.decLocationFuel fuel next child
+      | _ => .ok next) =
+    (closureOwnedValues captureKinds.toList captures.toList).foldlM
+      (init := runtime) (fun next value =>
+        match value with
+        | .object (.heap child) =>
+            Fir.LeanIR.Impure.decLocationFuel fuel next child
+        | _ => .ok next) := by
+  apply closureOwnedValues_foldlM_eq_of_each witness captureKinds.toList
+    captures.toList
+  · simpa using related.captureKindsSize
+  · intro offset kind value kindAt valueAt
+    obtain ⟨lane, _, laneRelated⟩ := related.captures offset kind value
+      (by simpa using kindAt) (by simpa using valueAt)
+    exact ⟨lane, laneRelated⟩
+
 /-- Pointwise typed capture reads determine the exact filtered word list
 returned by the executable closure ownership decoder. -/
 private theorem readClosureOwnedReferences_of_each

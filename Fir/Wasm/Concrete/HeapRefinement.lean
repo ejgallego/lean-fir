@@ -1,5 +1,6 @@
 import Fir.Wasm.Concrete.Runtime
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
+import Fir.Wasm.Concrete.ClosureHeapCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -366,9 +367,8 @@ structure BoxedObjectRel (state : MemoryState) (address : Word32)
   decoded : readBoxedScalar state kind address = .ok scalar
 
 /-- Relation for live semantic cells implemented by the current W6 runtime.
-Dead cells, closures, and other heap objects receive cases in their
-own implementation slices rather than being hidden behind a permissive
-catch-all. -/
+Dead cells and future heap objects receive cases in their own implementation
+slices rather than being hidden behind a permissive catch-all. -/
 inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
     (address : Word32) : HeapCell → Prop where
   | constructor {info fieldKinds semantic header cell}
@@ -406,6 +406,10 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (refCount : header.refCount.toNat = cell.rc)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
+      LiveCellRel state witness address cell
+
+  | closure {cell}
+      (related : ClosureCellRel state witness address cell) :
       LiveCellRel state witness address cell
 
 /-- Canonical concrete representation of a released semantic cell. The old
@@ -537,6 +541,8 @@ theorem LiveCellRel.prefixExtension
       · exact refCount
       · exact persistent
       · exact live
+  | closure closureRelated =>
+      exact .closure (closureRelated.prefixExtension extension)
 
 /-- Live-cell relations are monotone in proof-only witness metadata. -/
 theorem LiveCellRel.witnessExtension
@@ -558,6 +564,8 @@ theorem LiveCellRel.witnessExtension
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
         headerKind ordinary marker extent limbsFit decoded refCount persistent live
+  | closure closureRelated =>
+      exact .closure (closureRelated.witnessExtension extension)
 
 /-- Released headers remain canonical through fresh allocation beyond their
 owned prefix. -/
@@ -589,6 +597,7 @@ theorem LiveCellRel.headerOwned
       have minimum :=
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
       omega
+  | closure closureRelated => exact closureRelated.headerOwned
 
 /-- Whole-cell relation used once ownership can make semantic cells dead.
 Live cells retain their complete payload decoder; dead cells retain only the
@@ -621,6 +630,10 @@ theorem LiveCellRel.descriptor
   | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | natural descriptor _ _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | closure closureRelated =>
+      cases closureRelated with
+      | closure _ objectRelated _ _ _ _ _ _ _ _ _ =>
+          exact ⟨_, objectRelated.descriptor⟩
 
 theorem CellRel.descriptor
     {state : MemoryState} {witness : RefinementWitness}

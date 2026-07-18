@@ -25,7 +25,8 @@ structure ResetReuseProtocolRel
   unique : cell.rc = 1
   constructor : cell.object = .ctor object
   countFits : count ≤ object.objectFields.size
-  concreteReset : resetObject before count address = .ok (after, address)
+  concreteReset : resetObject before count address witness.closureDescriptors =
+    .ok (after, address)
   semanticReset :
     Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
       .ok (nextRuntime, .reuseToken (some location))
@@ -696,6 +697,35 @@ theorem ConstructorObjectRel.rebindConstructor
   exact ⟨word, read,
     valueRelated.rebindConstructor reboundAddress reboundInfo reboundFieldKinds⟩
 
+/-- Rebinding a distinct active constructor descriptor preserves a closure's
+immutable module tables, metadata decoder, and typed captures. -/
+theorem ClosureObjectRel.rebindConstructor_other
+    {state : MemoryState} {witness : RefinementWitness}
+    {address reboundAddress : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {captures : Array Value}
+    {reboundInfo : LCNF.CtorInfo} {reboundFieldKinds : Array AbiKind}
+    (related : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (different : reboundAddress.value ≠ address.value) :
+    ClosureObjectRel state
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds)
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds).closureDispatch
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds).closureDescriptors
+      address function arity captureKinds captures := by
+  refine {
+    descriptor := ?_
+    metadata := related.metadata
+    captureKindsSize := related.captureKindsSize
+    captures := ?_ }
+  · rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress address
+      reboundInfo reboundFieldKinds different]
+    exact related.descriptor
+  · intro index kind value kindAt valueAt
+    obtain ⟨lane, read, laneRelated⟩ :=
+      related.captures index kind value kindAt valueAt
+    exact ⟨lane, read,
+      laneRelated.rebindConstructor reboundAddress reboundInfo reboundFieldKinds⟩
+
 /-- Rebinding one active descriptor leaves every live cell at a distinct
 physical address related. -/
 theorem LiveCellRel.rebindConstructor_other
@@ -733,6 +763,13 @@ theorem LiveCellRel.rebindConstructor_other
           exact descriptor)
         objectEq headerRead headerKind ordinary marker extent limbsFit decoded refCount
           persistent live
+  | closure closureRelated =>
+      cases closureRelated with
+      | closure objectEq objectRelated headerRead headerKind descriptorLookup ordinary
+          fixedCount extent refCount persistent live =>
+          exact .closure (.closure objectEq
+            (objectRelated.rebindConstructor_other different) headerRead headerKind
+            descriptorLookup ordinary fixedCount extent refCount persistent live)
 
 /-- Rebinding one active descriptor leaves every whole-cell relation at a
 distinct physical address intact. -/
@@ -1376,7 +1413,8 @@ theorem OwnershipValuesRel.foldlM_public_refines
       Fir.LeanIR.Impure.decValueOnce next value true) = .ok finalRuntime) :
     ∃ finalState,
       words.foldlM (init := state) (fun next child =>
-        decrementReferenceOnce next child true) = .ok finalState ∧
+        decrementReferenceOnce next child true witness.closureDescriptors) =
+          .ok finalState ∧
       LiveHeapRel finalState witness finalRuntime := by
   induction related generalizing state runtime finalRuntime with
   | nil =>
@@ -1393,7 +1431,7 @@ theorem OwnershipValuesRel.foldlM_public_refines
       | ok middleRuntime =>
           rw [headSemantic] at semanticOperation
           have releaseStep := head.releaseStep heap
-            (state.heapCursor / headerBytes + 1)
+            (state.heapCursor / headerBytes + 1) witness.closureDescriptors
           rcases releaseStep with heapChild | noOp
           · obtain ⟨location, valueEq, mapped⟩ := heapChild
             subst value
@@ -1428,7 +1466,8 @@ theorem OwnershipValuesRel.foldlM_public_refines
               | reuseToken location =>
                   simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
             subst middleRuntime
-            have concreteHead : decrementReferenceOnce state word true =
+            have concreteHead :
+                decrementReferenceOnce state word true witness.closureDescriptors =
                 .ok state := by
               unfold decrementReferenceOnce
               exact concreteFuelNoOp
@@ -1507,7 +1546,8 @@ theorem LiveHeapRel.resetObject_tagged
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload) (count : Nat) :
-    resetObject state count word = .ok (state, Word32.zero) := by
+    resetObject state count word witness.closureDescriptors =
+      .ok (state, Word32.zero) := by
   cases tagged with
   | immediate actualPayload fits =>
       unfold resetObject
@@ -1524,9 +1564,11 @@ theorem LiveHeapRel.resetObject_tagged
         unfold Header.isPromotedTag
         rw [headerKind, persistent, marker]
         decide
-      have releaseNoop : decrementReferenceOnce state word true = .ok state := by
+      have releaseNoop :
+          decrementReferenceOnce state word true witness.closureDescriptors =
+            .ok state := by
         simpa using related.decrementReferenceOnce_tagged
-          (TaggedReferenceRel.promoted found) true
+          (TaggedReferenceRel.promoted found) true witness.closureDescriptors
       unfold resetObject
       rw [addressHeap, headerRead]
       simp only [Bind.bind, Except.bind, liftMemory]
@@ -1541,7 +1583,8 @@ theorem LiveHeapRel.resetObject_refines_tagged
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload) (count : Nat) :
-    resetObject state count word = .ok (state, Word32.zero) ∧
+    resetObject state count word witness.closureDescriptors =
+      .ok (state, Word32.zero) ∧
       Fir.LeanIR.Impure.reset runtime count (.object (.tagged payload)) =
         .ok (runtime, .reuseToken none) ∧
       ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) := by
@@ -1561,7 +1604,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique
       Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
         .ok (nextRuntime, .reuseToken none)) :
     ∃ result,
-      resetObject state count address = .ok (result, Word32.zero) ∧
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, Word32.zero) ∧
       LiveHeapRel result witness nextRuntime ∧
       ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
@@ -1604,7 +1648,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead).1
   have concreteReset :
-      resetObject state count address = .ok (result, Word32.zero) := by
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, Word32.zero) := by
     unfold resetObject
     rw [addressHeap, headerRead]
     simp only [Bind.bind, Except.bind, liftMemory]
@@ -1630,7 +1675,8 @@ theorem LiveHeapRel.resetObject_refines_unique
       Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
         .ok (nextRuntime, .reuseToken (some location))) :
     ∃ result info fieldKinds,
-      resetObject state count address = .ok (result, address) ∧
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, address) ∧
       LiveHeapRel result
         (witness.rebindConstructor address info
           (resetProtocolFieldKinds fieldKinds count)) nextRuntime ∧
@@ -1749,7 +1795,14 @@ theorem LiveHeapRel.resetObject_refines_unique
       have headerKindCheck : (header.kind == ObjectKind.constructor) = true := by
         rw [headerKind]
         decide
-      have concreteReset : resetObject state count address = .ok (result, address) := by
+      have concreteFoldOriginal :
+          words.foldlM (init := ({ state with memory := fieldMemory } : MemoryState))
+            (fun next child => decrementReferenceOnce next child true
+              witness.closureDescriptors) = .ok result := by
+        simpa [RefinementWitness.rebindConstructor] using concreteFold
+      have concreteReset :
+          resetObject state count address witness.closureDescriptors =
+            .ok (result, address) := by
         unfold resetObject
         rw [addressHeap, headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
@@ -1758,7 +1811,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         rw [objectCount, if_neg (Nat.not_lt.mpr countFitsInfo)]
         rw [ownedRead, fieldWrite]
         simp only
-        rw [concreteFold]
+        rw [concreteFoldOriginal]
         rfl
       have protocol : ResetReuseProtocolRel state result witness runtime nextRuntime
           location address cell object count := {
@@ -1781,6 +1834,10 @@ theorem LiveHeapRel.resetObject_refines_unique
   | natural descriptor objectEq headerRead headerKind ordinaryHeader marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [constructor] at objectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      rw [constructor] at closureEq
       contradiction
 
 /-- Consuming an empty reuse token for an empty-layout constructor preserves

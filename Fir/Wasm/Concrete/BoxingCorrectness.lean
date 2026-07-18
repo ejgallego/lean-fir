@@ -504,6 +504,12 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  case closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
 
 /-- The public concrete boxing operation and FIR's semantic boxing operation
 take the same heap branch above the 63-bit tagged limit. -/

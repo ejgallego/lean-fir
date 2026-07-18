@@ -41,6 +41,29 @@ theorem ClosureCellRel.headerOwned
       simp [closureCaptureAddress, target] at extent ⊢
       omega
 
+/-- A packaged closure exposes its proof descriptor for exhaustive whole-heap
+reasoning. -/
+theorem ClosureCellRel.descriptor
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : ClosureCellRel state witness address cell) :
+    ∃ function arity captureKinds,
+      witness.descriptors.lookup? address =
+        some (.closure function arity captureKinds) := by
+  cases related with
+  | closure _ objectRelated _ _ _ _ _ _ _ _ _ =>
+      exact ⟨_, _, _, objectRelated.descriptor⟩
+
+/-- A packaged closure exposes the exact semantic heap-object shape. -/
+theorem ClosureCellRel.objectEq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : ClosureCellRel state witness address cell) :
+    ∃ function arity captures,
+      cell.object = .closure function arity captures := by
+  cases related with
+  | closure objectEq _ _ _ _ _ _ _ _ _ _ => exact ⟨_, _, _, objectEq⟩
+
 /-- A live closure cell remains related when a fresh allocation preserves its
 complete header-and-capture prefix. -/
 theorem ClosureCellRel.prefixExtension

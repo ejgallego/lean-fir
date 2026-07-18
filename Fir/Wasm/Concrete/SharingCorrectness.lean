@@ -21,6 +21,10 @@ theorem LiveCellRel.sharingHeader
       exact ⟨_, objectRelated.headerRead, refCount, persistent⟩
   | natural _ _ headerRead _ _ _ _ _ _ refCount persistent _ =>
       exact ⟨_, headerRead, refCount, persistent⟩
+  | closure closureRelated =>
+      cases closureRelated with
+      | closure _ _ headerRead _ _ _ _ _ refCount persistent _ =>
+          exact ⟨_, headerRead, refCount, persistent⟩
 
 /-- Concrete header sharing agrees exactly with the semantic cell's
 persistent/refcount predicate. -/

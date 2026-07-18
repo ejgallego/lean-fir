@@ -95,6 +95,12 @@ theorem LiveHeapRel.readObjectField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
 
 /-- The checked concrete `USize` projection refines the actual W2 semantic
 `getUSizeField` operation. -/
@@ -137,6 +143,12 @@ theorem LiveHeapRel.readUSizeField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
 
 /-- Concrete constructor tag lookup refines semantic `getTag` for a mapped
 live constructor. -/
@@ -171,6 +183,12 @@ theorem LiveHeapRel.readTag_refines
       rw [objectEq] at semanticTag
       simp at semanticTag
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag

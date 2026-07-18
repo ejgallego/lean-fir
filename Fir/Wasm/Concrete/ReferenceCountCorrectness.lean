@@ -12,8 +12,9 @@ representation of a non-owning erased field; unchecked public use still
 rejects it as a non-object. -/
 theorem decrementReferenceOnceFuel_sentinel
     (fuel : Nat) (state : MemoryState) (object : Word32)
-    (sentinel : object.classify = .sentinel) (check : Bool) :
-    decrementReferenceOnceFuel fuel state object check =
+    (sentinel : object.classify = .sentinel) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnceFuel fuel state object check descriptors =
       if check then .ok state else .error (.source .expectedObject) := by
   cases fuel <;> cases check <;>
     simp [decrementReferenceOnceFuel, sentinel] <;> rfl
@@ -22,10 +23,11 @@ theorem decrementReferenceOnceFuel_sentinel
 depth never changes the resulting memory state. -/
 theorem decrementReferenceOnceFuel_ok_mono
     {fuel more : Nat} {state result : MemoryState} {object : Word32}
-    {check : Bool} (fuelLe : fuel ≤ more)
-    (operation : decrementReferenceOnceFuel fuel state object check = .ok result) :
-    decrementReferenceOnceFuel more state object check = .ok result := by
-  induction fuel generalizing more state result object check with
+    {check : Bool} {descriptors : ClosureDescriptorTable} (fuelLe : fuel ≤ more)
+    (operation :
+      decrementReferenceOnceFuel fuel state object check descriptors = .ok result) :
+    decrementReferenceOnceFuel more state object check descriptors = .ok result := by
+  induction fuel generalizing more state result object check descriptors with
   | zero =>
       cases more with
       | zero => exact operation
@@ -71,7 +73,8 @@ theorem decrementReferenceOnceFuel_ok_mono
                         · simpa [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
                             Bind.bind, Except.bind, promoted, persistent, zero, above]
                             using operation
-                        · cases ownedEq : readOwnedReferences state object header with
+                        · cases ownedEq :
+                            readOwnedReferences state object header descriptors with
                           | error failure =>
                               simp [decrementReferenceOnceFuel, classEq, headerEq,
                                 liftMemory, Bind.bind, Except.bind, promoted, persistent, zero,
@@ -87,10 +90,12 @@ theorem decrementReferenceOnceFuel_ok_mono
                                   have foldMono : ∀ (children : List Word32)
                                       (before after : MemoryState),
                                       children.foldlM (init := before) (fun next child =>
-                                        decrementReferenceOnceFuel fuel next child true) =
+                                        decrementReferenceOnceFuel fuel next child true
+                                          descriptors) =
                                           .ok after →
                                       children.foldlM (init := before) (fun next child =>
-                                        decrementReferenceOnceFuel more next child true) =
+                                        decrementReferenceOnceFuel more next child true
+                                          descriptors) =
                                           .ok after := by
                                     intro children
                                     induction children with
@@ -102,7 +107,7 @@ theorem decrementReferenceOnceFuel_ok_mono
                                         simp only [List.foldlM_cons, Bind.bind, Except.bind]
                                           at folded ⊢
                                         cases childEq : decrementReferenceOnceFuel fuel
-                                            before child true with
+                                            before child true descriptors with
                                         | error failure =>
                                             rw [childEq] at folded
                                             contradiction
@@ -112,7 +117,8 @@ theorem decrementReferenceOnceFuel_ok_mono
                                             rw [childMore]
                                             exact tailIH middle after folded
                                   have folded : owned.foldlM (init := released) (fun next child =>
-                                      decrementReferenceOnceFuel fuel next child true) =
+                                      decrementReferenceOnceFuel fuel next child true
+                                        descriptors) =
                                       .ok result := by
                                     simpa [decrementReferenceOnceFuel, classEq, headerEq,
                                       liftMemory, Bind.bind, Except.bind, promoted, persistent,
@@ -427,8 +433,9 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_tagged
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload)
-    (fuel : Nat) (check : Bool) :
-    decrementReferenceOnceFuel fuel state word check =
+    (fuel : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnceFuel fuel state word check descriptors =
       if check then .ok state else .error (.source .expectedHeapReference) := by
   cases tagged with
   | immediate actualPayload fits =>
@@ -461,11 +468,11 @@ theorem LiveHeapRel.decrementReferenceOnce_tagged
     {payload : UInt64} {word : Word32}
     (related : LiveHeapRel state witness runtime)
     (tagged : TaggedReferenceRel witness word payload)
-    (check : Bool) :
-    decrementReferenceOnce state word check =
+    (check : Bool) (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnce state word check descriptors =
       if check then .ok state else .error (.source .expectedHeapReference) := by
   unfold decrementReferenceOnce
-  exact related.decrementReferenceOnceFuel_tagged tagged _ check
+  exact related.decrementReferenceOnceFuel_tagged tagged _ check descriptors
 
 /-- One ABI-admissible ownership slot is either the exact concrete address of
 a semantic heap child, or a checked concrete no-op matching the semantic
@@ -474,12 +481,13 @@ theorem OwnershipValueRel.releaseStep
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {word : Word32} {value : Value}
     (heap : LiveHeapRel state witness runtime)
-    (ownership : OwnershipValueRel witness word value) (fuel : Nat) :
+    (ownership : OwnershipValueRel witness word value) (fuel : Nat)
+    (descriptors : ClosureDescriptorTable := #[]) :
     (∃ location,
       value = .object (.heap location) ∧
       witness.locations.lookup? location = some word) ∨
     ((∀ location, value ≠ .object (.heap location)) ∧
-      decrementReferenceOnceFuel fuel state word true = .ok state) := by
+      decrementReferenceOnceFuel fuel state word true descriptors = .ok state) := by
   cases ownership with
   | intro kind admissible valueRelated =>
       cases valueRelated with
@@ -488,7 +496,9 @@ theorem OwnershipValueRel.releaseStep
           | mapped found => exact .inl ⟨_, rfl, found⟩
       | tagged taggedRelated =>
           exact .inr ⟨by intro location; simp,
-            by simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true⟩
+            by simpa using
+              (heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+                descriptors)⟩
       | tobject objectRelated =>
           cases objectRelated with
           | heap heapRelated =>
@@ -497,10 +507,12 @@ theorem OwnershipValueRel.releaseStep
           | tagged taggedRelated =>
               exact .inr ⟨by intro location; simp,
                 by simpa using
-                  heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true⟩
+                  (heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+                    descriptors)⟩
       | erased =>
           exact .inr ⟨by intro location; simp,
-            decrementReferenceOnceFuel_sentinel fuel state Word32.zero (by rfl) true⟩
+            (decrementReferenceOnceFuel_sentinel fuel state Word32.zero (by rfl) true
+              descriptors)⟩
       | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
           simp [AbiKind.isObjectField] at admissible
 
@@ -509,6 +521,7 @@ step through the complete concrete/semantic child folds. -/
 theorem OwnershipValuesRel.foldlM_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime finalRuntime : RuntimeState}
     {words : List Word32} {values : List Value} {fuel : Nat}
+    {descriptors : ClosureDescriptorTable}
     (related : OwnershipValuesRel witness words values)
     (heap : LiveHeapRel state witness runtime)
     (recurse : ∀ {before : MemoryState} {semantic nextSemantic : RuntimeState}
@@ -517,7 +530,7 @@ theorem OwnershipValuesRel.foldlM_refines
       witness.locations.lookup? location = some address →
       Fir.LeanIR.Impure.decLocationFuel fuel semantic location = .ok nextSemantic →
       ∃ after,
-        decrementReferenceOnceFuel fuel before address true = .ok after ∧
+        decrementReferenceOnceFuel fuel before address true descriptors = .ok after ∧
         LiveHeapRel after witness nextSemantic)
     (semanticOperation :
       values.foldlM (init := runtime) (fun next value =>
@@ -527,7 +540,7 @@ theorem OwnershipValuesRel.foldlM_refines
         | _ => .ok next) = .ok finalRuntime) :
     ∃ finalState,
       words.foldlM (init := state) (fun next child =>
-        decrementReferenceOnceFuel fuel next child true) = .ok finalState ∧
+        decrementReferenceOnceFuel fuel next child true descriptors) = .ok finalState ∧
       LiveHeapRel finalState witness finalRuntime := by
   induction related generalizing state runtime finalRuntime with
   | nil =>
@@ -537,7 +550,8 @@ theorem OwnershipValuesRel.foldlM_refines
       exact ⟨state, rfl, heap⟩
   | @cons word value words values head tail ih =>
       have noOpCase
-          (concreteHead : decrementReferenceOnceFuel fuel state word true = .ok state)
+          (concreteHead :
+            decrementReferenceOnceFuel fuel state word true descriptors = .ok state)
           (semanticHead :
             (match value with
             | .object (.heap child) =>
@@ -545,7 +559,8 @@ theorem OwnershipValuesRel.foldlM_refines
             | _ => .ok runtime) = .ok runtime) :
           ∃ finalState,
             (word :: words).foldlM (init := state) (fun next child =>
-              decrementReferenceOnceFuel fuel next child true) = .ok finalState ∧
+              decrementReferenceOnceFuel fuel next child true descriptors) =
+                .ok finalState ∧
             LiveHeapRel finalState witness finalRuntime := by
         simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
         rw [semanticHead] at semanticOperation
@@ -555,7 +570,7 @@ theorem OwnershipValuesRel.foldlM_refines
         simp only [List.foldlM_cons, Bind.bind, Except.bind]
         rw [concreteHead]
         exact concreteTail
-      rcases head.releaseStep heap fuel with heapStep | noOpStep
+      rcases head.releaseStep heap fuel descriptors with heapStep | noOpStep
       · obtain ⟨location, valueEq, mapped⟩ := heapStep
         subst value
         simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
@@ -747,9 +762,10 @@ theorem decrementReferenceOnceFuel_above_one_eq_public
     (notPromoted : header.isPromotedTag = false)
     (ordinary : header.persistent = false)
     (oldCount : Nat) (refCount : header.refCount.toNat = oldCount)
-    (oneLt : 1 < oldCount) (fuel : Nat) (check : Bool) :
-    decrementReferenceOnceFuel (fuel + 1) state address check =
-      decrementReferenceOnce state address check := by
+    (oneLt : 1 < oldCount) (fuel : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+      decrementReferenceOnce state address check descriptors := by
   have heap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
   have refCountNe : header.refCount ≠ 0 := by
@@ -766,14 +782,15 @@ theorem decrementReferenceOnceFuel_above_one_eq_public
 chosen positive fuel budget. -/
 theorem decrementReferenceOnceFuel_leaf_one_eq_public
     {state : MemoryState} {address : Word32} {header : Header}
+    {descriptors : ClosureDescriptorTable}
     (headerRead : state.readLiveHeader address = .ok header)
     (notPromoted : header.isPromotedTag = false)
     (ordinary : header.persistent = false)
     (refCount : header.refCount.toNat = 1)
-    (owned : readOwnedReferences state address header = .ok [])
+    (owned : readOwnedReferences state address header descriptors = .ok [])
     (fuel : Nat) (check : Bool) :
-    decrementReferenceOnceFuel (fuel + 1) state address check =
-      decrementReferenceOnce state address check := by
+    decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+      decrementReferenceOnce state address check descriptors := by
   have heap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
   have refCountNe : header.refCount ≠ 0 := by
@@ -789,16 +806,17 @@ theorem decrementReferenceOnceFuel_leaf_one_eq_public
 no recursively owned references to visit after the write. -/
 theorem decrementReferenceOnce_leaf_one
     {state : MemoryState} {address : Word32} {header : Header}
+    {descriptors : ClosureDescriptorTable}
     (valid : state.FrontierInvariant)
     (headerRead : state.readLiveHeader address = .ok header)
     (headerOwned : address.value + headerBytes ≤ state.heapCursor)
     (notPromoted : header.isPromotedTag = false)
     (ordinary : header.persistent = false)
     (refCount : header.refCount.toNat = 1)
-    (owned : readOwnedReferences state address header = .ok [])
+    (owned : readOwnedReferences state address header descriptors = .ok [])
     (check : Bool) :
     ∃ result memory,
-      decrementReferenceOnce state address check = .ok result ∧
+      decrementReferenceOnce state address check descriptors = .ok result ∧
       result = { state with memory } ∧
       header.forRelease.write state.memory address = .ok memory ∧
       result.FrontierInvariant ∧
@@ -812,7 +830,8 @@ theorem decrementReferenceOnce_leaf_one
     intro zero
     rw [zero] at refCount
     simp at refCount
-  have operation : decrementReferenceOnce state address check = .ok result := by
+  have operation :
+      decrementReferenceOnce state address check descriptors = .ok result := by
     simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
     rw [heap]
     simp only
@@ -1461,6 +1480,280 @@ theorem BoxedObjectRel.decrementReferenceOnce_above_one
   exact ⟨result, updatedHeader, operation, updatedEq, finalValid, headerReadAfter,
     objectAfter⟩
 
+/-- Rewriting only a closure's reference count preserves its immutable module
+metadata and every typed capture slot. -/
+theorem ClosureObjectRel.writeReferenceCount
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {captures : Array Value} {header : Header}
+    (related : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor)
+    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      result.heapCursor = state.heapCursor ∧
+      ClosureObjectRel result witness witness.closureDispatch
+        witness.closureDescriptors address function arity captureKinds captures := by
+  obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
+      metadataFixed, metadataKinds⟩ := related.metadata
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  have closureHeaderSuccess : ∃ decoded,
+      readClosureHeader state address = .ok decoded := by
+    cases result : readClosureHeader state address with
+    | error failure =>
+        unfold readClosureMetadata at metadataRead
+        simp only [result, Bind.bind, Except.bind] at metadataRead
+        contradiction
+    | ok decoded => exact ⟨decoded, rfl⟩
+  obtain ⟨decoded, decodedRead⟩ := closureHeaderSuccess
+  have decodedEq : decoded = header := by
+    have check := decodedRead
+    unfold readClosureHeader at check
+    simp only [heap, if_true] at check
+    rw [headerRead] at check
+    simp only [liftMemory, Bind.bind, Except.bind] at check
+    split at check <;> split at check
+    · simpa using (Except.ok.inj check).symm
+    · contradiction
+    · contradiction
+    · contradiction
+  subst decoded
+  have kindCheck : (header.kind == ObjectKind.closure) = true := by
+    rw [headerKind]
+    decide
+  have validation : header.aux2.toNat < header.aux1.toNat ∧
+      align8 (headerBytes + target.semanticSlotBytes * header.aux2.toNat) ≤
+        header.allocationBytes.toNat := by
+    have check := decodedRead
+    unfold readClosureHeader at check
+    simp only [heap, if_true] at check
+    rw [headerRead] at check
+    simp only [liftMemory, Bind.bind, Except.bind] at check
+    rw [kindCheck] at check
+    simp only [if_true] at check
+    split at check
+    · rename_i validCheck
+      simpa using validCheck
+    · contradiction
+  have captureSize : captureKinds.size = header.aux2.toNat := by
+    exact related.captureKindsSize.trans fixedCount.symm
+  have targetLookup : ClosureDispatchTable.lookup? witness.closureDispatch
+      header.aux0 = some function := by
+    unfold readClosureMetadata at metadataRead
+    rw [decodedRead] at metadataRead
+    simp only [Bind.bind, Except.bind] at metadataRead
+    cases targetResult : ClosureDispatchTable.lookup? witness.closureDispatch
+        header.aux0 with
+    | none =>
+        simp [targetResult] at metadataRead
+    | some foundFunction =>
+        rw [targetResult, descriptorLookup] at metadataRead
+        simp [captureSize] at metadataRead
+        have metadataEq := Except.ok.inj metadataRead
+        have foundEq : foundFunction = function := by
+          calc
+            foundFunction = metadata.function := by
+              simpa using congrArg ClosureMetadata.function metadataEq
+            _ = function := metadataFunction
+        subst foundFunction
+        rfl
+  have headerArity : header.aux1.toNat = arity := by
+    unfold readClosureMetadata at metadataRead
+    rw [decodedRead] at metadataRead
+    simp only [Bind.bind, Except.bind] at metadataRead
+    rw [targetLookup, descriptorLookup] at metadataRead
+    simp [captureSize] at metadataRead
+    have metadataEq := Except.ok.inj metadataRead
+    calc
+      header.aux1.toNat = metadata.arity := by
+        simpa using congrArg ClosureMetadata.arity metadataEq
+      _ = arity := metadataArity
+  obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+      headerWrite, finalValid, headerReadAfter⟩ :=
+    writeReferenceCount_header valid headerRead headerOwned nextCount
+  subst updatedHeader
+  subst result
+  let updatedHeader : Header := { header with refCount := nextCount }
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans headerOwned valid.cursorInBounds
+  have closureHeaderAfter :
+      readClosureHeader ({ state with memory } : MemoryState) address =
+        .ok updatedHeader := by
+    unfold readClosureHeader
+    simp [heap, headerReadAfter, liftMemory, updatedHeader, headerKind]
+    simp only [Bind.bind, Except.bind]
+    simp [validation]
+    rw [show (ObjectKind.closure == ObjectKind.closure) = true by decide]
+    rfl
+  let metadataAfter : ClosureMetadata := {
+    header := updatedHeader
+    targetId := updatedHeader.aux0
+    descriptorId := updatedHeader.aux3
+    function
+    arity
+    fixed := captures.size
+    captureKinds }
+  have metadataReadAfter :
+      readClosureMetadata ({ state with memory } : MemoryState)
+          witness.closureDispatch witness.closureDescriptors address =
+        .ok metadataAfter := by
+    unfold readClosureMetadata
+    rw [closureHeaderAfter]
+    simp only [Bind.bind, Except.bind]
+    simp [updatedHeader, targetLookup, descriptorLookup, captureSize,
+      headerArity, fixedCount, metadataAfter]
+    rfl
+  have capturesAfter : ∀ index kind value,
+      captureKinds[index]? = some kind →
+      captures[index]? = some value →
+      ∃ lane,
+        memory.readClosureCapture
+            (closureCaptureAddress address.value index) kind = .ok lane ∧
+          ValueRel witness kind lane value := by
+    intro index kind value kindAt valueAt
+    obtain ⟨lane, readBefore, laneRelated⟩ :=
+      related.captures index kind value kindAt valueAt
+    refine ⟨lane, ?_, laneRelated⟩
+    rw [LinearMemory.readClosureCapture_of_byteFrame state.memory memory
+      (closureCaptureAddress address.value index) kind]
+    · exact readBefore
+    · intro offset offsetLt
+      apply Header.readByte_of_write_eq_ok_other state.memory memory address
+        { header with refCount := nextCount }
+          (closureCaptureAddress address.value index + offset) headerInBounds
+            headerWrite
+      right
+      change address.value + headerBytes ≤
+        address.value + headerBytes + target.semanticSlotBytes * index + offset
+      exact Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _)
+  refine ⟨{ state with memory }, updatedHeader, operation, rfl, finalValid,
+    headerReadAfter, rfl, ?_⟩
+  exact {
+    descriptor := related.descriptor
+    metadata := ⟨metadataAfter, metadataReadAfter, rfl, rfl, rfl, rfl⟩
+    captureKindsSize := related.captureKindsSize
+    captures := capturesAfter }
+
+/-- Incrementing an ordinary closure changes only its common-header count;
+module metadata, captures, and the semantic closure stay related. -/
+theorem ClosureCellRel.incrementReference
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : ClosureCellRel state witness address cell)
+    (valid : state.FrontierInvariant)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result,
+      Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
+      result.FrontierInvariant ∧
+      ClosureCellRel result witness address { cell with rc := cell.rc + amount } := by
+  have headerOwned := related.headerOwned
+  cases related with
+  | @closure function arity captureKinds captures header _ objectEq objectRelated
+      headerRead headerKind descriptorLookup ordinary fixedCount extent refCount
+      persistent live =>
+      obtain ⟨result, updatedHeader, write, updatedEq, finalValid,
+          headerReadAfter, cursorEq, objectAfter⟩ :=
+        objectRelated.writeReferenceCount headerRead headerKind descriptorLookup
+          fixedCount headerOwned valid (UInt32.ofNat (cell.rc + amount))
+      have heap :=
+        (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+          headerRead).1
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.closure == ObjectKind.natural) = false := by
+          decide
+        simp [Header.isPromotedTag, headerKind, different]
+      have operation : Fir.Wasm.Concrete.incrementReference state address amount check =
+          .ok result := by
+        unfold Fir.Wasm.Concrete.incrementReference
+        rw [heap]
+        simp only
+        rw [headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted])]
+        rw [if_neg (by simp [ordinary])]
+        rw [refCount]
+        rw [uint32Field_eq_ok "reference count" (cell.rc + amount) fits]
+        simpa [updatedEq] using write
+      subst updatedHeader
+      refine ⟨result, operation, finalValid, ?_⟩
+      exact .closure (by simpa using objectEq) objectAfter headerReadAfter
+        (by simpa using headerKind) (by simpa using descriptorLookup)
+        (by simpa using ordinary) (by simpa using fixedCount)
+        (by rw [cursorEq]; exact extent)
+        (by
+          simp only
+          exact UInt32.toNat_ofNat_of_lt' fits)
+        (by simpa using persistent) (by simpa using live)
+
+/-- Above one, decrementing a closure is nonrecursive and preserves all
+closure metadata and captures while lowering both counts by one. -/
+theorem ClosureCellRel.decrementReferenceOnce_above_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : ClosureCellRel state witness address cell)
+    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      result.FrontierInvariant ∧
+      ClosureCellRel result witness address { cell with rc := cell.rc - 1 } := by
+  have headerOwned := related.headerOwned
+  cases related with
+  | @closure function arity captureKinds captures header _ objectEq objectRelated
+      headerRead headerKind descriptorLookup ordinary fixedCount extent refCount
+      persistent live =>
+      obtain ⟨result, updatedHeader, write, updatedEq, finalValid,
+          headerReadAfter, cursorEq, objectAfter⟩ :=
+        objectRelated.writeReferenceCount headerRead headerKind descriptorLookup
+          fixedCount headerOwned valid (UInt32.ofNat (cell.rc - 1))
+      have heap :=
+        (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+          headerRead).1
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.closure == ObjectKind.natural) = false := by
+          decide
+        simp [Header.isPromotedTag, headerKind, different]
+      have refCountNe : header.refCount ≠ 0 := by
+        intro zero
+        rw [zero] at refCount
+        simp at refCount
+        omega
+      have operation : decrementReferenceOnce state address check = .ok result := by
+        simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+        rw [heap]
+        simp only
+        rw [headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted])]
+        rw [if_neg (by simp [ordinary])]
+        rw [if_neg (by simpa using refCountNe)]
+        rw [refCount, if_pos oneLt]
+        simpa [updatedEq] using write
+      have nextFits : cell.rc - 1 < UInt32.size := by
+        have oldFits := UInt32.toNat_lt_size header.refCount
+        rw [refCount] at oldFits
+        omega
+      subst updatedHeader
+      refine ⟨result, operation, finalValid, ?_⟩
+      exact .closure (by simpa using objectEq) objectAfter headerReadAfter
+        (by simpa using headerKind) (by simpa using descriptorLookup)
+        (by simpa using ordinary) (by simpa using fixedCount)
+        (by rw [cursorEq]; exact extent)
+        (by
+          simp only
+          exact UInt32.toNat_ofNat_of_lt' nextFits)
+        (by simpa using persistent) (by simpa using live)
+
 /-- First successful decrement refinement: a live box above one remains live,
 retains its scalar payload, and lowers the semantic/concrete count together. -/
 theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
@@ -1498,6 +1791,11 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [closureEq] at boxedEq
+      contradiction
 
 /-- Local live-cell refinement for the first W6.3 ownership case. -/
 theorem LiveCellRel.incrementReference_boxed
@@ -1531,6 +1829,11 @@ theorem LiveCellRel.incrementReference_boxed
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [closureEq] at boxedEq
       contradiction
 
 /-- Constructor increments preserve every decoded payload region and update
@@ -1568,6 +1871,11 @@ theorem LiveCellRel.incrementReference_constructor
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [closureEq] at constructorEq
       contradiction
 
 /-- Constructor cells above one remain live and preserve every decoded field
@@ -1609,6 +1917,11 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
   | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [closureEq] at constructorEq
       contradiction
 
 /-- Natural limbs frame across a common-header increment, yielding the same
@@ -1673,6 +1986,11 @@ theorem LiveCellRel.incrementReference_natural
         exact UInt32.toNat_ofNat_of_lt' fits
       · simpa using persistent
       · simpa using live
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [closureEq] at naturalEq
+      contradiction
 
 /-- Natural cells above one retain their complete limb decoder while the
 common header and semantic cell counts decrease together. -/
@@ -1756,12 +2074,18 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
         exact UInt32.toNat_ofNat_of_lt' nextFits
       · simpa using persistent
       · simpa using live
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [closureEq] at naturalEq
+      contradiction
 
 /-- Boxes and heap naturals own no concrete child references. At count one,
 both representations therefore transition directly to `DeadCellRel`. -/
 theorem LiveCellRel.decrementReferenceOnce_leaf_one
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
     (related : LiveCellRel state witness address cell)
     (leafCell :
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
@@ -1769,7 +2093,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
       (∃ value : Nat, cell.object = .natural value))
     (valid : state.FrontierInvariant) (one : cell.rc = 1) (check : Bool) :
     ∃ result header memory,
-      decrementReferenceOnce state address check = .ok result ∧
+      decrementReferenceOnce state address check descriptors = .ok result ∧
       state.readLiveHeader address = .ok header ∧
       result = { state with memory } ∧
       header.forRelease.write state.memory address = .ok memory ∧
@@ -1790,7 +2114,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         simp [Header.isPromotedTag, objectRelated.headerKind, different]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
-      have owned : readOwnedReferences state address header = .ok [] := by
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, objectRelated.headerKind]
       obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
           deadRelated⟩ :=
@@ -1805,7 +2129,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         simp [Header.isPromotedTag, headerKind, ordinary]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
-      have owned : readOwnedReferences state address header = .ok [] := by
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, headerKind]
       obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
           deadRelated⟩ :=
@@ -1815,20 +2139,30 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
           notPromoted ordinary countOne owned check
       exact ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
         finalValid, deadRelated⟩
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      rcases leafCell with boxedCell | naturalCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [closureEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [closureEq] at naturalEq
+        contradiction
 
 /-- The local box/natural leaf branch agrees with the public concrete entry
 point for every positive explicit fuel budget. -/
 theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
     (related : LiveCellRel state witness address cell)
     (leafCell :
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
     (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
-    decrementReferenceOnceFuel (fuel + 1) state address check =
-      decrementReferenceOnce state address check := by
+    decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+      decrementReferenceOnce state address check descriptors := by
   cases related with
   | constructor _ objectEq _ _ _ _ _ _ =>
       rcases leafCell with boxedCell | naturalCell
@@ -1844,7 +2178,7 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
         simp [Header.isPromotedTag, objectRelated.headerKind, different]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
-      have owned : readOwnedReferences state address header = .ok [] := by
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, objectRelated.headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public
         objectRelated.headerRead notPromoted objectRelated.ordinary countOne owned fuel check
@@ -1854,10 +2188,19 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
         simp [Header.isPromotedTag, headerKind, ordinary]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
-      have owned : readOwnedReferences state address header = .ok [] := by
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public headerRead
         notPromoted ordinary countOne owned fuel check
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      rcases leafCell with boxedCell | naturalCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [closureEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [closureEq] at naturalEq
+        contradiction
 
 /-- Complete local increment theorem for every live-cell representation in
 the current W6 heap relation. -/
@@ -1891,6 +2234,10 @@ theorem LiveCellRel.incrementReference
           decoded refCount persistent live
       exact localRelated.incrementReference_natural ⟨value, objectEq⟩ valid
         amount fits check
+  | closure closureRelated =>
+      obtain ⟨result, operation, finalValid, closureAfter⟩ :=
+        closureRelated.incrementReference valid amount fits check
+      exact ⟨result, operation, finalValid, .closure closureAfter⟩
 
 /-- Complete local above-one decrement theorem for every live-cell
 representation in the current W6 heap relation. -/
@@ -1923,12 +2270,22 @@ theorem LiveCellRel.decrementReferenceOnce_above_one
           decoded refCount persistent live
       exact localRelated.decrementReferenceOnce_natural_above_one
         ⟨value, objectEq⟩ valid oneLt check
+  | closure closureRelated =>
+      obtain ⟨result, operation, finalValid, closureAfter⟩ :=
+        closureRelated.decrementReferenceOnce_above_one valid oneLt check
+      exact ⟨result, operation, finalValid, .closure closureAfter⟩
 
 theorem LiveCellRel.live_eq_true
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell) : cell.live = true := by
-  cases related <;> assumption
+  cases related with
+  | constructor _ _ _ _ _ _ _ live => exact live
+  | boxed _ _ _ _ _ live => exact live
+  | natural _ _ _ _ _ _ _ _ _ _ _ live => exact live
+  | closure closureRelated =>
+      cases closureRelated with
+      | closure _ _ _ _ _ _ _ _ _ _ live => exact live
 
 theorem LiveCellRel.persistent_eq_false
     {state : MemoryState} {witness : RefinementWitness}
@@ -1948,6 +2305,11 @@ theorem LiveCellRel.persistent_eq_false
   | natural _ _ _ _ ordinary _ _ _ _ _ persistent _ =>
       rw [← persistent]
       exact ordinary
+  | closure closureRelated =>
+      cases closureRelated with
+      | closure _ _ _ _ _ ordinary _ _ _ persistent _ =>
+          rw [← persistent]
+          exact ordinary
 
 /-- Above one, every positive semantic fuel budget takes the same
 nonrecursive count-rewrite step. -/
@@ -2147,37 +2509,15 @@ theorem LiveCellRel.incValue_boxed_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+    (_boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
       cell.object = .boxed kind.semanticType scalar.semanticValue)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (amount : Nat) (check : Bool) :
     Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
       setCell runtime location { cell with rc := cell.rc + amount } := by
-  have cellLive : cell.live = true := by
-    cases related with
-    | constructor _ objectEq _ _ _ _ _ live =>
-        obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
-        rw [objectEq] at boxedEq
-        contradiction
-    | boxed _ _ _ _ _ live => exact live
-    | natural _ objectEq _ _ _ _ _ _ _ _ _ live =>
-        obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
-        rw [objectEq] at boxedEq
-        contradiction
-  have notPersistent : cell.persistent = false := by
-    cases related with
-    | constructor _ objectEq _ _ _ _ _ _ =>
-        obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
-        rw [objectEq] at boxedEq
-        contradiction
-    | boxed _ _ objectRelated _ persistent _ =>
-        rw [← persistent]
-        exact objectRelated.ordinary
-    | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
-        obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
-        rw [objectEq] at boxedEq
-        contradiction
+  have cellLive : cell.live = true := related.live_eq_true
+  have notPersistent : cell.persistent = false := related.persistent_eq_false
   unfold Fir.LeanIR.Impure.incValue Fir.LeanIR.Impure.incLocation
   simp only [getLiveCell, found, cellLive, notPersistent, ↓reduceIte,
     Bind.bind, Except.bind]
