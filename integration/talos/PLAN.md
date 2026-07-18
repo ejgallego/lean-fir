@@ -1214,6 +1214,16 @@ zero-count/dead cell. Recursive constructor release is now the remaining W6.3
 ownership case; it must compose this target release with ordered decrements of
 the constructor's owned children.
 
+W6.3o fixes the first discrepancy exposed by that recursive proof. The ABI
+admits `.erased` constructor object fields and encodes them as the zero
+sentinel, while the concrete recursive fold previously rejected that sentinel
+after the semantic fold had skipped the erased value. Bug card
+`FIR-BUG-wasm-none-recursive-release-erased-sentinel` records the mismatch.
+Checked sentinel decrements are now exact no-ops, unchecked public decrements
+still reject non-objects, invalid words remain errors, and a constructor
+release regression covers the erased-field path. The recursive proof can now
+relate each constructor field without excluding a valid ABI kind.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

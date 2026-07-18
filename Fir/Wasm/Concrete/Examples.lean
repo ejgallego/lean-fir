@@ -372,6 +372,23 @@ def decrementedMixedConstructor : Except ConcreteError (MemoryState × Word32) :
             usize == 0 && scalar == 0
       | _, _, _, _, _ => false
 
+/-- Regression for
+`FIR-BUG-wasm-none-recursive-release-erased-sentinel`: the zero word is the
+canonical representation of an erased object field and is skipped by checked
+recursive release. -/
+def releasedErasedFieldConstructor : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← allocateConstructor MemoryState.initial mixedConstructorInfo
+    #[Word32.zero]
+  let state ← decrementReferenceOnce state object true
+  return (state, object)
+
+#guard match releasedErasedFieldConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match Header.read state.memory object with
+      | .ok header => header.kind == .freed && !header.live && header.refCount == 0
+      | .error _ => false
+
 #guard match concreteMixedConstructor with
   | .error _ => false
   | .ok (state, object) =>

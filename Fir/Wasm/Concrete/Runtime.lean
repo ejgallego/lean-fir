@@ -528,7 +528,9 @@ def decrementReferenceOnceFuel : Nat → MemoryState → Word32 → Bool →
             let state ← writeLiveHeader state object header.forRelease
             owned.foldlM (init := state) fun state child =>
               decrementReferenceOnceFuel fuel state child true
-      | .sentinel | .invalid => throw (.source .expectedObject)
+      | .sentinel =>
+          if check then return state else throw (.source .expectedObject)
+      | .invalid => throw (.source .expectedObject)
 
 /-- One concrete decrement, including the zero transition and recursive
 release of constructor-owned object fields. The parent is marked dead before

@@ -7,6 +7,16 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- Checked recursive ownership treats the zero sentinel as the concrete
+representation of a non-owning erased field; unchecked public use still
+rejects it as a non-object. -/
+theorem decrementReferenceOnceFuel_sentinel
+    (fuel : Nat) (state : MemoryState) (object : Word32)
+    (sentinel : object.classify = .sentinel) (check : Bool) :
+    decrementReferenceOnceFuel (fuel + 1) state object check =
+      if check then .ok state else .error (.source .expectedObject) := by
+  cases check <;> simp [decrementReferenceOnceFuel, sentinel] <;> rfl
+
 /-- Exact semantic-heap frame produced by replacing the first cell at one
 location. The target lookup changes and every other lookup is preserved. -/
 structure HeapReplacePost (before after : Heap) (location : Location)
