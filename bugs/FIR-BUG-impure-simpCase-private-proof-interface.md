@@ -83,6 +83,14 @@ for a transparent-shadow run. This closes the semantic composition layer
 without pretending to prove that Lean's private traversal produced the
 intermediate. The upstream correspondence boundary therefore remains explicit.
 
+`SimpCaseScopedBridge` separately tracks the two alpha-renaming maps, variable
+scopes, and join scopes through recursive traversal. The alpha-fold fixture's
+case contract is now kernel-proved, while its concrete shadow output remains
+an executable guard: Lean 4.32 exposes `LCNF.Code.beq` as opaque and provides
+no `LawfulBEq` instance with which to turn that Boolean result into a kernel
+syntax equality. This is additional evidence for retaining the explicit
+compiler-correspondence boundary rather than adding an axiom.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -114,10 +122,10 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to one case-node contract. The downstream
-structural-then-alpha program composition is now reusable. Once the kernels or
-graph theorems are public, prove `filterUnreachable` equal to
-`removeUnreachable`, connect `addDefaultAlt` to the scope-indexed alpha
-relation, discharge `CaseBoundarySound` (or replace it with a correspondingly
-indexed boundary), and replace the executable actual-vs-shadow check with a
-kernel correspondence theorem.
+Unresolved, but narrowed to compiler correspondence and the universal scoped
+case contract. Downstream structural-then-alpha composition and the recursive
+scope-indexed boundary are reusable. Once the kernels or graph theorems are
+public, prove `filterUnreachable` equal to `removeUnreachable`, connect
+`addDefaultAlt` to `ScopedCodeBifactor`, discharge the universal
+`ScopedCaseBoundarySound`, and replace executable actual-vs-shadow checks with
+a kernel correspondence theorem.

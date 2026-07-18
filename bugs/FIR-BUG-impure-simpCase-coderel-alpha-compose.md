@@ -32,6 +32,7 @@ From a clean checkout:
 ```sh
 lake build Fir.LeanIR.Passes.SimpCaseExamples
 lake build Fir.LeanIR.Passes.SimpCaseAlphaBridge
+lake build Fir.LeanIR.Passes.SimpCaseScopedBridge
 lake build Fir.LeanIR.Passes.SimpCaseCompilerBridge
 ```
 
@@ -67,17 +68,25 @@ the program-aware alpha bisimulation renames that default to `alphaLeft`.
 
 `ShadowThenAlphaPrograms` additionally lifts any transparent traversal run to
 the same theorem while retaining `CaseBoundarySound` as an explicit field.
-The traversal theorem still cannot instantiate that premise directly for an
-alpha-default fold: `CaseBoundarySound` has no declaration-local variable or
-join scopes with which to state `AlphaEqv.CodeRelated`.
+
+`SimpCaseScopedBridge` now supplies the missing recursive interface. Its
+`ScopeIndex` tracks forward and backward renamings plus variable and join
+scopes; `shadowCode_scopedRelated` updates that index through ordinary,
+parameter, and join binders and delegates only case nodes to
+`ScopedCaseBoundarySound`. `ScopedCodeBifactor` states the semantic payload as
+a structural intermediate followed by `CodeRelated` in both orientations.
+`alphaFoldScopedCaseBoundary` proves that the alpha-folding fixture inhabits
+this case contract directly, and the declaration-level alpha proof consumes
+the factor's two scoped alpha fields.
 
 ## Semantic impact
 
-This is a limitation of FIR's generic compiler-bridge relation, not evidence
+This was a limitation of FIR's generic compiler-bridge relation, not evidence
 of a compiler miscompilation. The concrete alpha-default-folding fixture is
-now covered by a composed whole-program theorem. Arbitrary shadow traversal
-results remain outside the generic theorem when their case boundary needs an
-alpha step.
+covered both by the composed whole-program theorem and by the new scoped
+case-node contract. Arbitrary alpha-folding shadow results still require
+closure laws for `ScopedCodeFactored` under declaration-wide hygiene, plus a
+universal scoped case-boundary proof.
 
 ## Classification and triage
 
@@ -87,11 +96,12 @@ as `fir-semantics`.
 
 ## Workaround
 
-Use `StructuralThenAlphaPrograms` for proof-produced structural intermediates,
-and `ShadowThenAlphaPrograms` when the transparent shadow itself produces that
-intermediate. Keep `CaseBoundarySound` explicit and continue to compare the
-actual pass with the pinned traversal shadow. Do not weaken `CodeRel` or add a
-trusted alpha constructor.
+Use `StructuralThenAlphaPrograms` for proof-produced program intermediates,
+`ShadowThenAlphaPrograms` when the transparent shadow produces that
+intermediate, and `ScopedCodeBifactor` at alpha-changing case nodes. Keep the
+appropriate case boundary explicit and continue to compare the actual pass
+with the pinned traversal shadow. Do not weaken `CodeRel` or add a trusted
+alpha constructor.
 
 ## Upstream tracking
 
@@ -105,7 +115,10 @@ its bidirectional machine simulation proves whole-program observational
 equivalence. `SimpCaseAlphaBridge` makes structural-then-alpha composition
 generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
-The card stays confirmed for direct compiler traversal. Closing it requires a
-scope-indexed case-boundary interface (or an upstream transformation graph)
-that can justify the alpha edge produced inside the private recursive pass;
-the scope-free `CaseBoundarySound` statement cannot safely express that edge.
+The scope-indexed case-boundary interface and concrete alpha-fold regression
+are now implemented. The card stays confirmed for arbitrary recursive
+compiler traversal until declaration hygiene yields
+`ScopedTraversalLaws (ScopedCodeFactored validCase)` and every shadow case
+result satisfies the universal `ScopedCaseBoundarySound` contract. Connecting
+that shadow theorem to the actual private pass remains the separate upstream
+proof-interface issue.

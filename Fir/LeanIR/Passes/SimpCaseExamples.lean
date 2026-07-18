@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
-import Fir.LeanIR.Passes.SimpCaseAlphaBridge
+import Fir.LeanIR.Passes.SimpCaseScopedBridge
 import Fir.LeanIR.Passes.SimpCaseCorrectness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
@@ -16,6 +16,7 @@ open Fir.LeanIR.Passes.SimpCase
 open Fir.LeanIR.Passes.SimpCaseAlphaBridge
 open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseCorrectness
+open Fir.LeanIR.Passes.SimpCaseScopedBridge
 open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCaseRelation
 
@@ -527,6 +528,40 @@ theorem alphaFoldCasesAlphaBackward :
   · exact alphaFoldCaseBranchesBackward
   · exact ⟨4, by native_decide⟩
 
+def alphaFoldScopeIndex : ScopeIndex := {
+  forwardRho := alphaFoldParamRho
+  backwardRho := alphaFoldParamRho
+  sourceScope := [x, c]
+  targetScope := [x, c]
+  sourceJoins := []
+  targetJoins := []
+}
+
+/-- The traversal index reconstructs the declaration-body scope from its
+parameters in the same order as `ParamBodyRelated`. -/
+theorem alphaFoldScopeIndex_fromParams :
+    ScopeIndex.empty.pushParams #[param c, param x] = alphaFoldScopeIndex := by
+  rfl
+
+def alphaFoldScopedCodeFactor :
+    ScopedCodeBifactor alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldCode alphaFoldExpected := {
+  middle := alphaFoldIntermediate
+  structural := alphaFoldStructuralCodeRelated
+  alphaForward := alphaFoldCasesAlphaForward
+  alphaBackward := alphaFoldCasesAlphaBackward
+}
+
+#guard shadowCode? 2 alphaFoldCode == some alphaFoldExpected
+
+/-- Unlike the old scope-free `CaseBoundarySound`, the scoped case contract
+can state this structural-then-alpha result directly. -/
+theorem alphaFoldScopedCaseBoundary :
+    ScopedCaseBoundaryAt (ScopedCodeFactored alphaFoldValidCase)
+      alphaFoldScopeIndex 1 alphaFoldBeforeCases alphaFoldExpected := by
+  intro run
+  exact alphaFoldScopedCodeFactor.factored
+
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] []
@@ -542,7 +577,7 @@ theorem alphaFoldParamBodyForward :
     · exact xFreshForC
     · intro old oldScoped; simp at oldScoped
     · intro old oldScoped; simp at oldScoped
-    · exact .nil alphaFoldCasesAlphaForward
+    · exact .nil alphaFoldScopedCodeFactor.alphaForward
 
 theorem alphaFoldParamBodyBackward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])
@@ -559,7 +594,7 @@ theorem alphaFoldParamBodyBackward :
     · exact xFreshForC
     · intro old oldScoped; simp at oldScoped
     · intro old oldScoped; simp at oldScoped
-    · exact .nil alphaFoldCasesAlphaBackward
+    · exact .nil alphaFoldScopedCodeFactor.alphaBackward
 
 theorem alphaFoldProgramsRelatedOfParamBody
     (body : ParamBodyRelated (leftJoins := []) (rightJoins := [])
