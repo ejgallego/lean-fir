@@ -1472,6 +1472,13 @@ descriptor header through its allocation frame, and preserves all pairwise
 allocation disjointness. This supplies the descriptor-region and disjointness
 premises needed to lift W6.3ao from one target constructor to the whole heap.
 
+W6.3aq proves the corresponding ghost-witness frame. Rebinding the target's
+active constructor descriptor transports nested constructor `ValueRel`s and
+leaves every live or dead cell at a distinct address related, including boxed
+and natural cells; promoted tagged representations transport as well. This is
+an explicit descriptor-shadowing law, not a monotone witness extension, and
+therefore preserves the strict lookup semantics needed by in-place reuse.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

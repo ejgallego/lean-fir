@@ -279,6 +279,114 @@ theorem ConstructorObjectRel.resetPrefix
       (List.replicate count taggedZero) index headerRead headerKind writtenFits post]
     exact related.usizeFields index value oldAt
 
+/-- Constructor payload relations transport through a proof-only descriptor
+rebind; only their nested value relations mention the witness. -/
+theorem ConstructorObjectRel.rebindConstructor
+    {state : MemoryState} {witness : RefinementWitness}
+    {address reboundAddress : Word32} {info reboundInfo : LCNF.CtorInfo}
+    {fieldKinds reboundFieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic) :
+    ConstructorObjectRel state
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds)
+      address info fieldKinds semantic := by
+  refine {
+    header := related.header
+    headerOwned := related.headerOwned
+    extent := related.extent
+    semanticObjectFields := related.semanticObjectFields
+    semanticUSizeFields := related.semanticUSizeFields
+    semanticScalarFields := related.semanticScalarFields
+    fieldKindsSize := related.fieldKindsSize
+    fieldKindsValid := related.fieldKindsValid
+    objectFields := ?_
+    usizeFields := related.usizeFields }
+  intro index kind value kindAt valueAt
+  obtain ⟨word, read, valueRelated⟩ :=
+    related.objectFields index kind value kindAt valueAt
+  exact ⟨word, read,
+    valueRelated.rebindConstructor reboundAddress reboundInfo reboundFieldKinds⟩
+
+/-- Rebinding one active descriptor leaves every live cell at a distinct
+physical address related. -/
+theorem LiveCellRel.rebindConstructor_other
+    {state : MemoryState} {witness : RefinementWitness}
+    {address reboundAddress : Word32} {cell : HeapCell}
+    {reboundInfo : LCNF.CtorInfo} {reboundFieldKinds : Array AbiKind}
+    (related : LiveCellRel state witness address cell)
+    (different : reboundAddress.value ≠ address.value) :
+    LiveCellRel state
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds)
+      address cell := by
+  cases related with
+  | constructor descriptor objectEq objectRelated headerRead headerKind refCount
+      persistent live =>
+      exact .constructor
+        (by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact descriptor)
+        objectEq objectRelated.rebindConstructor headerRead headerKind refCount
+          persistent live
+  | boxed descriptor objectEq objectRelated refCount persistent live =>
+      exact .boxed
+        (by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact descriptor)
+        objectEq objectRelated refCount persistent live
+  | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+      decoded refCount persistent live =>
+      exact .natural
+        (by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact descriptor)
+        objectEq headerRead headerKind ordinary marker extent limbsFit decoded refCount
+          persistent live
+
+/-- Rebinding one active descriptor leaves every whole-cell relation at a
+distinct physical address intact. -/
+theorem CellRel.rebindConstructor_other
+    {state : MemoryState} {witness : RefinementWitness}
+    {address reboundAddress : Word32} {cell : HeapCell}
+    {reboundInfo : LCNF.CtorInfo} {reboundFieldKinds : Array AbiKind}
+    (related : CellRel state witness address cell)
+    (different : reboundAddress.value ≠ address.value) :
+    CellRel state
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds)
+      address cell := by
+  cases related with
+  | live liveRelated =>
+      exact .live (liveRelated.rebindConstructor_other different)
+  | dead count dead descriptor deadRelated =>
+      obtain ⟨allocation, found⟩ := descriptor
+      exact .dead count dead
+        ⟨allocation, by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact found⟩
+        deadRelated
+
+/-- Rebinding a distinct constructor descriptor leaves a promoted tagged
+representation and its shadow descriptor unchanged. -/
+theorem PromotedTagRel.rebindConstructor_other
+    {state : MemoryState} {witness : RefinementWitness}
+    {payload : UInt64} {address reboundAddress : Word32}
+    {reboundInfo : LCNF.CtorInfo} {reboundFieldKinds : Array AbiKind}
+    (related : PromotedTagRel state witness payload address)
+    (different : reboundAddress.value ≠ address.value) :
+    PromotedTagRel state
+      (witness.rebindConstructor reboundAddress reboundInfo reboundFieldKinds)
+      payload address := {
+  mapped := by simpa using related.mapped
+  descriptor := by
+    rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress address
+      reboundInfo reboundFieldKinds different]
+    exact related.descriptor
+  header := related.header
+  decoded := related.decoded }
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated
