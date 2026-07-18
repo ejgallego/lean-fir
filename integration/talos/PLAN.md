@@ -1326,6 +1326,13 @@ the complete supported constructor/box/natural ownership fragment. The final
 W6.3 audit is reset/reuse and repeated-decrement packaging over this one-step
 theorem.
 
+W6.3z packages public one-step release into FIR's repeated decrement. Induction
+over the requested amount composes `decrementReferenceOnce_refines` through
+the concrete and semantic folds, with amount zero preserving both states and
+each successful successor step preserving the stable witness mapping. The
+complete checked `.dec amount` ownership path is therefore related. W6.3 now
+turns to concrete deletion and both reset/reuse paths.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

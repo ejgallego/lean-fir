@@ -1422,4 +1422,45 @@ theorem LiveHeapRel.decrementReferenceOnce_refines
     unfold decrementReferenceOnce
     exact concretePublic, finalRelated⟩
 
+/-- Repeating the checked public decrement preserves the heap relation after
+every successful semantic step. The witness mapping is stable across dead-cell
+transitions, so the one-step theorem composes directly through both folds. -/
+theorem LiveHeapRel.decrementReference_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    {amount : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decValue runtime (.object (.heap location)) amount true =
+        .ok nextRuntime) :
+    ∃ result,
+      decrementReference state address amount true = .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  induction amount generalizing state runtime nextRuntime with
+  | zero =>
+      simp [Fir.LeanIR.Impure.decValue] at semanticOperation
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst nextRuntime
+      exact ⟨state, rfl, related⟩
+  | succ amount ih =>
+      simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
+        List.foldlM_cons, Bind.bind, Except.bind,
+        Fir.LeanIR.Impure.decValueOnce] at semanticOperation
+      cases firstSemantic : Fir.LeanIR.Impure.decLocation runtime location with
+      | error fault =>
+          rw [firstSemantic] at semanticOperation
+          contradiction
+      | ok middleRuntime =>
+          rw [firstSemantic] at semanticOperation
+          obtain ⟨middleState, firstConcrete, middleRelated⟩ :=
+            related.decrementReferenceOnce_refines mapped firstSemantic
+          obtain ⟨result, restConcrete, finalRelated⟩ :=
+            ih middleRelated semanticOperation
+          refine ⟨result, ?_, finalRelated⟩
+          simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+            Bind.bind, Except.bind]
+          rw [firstConcrete]
+          exact restConcrete
+
 end Fir.Wasm.Concrete
