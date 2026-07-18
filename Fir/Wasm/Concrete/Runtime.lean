@@ -146,7 +146,9 @@ partial def naturalLimbs (value : Nat) : List UInt64 :=
   else
     UInt64.ofNat (value % UInt64.size) :: naturalLimbs (value / UInt64.size)
 
-private def writeNaturalLimbs (memory : LinearMemory) (base index : Nat) :
+/-- Install little-endian natural limbs.  It is public so allocation
+refinement can state and prove exact payload postconditions. -/
+def writeNaturalLimbs (memory : LinearMemory) (base index : Nat) :
     List UInt64 → Except MemoryError LinearMemory
   | [] => .ok memory
   | limb :: rest => do
@@ -154,7 +156,9 @@ private def writeNaturalLimbs (memory : LinearMemory) (base index : Nat) :
         (base + headerBytes + target.semanticSlotBytes * index) limb
       writeNaturalLimbs memory base (index + 1) rest
 
-private def readNaturalLimbs (memory : LinearMemory) (base index : Nat) :
+/-- Decode little-endian natural limbs.  It is public so fresh-allocation
+framing can transport existing natural objects. -/
+def readNaturalLimbs (memory : LinearMemory) (base index : Nat) :
     Nat → Except MemoryError Nat
   | 0 => .ok 0
   | count + 1 => do

@@ -904,6 +904,20 @@ all satisfy it. The next relation-transport proof can therefore reason from
 allocation extents and this single prefix boundary instead of replaying the
 header and payload writers for every old semantic cell.
 
+W6.1g completes nonempty constructor allocation refinement at the decoded
+heap boundary. Prefix transport now covers checked headers, typed constructor
+projections, recursive large-natural limbs, promoted tags, every `LiveCellRel`
+case, and the complete pre-allocation `LiveHeapRel`. A separate monotone ghost
+witness relation preserves old location, promoted-tag, descriptor, and
+ABI-indexed value relations; fresh bindings preserve witness injectivity and
+address disjointness. The final constructor theorem combines those layers
+with the actual semantic `allocCtor` result: it extends both heaps and the
+witness, retains the bidirectional relation for every old cell, installs the
+new `ConstructorObjectRel`, and relates the returned wasm32 address to the
+fresh semantic location. Empty constructors remain on the already-proved
+tagged/immediate path. W6.1 can now package projection and tag operations
+against this postcondition before moving to W6.2 field mutation and boxing.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

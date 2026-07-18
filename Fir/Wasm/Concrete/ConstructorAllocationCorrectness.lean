@@ -245,6 +245,10 @@ theorem allocateConstructor_nonempty_objectRel
         (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize)) := by
     rw [← stateEq]
     simpa [layout, allocationEq] using headerRead
+  have objectExtent := MemoryState.allocateObject_extent objectAllocation
+  have resultExtent : address.value + layout.allocationBytes ≤ result.heapCursor := by
+    rw [cursorEq, objectExtent, allocationEq]
+    exact Nat.le_refl _
   have addressHeap : address.classify = .heap := by
     have checked := exactHeader
     unfold MemoryState.readLiveHeader at checked
@@ -261,6 +265,9 @@ theorem allocateConstructor_nonempty_objectRel
   refine ⟨finalValidResult, ?_⟩
   refine {
     header := ?_
+    headerOwned := Nat.le_trans
+      (Nat.add_le_add_left layoutMinimum address.value) resultExtent
+    extent := resultExtent
     semanticTag := rfl
     semanticObjectFields := semanticArity
     semanticUSizeFields := by simp
@@ -271,7 +278,8 @@ theorem allocateConstructor_nonempty_objectRel
   · exact ⟨Header.forAllocation .constructor layout.allocationBytes false
       (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize), exactHeader,
-      rfl, tagToNat, objectFieldsToNat, usizeFieldsToNat, scalarBytesToNat⟩
+      rfl, rfl, rfl, tagToNat, objectFieldsToNat, usizeFieldsToNat,
+      scalarBytesToNat⟩
   · intro index kind value kindAt valueAt
     obtain ⟨word, wordAt, related⟩ := fieldRelated index kind value kindAt valueAt
     have indexLt : index < info.size := by

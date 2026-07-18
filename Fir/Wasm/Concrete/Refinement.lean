@@ -113,6 +113,22 @@ def RefinementWitness.bindNatural (witness : RefinementWitness)
       some (.constructor info fieldKinds) := by
   simp [RefinementWitness.bindConstructor, DescriptorMap.lookup?]
 
+theorem RefinementWitness.lookup_bindConstructor_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (different : other ≠ location) :
+    (witness.bindConstructor location address info fieldKinds).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindConstructor, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindConstructor_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (different : address.value ≠ other.value) :
+    (witness.bindConstructor location address info fieldKinds).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindConstructor, DescriptorMap.lookup?, different]
+
 @[simp] theorem RefinementWitness.lookup_bindNatural_location
     (witness : RefinementWitness) (location : Location) (address : Word32) (value : Nat) :
     (witness.bindNatural location address value).locations.lookup? location = some address := by
@@ -123,6 +139,64 @@ def RefinementWitness.bindNatural (witness : RefinementWitness)
     (witness.bindNatural location address value).descriptors.lookup? address =
       some (.natural value) := by
   simp [RefinementWitness.bindNatural, DescriptorMap.lookup?]
+
+/-- Lookup-level monotonicity of proof-only refinement metadata. Allocation
+operations establish this relation before transporting value and heap-cell
+relations to an extended witness. -/
+structure RefinementWitness.Extends (before after : RefinementWitness) : Prop where
+  locations : ∀ location address,
+    before.locations.lookup? location = some address →
+    after.locations.lookup? location = some address
+  promotedTags : ∀ payload address,
+    before.promotedTags.lookup? payload = some address →
+    after.promotedTags.lookup? payload = some address
+  descriptors : ∀ address descriptor,
+    before.descriptors.lookup? address = some descriptor →
+    after.descriptors.lookup? address = some descriptor
+
+namespace RefinementWitness.Extends
+
+theorem refl (witness : RefinementWitness) : witness.Extends witness := by
+  exact ⟨fun _ _ found => found, fun _ _ found => found, fun _ _ found => found⟩
+
+theorem trans {first second third : RefinementWitness}
+    (left : first.Extends second) (right : second.Extends third) :
+    first.Extends third := by
+  exact ⟨
+    fun _ _ found => right.locations _ _ (left.locations _ _ found),
+    fun _ _ found => right.promotedTags _ _ (left.promotedTags _ _ found),
+    fun _ _ found => right.descriptors _ _ (left.descriptors _ _ found)⟩
+
+end RefinementWitness.Extends
+
+/-- Binding a fresh constructor extends every old lookup. Descriptor freshness
+is stated at the value-comparison boundary used by `DescriptorMap.lookup?`. -/
+theorem RefinementWitness.bindConstructor_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindConstructor location address info fieldKinds) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_ }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindConstructor_location_other location old address info
+      fieldKinds different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindConstructor_descriptor_other location address old info
+      fieldKinds (descriptorFresh old descriptor found)]
+    exact found
 
 /-- The lookup-visible part of a witness is injective and every related word
 is a concrete heap address. This avoids baking proof-only location identities
@@ -141,6 +215,66 @@ structure RefinementWitness.WellFormed (witness : RefinementWitness) : Prop wher
   locationPromotionDisjoint : ∀ location payload left right,
     witness.locations.lookup? location = some left →
     witness.promotedTags.lookup? payload = some right → left ≠ right
+
+/-- Fresh constructor metadata preserves witness injectivity and the
+location/promoted-tag address partition. -/
+theorem RefinementWitness.WellFormed.bindConstructor
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress) :
+    (witness.bindConstructor location address info fieldKinds).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := ?_ }
+  · intro old oldAddress found
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindConstructor, LocationMap.lookup?] at found
+      cases found
+      exact addressHeap
+    · rw [witness.lookup_bindConstructor_location_other location old address info
+        fieldKinds isNew] at found
+      exact valid.locationHeap old oldAddress found
+  · intro left right common leftFound rightFound
+    by_cases leftNew : left = location
+    · subst left
+      simp [RefinementWitness.bindConstructor, LocationMap.lookup?] at leftFound
+      have commonEq : common = address := leftFound.symm
+      subst common
+      by_cases rightNew : right = location
+      · exact rightNew.symm
+      · rw [witness.lookup_bindConstructor_location_other location right address info
+          fieldKinds rightNew] at rightFound
+        exact False.elim ((locationAddressFresh right address rightFound) rfl)
+    · rw [witness.lookup_bindConstructor_location_other location left address info
+        fieldKinds leftNew] at leftFound
+      by_cases rightNew : right = location
+      · subst right
+        simp [RefinementWitness.bindConstructor, LocationMap.lookup?] at rightFound
+        have commonEq : common = address := rightFound.symm
+        subst common
+        exact False.elim ((locationAddressFresh left address leftFound) rfl)
+      · rw [witness.lookup_bindConstructor_location_other location right address info
+          fieldKinds rightNew] at rightFound
+        exact valid.locationInjective left right common leftFound rightFound
+  · intro old payload left right locationFound promotedFound
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindConstructor, LocationMap.lookup?] at locationFound
+      have leftEq : left = address := locationFound.symm
+      subst left
+      exact promotedAddressFresh payload right promotedFound
+    · rw [witness.lookup_bindConstructor_location_other location old address info
+        fieldKinds isNew] at locationFound
+      exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
 
 inductive HeapReferenceRel (witness : RefinementWitness) :
     Word32 → Location → Prop where
@@ -193,6 +327,51 @@ inductive ValueRel (witness : RefinementWitness) :
       ValueRel witness .uint64 (.word64 value) (.scalar (.uint64 value))
   | usize :
       ValueRel witness .usize (.word64 value) (.usize value)
+
+theorem HeapReferenceRel.witnessExtension
+    {before after : RefinementWitness} (extension : before.Extends after)
+    {word : Word32} {location : Location}
+    (related : HeapReferenceRel before word location) :
+    HeapReferenceRel after word location := by
+  cases related with
+  | mapped found => exact .mapped (extension.locations _ _ found)
+
+theorem TaggedReferenceRel.witnessExtension
+    {before after : RefinementWitness} (extension : before.Extends after)
+    {word : Word32} {payload : UInt64}
+    (related : TaggedReferenceRel before word payload) :
+    TaggedReferenceRel after word payload := by
+  cases related with
+  | immediate payload fits => exact .immediate payload fits
+  | promoted found => exact .promoted (extension.promotedTags _ _ found)
+
+theorem ObjectReferenceRel.witnessExtension
+    {before after : RefinementWitness} (extension : before.Extends after)
+    {word : Word32} {reference : ObjectRef}
+    (related : ObjectReferenceRel before word reference) :
+    ObjectReferenceRel after word reference := by
+  cases related with
+  | heap heapRelated => exact .heap (heapRelated.witnessExtension extension)
+  | tagged taggedRelated => exact .tagged (taggedRelated.witnessExtension extension)
+
+/-- ABI-indexed value refinement is monotone in proof-only witness metadata. -/
+theorem ValueRel.witnessExtension
+    {before after : RefinementWitness} (extension : before.Extends after)
+    {kind : AbiKind} {concrete : LaneValue} {semantic : Value}
+    (related : ValueRel before kind concrete semantic) :
+    ValueRel after kind concrete semantic := by
+  cases related with
+  | object heapRelated => exact .object (heapRelated.witnessExtension extension)
+  | tagged taggedRelated => exact .tagged (taggedRelated.witnessExtension extension)
+  | tobject objectRelated => exact .tobject (objectRelated.witnessExtension extension)
+  | erased => exact .erased
+  | reuseNone => exact .reuseNone
+  | reuseSome heapRelated => exact .reuseSome (heapRelated.witnessExtension extension)
+  | uint8 encoded => exact .uint8 encoded
+  | uint16 encoded => exact .uint16 encoded
+  | uint32 encoded => exact .uint32 encoded
+  | uint64 => exact .uint64
+  | usize => exact .usize
 
 theorem ValueRel.physical_type {witness : RefinementWitness} {kind : AbiKind}
     {concrete : LaneValue} {semantic : Value}
