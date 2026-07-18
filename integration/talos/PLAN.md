@@ -862,9 +862,11 @@ is framed. Successful same-address reads and disjoint 32-bit reads follow from
 that postcondition. `UInt64` accesses are implemented and proved as two
 adjacent verified 32-bit lanes, including exact round trips and a disjoint
 32-bit frame rule; concrete `Word32` object lanes inherit the same round-trip
-guarantee. The next preservation step is to compose these word rules across a
-common-header write/read, then through object allocation and payload writes to
-establish `LiveHeapRel` extension.
+guarantee. Common headers are now structurally written as eight adjacent lanes;
+their generic sequence postcondition proves every indexed word, unchanged
+memory size, disjoint-read framing, and exact `Header.write`/`Header.read`
+round trips. The next preservation step composes this header result through
+object allocation and payload writes to establish `LiveHeapRel` extension.
 
 ## Parallel agent packages
 

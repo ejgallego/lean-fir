@@ -59,6 +59,16 @@ def writeUInt32 (memory : LinearMemory) (address : Nat) (value : UInt32) :
   let memory ← memory.writeByte (address + 2) (byte32 value 16)
   memory.writeByte (address + 3) (byte32 value 24)
 
+/-- Write adjacent 32-bit lanes. Common headers and later fixed-width metadata
+regions use this structural form so their runtime layout and proof composition
+share the same operation boundary. -/
+def writeUInt32s (memory : LinearMemory) (address : Nat) :
+    List UInt32 → Except MemoryError LinearMemory
+  | [] => .ok memory
+  | value :: rest => do
+      let memory ← memory.writeUInt32 address value
+      writeUInt32s memory (address + 4) rest
+
 def readUInt64 (memory : LinearMemory) (address : Nat) : Except MemoryError UInt64 := do
   let low ← memory.readUInt32 address
   let high ← memory.readUInt32 (address + 4)
@@ -342,17 +352,13 @@ def ObjectKind.ofCode? (code : UInt32) : Option ObjectKind :=
 def Header.flags (header : Header) : UInt32 :=
   UInt32.ofNat ((if header.persistent then 1 else 0) + (if header.live then 2 else 0))
 
+def Header.words (header : Header) : List UInt32 :=
+  [header.kind.code, header.flags, header.refCount, header.allocationBytes,
+    header.aux0, header.aux1, header.aux2, header.aux3]
+
 def Header.write (memory : LinearMemory) (address : Word32) (header : Header) :
-    Except MemoryError LinearMemory := do
-  let base := address.value
-  let memory ← memory.writeUInt32 (base + headerKindOffset) header.kind.code
-  let memory ← memory.writeUInt32 (base + headerFlagsOffset) header.flags
-  let memory ← memory.writeUInt32 (base + headerRefCountOffset) header.refCount
-  let memory ← memory.writeUInt32 (base + headerAllocationBytesOffset) header.allocationBytes
-  let memory ← memory.writeUInt32 (base + headerAux0Offset) header.aux0
-  let memory ← memory.writeUInt32 (base + headerAux1Offset) header.aux1
-  let memory ← memory.writeUInt32 (base + headerAux2Offset) header.aux2
-  memory.writeUInt32 (base + headerAux3Offset) header.aux3
+    Except MemoryError LinearMemory :=
+  memory.writeUInt32s address.value header.words
 
 def Header.read (memory : LinearMemory) (address : Word32) : Except MemoryError Header := do
   let base := address.value
