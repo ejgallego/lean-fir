@@ -288,6 +288,22 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
   allocateConstructor MemoryState.initial mixedConstructorInfo
     #[Word32.encodeImmediate 11 (by decide)]
 
+def incrementedMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← concreteMixedConstructor
+  let state ← incrementReference state object 2 true
+  return (state, object)
+
+#guard match incrementedMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readTag state object,
+          readObjectField state object 0, readUSizeField state object 0,
+          readScalarUInt64Field state object 2 0 with
+      | .ok header, .ok tag, .ok field, .ok usize, .ok scalar =>
+          header.refCount == 3 && tag == 3 && field.value == 23 &&
+            usize == 0 && scalar == 0
+      | _, _, _, _, _ => false
+
 #guard match concreteMixedConstructor with
   | .error _ => false
   | .ok (state, object) =>

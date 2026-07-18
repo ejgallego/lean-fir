@@ -4,6 +4,7 @@ import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
 
+open Lean.Compiler
 open Fir.LeanIR.Impure
 
 /-- Ownership checks see both physical encodings of a semantic tagged value
@@ -123,6 +124,313 @@ theorem Header.readNaturalLimbs_of_write_eq_ok
         (address.value + headerBytes + target.semanticSlotBytes * index + 4)
         headerInBounds written (.inr (by omega))]
       rw [ih (index + 1)]
+
+theorem Header.readUInt16_of_write_eq_ok_payload
+    (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
+    (other : Nat)
+    (headerInBounds : address.value + headerBytes ≤ before.size)
+    (written : updatedHeader.write before address = .ok after)
+    (payload : address.value + headerBytes ≤ other) :
+    after.readUInt16 other = before.readUInt16 other := by
+  unfold LinearMemory.readUInt16
+  rw [Header.readByte_of_write_eq_ok_other before after address updatedHeader other
+    headerInBounds written (.inr payload)]
+  rw [Header.readByte_of_write_eq_ok_other before after address updatedHeader (other + 1)
+    headerInBounds written (.inr (by omega))]
+
+theorem Header.readUInt64_of_write_eq_ok_payload
+    (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
+    (other : Nat)
+    (headerInBounds : address.value + headerBytes ≤ before.size)
+    (written : updatedHeader.write before address = .ok after)
+    (payload : address.value + headerBytes ≤ other) :
+    after.readUInt64 other = before.readUInt64 other := by
+  unfold LinearMemory.readUInt64
+  rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader other
+    headerInBounds written (.inr payload)]
+  rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader (other + 4)
+    headerInBounds written (.inr (by omega))]
+
+theorem Header.readWord32_of_write_eq_ok_payload
+    (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
+    (other : Nat)
+    (headerInBounds : address.value + headerBytes ≤ before.size)
+    (written : updatedHeader.write before address = .ok after)
+    (payload : address.value + headerBytes ≤ other) :
+    after.readWord32 other = before.readWord32 other := by
+  unfold LinearMemory.readWord32
+  rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader other
+    headerInBounds written (.inr payload)]
+
+/-- Rewriting only a constructor's reference count frames every representation
+region described by its immutable allocation metadata. -/
+theorem ConstructorObjectRel.incrementReference
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject} {header : Header}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (valid : state.FrontierInvariant)
+    (oldCount amount : Nat)
+    (refCount : header.refCount.toNat = oldCount)
+    (fits : oldCount + amount < UInt32.size)
+    (check : Bool) :
+    ∃ result updatedHeader,
+      incrementReference state address amount check = .ok result ∧
+      updatedHeader = { header with refCount := UInt32.ofNat (oldCount + amount) } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      ConstructorObjectRel result witness address info fieldKinds semantic := by
+  obtain ⟨objectHeader, objectHeaderRead, headerKind, allocationBytes, ordinary,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  rw [headerRead] at objectHeaderRead
+  cases objectHeaderRead
+  have notPromoted : header.isPromotedTag = false := by
+    have different : (ObjectKind.constructor == ObjectKind.natural) = false := by decide
+    simp [Header.isPromotedTag, headerKind, different]
+  obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+      headerWrite, finalValid, headerReadAfter⟩ :=
+    incrementReference_header valid headerRead related.headerOwned notPromoted ordinary
+      oldCount amount refCount fits check
+  subst updatedHeader
+  subst result
+  let updatedHeader : Header :=
+    { header with refCount := UInt32.ofNat (oldCount + amount) }
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans related.headerOwned valid.cursorInBounds
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
+  have constructorHeaderBefore : readConstructorHeader state address = .ok header := by
+    unfold readConstructorHeader
+    simp [heap]
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, headerKind]
+    rfl
+  have constructorHeaderAfter :
+      readConstructorHeader ({ state with memory } : MemoryState) address =
+        .ok updatedHeader := by
+    unfold readConstructorHeader
+    simp [heap]
+    rw [headerReadAfter]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, updatedHeader, headerKind]
+    rfl
+  have scalarFieldsAfter : ∀ field, field ∈ semantic.scalarFields →
+      match field.value with
+      | .uint8 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 1 ≤ info.ssize ∧
+          readScalarUInt8Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok value
+      | .uint16 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 2 ≤ info.ssize ∧
+          readScalarUInt16Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok value
+      | .uint32 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 4 ≤ info.ssize ∧
+          readScalarUInt32Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok value
+      | .uint64 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok value := by
+    intro field member
+    have beforeField := related.semanticScalarFields field member
+    cases valueEq : field.value with
+    | uint8 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt8Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt8Field state address field.width field.offset := by
+          unfold readScalarUInt8Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 1 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 1 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readByte (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readByte (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readByte_of_write_eq_ok_other state.memory memory address
+            { header with refCount := UInt32.ofNat (oldCount + amount) }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (.inr (by omega))]
+        rw [operationEq]
+        exact readBefore
+    | uint16 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt16Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt16Field state address field.width field.offset := by
+          unfold readScalarUInt16Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 2 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 2 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readUInt16 (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readUInt16 (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readUInt16_of_write_eq_ok_payload state.memory memory address
+            { header with refCount := UInt32.ofNat (oldCount + amount) }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (by omega)]
+        rw [operationEq]
+        exact readBefore
+    | uint32 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt32Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt32Field state address field.width field.offset := by
+          unfold readScalarUInt32Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readUInt32 (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readUInt32 (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readUInt32_of_write_eq_ok_other state.memory memory address
+            { header with refCount := UInt32.ofNat (oldCount + amount) }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (.inr (by omega))]
+        rw [operationEq]
+        exact readBefore
+    | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt64Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt64Field state address field.width field.offset := by
+          unfold readScalarUInt64Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readUInt64 (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readUInt64 (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readUInt64_of_write_eq_ok_payload state.memory memory address
+            { header with refCount := UInt32.ofNat (oldCount + amount) }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (by omega)]
+        rw [operationEq]
+        exact readBefore
+  refine ⟨{ state with memory }, updatedHeader, operation, rfl, finalValid,
+    headerReadAfter, ?_⟩
+  refine {
+    header := ⟨updatedHeader, headerReadAfter,
+      by simpa [updatedHeader] using headerKind,
+      by simpa [updatedHeader] using allocationBytes,
+      by simpa [updatedHeader] using ordinary,
+      by simpa [updatedHeader] using tag,
+      by simpa [updatedHeader] using objectCount,
+      by simpa [updatedHeader] using usizeCount,
+      by simpa [updatedHeader] using scalarCount⟩
+    headerOwned := related.headerOwned
+    extent := by simpa [updatedHeader] using related.extent
+    semanticObjectFields := related.semanticObjectFields
+    semanticUSizeFields := related.semanticUSizeFields
+    semanticScalarFields := scalarFieldsAfter
+    fieldKindsSize := related.fieldKindsSize
+    objectFields := ?_
+    usizeFields := ?_ }
+  · intro index kind value kindAt valueAt
+    obtain ⟨word, readBefore, valueRelated⟩ :=
+      related.objectFields index kind value kindAt valueAt
+    have operationEq :
+        readObjectField ({ state with memory } : MemoryState) address index =
+          readObjectField state address index := by
+      unfold readObjectField
+      rw [constructorHeaderAfter, constructorHeaderBefore]
+      simp only [Bind.bind, Except.bind, updatedHeader]
+      rw [Header.readWord32_of_write_eq_ok_payload state.memory memory address
+        { header with refCount := UInt32.ofNat (oldCount + amount) }
+        (address.value + headerBytes + target.semanticSlotBytes * index)
+        headerInBounds headerWrite (by omega)]
+      rw [Header.readUInt32_of_write_eq_ok_other state.memory memory address
+        { header with refCount := UInt32.ofNat (oldCount + amount) }
+        (address.value + headerBytes + target.semanticSlotBytes * index + 4)
+        headerInBounds headerWrite (.inr (by omega))]
+    exact ⟨word, by rw [operationEq]; exact readBefore, valueRelated⟩
+  · intro index value valueAt
+    have operationEq :
+        readUSizeField ({ state with memory } : MemoryState) address index =
+          readUSizeField state address index := by
+      unfold readUSizeField
+      rw [constructorHeaderAfter, constructorHeaderBefore]
+      simp only [Bind.bind, Except.bind, updatedHeader]
+      rw [Header.readUInt64_of_write_eq_ok_payload state.memory memory address
+        { header with refCount := UInt32.ofNat (oldCount + amount) }
+        (address.value + headerBytes + target.semanticSlotBytes *
+          (header.aux1.toNat + index)) headerInBounds headerWrite (by omega)]
+    rw [operationEq]
+    exact related.usizeFields index value valueAt
 
 /-- Incrementing one ordinary boxed object's header preserves its canonical
 payload decoder while changing exactly the mutable reference count. -/
@@ -258,6 +566,43 @@ theorem LiveCellRel.incrementReference_boxed
       rw [objectEq] at boxedEq
       contradiction
 
+/-- Constructor increments preserve every decoded payload region and update
+the enclosing live-cell ownership equality. -/
+theorem LiveCellRel.incrementReference_constructor
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (constructorCell : ∃ semantic : ConstructorObject, cell.object = .ctor semantic)
+    (valid : state.FrontierInvariant)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result,
+      incrementReference state address amount check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc + amount } := by
+  cases related with
+  | constructor descriptor objectEq objectRelated headerRead headerKind refCount
+        persistent live =>
+      obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
+          headerReadAfter, objectAfter⟩ :=
+        objectRelated.incrementReference headerRead valid cell.rc amount refCount fits check
+      subst updatedHeader
+      refine ⟨result, operation, finalValid, ?_⟩
+      apply LiveCellRel.constructor descriptor (by simpa using objectEq) objectAfter
+        headerReadAfter
+      · simpa using headerKind
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' fits
+      · simpa using persistent
+      · simpa using live
+  | boxed _ objectEq _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+
 /-- Natural limbs frame across a common-header increment, yielding the same
 decoded semantic natural at the incremented live-cell count. -/
 theorem LiveCellRel.incrementReference_natural
@@ -320,6 +665,39 @@ theorem LiveCellRel.incrementReference_natural
         exact UInt32.toNat_ofNat_of_lt' fits
       · simpa using persistent
       · simpa using live
+
+/-- Complete local increment theorem for every live-cell representation in
+the current W6 heap relation. -/
+theorem LiveCellRel.incrementReference
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (valid : state.FrontierInvariant)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result,
+      Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc + amount } := by
+  cases related with
+  | @constructor info fieldKinds semantic header _ descriptor objectEq objectRelated
+        headerRead headerKind refCount persistent live =>
+      let localRelated : LiveCellRel state witness address cell :=
+        .constructor descriptor objectEq objectRelated headerRead headerKind refCount
+          persistent live
+      exact localRelated.incrementReference_constructor ⟨semantic, objectEq⟩ valid
+        amount fits check
+  | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      let localRelated : LiveCellRel state witness address cell :=
+        .boxed descriptor objectEq objectRelated refCount persistent live
+      exact localRelated.incrementReference_boxed ⟨kind, scalar, objectEq⟩ valid
+        amount fits check
+  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        extent limbsFit decoded refCount persistent live =>
+      let localRelated : LiveCellRel state witness address cell :=
+        .natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+          decoded refCount persistent live
+      exact localRelated.incrementReference_natural ⟨value, objectEq⟩ valid
+        amount fits check
 
 theorem LiveCellRel.live_eq_true
     {state : MemoryState} {witness : RefinementWitness}

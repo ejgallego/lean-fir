@@ -1086,6 +1086,16 @@ increments the first heap natural from one to five, retains its exact decoded
 value, and observes the expected unique-to-shared transition. Constructor
 payload framing is the remaining increment case before decrement begins.
 
+W6.3c completes that local increment matrix. A constructor header rewrite now
+frames object words and their padding, `USize` slots, and packed `UInt8`,
+`UInt16`, `UInt32`, and `UInt64` reads while retaining the exact constructor
+descriptor and semantic fields. `LiveCellRel.incrementReference` packages the
+constructor, boxed, and natural cases behind one theorem. The mixed-layout
+executable guard increments from one to three and then rechecks its tag,
+object field, `USize` field, and scalar field. With all current payload kinds
+covered, W6.3 proceeds to decrement-above-one and then dead-cell/recursive
+release semantics.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
