@@ -61,7 +61,15 @@ structure RefinementWitness where
   locations : LocationMap := []
   promotedTags : PromotedTags := []
   descriptors : DescriptorMap := []
+  /-- The deterministic generated-function table for this module. Heap
+  closure proofs consult this proof-only copy, which allocation extensions
+  preserve rather than replacing per object. -/
+  closureDispatch : Array Lean.Name := #[]
   deriving Inhabited, Repr
+
+def RefinementWitness.withClosureDispatch (witness : RefinementWitness)
+    (dispatch : Array Lean.Name) : RefinementWitness :=
+  { witness with closureDispatch := dispatch }
 
 def RefinementWitness.bindLocation (witness : RefinementWitness)
     (location : Location) (address : Word32) : RefinementWitness :=
@@ -274,11 +282,13 @@ structure RefinementWitness.Extends (before after : RefinementWitness) : Prop wh
   descriptors : ∀ address descriptor,
     before.descriptors.lookup? address = some descriptor →
     after.descriptors.lookup? address = some descriptor
+  closureDispatch : after.closureDispatch = before.closureDispatch
 
 namespace RefinementWitness.Extends
 
 theorem refl (witness : RefinementWitness) : witness.Extends witness := by
-  exact ⟨fun _ _ found => found, fun _ _ found => found, fun _ _ found => found⟩
+  exact ⟨fun _ _ found => found, fun _ _ found => found,
+    fun _ _ found => found, rfl⟩
 
 theorem trans {first second third : RefinementWitness}
     (left : first.Extends second) (right : second.Extends third) :
@@ -286,7 +296,8 @@ theorem trans {first second third : RefinementWitness}
   exact ⟨
     fun _ _ found => right.locations _ _ (left.locations _ _ found),
     fun _ _ found => right.promotedTags _ _ (left.promotedTags _ _ found),
-    fun _ _ found => right.descriptors _ _ (left.descriptors _ _ found)⟩
+    fun _ _ found => right.descriptors _ _ (left.descriptors _ _ found),
+    right.closureDispatch.trans left.closureDispatch⟩
 
 end RefinementWitness.Extends
 
@@ -303,7 +314,8 @@ theorem RefinementWitness.bindConstructor_extends
   refine {
     locations := ?_
     promotedTags := ?_
-    descriptors := ?_ }
+    descriptors := ?_
+    closureDispatch := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -333,7 +345,8 @@ theorem RefinementWitness.bindClosure_extends
   refine {
     locations := ?_
     promotedTags := ?_
-    descriptors := ?_ }
+    descriptors := ?_
+    closureDispatch := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -361,7 +374,8 @@ theorem RefinementWitness.bindBoxed_extends
   refine {
     locations := ?_
     promotedTags := ?_
-    descriptors := ?_ }
+    descriptors := ?_
+    closureDispatch := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -388,7 +402,8 @@ theorem RefinementWitness.promoteTag_extends
   refine {
     locations := fun _ _ found => found
     promotedTags := ?_
-    descriptors := ?_ }
+    descriptors := ?_
+    closureDispatch := rfl }
   · intro oldPayload oldAddress found
     change (oldPayload, oldAddress) ∈
       (payload, address) :: witness.promotedTags

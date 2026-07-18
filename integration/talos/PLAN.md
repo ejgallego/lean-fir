@@ -1596,6 +1596,13 @@ typed capture reads transport through any such extension, and
 growth. This isolates the byte-level framing from the next slice's structural
 addition of closures to `LiveCellRel` and its ownership/refcount cases.
 
+W6.4e freezes dispatch identity at the whole-heap proof boundary. The
+refinement witness now carries the module's deterministic generated-function
+table, and every allocation-style witness extension must preserve it exactly.
+This prevents a future closure-cell proof from choosing a convenient decoder
+per object; the pending `LiveCellRel` case will use the one table installed for
+the module.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
