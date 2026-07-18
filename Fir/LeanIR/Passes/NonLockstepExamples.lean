@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.Structural
+import Fir.LeanIR.Passes.SimpCaseRelation
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
 
@@ -13,6 +13,7 @@ open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Passes.NonLockstep
 open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseRelation
 
 /-!
 This fixture is deliberately closed over its case discriminant. Consequently
@@ -40,6 +41,44 @@ def sourceProgram : ImpureProgram :=
 
 def targetProgram : ImpureProgram :=
   { decls := #[decl `main #[] objType (.code targetBody)] }
+
+/-- Every natural tag is admissible for the closed singleton-default fixture.
+The runtime-readiness component below separately proves that the discriminant
+is a valid tagged object when the eliminated case becomes active. -/
+def closedValidCase (_ : LCNF.Cases .impure) (_ : Nat) : Prop := True
+
+abbrev ClosedCodeRel := CodeRel closedValidCase
+
+theorem closedReturnRelated :
+    ClosedCodeRel (.return x) (.return x) :=
+  .aligned (.return x)
+
+theorem closedCaseEliminated :
+    ClosedCodeRel (.cases closedCases) (.return x) := by
+  apply CodeRel.eliminate closedCases (.return x)
+  intro tag valid
+  change ElimSelectionRel closedValidCase (.return x) (some (.return x))
+  exact .some closedReturnRelated
+
+theorem closedTailRelated : ClosedCodeRel sourceTail targetTail := by
+  exact .aligned (.let (letDecl x objType .erased) closedCaseEliminated)
+
+theorem closedBodyRelated : ClosedCodeRel sourceBody targetBody := by
+  exact .aligned
+    (.let (letDecl c objType (.lit (.nat 0))) closedTailRelated)
+
+theorem closedProgramsRelated :
+    ProgramRelated ClosedCodeRel sourceProgram targetProgram := by
+  exact .cons {
+    name_eq := rfl
+    levelParams_eq := rfl
+    type_eq := rfl
+    params_eq := rfl
+    safe_eq := rfl
+    value := .code closedBodyRelated
+    recursive_eq := rfl
+    inlineAttr_eq := rfl
+  } .nil
 
 def structuralMainDeclaration : LCNF.Decl .impure :=
   decl `main #[] objType (.code sourceBody)
@@ -87,6 +126,13 @@ theorem multiInitialStateRelated (entry : Name) (args : Array Value) :
 
 def entryFrames (args : Array Value) : List Frame :=
   if args.isEmpty then [.cache `main] else [.apply args]
+
+theorem entryFramesClosedRelated (args : Array Value) :
+    FramesRelated ClosedCodeRel (entryFrames args) (entryFrames args) := by
+  simp only [entryFrames]
+  split
+  · exact .cons (.cache `main) .nil
+  · exact .cons (.apply args) .nil
 
 def afterDiscrEnv : Env :=
   bind [] c (.object (.tagged 0))
@@ -286,6 +332,107 @@ inductive ProgramStateRel : MachineState → MachineState → Prop where
         (invokingState sourceProgram args)
         (invokingState targetProgram args)
 
+/-- Every state in the concrete bisimulation is an instance of the recursive
+code graph lifted through programs, frames, joins, and controls. -/
+theorem programStateStructural
+    (related : ProgramStateRel left right) :
+    MachineRelated ClosedCodeRel left right := by
+  cases related with
+  | entry args => exact initialState_related closedProgramsRelated
+  | body args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := entryFramesClosedRelated args
+        control := .code closedBodyRelated
+      }
+  | afterDiscr args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := entryFramesClosedRelated args
+        control := .code closedTailRelated
+      }
+  | caseBranch args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := entryFramesClosedRelated args
+        control := .code closedCaseEliminated
+      }
+  | branch args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := entryFramesClosedRelated args
+        control := .code closedReturnRelated
+      }
+  | yielded args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := entryFramesClosedRelated args
+        control := .yielded .erased
+      }
+  | cached =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := .nil
+        control := .yielded .erased
+      }
+  | invoking args =>
+      exact {
+        programs := closedProgramsRelated
+        runtime_eq := rfl
+        env_eq := rfl
+        joins := .nil
+        frames := .nil
+        control := .invokeValue .erased args
+      }
+
+theorem programStateReady
+    (related : ProgramStateRel left right) :
+    ControlReadyAt closedValidCase left left.control right.control := by
+  cases related with
+  | entry args => simp [ControlReadyAt, initialState]
+  | body args =>
+      simp [ControlReadyAt, CodeReadyAt, bodyState, sourceBody, targetBody]
+  | afterDiscr args =>
+      simp [ControlReadyAt, CodeReadyAt, afterDiscrState, sourceTail, targetTail]
+  | caseBranch args =>
+      change ∃ value tag,
+        lookupValue branchEnv c = .ok value ∧
+        getTag ({} : RuntimeState) value = .ok tag ∧ True
+      refine ⟨.object (.tagged 0), 0, ?_, rfl, trivial⟩
+      have xNotC : (`x == `c) = false := by decide
+      simp [branchEnv, afterDiscrEnv, lookupValue, Impure.bind, Impure.lookup,
+        x, c, xNotC]
+  | branch args => simp [ControlReadyAt, CodeReadyAt, branchState]
+  | yielded args => simp [ControlReadyAt, yieldedState]
+  | cached => simp [ControlReadyAt, cachedState]
+  | invoking args => simp [ControlReadyAt, invokingState]
+
+theorem refinedProgramState_iff (left right : MachineState) :
+    MachineRelatedWith ClosedCodeRel ProgramStateRel left right ↔
+      ProgramStateRel left right := by
+  constructor
+  · exact fun related => related.invariant
+  · intro related
+    exact { structural := programStateStructural related, invariant := related }
+
 theorem programForward (externals : ExternalSpec) :
     StutteringSimulation externals ProgramStateRel where
   terminal := by
@@ -402,6 +549,26 @@ theorem programBisimulation (externals : ExternalSpec) :
   forward := programForward externals
   backward := programBackward externals
 
+/-- The existing execution proof reindexed through the recursive code graph
+and the generic `MachineRelatedWith` structural lifting. -/
+theorem recursiveProgramBisimulation (externals : ExternalSpec) :
+    StutteringBisimulation externals
+      (MachineRelatedWith ClosedCodeRel ProgramStateRel) where
+  forward := (programForward externals).reindex (by
+    intro left right
+    exact refinedProgramState_iff left right)
+  backward := (programBackward externals).reindex (by
+    intro right left
+    exact refinedProgramState_iff left right)
+
+theorem recursiveInitialInvariant :
+    InitialInvariantOn (fun _ _ => True) ProgramStateRel
+      sourceProgram targetProgram #[`main] := by
+  intro entry member args accepted
+  have entryEq : entry = `main := by simpa using member
+  subst entry
+  exact .entry args
+
 theorem initialStatesRelated :
     InitialStatesRelated ProgramStateRel sourceProgram targetProgram #[`main] := by
   intro entry member args
@@ -417,6 +584,17 @@ theorem closed_singleton_default_program_correct (externals : ExternalSpec) :
       sourceProgram targetProgram #[`main] :=
   samePhaseCorrect_of_stuttering
     (programBisimulation externals) initialStatesRelated
+
+/-- The same whole-program result through the new recursive relation and the
+typed-entry lifting interface.  This is the first end-to-end instantiation of
+the graph that future generic core-step closure will consume. -/
+theorem closed_singleton_default_recursive_relation_correct
+    (externals : ExternalSpec) :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      sourceProgram targetProgram #[`main] (fun _ _ => True) :=
+  samePhaseCorrectOn_of_refined_machine_bisimulation
+    closedProgramsRelated recursiveInitialInvariant
+    (recursiveProgramBisimulation externals)
 
 /-- Execute Lean's actual recursive pass over the declaration fixture. This
 keeps the compiler/specification bridge executable while the upstream pass
