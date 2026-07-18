@@ -1159,6 +1159,17 @@ The next slice proves whole-heap preservation for the above-one and leaf-one
 transitions before recursive constructor release folds those steps over owned
 children.
 
+W6.3j establishes the spatial frame invariant required by those whole-heap
+transitions. Proof work recorded and resolved
+`FIR-BUG-wasm-none-heap-refinement-allocation-aliasing`: address injectivity
+alone did not show that a 32-byte header rewrite was disjoint from every other
+decoded allocation. `LiveHeapRel` now records a readable complete region for
+each descriptor and pairwise disjoint descriptor intervals. A shared fresh-
+descriptor theorem preserves both facts when allocation starts at the exact
+old frontier, and constructor, boxed-scalar, and promoted-tag allocation all
+instantiate it. Ownership framing can now derive non-aliasing from the global
+relation rather than accepting it as a theorem premise.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

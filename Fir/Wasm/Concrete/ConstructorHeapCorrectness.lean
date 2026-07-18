@@ -128,6 +128,29 @@ theorem allocateConstructor_nonempty_liveHeapRel
     runtime.nextLocation address info fieldKinds addressHeap locationAddressFresh
       promotedAddressFresh
   have objectRelatedNext := objectRelated.witnessExtension witnessExtension
+  obtain ⟨_, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address header headerRead
+  have newExtent :
+      address.value + header.allocationBytes.toNat ≤ result.heapCursor := by
+    obtain ⟨objectHeader, objectHeaderRead, _, allocationBytes, _, _, _, _, _⟩ :=
+      objectRelatedNext.header
+    rw [headerRead] at objectHeaderRead
+    have headerEq := Except.ok.inj objectHeaderRead
+    subst objectHeader
+    rw [allocationBytes]
+    exact objectRelatedNext.extent
+  have newRegion : ∃ newHeader,
+      Header.read result.memory address = .ok newHeader ∧
+      headerBytes ≤ newHeader.allocationBytes.toNat ∧
+      newHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + newHeader.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨header, rawHeaderRead, headerMinimum, headerAligned, newExtent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial extension address freshAddress
+      (fun other different =>
+        witness.lookup_bindConstructor_descriptor_other runtime.nextLocation address
+          other info fieldKinds different)
+      newRegion
   have newCellRelated : LiveCellRel result
       (witness.bindConstructor runtime.nextLocation address info fieldKinds) address
       (semanticConstructorCell info semanticFields) := by
@@ -145,6 +168,8 @@ theorem allocateConstructor_nonempty_liveHeapRel
     witnessWellFormed
     locationsBeforeNext := ?_
     descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
     semanticToConcrete := ?_
     concreteToSemantic := ?_
     promoted := ?_ }

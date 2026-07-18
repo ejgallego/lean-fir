@@ -696,6 +696,26 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
   descriptorsOwned : ∀ address descriptor,
     witness.descriptors.lookup? address = some descriptor →
     address.value + headerBytes ≤ state.heapCursor
+  /-- Every proof descriptor names a readable, complete allocation below the
+  current cursor. Keeping the full retained extent here is what lets ownership
+  writes frame all other decoded cells. -/
+  descriptorRegion : ∀ address descriptor,
+    witness.descriptors.lookup? address = some descriptor →
+    ∃ header,
+      Header.read state.memory address = .ok header ∧
+      headerBytes ≤ header.allocationBytes.toNat ∧
+      header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + header.allocationBytes.toNat ≤ state.heapCursor
+  /-- Descriptor allocations occupy pairwise disjoint intervals. -/
+  descriptorDisjoint : ∀ left right leftDescriptor rightDescriptor,
+    witness.descriptors.lookup? left = some leftDescriptor →
+    witness.descriptors.lookup? right = some rightDescriptor →
+    left.value ≠ right.value →
+    ∀ leftHeader rightHeader,
+      Header.read state.memory left = .ok leftHeader →
+      Header.read state.memory right = .ok rightHeader →
+      left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+        right.value + rightHeader.allocationBytes.toNat ≤ left.value
   semanticToConcrete : ∀ location cell,
     findCell? semantic.heap location = some cell →
     ∃ address, witness.locations.lookup? location = some address ∧
@@ -722,12 +742,35 @@ theorem LiveHeapRel.prefixExtension
     witnessWellFormed := related.witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
     descriptorsOwned := ?_
+    descriptorRegion := ?_
+    descriptorDisjoint := ?_
     semanticToConcrete := ?_
     concreteToSemantic := ?_
     promoted := ?_ }
   · intro address descriptor found
     exact Nat.le_trans (related.descriptorsOwned address descriptor found)
       extension.cursor
+  · intro address descriptor found
+    obtain ⟨header, headerRead, minimum, aligned, extent⟩ :=
+      related.descriptorRegion address descriptor found
+    have headerOwned : address.value + headerBytes ≤ before.heapCursor := by
+      omega
+    exact ⟨header, by
+        rw [extension.readHeader address headerOwned]
+        exact headerRead,
+      minimum, aligned, Nat.le_trans extent extension.cursor⟩
+  · intro left right leftDescriptor rightDescriptor leftFound rightFound
+      different leftHeader rightHeader leftRead rightRead
+    obtain ⟨oldLeftHeader, _, leftMinimum, _, leftExtent⟩ :=
+      related.descriptorRegion left leftDescriptor leftFound
+    obtain ⟨oldRightHeader, _, rightMinimum, _, rightExtent⟩ :=
+      related.descriptorRegion right rightDescriptor rightFound
+    have leftOwned : left.value + headerBytes ≤ before.heapCursor := by omega
+    have rightOwned : right.value + headerBytes ≤ before.heapCursor := by omega
+    rw [extension.readHeader left leftOwned] at leftRead
+    rw [extension.readHeader right rightOwned] at rightRead
+    exact related.descriptorDisjoint left right leftDescriptor rightDescriptor
+      leftFound rightFound different leftHeader rightHeader leftRead rightRead
   · intro location cell found
     obtain ⟨address, mapped, cellRelated⟩ :=
       related.semanticToConcrete location cell found
@@ -738,6 +781,108 @@ theorem LiveHeapRel.prefixExtension
     exact ⟨cell, found, cellRelated.prefixExtension extension⟩
   · intro payload address mapped
     exact (related.promoted payload address mapped).prefixExtension extension
+
+/-- Adding one descriptor at the old frontier preserves complete descriptor
+regions and pairwise disjointness. Allocation-specific proofs provide only
+the new region and the lookup equation away from its fresh address. -/
+theorem LiveHeapRel.extendDescriptorSpatial
+    {before after : MemoryState} {witness nextWitness : RefinementWitness}
+    {semantic : RuntimeState} (related : LiveHeapRel before witness semantic)
+    (extension : before.PrefixExtension after)
+    (newAddress : Word32)
+    (freshAddress : newAddress.value = before.heapCursor)
+    (lookupOther : ∀ other,
+      newAddress.value ≠ other.value →
+      nextWitness.descriptors.lookup? other = witness.descriptors.lookup? other)
+    (newRegion : ∃ header,
+      Header.read after.memory newAddress = .ok header ∧
+      headerBytes ≤ header.allocationBytes.toNat ∧
+      header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      newAddress.value + header.allocationBytes.toNat ≤ after.heapCursor) :
+    (∀ address descriptor,
+      nextWitness.descriptors.lookup? address = some descriptor →
+      ∃ header,
+        Header.read after.memory address = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        address.value + header.allocationBytes.toNat ≤ after.heapCursor) ∧
+    (∀ left right leftDescriptor rightDescriptor,
+      nextWitness.descriptors.lookup? left = some leftDescriptor →
+      nextWitness.descriptors.lookup? right = some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read after.memory left = .ok leftHeader →
+      Header.read after.memory right = .ok rightHeader →
+      left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value) := by
+  have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
+    intro left right equal
+    cases left
+    cases right
+    simp_all
+  have oldRegion : ∀ address descriptor,
+      witness.descriptors.lookup? address = some descriptor →
+      ∃ header,
+        Header.read after.memory address = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        address.value + header.allocationBytes.toNat ≤ after.heapCursor := by
+    intro address descriptor found
+    obtain ⟨header, headerRead, minimum, aligned, extent⟩ :=
+      related.descriptorRegion address descriptor found
+    have headerOwned : address.value + headerBytes ≤ before.heapCursor := by omega
+    exact ⟨header, by
+        rw [extension.readHeader address headerOwned]
+        exact headerRead,
+      minimum, aligned, Nat.le_trans extent extension.cursor⟩
+  refine ⟨?_, ?_⟩
+  · intro address descriptor found
+    by_cases isNew : newAddress.value = address.value
+    · have addressEq : address = newAddress := wordEq address newAddress isNew.symm
+      subst address
+      exact newRegion
+    · rw [lookupOther address isNew] at found
+      exact oldRegion address descriptor found
+  · intro left right leftDescriptor rightDescriptor leftFound rightFound different
+      leftHeader rightHeader leftRead rightRead
+    by_cases leftNew : newAddress.value = left.value
+    · by_cases rightNew : newAddress.value = right.value
+      · exact False.elim (different (leftNew.symm.trans rightNew))
+      · rw [lookupOther right rightNew] at rightFound
+        obtain ⟨oldHeader, oldRead, minimum, _, extent⟩ :=
+          related.descriptorRegion right rightDescriptor rightFound
+        have headerOwned : right.value + headerBytes ≤ before.heapCursor := by omega
+        rw [extension.readHeader right headerOwned] at rightRead
+        rw [oldRead] at rightRead
+        have headerEq := Except.ok.inj rightRead
+        subst rightHeader
+        right
+        rw [← leftNew, freshAddress]
+        exact extent
+    · by_cases rightNew : newAddress.value = right.value
+      · rw [lookupOther left leftNew] at leftFound
+        obtain ⟨oldHeader, oldRead, minimum, _, extent⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        have headerOwned : left.value + headerBytes ≤ before.heapCursor := by omega
+        rw [extension.readHeader left headerOwned] at leftRead
+        rw [oldRead] at leftRead
+        have headerEq := Except.ok.inj leftRead
+        subst leftHeader
+        left
+        rw [← rightNew, freshAddress]
+        exact extent
+      · rw [lookupOther left leftNew] at leftFound
+        rw [lookupOther right rightNew] at rightFound
+        obtain ⟨oldLeftHeader, _, leftMinimum, _, leftExtent⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        obtain ⟨oldRightHeader, _, rightMinimum, _, rightExtent⟩ :=
+          related.descriptorRegion right rightDescriptor rightFound
+        have leftOwned : left.value + headerBytes ≤ before.heapCursor := by omega
+        have rightOwned : right.value + headerBytes ≤ before.heapCursor := by omega
+        rw [extension.readHeader left leftOwned] at leftRead
+        rw [extension.readHeader right rightOwned] at rightRead
+        exact related.descriptorDisjoint left right leftDescriptor rightDescriptor
+          leftFound rightFound different leftHeader rightHeader leftRead rightRead
 
 theorem ConstructorObjectRel.readObjectField_refines
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}

@@ -246,18 +246,35 @@ theorem allocatePromotedTag_liveHeapRel
     subst oldAddress
     simp [headerBytes] at payloadFits extent
     omega
-  obtain ⟨newHeader, newHeaderRead, _, _, _, _, _, _⟩ := newPromoted.header
+  obtain ⟨newHeader, newHeaderRead, _, _, _, _, newExtent, _⟩ :=
+    newPromoted.header
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts result address newHeader
       newHeaderRead).1
   have witnessWellFormed := related.witnessWellFormed.promoteTag payload address
     addressHeap locationAddressFresh promotedAddressFresh
+  obtain ⟨_, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address newHeader
+      newHeaderRead
+  have newRegion : ∃ header,
+      Header.read result.memory address = .ok header ∧
+      headerBytes ≤ header.allocationBytes.toNat ∧
+      header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + header.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨newHeader, rawHeaderRead, headerMinimum, headerAligned, newExtent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial extension address freshAddress
+      (fun other different =>
+        witness.lookup_promoteTag_descriptor_other payload address other different)
+      newRegion
   refine ⟨?_, ValueRel.new_promoted_tobject witness payload address⟩
   refine {
     frontier := finalFrontier
     witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
     descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
     semanticToConcrete := ?_
     concreteToSemantic := ?_
     promoted := ?_ }

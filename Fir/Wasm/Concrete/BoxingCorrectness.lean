@@ -326,6 +326,21 @@ theorem allocateBoxedScalar_liveHeapRel
   have witnessWellFormed := related.witnessWellFormed.bindBoxed
     runtime.nextLocation address scalar.kind addressHeap locationAddressFresh
       promotedAddressFresh
+  obtain ⟨_, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address header
+      objectRelated.headerRead
+  have newRegion : ∃ newHeader,
+      Header.read result.memory address = .ok newHeader ∧
+      headerBytes ≤ newHeader.allocationBytes.toNat ∧
+      newHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + newHeader.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨header, rawHeaderRead, headerMinimum, headerAligned, objectRelated.extent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial extension address freshAddress
+      (fun other different =>
+        witness.lookup_bindBoxed_descriptor_other runtime.nextLocation address other
+          scalar.kind different)
+      newRegion
   have newCellRelated : LiveCellRel result
       (witness.bindBoxed runtime.nextLocation address scalar.kind) address
       (semanticBoxCell scalar) := by
@@ -342,6 +357,8 @@ theorem allocateBoxedScalar_liveHeapRel
     witnessWellFormed
     locationsBeforeNext := ?_
     descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
     semanticToConcrete := ?_
     concreteToSemantic := ?_
     promoted := ?_ }
