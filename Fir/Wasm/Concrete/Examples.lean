@@ -400,6 +400,22 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
             header.aux1 == 1 &&
             value == Fir.LeanIR.Impure.maxTaggedPayload + 1
 
+def incrementedLargeNatural : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← allocateNatural MemoryState.initial
+    (Fir.LeanIR.Impure.maxTaggedPayload + 1)
+  let state ← incrementReference state object 4 true
+  return (state, object)
+
+#guard match incrementedLargeNatural with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readNatural state object,
+          readIsShared state object with
+      | .ok header, .ok value, .ok shared =>
+          header.kind == .natural && header.refCount == 5 &&
+            value == Fir.LeanIR.Impure.maxTaggedPayload + 1 && shared == 1
+      | _, _, _ => false
+
 #guard naturalLimbs (UInt64.size + 5) == [5, 1]
 
 def semanticMixedConstructor :=

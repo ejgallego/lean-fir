@@ -41,6 +41,89 @@ theorem LiveHeapRel.incrementReference_tagged
       rw [if_pos isPromoted]
       cases check <;> rfl
 
+/-- Shared header-level postcondition for ordinary successful increments. It
+separates the common-header write from object-kind-specific payload framing. -/
+theorem incrementReference_header
+    {state : MemoryState} {address : Word32} {header : Header}
+    (valid : state.FrontierInvariant)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor)
+    (notPromoted : header.isPromotedTag = false)
+    (ordinary : header.persistent = false)
+    (oldCount amount : Nat)
+    (refCount : header.refCount.toNat = oldCount)
+    (fits : oldCount + amount < UInt32.size)
+    (check : Bool) :
+    ∃ result updatedHeader memory,
+      incrementReference state address amount check = .ok result ∧
+      updatedHeader = { header with refCount := UInt32.ofNat (oldCount + amount) } ∧
+      result = { state with memory } ∧
+      updatedHeader.write state.memory address = .ok memory ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader := by
+  obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans headerOwned valid.cursorInBounds
+  let updatedHeader : Header :=
+    { header with refCount := UInt32.ofNat (oldCount + amount) }
+  obtain ⟨memory, headerWrite, _⟩ :=
+    Header.write_spec state.memory address updatedHeader headerInBounds
+  let result : MemoryState := { state with memory }
+  have operation : incrementReference state address amount check = .ok result := by
+    unfold incrementReference
+    rw [heap]
+    simp only
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted])]
+    rw [if_neg (by simp [ordinary])]
+    rw [refCount]
+    rw [uint32Field_eq_ok "reference count" (oldCount + amount) fits]
+    unfold writeLiveHeader
+    change (do
+      let nextMemory ← liftMemory (updatedHeader.write state.memory address)
+      return ({ state with memory := nextMemory } : MemoryState)) = .ok result
+    rw [headerWrite]
+    rfl
+  have memorySize : memory.size = state.memory.size :=
+    Header.write_preserves_size state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have decodedHeader : Header.read memory address = .ok updatedHeader :=
+    Header.read_of_write_eq_ok state.memory memory address updatedHeader
+      headerInBounds headerWrite
+  have headerReadAfter : result.readLiveHeader address = .ok updatedHeader := by
+    unfold MemoryState.readLiveHeader
+    simp [result, heap, decodedHeader]
+    simp only [Bind.bind, Except.bind]
+    simp [updatedHeader, live, minimum, aligned, memorySize, extentInMemory]
+    rfl
+  have finalValid : result.FrontierInvariant :=
+    valid.writeHeader headerOwned headerWrite
+  exact ⟨result, updatedHeader, memory, operation, rfl, rfl, headerWrite,
+    finalValid, headerReadAfter⟩
+
+/-- A common-header rewrite leaves the recursive natural payload decoder
+unchanged because every limb starts after the 32-byte header. -/
+theorem Header.readNaturalLimbs_of_write_eq_ok
+    (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
+    (index count : Nat)
+    (headerInBounds : address.value + headerBytes ≤ before.size)
+    (written : updatedHeader.write before address = .ok after) :
+    readNaturalLimbs after address.value index count =
+      readNaturalLimbs before address.value index count := by
+  induction count generalizing index with
+  | zero => rfl
+  | succ count ih =>
+      unfold readNaturalLimbs LinearMemory.readUInt64
+      rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader
+        (address.value + headerBytes + target.semanticSlotBytes * index)
+        headerInBounds written (.inr (by omega))]
+      rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader
+        (address.value + headerBytes + target.semanticSlotBytes * index + 4)
+        headerInBounds written (.inr (by omega))]
+      rw [ih (index + 1)]
+
 /-- Incrementing one ordinary boxed object's header preserves its canonical
 payload decoder while changing exactly the mutable reference count. -/
 theorem BoxedObjectRel.incrementReference
@@ -174,6 +257,111 @@ theorem LiveCellRel.incrementReference_boxed
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
+
+/-- Natural limbs frame across a common-header increment, yielding the same
+decoded semantic natural at the incremented live-cell count. -/
+theorem LiveCellRel.incrementReference_natural
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (naturalCell : ∃ value : Nat, cell.object = .natural value)
+    (valid : state.FrontierInvariant)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result,
+      incrementReference state address amount check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc + amount } := by
+  have headerOwned := related.headerOwned
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
+  | boxed _ objectEq _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
+  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        extent limbsFit decoded refCount persistent live =>
+      have notPromoted : Header.isPromotedTag header = false := by
+        simp [Header.isPromotedTag, headerKind, ordinary]
+      obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+          headerWrite, finalValid, headerReadAfter⟩ :=
+        incrementReference_header valid headerRead headerOwned notPromoted ordinary
+          cell.rc amount refCount fits check
+      subst updatedHeader
+      subst result
+      have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+        Nat.le_trans headerOwned valid.cursorInBounds
+      have decoderEq :
+          readNatural ({ state with memory } : MemoryState) address =
+            readNatural state address := by
+        obtain ⟨heap, _, _, _, _, _⟩ :=
+          MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead
+        unfold readNatural
+        rw [heap]
+        simp only
+        rw [headerReadAfter, headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        simp [headerKind, ordinary, marker]
+        rw [Header.readNaturalLimbs_of_write_eq_ok state.memory memory address
+          { header with refCount := UInt32.ofNat (cell.rc + amount) }
+          0 _ headerInBounds headerWrite]
+      refine ⟨{ state with memory }, operation, finalValid, ?_⟩
+      apply LiveCellRel.natural descriptor (by simpa using objectEq) headerReadAfter
+      · simpa using headerKind
+      · simpa using ordinary
+      · simpa using marker
+      · simpa using extent
+      · simpa using limbsFit
+      · rw [decoderEq]
+        exact decoded
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' fits
+      · simpa using persistent
+      · simpa using live
+
+theorem LiveCellRel.live_eq_true
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell) : cell.live = true := by
+  cases related <;> assumption
+
+theorem LiveCellRel.persistent_eq_false
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell) : cell.persistent = false := by
+  cases related with
+  | constructor _ _ objectRelated headerRead _ _ persistent _ =>
+      obtain ⟨objectHeader, objectHeaderRead, _, _, objectOrdinary, _, _, _, _⟩ :=
+        objectRelated.header
+      rw [headerRead] at objectHeaderRead
+      cases objectHeaderRead
+      rw [← persistent]
+      exact objectOrdinary
+  | boxed _ _ objectRelated _ persistent _ =>
+      rw [← persistent]
+      exact objectRelated.ordinary
+  | natural _ _ _ _ ordinary _ _ _ _ _ persistent _ =>
+      rw [← persistent]
+      exact ordinary
+
+/-- Every currently represented ordinary live cell takes the same semantic
+increment step; the object-specific concrete theorem only has to frame its
+payload decoder. -/
+theorem LiveCellRel.incValue_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (amount : Nat) (check : Bool) :
+    Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
+      setCell runtime location { cell with rc := cell.rc + amount } := by
+  unfold Fir.LeanIR.Impure.incValue Fir.LeanIR.Impure.incLocation
+  simp only [getLiveCell, found, related.live_eq_true, related.persistent_eq_false,
+    ↓reduceIte, Bind.bind, Except.bind]
+  congr 2
 
 /-- The corresponding semantic boxed increment reaches exactly the mutable
 `setCell` boundary with the incremented count. -/

@@ -1076,6 +1076,16 @@ and the checked `UInt32` overflow boundary. The next W6.3 slice generalizes
 header mutation framing to constructors and naturals before decrement,
 recursive deletion, reset, and reuse are added.
 
+W6.3b factors that write into a reusable header-level postcondition and proves
+the first variable-sized payload frame. Rewriting an ordinary natural's count
+leaves every recursive 64-bit limb read unchanged, reconstructs the decoded
+natural `LiveCellRel`, and preserves the allocation frontier. The semantic
+`incValue` equation is now stated once for every currently modeled ordinary
+live cell instead of being tied to boxed scalars. An executable regression
+increments the first heap natural from one to five, retains its exact decoded
+value, and observes the expected unique-to-shared transition. Constructor
+payload framing is the remaining increment case before decrement begins.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
