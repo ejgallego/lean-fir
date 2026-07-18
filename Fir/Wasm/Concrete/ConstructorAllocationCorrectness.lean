@@ -1,5 +1,5 @@
 import Fir.Wasm.Concrete.HeapRefinement
-import Fir.Wasm.Concrete.ObjectFieldsCorrectness
+import Fir.Wasm.Concrete.FreshAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -82,6 +82,65 @@ theorem allocateConstructor_nonempty_decompose
           subst result
           subst address
           exact ⟨middle, rfl, fieldWrite, rfl⟩
+
+/-- A public nonempty constructor allocation preserves every byte owned below
+the old frontier, so all previously decoded heap cells can be framed. -/
+theorem allocateConstructor_nonempty_prefixExtension
+    (state result : MemoryState) (info : LCNF.CtorInfo)
+    (fields : Array Word32) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (arity : fields.size = info.size)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (allocated : allocateConstructor state info fields = .ok (result, address)) :
+    state.PrefixExtension result := by
+  let layout := ConstructorLayout.ofInfo info
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    simp only [ConstructorLayout.ofInfo]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa [target, layout] using ConstructorLayout.ofInfo_allocation_aligned info
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  have fieldsEnd : objectFieldAddress address.value fields.toList.length ≤
+      address.value + align8
+        (headerBytes + (layout.allocationBytes - headerBytes)) := by
+    rw [allocationEq]
+    simp [objectFieldAddress, target, layout, ConstructorLayout.ofInfo, arity]
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
+    simp [target] at aligned
+    omega
+  obtain ⟨middle, objectAllocation, fieldWrite, cursorEq⟩ :=
+    allocateConstructor_nonempty_decompose state result info fields address arity
+      nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have extension := valid.allocateObject_prefixExtension objectAllocation
+  have completed := valid.allocateObject_writeObjectFields objectAllocation
+    fieldsEnd fieldWrite
+  dsimp only at completed
+  rcases completed with ⟨_, _, payloadPost, _⟩
+  have freshAddress := valid.allocateObject_address objectAllocation
+  refine {
+    cursor := by simpa [cursorEq] using extension.cursor
+    memorySize := by
+      calc
+        state.memory.size ≤ middle.memory.size := extension.memorySize
+        _ = result.memory.size := payloadPost.size.symm
+    readByte := ?_ }
+  intro byte beforeCursor
+  calc
+    result.memory.readByte byte = middle.memory.readByte byte :=
+      payloadPost.byteFrame byte (.inl (by
+        simp [objectFieldAddress, target, freshAddress]
+        omega))
+    _ = state.memory.readByte byte := extension.readByte byte beforeCursor
 
 theorem LinearMemory.readUInt64_of_zero_bytes (memory : LinearMemory)
     (address : Nat)

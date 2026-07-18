@@ -894,6 +894,15 @@ live-cell boundary with allocation extents, use fresh-allocation framing to
 retain every old mapped cell, and extend `LiveHeapRel` with the new constructor
 without assuming that unrelated heap bytes are immutable.
 
+W6.1f establishes that fresh-allocation frame independently of any one heap
+object kind. `MemoryState.PrefixExtension` records cursor and memory-size
+monotonicity together with exact byte preservation below the old owned
+frontier. It is reflexive and transitive; page growth, raw allocation, common
+header installation, and the complete public nonempty constructor allocation
+all satisfy it. The next relation-transport proof can therefore reason from
+allocation extents and this single prefix boundary instead of replaying the
+header and payload writers for every old semantic cell.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
