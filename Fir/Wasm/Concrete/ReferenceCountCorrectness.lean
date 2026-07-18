@@ -13,9 +13,10 @@ rejects it as a non-object. -/
 theorem decrementReferenceOnceFuel_sentinel
     (fuel : Nat) (state : MemoryState) (object : Word32)
     (sentinel : object.classify = .sentinel) (check : Bool) :
-    decrementReferenceOnceFuel (fuel + 1) state object check =
+    decrementReferenceOnceFuel fuel state object check =
       if check then .ok state else .error (.source .expectedObject) := by
-  cases check <;> simp [decrementReferenceOnceFuel, sentinel] <;> rfl
+  cases fuel <;> cases check <;>
+    simp [decrementReferenceOnceFuel, sentinel] <;> rfl
 
 /-- Successful concrete recursive release is monotone in fuel: additional
 depth never changes the resulting memory state. -/
@@ -26,7 +27,13 @@ theorem decrementReferenceOnceFuel_ok_mono
     decrementReferenceOnceFuel more state object check = .ok result := by
   induction fuel generalizing more state result object check with
   | zero =>
-      simp [decrementReferenceOnceFuel] at operation
+      cases more with
+      | zero => exact operation
+      | succ more =>
+          cases classEq : object.classify with
+          | heap => simp [decrementReferenceOnceFuel, classEq] at operation
+          | sentinel | immediate | invalid =>
+              simpa [decrementReferenceOnceFuel, classEq] using operation
   | succ fuel ih =>
       cases more with
       | zero => omega

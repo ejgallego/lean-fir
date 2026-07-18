@@ -307,6 +307,20 @@ checked increments are no-ops and unchecked increments reject them. -/
       | _, _, _, _ => false
   | _, _ => false
 
+/- Regression for
+`FIR-BUG-wasm-none-release-fuel-preempts-nonheap-noop`: checked non-owning
+words do not consult heap-recursion fuel. -/
+#guard match decrementReferenceOnceFuel 0 MemoryState.initial Word32.zero true with
+  | .ok state =>
+      state.heapCursor == heapBase && state.memory.size == wasmPageBytes
+  | .error _ => false
+
+#guard match decrementReferenceOnceFuel 0 MemoryState.initial
+    (Word32.encodeImmediate 7 (by decide)) true with
+  | .ok state =>
+      state.heapCursor == heapBase && state.memory.size == wasmPageBytes
+  | .error _ => false
+
 /-- Install the largest representable common-header count so the next
 increment exercises the checked target-overflow boundary. -/
 def boxedUInt64MaxAtRefCountMax : Except ConcreteError (MemoryState × Word32) := do
@@ -338,6 +352,14 @@ def emptyConcreteInfo : LCNF.CtorInfo := {
 def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
   allocateConstructor MemoryState.initial mixedConstructorInfo
     #[Word32.encodeImmediate 11 (by decide)]
+
+/- Actual heap recursion still consumes fuel and faults at depth zero. -/
+#guard match concreteMixedConstructor with
+  | .ok (state, object) =>
+      match decrementReferenceOnceFuel 0 state object true with
+      | .error (.target .releaseFuelExhausted) => true
+      | _ => false
+  | .error _ => false
 
 def incrementedMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
   let (state, object) ← concreteMixedConstructor

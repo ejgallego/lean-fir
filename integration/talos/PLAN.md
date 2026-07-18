@@ -1267,6 +1267,17 @@ fuel policy from the remaining same-fuel recursive simulation: that proof can
 use semantic heap fuel first and lift the concrete execution to the public
 cursor-derived budget afterward.
 
+W6.3t fixes the fuel-order discrepancy found while pairing the recursive
+folds. Bug card `FIR-BUG-wasm-none-release-fuel-preempts-nonheap-noop` records
+that concrete release previously exhausted fuel before classifying a checked
+tagged or erased child, whereas semantic ownership traversal skips those
+values without recursion. Concrete release now classifies first: checked
+immediates and sentinels are no-ops at every fuel, invalid and unchecked words
+retain their faults, and only heap recursion consumes fuel. Zero-fuel guards
+cover both no-op representations and the retained heap-exhaustion branch.
+This restores the local per-field correspondence needed by the paired-fold
+simulation without weakening the heap recursion bound.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
