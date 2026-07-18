@@ -571,6 +571,7 @@ theorem abiCaseCasesStep :
         (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
         (actualTag := 1) (handle := 1)
       · native_decide
+      · native_decide
       · exact trueBranch
       · exact fallbackAdapted
       · rfl
@@ -603,6 +604,7 @@ theorem abiCaseCasesStep :
         (spec := abiCaseResolvedHosts.spec)
         (imp := abiCaseImport 1) (sourceObject := abiCaseTrueValue)
         (actualTag := 1) (handle := 1)
+      · native_decide
       · native_decide
       · exact abiCaseFalseBranch_adapted
       · simpa [abiCaseCases] using trueChain

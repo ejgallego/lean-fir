@@ -247,8 +247,18 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       return { fallthrough := stack? }
   | .i32Eq => do
       let stack? ← stack?.mapM fun stack => do
-        let stack ← popKinds context.function.name stack [.uint32, .uint32]
-        return stack ++ [.uint32]
+        if stack.length < 2 then
+          throw (.stackUnderflow context.function.name [.uint32, .uint32])
+        let remaining := stack.take (stack.length - 2)
+        let operands := stack.drop (stack.length - 2)
+        let some left := operands[0]? |
+          throw (.stackUnderflow context.function.name [.uint32, .uint32])
+        let some right := operands[1]? |
+          throw (.stackUnderflow context.function.name [.uint32, .uint32])
+        unless left.valueType == .i32 && right.valueType == .i32 &&
+            left.refines right && right.refines left do
+          throw (.stackMismatch context.function.name [right, right] operands)
+        return remaining ++ [.uint32]
       return { fallthrough := stack? }
   | .block label body => do
       let nested := { context with labels := { fvarId := label, stack? } :: context.labels }

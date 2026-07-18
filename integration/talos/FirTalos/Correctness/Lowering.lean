@@ -209,10 +209,36 @@ theorem compileLetValue_reuse
   simp [compileLetValue, valueEq, resultEq, tokenEq, argumentsEq]
   rfl
 
+theorem compileCaseChain_constructor_of_mode
+    {context : Context} {discr : Lean.FVarId}
+    {mode : CaseDiscriminatorMode}
+    {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)} {fallback thenBody elseBody : List Instruction}
+    (modeEq : caseDiscriminatorMode context discr = mode)
+    (fits : caseConstructorTagFits mode info = true)
+    (thenEq : compileCode context code = .ok thenBody)
+    (elseEq : compileCaseChain context discr alts fallback = .ok elseBody) :
+    compileCaseChain context discr (.ctorAlt info code :: alts) fallback =
+      .ok (caseTagTest mode discr info ++
+        [.i32Eq, .ifElse thenBody elseBody]) := by
+  change compileCaseChainWithM (compileCode context)
+    (caseDiscriminatorMode context discr) discr alts fallback =
+    .ok elseBody at elseEq
+  change compileCaseChainWithM (compileCode context)
+    (caseDiscriminatorMode context discr) discr (.ctorAlt info code :: alts)
+      fallback = _
+  rw [modeEq] at elseEq ⊢
+  rw [compileCaseChainWithM.eq_def]
+  simp only [fits, ↓reduceIte]
+  rw [thenEq, elseEq]
+  rfl
+
 theorem compileCaseChain_constructor
     {context : Context} {discr : Lean.FVarId}
     {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
-    {alts : List (Lean.Compiler.LCNF.Alt .impure)} {fallback thenBody elseBody : List Instruction}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback thenBody elseBody : List Instruction}
+    (modeEq : caseDiscriminatorMode context discr = .objectTag)
     (fits : constructorTagFitsI32 info = true)
     (thenEq : compileCode context code = .ok thenBody)
     (elseEq : compileCaseChain context discr alts fallback = .ok elseBody) :
@@ -220,17 +246,29 @@ theorem compileCaseChain_constructor
       .ok [
         .localGet discr,
         .call (.runtime .getTag),
-      .i32Const .uint32 (UInt32.ofNat info.cidx),
-      .i32Eq,
-      .ifElse thenBody elseBody] := by
-  change compileCaseChainWithM (compileCode context) discr alts fallback =
-    .ok elseBody at elseEq
-  change compileCaseChainWithM (compileCode context) discr (.ctorAlt info code :: alts)
-    fallback = _
-  rw [compileCaseChainWithM.eq_def]
-  simp only [fits, ↓reduceIte]
-  rw [thenEq, elseEq]
-  rfl
+        .i32Const .uint32 (UInt32.ofNat info.cidx),
+        .i32Eq,
+        .ifElse thenBody elseBody] := by
+  simpa [caseConstructorTagFits, caseTagTest] using
+    compileCaseChain_constructor_of_mode modeEq fits thenEq elseEq
+
+theorem compileCaseChain_scalarUInt8_constructor
+    {context : Context} {discr : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo} {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback thenBody elseBody : List Instruction}
+    (modeEq : caseDiscriminatorMode context discr = .scalarUInt8)
+    (fits : constructorTagFitsUInt8 info = true)
+    (thenEq : compileCode context code = .ok thenBody)
+    (elseEq : compileCaseChain context discr alts fallback = .ok elseBody) :
+    compileCaseChain context discr (.ctorAlt info code :: alts) fallback =
+      .ok [
+        .localGet discr,
+        .i32Const .uint8 (UInt32.ofNat info.cidx),
+        .i32Eq,
+        .ifElse thenBody elseBody] := by
+  simpa [caseConstructorTagFits, caseTagTest] using
+    compileCaseChain_constructor_of_mode modeEq fits thenEq elseEq
 
 theorem constructorTag_i32_eq_iff {left right : Nat}
     (leftFits : left < UInt32.size) (rightFits : right < UInt32.size) :
@@ -241,6 +279,13 @@ theorem constructorTag_i32_eq_iff {left right : Nat}
     simpa [UInt32.toNat_ofNat_of_lt' leftFits,
       UInt32.toNat_ofNat_of_lt' rightFits] using this
   · exact congrArg UInt32.ofNat
+
+theorem constructorTag_uint8_eq_iff {left right : Nat}
+    (leftFits : left < UInt8.size) (rightFits : right < UInt8.size) :
+    UInt32.ofNat left = UInt32.ofNat right ↔ left = right := by
+  have sizeLe : UInt8.size ≤ UInt32.size := by native_decide
+  exact constructorTag_i32_eq_iff
+    (lt_of_lt_of_le leftFits sizeLe) (lt_of_lt_of_le rightFits sizeLe)
 
 /--
 The semantic host implementation of a compiler-produced natural literal
@@ -1021,6 +1066,39 @@ theorem wp_i32Eq_ifElse
     | Break level nextStore nextLocals =>
         cases level <;> rfl
     | _ => rfl
+
+/-- Direct scalar-case dispatch: load the `UInt8` discriminator, compare it
+with the range-checked constructor index, and select the corresponding arm. -/
+theorem wp_scalarUInt8_case_test
+    {module : Wasm.Module} {env : Wasm.HostEnv RuntimeHost}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion RuntimeHost}
+    {store : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {localIndex : Nat} (actualTag expectedTag : Nat)
+    (hLocal :
+      locals.get localIndex = some (.i32 (UInt32.ofNat actualTag)))
+    (actualFits : actualTag < UInt8.size)
+    (expectedFits : expectedTag < UInt8.size)
+    (hBody :
+      Wasm.wp module (if actualTag = expectedTag then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := locals.values } env) :
+    Wasm.wp module
+      (.localGet localIndex :: .const (UInt32.ofNat expectedTag) :: .eq ::
+        .iff 0 0 thenBody elseBody :: rest)
+      Q store locals env := by
+  rw [Wasm.wp_localGet_cons, hLocal]
+  apply wp_i32Eq_ifElse (UInt32.ofNat actualTag)
+    (UInt32.ofNat expectedTag) locals.values
+  simpa only [constructorTag_uint8_eq_iff actualFits expectedFits] using hBody
 
 /--
 Composition rule for the exact Talos sequence produced by one constructor-case

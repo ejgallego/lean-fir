@@ -972,8 +972,8 @@ theorem caseChainAdapted_nil
       instructions sourceModule sourceFunction labels fallback = .ok target) :
     CaseChainAdapted context sourceModule sourceFunction labels discr [] fallback target := by
   refine ⟨fallback, ?_, fallbackAdapted⟩
-  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context) discr [] fallback =
-    .ok fallback
+  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+    (Fir.Wasm.caseDiscriminatorMode context discr) discr [] fallback = .ok fallback
   rw [Fir.Wasm.compileCaseChainWithM.eq_def]
   rfl
 
@@ -992,8 +992,9 @@ theorem caseChainAdapted_default
       (.default code :: alts) fallback target := by
   rcases restAdapted with ⟨symbolic, compiled, targetCompiled⟩
   refine ⟨symbolic, ?_, targetCompiled⟩
-  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context) discr
-    (.default code :: alts) fallback = .ok symbolic
+  change Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+    (Fir.Wasm.caseDiscriminatorMode context discr) discr
+      (.default code :: alts) fallback = .ok symbolic
   rw [Fir.Wasm.compileCaseChainWithM.eq_def]
   exact compiled
 
@@ -1011,6 +1012,7 @@ theorem caseChainAdapted_constructor
     {fallback : List Fir.Wasm.Instruction}
     {thenTarget elseTarget : Wasm.Program}
     {discrIndex getTagIndex : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction labels code thenTarget)
@@ -1033,8 +1035,46 @@ theorem caseChainAdapted_constructor
   refine ⟨[.localGet discr, .call (.runtime .getTag),
     .i32Const .uint32 (UInt32.ofNat info.cidx), .i32Eq,
     .ifElse thenBody elseBody], ?_, ?_⟩
-  · exact compileCaseChain_constructor fits thenCompiled elseCompiled
+  · exact compileCaseChain_constructor modeEq fits thenCompiled elseCompiled
   · simp [instructions, instruction, discrFound, getTagFound,
+      thenTargetCompiled, elseTargetCompiled]
+    rfl
+
+/-- A scalar `UInt8` constructor alternative compares the discriminator local
+directly, with no semantic-host `getTag` call. -/
+theorem caseChainAdapted_scalarUInt8_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {discr : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {discrIndex : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
+    (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
+    (thenAdapted :
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+    (elseAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback elseTarget)
+    (discrFound :
+      findFVar?
+        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex) :
+    CaseChainAdapted context sourceModule sourceFunction labels discr
+      (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget] := by
+  rcases thenAdapted with ⟨thenBody, thenCompiled, thenTargetCompiled⟩
+  rcases elseAdapted with ⟨elseBody, elseCompiled, elseTargetCompiled⟩
+  refine ⟨[.localGet discr,
+    .i32Const .uint8 (UInt32.ofNat info.cidx), .i32Eq,
+    .ifElse thenBody elseBody], ?_, ?_⟩
+  · exact compileCaseChain_scalarUInt8_constructor modeEq fits thenCompiled elseCompiled
+  · simp [instructions, instruction, discrFound,
       thenTargetCompiled, elseTargetCompiled]
     rfl
 

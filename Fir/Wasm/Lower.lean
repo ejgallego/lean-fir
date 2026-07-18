@@ -107,6 +107,37 @@ def findLocalKind? : LocalKinds → FVarId → Option AbiKind
   | (candidate, kind) :: rest, fvarId =>
       if candidate.name == fvarId.name then some kind else findLocalKind? rest fvarId
 
+/-- The two source representations for which final-impure constructor cases are lowered. -/
+inductive CaseDiscriminatorMode where
+  | objectTag
+  | scalarUInt8
+  deriving Inhabited, BEq, DecidableEq, Repr
+
+/-- Select direct scalar comparison only for the compiler's `UInt8` case lane.
+All other kinds retain the historical object-tag lowering; `WasmSupported`
+separately rejects kinds outside the two accepted modes. -/
+def caseDiscriminatorMode (context : Context) (discr : FVarId) :
+    CaseDiscriminatorMode :=
+  if findLocalKind? context.localKinds discr == some .uint8 then
+    .scalarUInt8
+  else
+    .objectTag
+
+def caseConstructorTagFits : CaseDiscriminatorMode → LCNF.CtorInfo → Bool
+  | .objectTag => constructorTagFitsI32
+  | .scalarUInt8 => constructorTagFitsUInt8
+
+def caseTagTest (mode : CaseDiscriminatorMode) (discr : FVarId)
+    (info : LCNF.CtorInfo) : List Instruction :=
+  match mode with
+  | .objectTag =>
+      [.localGet discr,
+        .call (.runtime .getTag),
+        .i32Const .uint32 (UInt32.ofNat info.cidx)]
+  | .scalarUInt8 =>
+      [.localGet discr,
+        .i32Const .uint8 (UInt32.ofNat info.cidx)]
+
 def findJoinPoint? : JoinPoints → FVarId → Option (LCNF.FunDecl .impure)
   | [], _ => none
   | (candidate, decl) :: rest, fvarId =>
@@ -424,32 +455,30 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
 
 def compileCaseChainWithM [Monad m] [MonadExceptOf CompileError m]
     (compile : LCNF.Code .impure → m (List Instruction))
+    (mode : CaseDiscriminatorMode)
     (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) : m (List Instruction) := do
   match alts with
   | [] => return fallback
-  | .default _ :: rest => compileCaseChainWithM compile discr rest fallback
+  | .default _ :: rest => compileCaseChainWithM compile mode discr rest fallback
   | .alt _ _ _ h :: _ => nomatch h
   | .ctorAlt info code :: rest =>
-      unless constructorTagFitsI32 info do
-        throw (.malformed s!"constructor tag {info.cidx} does not fit the i32 case ABI")
+      unless caseConstructorTagFits mode info do
+        throw (.malformed s!"constructor tag {info.cidx} does not fit the case discriminator ABI")
       let thenBody ← compile code
-      let elseBody ← compileCaseChainWithM compile discr rest fallback
-      return [
-        .localGet discr,
-        .call (.runtime .getTag),
-        .i32Const .uint32 (UInt32.ofNat info.cidx),
-        .i32Eq,
-        .ifElse thenBody elseBody]
+      let elseBody ← compileCaseChainWithM compile mode discr rest fallback
+      return caseTagTest mode discr info ++ [
+        .i32Eq, .ifElse thenBody elseBody]
 
 termination_by sizeOf alts
 
 def compileCaseChainWith
     (compile : LCNF.Code .impure → Except CompileError (List Instruction))
+    (mode : CaseDiscriminatorMode)
     (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) :=
-  compileCaseChainWithM compile discr alts fallback
+  compileCaseChainWithM compile mode discr alts fallback
 
 def isDefaultAlt : LCNF.Alt .impure → Bool
   | .default _ => true
@@ -478,9 +507,10 @@ open Lean.Order in
 theorem monotone_compileCaseChainWithM
     {γ : Type} [PartialOrder γ]
     (compile : γ → LCNF.Code .impure → CompileM (List Instruction))
-    (discr : FVarId) (alts : List (LCNF.Alt .impure)) (fallback : List Instruction)
+    (mode : CaseDiscriminatorMode) (discr : FVarId)
+    (alts : List (LCNF.Alt .impure)) (fallback : List Instruction)
     (hmono : monotone compile) :
-    monotone (fun x => compileCaseChainWithM (compile x) discr alts fallback) := by
+    monotone (fun x => compileCaseChainWithM (compile x) mode discr alts fallback) := by
   induction alts with
   | nil =>
       simp only [compileCaseChainWithM]
@@ -493,7 +523,7 @@ theorem monotone_compileCaseChainWithM
           exact ih
       | ctorAlt info code =>
           simp only [compileCaseChainWithM]
-          by_cases fits : constructorTagFitsI32 info = true
+          by_cases fits : caseConstructorTagFits mode info = true
           · simp only [fits, ↓reduceIte]
             apply monotone_bind
             · apply monotone_apply
@@ -540,7 +570,8 @@ def compileCodeCore (context : Context) : LCNF.Code .impure → CompileM (List I
   | .jmp fvarId args => liftCompileResult (compileJump context fvarId args)
   | .cases cases => do
       let fallback ← compileCaseFallbackWithM (compileCodeCore context) cases.alts.toList
-      compileCaseChainWithM (compileCodeCore context) cases.discr cases.alts.toList fallback
+      compileCaseChainWithM (compileCodeCore context)
+        (caseDiscriminatorMode context cases.discr) cases.discr cases.alts.toList fallback
   | .return fvarId => do
       let (value, _) ← liftCompileResult (getLocal context fvarId)
       return [value, .ret]
@@ -820,7 +851,8 @@ theorem compileCode_delete
 def compileCaseChain (context : Context) (discr : FVarId)
     (alts : List (LCNF.Alt .impure)) (fallback : List Instruction) :
     Except CompileError (List Instruction) :=
-  compileCaseChainWith (compileCode context) discr alts fallback
+  compileCaseChainWith (compileCode context) (caseDiscriminatorMode context discr)
+    discr alts fallback
 
 def compileCaseFallback (context : Context) (alts : List (LCNF.Alt .impure)) :
     Except CompileError (List Instruction) :=
@@ -870,7 +902,8 @@ theorem compileCaseChainCore_of_compileCaseChain
     {context : Context} {discr : FVarId}
     {alts : List (LCNF.Alt .impure)} {fallback result : List Instruction}
     (compiled : compileCaseChain context discr alts fallback = .ok result) :
-    compileCaseChainWithM (compileCodeCore context) discr alts fallback =
+    compileCaseChainWithM (compileCodeCore context)
+      (caseDiscriminatorMode context discr) discr alts fallback =
       some (.ok result) := by
   induction alts generalizing result with
   | nil =>
@@ -883,20 +916,24 @@ theorem compileCaseChainCore_of_compileCaseChain
       | default code =>
           rw [compileCaseChainWithM.eq_def]
           apply ih
-          change compileCaseChainWithM (compileCode context) discr alts fallback =
+          change compileCaseChainWithM (compileCode context)
+            (caseDiscriminatorMode context discr) discr alts fallback =
             .ok result
-          change compileCaseChainWithM (compileCode context) discr
+          change compileCaseChainWithM (compileCode context)
+            (caseDiscriminatorMode context discr) discr
             (.default code :: alts) fallback = .ok result at compiled
           rw [compileCaseChainWithM.eq_def] at compiled
           exact compiled
       | ctorAlt info code =>
-          by_cases fits : constructorTagFitsI32 info = true
+          by_cases fits :
+              caseConstructorTagFits (caseDiscriminatorMode context discr) info = true
           · cases thenResult : compileCode context code with
             | error error =>
                 have fullError :
                     compileCaseChain context discr (.ctorAlt info code :: alts)
                         fallback = .error error := by
-                  change compileCaseChainWithM (compileCode context) discr
+                  change compileCaseChainWithM (compileCode context)
+                    (caseDiscriminatorMode context discr) discr
                     (.ctorAlt info code :: alts) fallback = .error error
                   rw [compileCaseChainWithM.eq_def]
                   simp only [fits, ↓reduceIte]
@@ -910,26 +947,30 @@ theorem compileCaseChainCore_of_compileCaseChain
                     have fullError :
                         compileCaseChain context discr
                             (.ctorAlt info code :: alts) fallback = .error error := by
-                      change compileCaseChainWithM (compileCode context) discr
+                      change compileCaseChainWithM (compileCode context)
+                        (caseDiscriminatorMode context discr) discr
                         (.ctorAlt info code :: alts) fallback = .error error
                       rw [compileCaseChainWithM.eq_def]
                       simp only [fits, ↓reduceIte]
                       rw [thenResult]
                       have elseResult' :
-                          compileCaseChainWithM (compileCode context) discr alts fallback =
+                          compileCaseChainWithM (compileCode context)
+                            (caseDiscriminatorMode context discr) discr alts fallback =
                             .error error := elseResult
                       rw [elseResult']
                       rfl
                     rw [fullError] at compiled
                     contradiction
                 | ok elseBody =>
-                    change compileCaseChainWithM (compileCode context) discr
+                    change compileCaseChainWithM (compileCode context)
+                      (caseDiscriminatorMode context discr) discr
                       (.ctorAlt info code :: alts) fallback = .ok result at compiled
                     rw [compileCaseChainWithM.eq_def] at compiled
                     simp only [fits, ↓reduceIte] at compiled
                     rw [thenResult] at compiled
                     have elseResult' :
-                        compileCaseChainWithM (compileCode context) discr alts fallback =
+                        compileCaseChainWithM (compileCode context)
+                          (caseDiscriminatorMode context discr) discr alts fallback =
                           .ok elseBody := elseResult
                     rw [elseResult'] at compiled
                     injection compiled with resultEq
@@ -938,24 +979,29 @@ theorem compileCaseChainCore_of_compileCaseChain
                         compileCodeCore context code = some (.ok thenBody) :=
                       finishCompileResult_eq_ok_iff.mp thenResult
                     have elseCore :
-                        compileCaseChainWithM (compileCodeCore context) discr alts fallback =
+                        compileCaseChainWithM (compileCodeCore context)
+                          (caseDiscriminatorMode context discr) discr alts fallback =
                           some (.ok elseBody) :=
                       ih elseResult
                     rw [compileCaseChainWithM.eq_def]
                     simp only [fits, ↓reduceIte]
                     rw [thenCore, elseCore]
                     rfl
-          · change compileCaseChainWithM (compileCode context) discr
+          · change compileCaseChainWithM (compileCode context)
+              (caseDiscriminatorMode context discr) discr
               (.ctorAlt info code :: alts) fallback = .ok result at compiled
-            have notFits : constructorTagFitsI32 info = false := by
-              cases tagFits : constructorTagFitsI32 info with
+            have notFits :
+                caseConstructorTagFits (caseDiscriminatorMode context discr) info = false := by
+              cases tagFits :
+                  caseConstructorTagFits (caseDiscriminatorMode context discr) info with
               | false => rfl
               | true => exact (fits tagFits).elim
             have fullError :
-                compileCaseChainWithM (compileCode context) discr
+                compileCaseChainWithM (compileCode context)
+                    (caseDiscriminatorMode context discr) discr
                     (.ctorAlt info code :: alts) fallback =
                   .error (.malformed
-                    s!"constructor tag {info.cidx} does not fit the i32 case ABI") := by
+                    s!"constructor tag {info.cidx} does not fit the case discriminator ABI") := by
               rw [compileCaseChainWithM.eq_def]
               simp only [notFits, Bool.false_eq_true, ↓reduceIte]
               rfl
@@ -978,7 +1024,8 @@ theorem compileCode_cases
   rw [compileCodeCore.eq_def]
   simp only
   rw [fallbackCore]
-  change compileCaseChainWithM (compileCodeCore context) cases.discr
+  change compileCaseChainWithM (compileCodeCore context)
+    (caseDiscriminatorMode context cases.discr) cases.discr
     cases.alts.toList fallback = some (.ok body)
   exact bodyCore
 

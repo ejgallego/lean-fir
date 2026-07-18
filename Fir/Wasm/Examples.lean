@@ -403,6 +403,14 @@ def abiCaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt trueInfo
           (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
 
+def scalarUInt8CaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param c u8Type] tobjectType (.code <|
+      .cases (.mk ``Bool tobjectType c #[
+        .ctorAlt falseInfo
+          (.let (letDecl r tobjectType (.lit (.nat 0))) (.return r)),
+        .ctorAlt trueInfo
+          (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
+
 def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] tobjectType (.code <|
       .let (letDecl c taggedType (.ctor trueInfo #[])) <|
@@ -478,6 +486,16 @@ def oversizedTagCaseProgram : Fir.LeanIR.ImpureProgram :=
       .cases (.mk `Oversized tobjectType c #[
         .ctorAlt oversizedTagInfo (.return x)]))] }
 
+def oversizedScalarTagInfo : LCNF.CtorInfo :=
+  { name := `Oversized.scalar, cidx := UInt8.size,
+    size := 0, usize := 0, ssize := 0 }
+
+def oversizedScalarTagCaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param c u8Type] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 0))) <|
+      .cases (.mk `OversizedScalar tobjectType c #[
+        .ctorAlt oversizedScalarTagInfo (.return x)]))] }
+
 /--
 The allocated discriminator is out of range while the compared alternative
 is representable. Without the allocation-side check, both tags become zero in
@@ -501,8 +519,10 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiErasedProgram
 #guard supportedProgram abiCtorProjectionProgram
 #guard supportedProgram abiCaseProgram
+#guard supportedProgram scalarUInt8CaseProgram
 #guard supportedProgram abiDefaultCaseProgram
 #guard !supportedProgram oversizedTagCaseProgram
+#guard !supportedProgram oversizedScalarTagCaseProgram
 #guard !supportedProgram oversizedAllocatedTagProgram
 #guard !supportedProgram directCallProgram
 #guard !supportedProgram closureCallProgram
@@ -521,8 +541,21 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
   | .ok _ => true
   | .error _ => false
 
+#guard match lowerSupported scalarUInt8CaseProgram with
+  | .ok module =>
+      !module.runtimeOperations.contains .getTag &&
+        module.functions[0]?.any fun function =>
+          function.body[0]? == some (.localGet c) &&
+            function.body[1]? == some (.i32Const .uint8 0) &&
+            function.body[2]? == some .i32Eq
+  | .error _ => false
+
 #guard match lower oversizedTagCaseProgram with
-  | .error (.malformed message) => message.contains "does not fit the i32 case ABI"
+  | .error (.malformed message) => message.contains "does not fit the case discriminator ABI"
+  | _ => false
+
+#guard match lower oversizedScalarTagCaseProgram with
+  | .error (.malformed message) => message.contains "does not fit the case discriminator ABI"
   | _ => false
 
 #guard match lower oversizedAllocatedTagProgram with

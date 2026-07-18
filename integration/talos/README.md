@@ -175,3 +175,7 @@ corpus/adapter expansion work, not missing W5 runtime operations. The default
 native--V8 matrix contains 39 compiler-produced cases, while the independent
 Talos--V8 artifact lane compares 34 fixtures. Large odd `Nat` values are kept
 out of the JSON adapter until `FIR-BUG-wasm-none-json-nat-precision` is fixed.
+The scalar-case admission slice additionally passes seven targeted
+native--V8 cases—both Boolean branches, a three-way nullary enum, and four
+signed-`Int` boundaries—bringing the ready generation set to 46 once the
+root-owned default-matrix list is updated.

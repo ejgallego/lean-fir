@@ -14,6 +14,20 @@ run_cmd do
     throwError "validation Bool schema rejected its tagged object ABI"
   if validationSchemaAcceptsAbiKind .bool .uint16 then
     throwError "validation Bool schema accepted an unrelated scalar ABI"
+  match validationArgumentForAbi .bool .uint8 (.object (.tagged 1)) with
+  | .ok (.scalar (.uint8 value)) =>
+      unless value == 1 do
+        throwError "validation Bool argument normalized to {value}, expected one"
+  | .ok value =>
+      throwError "validation Bool argument normalized to wrong kind: {repr value}"
+  | .error message =>
+      throwError "validation Bool argument normalization failed: {message}"
+  match validationArgumentForAbi .bool .uint8 (.object (.tagged 2)) with
+  | .error message =>
+      unless message.contains "zero or one" do
+        throwError "unexpected invalid Bool tag error: {message}"
+  | .ok value =>
+      throwError "validation Bool argument accepted invalid tag as {repr value}"
 
 run_cmd do
   let result ← liftCoreM <|

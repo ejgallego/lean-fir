@@ -196,6 +196,7 @@ Node/V8 host reconstructs that heap before assigning opaque Wasm handles.
 | 2026-07-18 | A0 ByteArray externals | validation and integration owners | landed | Commits `5c32509` and `73fad11` generate and execute `ByteArray.size`, boundary-index `ByteArray.get!`, and both `ByteArray.set!` ownership paths. Unique mutation reuses its heap cell; shared mutation preserves the original and allocates the updated copy. The default native↔V8 generation matrix now checks 35 compiler-produced cases. No W6/proof file or shared semantic contract changed. |
 | 2026-07-18 | A0 Int literal externals | proof and integration owners | landed | Commit `2426311` generates and executes compiler-emitted `Int.ofNat` and `Int.neg` calls for positive and negative literals at both immediate and heap representation boundaries. The default native↔V8 generation matrix now checks 39 compiler-produced cases. `classifyInt` remains rejected by `WasmSupported` before emission because `supportedCode` admits only object-like case discriminators, while `Int.decLt` returns `UInt8`; its external declaration itself is already admitted. A0 did not bypass or weaken that proof-owned boundary. No W6/proof file or shared semantic contract changed. |
 | 2026-07-18 | A0 final-twelve preflight | proof and integration owners | prepared | Commit `1174eaa` makes the validation external registry an explicit replay-audited tool and implements exact `Int.decLt : tobject → tobject → UInt8` behavior across both immediate/heap signed boundaries. All seven distinct source declarations underlying the final twelve cases still fail closed at `WasmSupported`: `branchNat`, `selectScalarChoice`, and `classifyInt` need scalar-case admission; `PackedPoint.setX`, `tupleRotate`, `Assoc.reassoc`, and `changeOrGrow` need `jp`/`jmp` admitted by both `supportedCode` and `closureFlowSafeCode`. The existing W5 host already covers their projection, ownership, mutation, deletion, tag, reuse, call, and structured-result operations, so no other generation-side runtime primitive is currently missing. No W6/proof file or shared semantic contract changed. |
+| 2026-07-18 | A0 scalar-case admission | integration owner | ready | ABI-aware case lowering now retains `getTag` for object-like discriminators and compares compiler-produced `UInt8` discriminators directly, with separate 32-bit and 8-bit constructor-tag bounds. The symbolic validator requires both `i32.eq` operands to carry equivalent semantic lanes. Structural adaptation and Talos weakest-precondition lemmas cover the direct scalar sequence. `branch-nat`, `branch-nat-false`, `scalar-enum-cases`, and all four immediate/heap `int-classify-*` cases pass a targeted native↔V8 run. That run exposed and fixed `FIR-BUG-wasm-none-bool-argument-scalar` by normalizing protocol Boolean tags to the checked `UInt8` parameter ABI. The integration owner still needs to add these seven IDs to the root-owned default matrix; no runtime import or semantic ABI kind changed. |
 
 Shared-contract changes in these A0 slices are the additive common
 `nat-list-nonempty` case in `09d3c06` and the scalar-Boolean observation
@@ -209,12 +210,14 @@ initial-runtime manifest uses the same value, heap-cell, and heap-object JSON
 vocabulary as the FIR observation oracle. The W5 semantic-import vocabulary is
 fully adapted in the shared host and manifest, including ownership, effects,
 caches, generated calls, and immediate/heap `Int` literal construction.
-The validation registry also has exact immediate/heap `Int.decLt` behavior
-ready for the four classification cases once their source is admitted.
+The validation registry's exact immediate/heap `Int.decLt` behavior is now
+exercised by all four classification cases. A targeted native↔V8 run also
+covers both scalar Boolean branches and the three-way nullary enum; these seven
+cases await only the root-owned default-matrix list update.
 Independent A0 work can now broaden
 schema-directed results and initial-runtime encodings whose compiler-produced
-LCNF is already inside the supported fragment; scalar-case and join-point
-admission, plus the large-`Nat` JSON protocol fix, remain explicit follow-ups.
+LCNF is already inside the supported fragment; join-point admission and the
+large-`Nat` JSON protocol fix remain explicit follow-ups.
 
 ## Architecture decisions
 

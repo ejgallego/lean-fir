@@ -2492,6 +2492,7 @@ theorem caseChainWP_constructor
     {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction labels code thenTarget)
@@ -2530,8 +2531,8 @@ theorem caseChainWP_constructor
         .const (UInt32.ofNat info.cidx), .eq,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
-  refine ⟨caseChainAdapted_constructor fits thenAdapted elseAdapted discrFound
-    getTagFound, stateRelated, ?_⟩
+  refine ⟨caseChainAdapted_constructor modeEq fits thenAdapted elseAdapted
+    discrFound getTagFound, stateRelated, ?_⟩
   apply wp_getTag_case_test (spec := spec) (rest := []) sourceObject actualTag
     info.cidx
   · simpa [Wasm.Locals.get] using hLocal
@@ -2547,6 +2548,57 @@ theorem caseChainWP_constructor
   · exact expectedFits
   · rw [StateRelated.clearFailures stateRelated]
     exact selectedWP
+
+/-- Scalar `UInt8` constructor-test rule. Unlike object cases, the target
+loads the discriminator lane directly and therefore performs no host call or
+runtime-state transition. -/
+theorem caseChainWP_scalarUInt8_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv RuntimeHost}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {initial : Wasm.Store RuntimeHost} {locals : Wasm.Locals}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
+    {discrIndex actualTag : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
+    (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
+    (thenAdapted :
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget)
+    (elseAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback elseTarget)
+    (discrFound :
+      findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        discr = some discrIndex)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals)
+    (hLocal :
+      locals.get discrIndex = some (.i32 (UInt32.ofNat actualTag)))
+    (actualFits : actualTag < UInt8.size)
+    (expectedFits : info.cidx < UInt8.size)
+    (selectedWP :
+      Wasm.wp module
+        (if actualTag = info.cidx then thenTarget else elseTarget)
+        (CaseResumePost module hostEnv [] Q tail) initial
+        { locals with values := tail } hostEnv) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget]
+      initial locals tail Q := by
+  refine ⟨caseChainAdapted_scalarUInt8_constructor modeEq fits thenAdapted
+    elseAdapted discrFound, stateRelated, ?_⟩
+  apply wp_scalarUInt8_case_test actualTag info.cidx
+  · simpa [Wasm.Locals.get] using hLocal
+  · exact actualFits
+  · exact expectedFits
+  · exact selectedWP
 
 /--
 Path-sensitive constructor hit: only the selected source branch needs a
@@ -2567,6 +2619,7 @@ theorem caseChainWP_constructor_hit
     {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenBranch :
       CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -2601,9 +2654,9 @@ theorem caseChainWP_constructor_hit
         .const (UInt32.ofNat info.cidx), .eq,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
-  apply caseChainWP_constructor fits thenBranch.1 elseAdapted discrFound getTagFound
-    thenBranch.2.1 hLocal hImp hSat hi hContract hParams hResults decoded tagged
-    actualFits expectedFits
+  apply caseChainWP_constructor modeEq fits thenBranch.1 elseAdapted discrFound
+    getTagFound thenBranch.2.1 hLocal hImp hSat hi hContract hParams hResults
+    decoded tagged actualFits expectedFits
   simpa [tagEq] using thenBranch.2.2
 
 /--
@@ -2625,6 +2678,7 @@ theorem caseChainWP_constructor_miss
     {tail : List Wasm.Value} {Q : Wasm.Assertion RuntimeHost}
     {discrIndex getTagIndex : Nat} {handle : Handle}
     {imp : Wasm.ImportDecl} {sourceObject : Value} {actualTag : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
     (fits : Fir.Wasm.constructorTagFitsI32 info = true)
     (thenAdapted :
       CodeAdapted context sourceModule sourceFunction labels code thenTarget)
@@ -2658,9 +2712,9 @@ theorem caseChainWP_constructor_miss
         .const (UInt32.ofNat info.cidx), .eq,
         .iff 0 0 thenTarget elseTarget]
       initial locals tail Q := by
-  apply caseChainWP_constructor fits thenAdapted elseBranch.1 discrFound getTagFound
-    elseBranch.2.1 hLocal hImp hSat hi hContract hParams hResults decoded tagged
-    actualFits expectedFits
+  apply caseChainWP_constructor modeEq fits thenAdapted elseBranch.1 discrFound
+    getTagFound elseBranch.2.1 hLocal hImp hSat hi hContract hParams hResults
+    decoded tagged actualFits expectedFits
   simpa [tagNe] using elseBranch.2.2
 
 /-- A semantically established full test chain is a semantic source `.cases`. -/

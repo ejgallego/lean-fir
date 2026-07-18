@@ -41,6 +41,14 @@ def supportedScalarProjectionKind : AbiKind → Bool
 def supportedBoxScalarKind (kind : AbiKind) : Bool :=
   supportedScalarProjectionKind kind || kind == .usize
 
+/-- Final-impure cases use either an object tag or the compiler's scalar
+`UInt8` constructor-index lane. Other scalar widths are not accepted merely
+because they share a physical Wasm representation. -/
+def supportedCaseDiscriminatorMode? : AbiKind → Option CaseDiscriminatorMode
+  | .object | .tagged | .tobject => some .objectTag
+  | .uint8 => some .scalarUInt8
+  | _ => none
+
 def addSupportedParams? (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     Option LocalKinds :=
   params.foldlM (init := locals) fun locals param => do
@@ -207,11 +215,17 @@ partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
   | .fun _ _ h => nomatch h
   | .cases cases =>
       let resultKnown := abiTypeKnown cases.resultType
-      let discrSupported :=
-        (findLocalKind? locals cases.discr).any AbiKind.isObjectLike
-      resultKnown && discrSupported &&
+      let altsSupported :=
+        match findLocalKind? locals cases.discr with
+        | some kind =>
+            match supportedCaseDiscriminatorMode? kind with
+            | some mode =>
+                cases.alts.all (supportedAlt program locals expectedResult mode)
+            | none => false
+        | none => false
+      resultKnown &&
         resultKindRefines (abiValueKind? cases.resultType) expectedResult &&
-        cases.alts.all (supportedAlt program locals expectedResult)
+        altsSupported
   | .return fvarId =>
       match findLocalKind? locals fvarId, expectedResult with
       | some actual, some expected => actual.refines expected
@@ -256,10 +270,11 @@ partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
   | .jp .. | .jmp .. => false
 
 partial def supportedAlt (program : Fir.LeanIR.ImpureProgram)
-    (locals : LocalKinds) (expectedResult : Option AbiKind) :
+    (locals : LocalKinds) (expectedResult : Option AbiKind)
+    (mode : CaseDiscriminatorMode) :
     LCNF.Alt .impure → Bool
   | .ctorAlt info code =>
-      constructorTagFitsI32 info &&
+      caseConstructorTagFits mode info &&
         supportedCode program locals expectedResult code
   | .default code => supportedCode program locals expectedResult code
   | .alt _ _ _ h => nomatch h

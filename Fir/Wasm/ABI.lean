@@ -121,6 +121,10 @@ def constructorKind (info : LCNF.CtorInfo) : AbiKind :=
 def constructorTagFitsI32 (info : LCNF.CtorInfo) : Bool :=
   decide (info.cidx < UInt32.size)
 
+/-- A scalar `UInt8` case discriminator can only denote constructor tags below `2^8`. -/
+def constructorTagFitsUInt8 (info : LCNF.CtorInfo) : Bool :=
+  decide (info.cidx < UInt8.size)
+
 /--
 Scalar literals must match exactly. The wider object-like cases preserve the
 existing hand-built fixtures tracked by

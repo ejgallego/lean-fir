@@ -569,6 +569,7 @@ theorem abiDefaultCaseCasesStep :
         (sourceObject := abiDefaultCaseTrueValue)
         (actualTag := 1) (handle := 1)
       · native_decide
+      · native_decide
       · exact abiDefaultCaseFalseBranch_adapted
       · exact fallbackChain
       · native_decide
