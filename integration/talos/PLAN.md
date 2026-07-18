@@ -919,6 +919,17 @@ fresh semantic location. Empty constructors remain on the already-proved
 tagged/immediate path. W6.1 can now package projection and tag operations
 against this postcondition before moving to W6.2 field mutation and boxing.
 
+W6.1h closes that operation boundary for mapped live constructors. The actual
+W2 semantic `getObjectField`, `getUSizeField`, and `getTag` operations now
+refine the checked concrete object-word, `UInt64`, and header-tag reads through
+`LiveHeapRel`; constructor descriptors select the ABI kind used by `ValueRel`,
+while non-constructor live cells discharge by the matching semantic fault.
+Together with the allocation theorem, this gives a compositional
+allocate-then-project correctness path for every nonempty constructor. Empty
+constructors continue to use the immediate tag encoding and require no heap
+projection. W6.1 is complete; W6.2 begins with checked field mutation and
+boxing while preserving the same heap and witness relations.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
