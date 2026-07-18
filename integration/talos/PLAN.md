@@ -1618,6 +1618,14 @@ exhaustive `LiveCellRel` consumers; the next slice can therefore add one
 structural constructor and reuse these facts throughout ownership and
 reference-count proofs.
 
+The structural audit exposed `FIR-BUG-wasm-none-closure-capture-descriptor-reserved`:
+W6.4a currently writes a reserved zero in closure `aux3`, despite W6.0
+assigning that word to the static capture-descriptor index required by
+recursive ownership. The bug is recorded before changing the executable ABI;
+the next checkpoint restores the descriptor-table contract, then closure
+ownership can enter `LiveCellRel` without using proof-only metadata at run
+time.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
