@@ -86,6 +86,18 @@ def shadowSimplifyCases (cases : LCNF.Cases .impure) : LCNF.Code .impure :=
   else
     .cases (cases.updateAlts alts)
 
+/-- Transform one alternative with a supplied recursive code transformer.
+Factoring this nonrecursive layer out makes the case-kernel proof inspectable
+without changing the shadow traversal's returned syntax. -/
+def shadowAltUsing?
+    (recurse : LCNF.Code .impure → Option (LCNF.Code .impure)) :
+    LCNF.Alt .impure → Option (LCNF.Alt .impure)
+  | .ctorAlt info body =>
+      return .ctorAlt info (← recurse body)
+  | .default body =>
+      return .default (← recurse body)
+  | .alt _ _ _ impossible => nomatch impossible
+
 /--
 Fuel-indexed, total shadow of the private recursive code traversal.  Running
 out of fuel is reported as `none`; no arbitrary syntax is returned.
@@ -98,13 +110,8 @@ def shadowCode? : Nat → LCNF.Code .impure → Option (LCNF.Code .impure)
   | fuel + 1, code =>
       match code with
       | .cases (.mk typeName resultType discr alts) => do
-          let alts ← alts.toList.mapM fun alt =>
-            match alt with
-            | .ctorAlt info body =>
-                return .ctorAlt info (← shadowCode? fuel body)
-            | .default body =>
-                return .default (← shadowCode? fuel body)
-            | .alt _ _ _ impossible => nomatch impossible
+          let alts ← alts.toList.mapM
+            (shadowAltUsing? (shadowCode? fuel))
           return shadowSimplifyCases
             (.mk typeName resultType discr alts.toArray)
       | .jp (.mk fvarId binderName params type body) continuation => do

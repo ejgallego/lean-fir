@@ -276,6 +276,231 @@ theorem shadowCode_scopedRelated
               subst target
               exact laws.del (ih continuationRun)
 
+/-- One recursively transformed alternative. Constructor metadata is
+unchanged by `shadowCode?`; only the alternative body follows the selected
+scoped relation. -/
+inductive ScopedAltRelated (relation : ScopedCodeRelation)
+    (index : ScopeIndex) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor (body : relation index left right) :
+      ScopedAltRelated relation index
+        (.ctorAlt info left) (.ctorAlt info right)
+  | default (body : relation index left right) :
+      ScopedAltRelated relation index (.default left) (.default right)
+
+abbrev ScopedAltsRelated (relation : ScopedCodeRelation)
+    (index : ScopeIndex) :=
+  ListRel (ScopedAltRelated relation index)
+
+/-- The nonrecursive case-kernel obligation. Its first premise is the exact
+successful recursive alternative traversal; its second premise exposes the
+proof relation already established for every branch. Unlike
+`ScopedCaseBoundarySound`, this interface contains no recursive proof
+obligation of its own. -/
+structure ScopedCaseKernelLaws (relation : ScopedCodeRelation) : Prop where
+  simplify : ∀ {fuel : Nat} {index : ScopeIndex} {typeName : Name}
+      {resultType : Expr} {discr : FVarId}
+      {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    sourceAlts.toList.mapM (shadowAltUsing? (shadowCode? fuel)) =
+        some targetAlts →
+    ScopedAltsRelated relation index sourceAlts.toList targetAlts →
+    relation index
+      (.cases (.mk typeName resultType discr sourceAlts))
+      (shadowSimplifyCases
+        (.mk typeName resultType discr targetAlts.toArray))
+
+/-- Successful pointwise alternative traversal lifts body relations without
+inspecting the case simplifier. -/
+theorem scopedAltsRelated_of_mapM
+    {recurse : LCNF.Code .impure → Option (LCNF.Code .impure)}
+    {relation : ScopedCodeRelation} {index : ScopeIndex}
+    {left right : List (LCNF.Alt .impure)}
+    (body : ∀ {left right}, recurse left = some right →
+      relation index left right)
+    (run : left.mapM (shadowAltUsing? recurse) = some right) :
+    ScopedAltsRelated relation index left right := by
+  induction left generalizing right with
+  | nil =>
+      simp at run
+      subst right
+      exact .nil
+  | cons alt rest ih =>
+      cases alt with
+      | ctorAlt info code =>
+          cases bodyRun : recurse code with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst right
+                  exact .cons (.ctor (body bodyRun)) (ih restRun)
+      | default code =>
+          cases bodyRun : recurse code with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst right
+                  exact .cons (.default (body bodyRun)) (ih restRun)
+      | alt _ _ _ impossible => nomatch impossible
+
+/-- Recursive shadow traversal from a genuinely local case-kernel law. This
+is the admissibility-correct replacement for trying to prove an unconditional
+case boundary from hygiene alone. -/
+theorem shadowCode_scopedRelated_of_caseKernel
+    (laws : ScopedTraversalLaws relation)
+    (caseKernel : ScopedCaseKernelLaws relation)
+    (run : shadowCode? fuel source = some target) :
+    relation index source target := by
+  induction fuel generalizing index source target with
+  | zero =>
+      cases source <;> simp [shadowCode?] at run
+      · subst target
+        exact laws.jmp index _ _
+      · subst target
+        exact laws.ret index _
+      · subst target
+        exact laws.unreach index _
+  | succ fuel ih =>
+      cases source with
+      | «let» declaration continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.letE (ih continuationRun)
+      | «fun» declaration continuation impossible => nomatch impossible
+      | jp declaration continuation =>
+          cases declaration with
+          | mk fvarId binderName params type body =>
+              simp only [shadowCode?] at run
+              cases bodyRun : shadowCode? fuel body with
+              | none => simp [bodyRun] at run
+              | some transformedBody =>
+                  cases continuationRun : shadowCode? fuel continuation with
+                  | none => simp [bodyRun, continuationRun] at run
+                  | some transformedContinuation =>
+                      simp [bodyRun, continuationRun] at run
+                      subst target
+                      exact laws.jp (ih bodyRun) (ih continuationRun)
+      | jmp fvarId args =>
+          simp [shadowCode?] at run
+          subst target
+          exact laws.jmp index fvarId args
+      | cases cases =>
+          cases cases with
+          | mk typeName resultType discr alts =>
+              simp only [shadowCode?] at run
+              cases altsRun : alts.toList.mapM
+                  (shadowAltUsing? (shadowCode? fuel)) with
+              | none => simp [altsRun] at run
+              | some transformedAlts =>
+                  simp [altsRun] at run
+                  subst target
+                  exact caseKernel.simplify altsRun
+                    (scopedAltsRelated_of_mapM
+                      (fun bodyRun => ih bodyRun) altsRun)
+      | «return» fvarId =>
+          simp [shadowCode?] at run
+          subst target
+          exact laws.ret index fvarId
+      | unreach type =>
+          simp [shadowCode?] at run
+          subst target
+          exact laws.unreach index type
+      | oset fvarId fieldIndex value continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.oset (ih continuationRun)
+      | uset fvarId fieldIndex value continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.uset (ih continuationRun)
+      | sset fvarId width offset value type continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.sset (ih continuationRun)
+      | setTag fvarId tag continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.setTag (ih continuationRun)
+      | inc fvarId amount check persistent continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.inc (ih continuationRun)
+      | dec fvarId amount check persistent objects continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.dec (ih continuationRun)
+      | del fvarId continuation =>
+          simp only [shadowCode?] at run
+          cases continuationRun : shadowCode? fuel continuation with
+          | none => simp [continuationRun] at run
+          | some transformed =>
+              simp [continuationRun] at run
+              subst target
+              exact laws.del (ih continuationRun)
+
+/-- The old recursive boundary implies the local kernel law. This direction
+does not use the pointwise branch proof; the boundary already hides it. -/
+theorem scopedCaseKernelLaws_of_boundary
+    (caseSound : ScopedCaseBoundarySound relation) :
+    ScopedCaseKernelLaws relation where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun branchRelations
+    apply caseSound fuel index (.mk typeName resultType discr sourceAlts)
+    simp [shadowCode?, altsRun]
+
+/-- Conversely, ordinary traversal closure lifts the nonrecursive kernel law
+to the universal recursive case boundary. -/
+theorem scopedCaseBoundarySound_of_kernel
+    (laws : ScopedTraversalLaws relation)
+    (caseKernel : ScopedCaseKernelLaws relation) :
+    ScopedCaseBoundarySound relation := by
+  intro fuel index cases target run
+  exact shadowCode_scopedRelated_of_caseKernel laws caseKernel run
+
+theorem scopedCaseBoundarySound_iff_kernel
+    (laws : ScopedTraversalLaws relation) :
+    ScopedCaseBoundarySound relation ↔ ScopedCaseKernelLaws relation := by
+  constructor
+  · exact scopedCaseKernelLaws_of_boundary
+  · exact scopedCaseBoundarySound_of_kernel laws
+
 /-- The old structural relation is one scope-insensitive instance of the new
 recursive traversal interface. -/
 def StructuralScopedRelation
@@ -692,6 +917,29 @@ theorem scopedCodeFactoredOnAlphaReflexive_traversalLaws :
           alphaForward := .del forwardObject factor.alphaForward
           alphaBackward := .del backwardObject factor.alphaBackward
         }⟩
+
+/-- The remaining proof input is now strictly local to
+`shadowSimplifyCases`: recursive alternative bodies and every surrounding
+constructor are discharged by the generic traversal theorem. -/
+theorem shadowCode_scopedFactored_of_caseKernel
+    (caseKernel : ScopedCaseKernelLaws
+      (ScopedCodeFactoredOnAlphaReflexive validCase))
+    (reflexive : ScopedAlphaBireflexive index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodeFactored validCase index source target :=
+  (shadowCode_scopedRelated_of_caseKernel
+    scopedCodeFactoredOnAlphaReflexive_traversalLaws caseKernel run) reflexive
+
+/-- For the structural/alpha factor relation, the universal recursive
+boundary is exactly the nonrecursive simplifier law—provided explicitly
+because neither hygiene nor an unconstrained `validCase` can imply it. -/
+theorem scopedCodeFactored_caseBoundary_iff_kernel :
+    ScopedCaseBoundarySound
+        (ScopedCodeFactoredOnAlphaReflexive validCase) ↔
+      ScopedCaseKernelLaws
+        (ScopedCodeFactoredOnAlphaReflexive validCase) :=
+  scopedCaseBoundarySound_iff_kernel
+    scopedCodeFactoredOnAlphaReflexive_traversalLaws
 
 /-- End-to-end recursive traversal theorem for structural/alpha factors. The
 universal case premise remains explicit; lexical alpha reflexivity is consumed

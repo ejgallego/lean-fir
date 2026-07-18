@@ -590,6 +590,73 @@ theorem nestedAlphaFoldScopedTraversal :
   exact scopedCodeFactoredOnAlphaReflexive_traversalLaws.setTag
     alphaFoldFactoredOnAlphaReflexive
 
+/-!
+Hygiene alone cannot justify a universal case boundary for an unconstrained
+phase predicate. An empty case table is alpha-reflexive, but declaring every
+tag valid makes its simplification to `unreach` impossible to justify through
+`CodeRel.eliminate`: there is no source arm to select.
+-/
+
+def emptyCaseTable : LCNF.Cases .impure :=
+  .mk `Empty objType c #[]
+
+def emptyCaseScopeIndex : ScopeIndex := {
+  forwardRho := {}
+  backwardRho := {}
+  sourceScope := [c]
+  targetScope := [c]
+  sourceJoins := []
+  targetJoins := []
+}
+
+def everyCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
+  True
+
+theorem emptyCaseAlphaBireflexive :
+    ScopedAlphaBireflexive emptyCaseScopeIndex (.cases emptyCaseTable) := by
+  constructor
+  · apply CodeRelated.cases
+    · exact ⟨by rfl, by rfl, by rfl⟩
+    · intro tag
+      exact .none
+  · apply CodeRelated.cases
+    · exact ⟨by rfl, by rfl, by rfl⟩
+    · intro tag
+      exact .none
+
+theorem emptyCaseShadowRun :
+    shadowCode? 1 (.cases emptyCaseTable) = some (.unreach objType) := by
+  rfl
+
+theorem emptyCaseNotFactored :
+    ¬ ScopedCodeFactored everyCaseTagValid emptyCaseScopeIndex
+      (.cases emptyCaseTable) (.unreach objType) := by
+  rintro ⟨⟨middle, structural, alphaForward, alphaBackward⟩⟩
+  have middleUnreach : ∃ type, middle = .unreach type := by
+    cases alphaForward with
+    | terminal related =>
+        cases related with
+        | unreachable => exact ⟨_, rfl⟩
+  rcases middleUnreach with ⟨type, rfl⟩
+  cases structural with
+  | aligned related => cases related
+  | eliminate cases target selected =>
+      have impossible := selected 0 trivial
+      have noSelection :
+          chooseAlt 0 emptyCaseTable.alts.toList = none := by rfl
+      rw [noSelection] at impossible
+      cases impossible
+
+/-- Regression for the missing phase premise: the proposed unconditional
+boundary is refutable in the kernel, not merely difficult to prove. -/
+theorem scopedCaseBoundaryNotUnconditional :
+    ¬ ScopedCaseBoundarySound
+      (ScopedCodeFactoredOnAlphaReflexive everyCaseTagValid) := by
+  intro boundary
+  have factored := boundary 0 emptyCaseScopeIndex emptyCaseTable
+    (.unreach objType) emptyCaseShadowRun emptyCaseAlphaBireflexive
+  exact emptyCaseNotFactored factored
+
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] []

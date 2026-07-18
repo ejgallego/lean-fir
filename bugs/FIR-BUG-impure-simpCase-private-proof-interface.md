@@ -94,8 +94,11 @@ compiler-correspondence boundary rather than adding an axiom.
 The downstream non-case traversal gap is also closed:
 `ScopedCodeFactoredOnAlphaReflexive` consumes explicit hygiene evidence and
 lifts the structural/alpha factor through every recursive non-case
-constructor. The only generic shadow obligation left is therefore the
-universal scoped case-node contract itself.
+constructor. `ScopedCaseKernelLaws` now separates successful recursive branch
+transformation from the nonrecursive `shadowSimplifyCases` step, and its
+equivalence theorem lifts that local law to the old universal boundary.
+The remaining generic shadow obligation is therefore the admissible local
+case-kernel law—not an unconditional theorem for arbitrary `validCase`.
 
 ## Semantic impact
 
@@ -128,10 +131,11 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to compiler correspondence and the universal scoped
-case contract. Downstream structural-then-alpha composition, scope-indexed
-non-case traversal, and its hygiene discipline are reusable. Once the kernels
-or graph theorems are public, prove `filterUnreachable` equal to
-`removeUnreachable`, connect `addDefaultAlt` to `ScopedCodeBifactor`, discharge
-the universal `ScopedCaseBoundarySound`, and replace executable
-actual-vs-shadow checks with a kernel correspondence theorem.
+Unresolved, but narrowed to compiler correspondence and the admissible scoped
+case-kernel contract. Downstream structural-then-alpha composition,
+scope-indexed non-case traversal, pointwise alternative traversal, and the
+kernel-to-boundary lift are reusable. Once the kernels or graph theorems are
+public, prove `filterUnreachable` equal to `removeUnreachable`, connect
+`addDefaultAlt` to `ScopedCodeBifactor` under the phase selection invariant,
+and replace executable actual-vs-shadow checks with a kernel correspondence
+theorem.

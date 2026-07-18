@@ -87,6 +87,15 @@ lists, join bodies and continuations, and all impure ownership instructions.
 `nestedAlphaFoldScopedTraversal` is the regression that lifts the
 alpha-changing case factor through a non-case parent using those generic laws.
 
+Attempting to discharge `ScopedCaseBoundarySound` without another phase
+premise exposed a smaller counterexample: take an empty case table and
+`validCase := fun _ _ => True`. The transparent simplifier returns `unreach`,
+but `CodeRel.eliminate` cannot justify any promised tag because the source has
+no selected arm. Alpha reflexivity still holds for the empty table, so hygiene
+alone cannot rule this case out. The universal theorem must therefore consume
+an explicit case-admissibility/kernel law connecting `validCase` to the
+source table and the simplifier result.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
@@ -94,7 +103,9 @@ of a compiler miscompilation. The concrete alpha-default-folding fixture is
 covered both by the composed whole-program theorem and by the new scoped
 case-node contract. Closure through surrounding recursive syntax is now
 generic under explicit alpha-reflexivity evidence. Arbitrary alpha-folding
-shadow results still require a universal scoped case-boundary proof.
+shadow results still require a scoped case-kernel law carrying both hygiene
+and the phase-specific selection/admissibility facts; the boundary is not
+valid for an unconstrained `validCase`.
 
 ## Classification and triage
 
@@ -126,6 +137,7 @@ generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 The scope-indexed case-boundary interface and concrete alpha-fold regression
 are now implemented, and explicit hygiene supplies the full non-case
 traversal-closure laws. The card stays confirmed for arbitrary recursive
-compiler traversal until every shadow case result satisfies the universal
-`ScopedCaseBoundarySound` contract. Connecting that shadow theorem to the
-actual private pass remains the separate upstream proof-interface issue.
+compiler traversal until every shadow case result satisfies the admissible
+case-kernel contract and that local contract is lifted to
+`ScopedCaseBoundarySound`. Connecting that shadow theorem to the actual
+private pass remains the separate upstream proof-interface issue.
