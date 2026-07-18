@@ -21,6 +21,12 @@ inductive MemoryError where
   | unsupportedOwnershipKind (kind : ObjectKind)
   | releaseFuelExhausted
   | reuseAllocationTooSmall (available required : Nat)
+  | unknownClosureTarget (name : Lean.Name)
+  | unknownClosureTargetId (id : UInt32)
+  | closureMetadataMismatch
+  | closureCaptureCountMismatch (kinds values : Nat)
+  | closureCaptureIndexOutOfBounds (index fixed : Nat)
+  | closureCaptureKindMismatch (expected actual : ValueType)
   deriving BEq, Repr
 
 abbrev LinearMemory := Array UInt8

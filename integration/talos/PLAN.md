@@ -1558,6 +1558,18 @@ ordinary non-unique reset, unique protocol reset, fresh empty/nonempty reuse,
 and in-place reuse all covered, W6.3's successful-operation matrix is
 complete; structured failure correspondence remains the explicit W6.5 task.
 
+W6.4a freezes the executable concrete closure ABI. Generated function order
+forms a deterministic dispatch table, while each closure header stores the
+checked `UInt32` target id, total arity, fixed-capture count, and reserved
+zero. Heterogeneous captures use the existing eight-byte `ClosureLayout` slots:
+`i32`/`f32` lanes occupy the low word with checked zero padding, and
+`i64`/`f64` lanes occupy the complete slot. `allocateClosure`,
+`readClosureMetadata`, `closureMatches`, and `projectClosureCapture` fail
+closed on unknown targets, malformed metadata, type mismatches, and bounds.
+Executable guards cover allocation, metadata recovery, a successful typed
+capture projection, and a nonmatching trampoline target. The next W6.4 slice
+adds the proof-only closure descriptor and local decoder refinement.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
