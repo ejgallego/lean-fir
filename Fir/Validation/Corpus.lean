@@ -635,6 +635,16 @@ def cases : Array Case := #[
     requiredLcnfForms := #["cases", "lit", "return"]
     requiredExecutedLcnfForms := #["cases", "lit", "return"]
     provenance := firProvenance "Boolean result from a nonempty initial heap graph" },
+  { id := "nat-list-empty-bool"
+    entry := ``Source.hasNatListElements
+    args := #[natListDatum []]
+    argSchemas := #[.seq .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.hasNatListElements [])
+    tags := #["quick", "constructor", "control-flow", "empty", "bool"]
+    requiredLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    provenance := firProvenance "Scalar false result from the empty list constructor" },
   { id := "unicode-string-roundtrip"
     entry := ``Source.idString
     args := #[.string "hello α_world_β"]
