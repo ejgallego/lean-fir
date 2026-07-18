@@ -70,7 +70,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
   have extension := allocateConstructor_nonempty_prefixExtension state result info fields
     address related.frontier arity nonempty tagFits objectFieldsFit usizeFieldsFit
       scalarBytesFit allocated
-  obtain ⟨finalFrontier, objectRelated⟩ :=
+  obtain ⟨finalFrontier, objectRelated, exactHeader⟩ :=
     allocateConstructor_nonempty_objectRel state result witness info fieldKinds fields
       semanticFields address related.frontier arity semanticArity fieldKindsSize
       fieldRelated nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
@@ -113,8 +113,15 @@ theorem allocateConstructor_nonempty_liveHeapRel
     simp [headerBytes] at payloadFits extent
     have addressEq := freshAddress
     omega
-  obtain ⟨header, headerRead, headerKind, _, headerRefCount, headerPersistent,
-      _, _, _, _⟩ := objectRelated.header
+  let header := Header.forAllocation .constructor
+    (ConstructorLayout.ofInfo info).allocationBytes false
+      (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+      (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize)
+  have headerRead : result.readLiveHeader address = .ok header := by
+    simpa [header] using exactHeader
+  have headerKind : header.kind = .constructor := rfl
+  have headerRefCount : header.refCount.toNat = 1 := rfl
+  have headerPersistent : header.persistent = false := rfl
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts result address header headerRead).1
   have witnessWellFormed := related.witnessWellFormed.bindConstructor

@@ -1058,6 +1058,24 @@ Executable guards cover immediate/shared, promoted/shared, and fresh
 heap/unique outcomes. W6.3 can now make refcount transitions concrete and
 reuse these header-level sharing facts.
 
+W6.3a starts the ownership transition boundary with checked increments.
+Direct and promoted tagged references preserve FIR's checked no-op/unchecked
+`expectedHeapReference` behavior. Ordinary heap increments decode the live
+header, ignore persistent objects, reject `UInt32` overflow as a structured
+target failure, and rewrite only the common header.
+
+The local boxed-cell theorem preserves its canonical payload decoder and
+rebuilds `LiveCellRel` at the incremented semantic count; a companion theorem
+reduces FIR's `incValue` to the same `setCell` update. This work found and fixed
+`FIR-BUG-wasm-none-constructor-refcount-frozen`: immutable constructor payload
+refinement had accidentally retained the fresh-allocation count of one.
+Allocation still returns the exact initialized header, while mutable live-cell
+refinement now owns the count equality. Executable guards cover boxed
+`1 + 2 = 3`, the resulting sharing transition, both tagged representations,
+and the checked `UInt32` overflow boundary. The next W6.3 slice generalizes
+header mutation framing to constructors and naturals before decrement,
+recursive deletion, reset, and reuse are added.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

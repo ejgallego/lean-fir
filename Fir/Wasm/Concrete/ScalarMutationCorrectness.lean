@@ -32,7 +32,7 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
             offset := byteOffset
             value := .uint64 value } :: semantic.scalarFields.filter fun old =>
               old.width != slotIndex || old.offset != byteOffset } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
       tag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
@@ -193,7 +193,7 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
           value := .uint64 value } :: semantic.scalarFields.filter fun old =>
             old.width != slotIndex || old.offset != byteOffset } := by
     refine {
-      header := ⟨header, headerReadAfter, headerKind, allocationBytes, refCount,
+      header := ⟨header, headerReadAfter, headerKind, allocationBytes,
         persistent, tag, objectCount, usizeCount, scalarCount⟩
       headerOwned := related.headerOwned
       extent := related.extent
@@ -246,7 +246,7 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
             offset := byteOffset
             value := .uint32 value } :: semantic.scalarFields.filter fun old =>
               old.width != slotIndex || old.offset != byteOffset } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
       tag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
@@ -392,7 +392,7 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
           value := .uint32 value } :: semantic.scalarFields.filter fun old =>
             old.width != slotIndex || old.offset != byteOffset } := by
     refine {
-      header := ⟨header, headerReadAfter, headerKind, allocationBytes, refCount,
+      header := ⟨header, headerReadAfter, headerKind, allocationBytes,
         persistent, tag, objectCount, usizeCount, scalarCount⟩
       headerOwned := related.headerOwned
       extent := related.extent
@@ -439,7 +439,7 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
             offset := byteOffset
             value := .uint8 value } :: semantic.scalarFields.filter fun old =>
               old.width != slotIndex || old.offset != byteOffset } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
       tag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
@@ -570,7 +570,7 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
     · rfl
   refine ⟨result, operation, ?_⟩
   refine {
-    header := ⟨header, headerReadAfter, headerKind, allocationBytes, refCount,
+    header := ⟨header, headerReadAfter, headerKind, allocationBytes,
       persistent, tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := related.headerOwned
     extent := related.extent
@@ -615,7 +615,7 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
             offset := byteOffset
             value := .uint16 value } :: semantic.scalarFields.filter fun old =>
               old.width != slotIndex || old.offset != byteOffset } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
       tag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
@@ -746,7 +746,7 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
     · rfl
   refine ⟨result, operation, ?_⟩
   refine {
-    header := ⟨header, headerReadAfter, headerKind, allocationBytes, refCount,
+    header := ⟨header, headerReadAfter, headerKind, allocationBytes,
       persistent, tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := related.headerOwned
     extent := related.extent

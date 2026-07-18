@@ -39,7 +39,7 @@ theorem ConstructorObjectRel.readTag_refines
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic) :
     readTag state address = .ok (UInt64.ofNat semantic.tag) := by
-  obtain ⟨header, headerRead, headerKind, _, _, _, tag, _, _, _⟩ := related.header
+  obtain ⟨header, headerRead, headerKind, _, _, tag, _, _, _⟩ := related.header
   have heap := (MemoryState.PrefixExtension.readLiveHeader_facts
     state address header headerRead).1
   unfold readTag

@@ -196,7 +196,11 @@ theorem allocateConstructor_nonempty_objectRel
       tag := info.cidx
       objectFields := semanticFields
       usizeFields := Array.replicate info.usize 0
-      scalarFields := [] } := by
+      scalarFields := [] } ∧
+    result.readLiveHeader address = .ok
+      (Header.forAllocation .constructor (ConstructorLayout.ofInfo info).allocationBytes
+        false (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+        (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize)) := by
   let layout := ConstructorLayout.ofInfo info
   have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
     dsimp only [layout]
@@ -289,7 +293,7 @@ theorem allocateConstructor_nonempty_objectRel
     unfold readConstructorHeader
     simp [addressHeap, exactHeader, Header.forAllocation, liftMemory]
     rfl
-  refine ⟨finalValidResult, ?_⟩
+  refine ⟨finalValidResult, ?_, by simpa [layout] using exactHeader⟩
   refine {
     header := ?_
     headerOwned := Nat.le_trans
@@ -304,7 +308,7 @@ theorem allocateConstructor_nonempty_objectRel
   · exact ⟨Header.forAllocation .constructor layout.allocationBytes false
       (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize), exactHeader,
-      rfl, allocationBytesToNat, rfl, rfl, tagToNat, objectFieldsToNat,
+      rfl, allocationBytesToNat, rfl, tagToNat, objectFieldsToNat,
       usizeFieldsToNat,
       scalarBytesToNat⟩
   · intro index kind value kindAt valueAt

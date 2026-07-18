@@ -220,6 +220,59 @@ tags are shared, while a fresh ordinary heap box is unique. -/
       | _, _, _ => false
   | _, _, _ => false
 
+/-- The first concrete ownership transition changes only the common header:
+the boxed payload remains decodable and becomes observably shared. -/
+def incrementedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← boxedUInt64Max
+  let state ← incrementReference state object 2 true
+  return (state, object)
+
+#guard match incrementedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readBoxedScalar state .uint64 object,
+          readIsShared state object with
+      | .ok header, .ok scalar, .ok shared =>
+          header.refCount == 3 && scalar == .uint64 18446744073709551615 &&
+            shared == 1
+      | _, _, _ => false
+
+/- Tagged references retain their no-ownership representation contract:
+checked increments are no-ops and unchecked increments reject them. -/
+#guard match smallTagged, promotedTagged with
+  | .ok (immediateState, immediate), .ok (promotedState, promoted) =>
+      match incrementReference immediateState immediate 1 true,
+          incrementReference promotedState promoted 1 true,
+          incrementReference immediateState immediate 1 false,
+          incrementReference promotedState promoted 1 false with
+      | .ok immediateResult, .ok promotedResult,
+          .error (.source .expectedHeapReference),
+          .error (.source .expectedHeapReference) =>
+          match readTag immediateResult immediate, readTag promotedResult promoted with
+          | .ok immediatePayload, .ok promotedPayload =>
+              immediatePayload == 42 &&
+                promotedPayload.toNat == maxImmediatePayload + 1
+          | _, _ => false
+      | _, _, _, _ => false
+  | _, _ => false
+
+/-- Install the largest representable common-header count so the next
+increment exercises the checked target-overflow boundary. -/
+def boxedUInt64MaxAtRefCountMax : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← boxedUInt64Max
+  let header ← liftMemory <| state.readLiveHeader object
+  let memory ← liftMemory <| { header with refCount := (4294967295 : UInt32) }.write
+    state.memory object
+  return ({ state with memory }, object)
+
+#guard match boxedUInt64MaxAtRefCountMax with
+  | .error _ => false
+  | .ok (state, object) =>
+      match incrementReference state object 1 true with
+      | .error (.target (.headerValueOverflow field value)) =>
+          field == "reference count" && value == UInt32.size
+      | _ => false
+
 def emptyConcreteInfo : LCNF.CtorInfo := {
   name := `Concrete.empty
   cidx := 3

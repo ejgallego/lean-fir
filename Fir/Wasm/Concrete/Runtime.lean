@@ -223,6 +223,35 @@ def readIsShared (state : MemoryState) (object : Word32) :
       return if header.persistent || header.refCount != 1 then 1 else 0
   | .sentinel | .invalid => throw (.source .expectedObject)
 
+def Header.isPromotedTag (header : Header) : Bool :=
+  header.kind == .natural && header.persistent &&
+    header.aux0 == promotedTagMarker
+
+/-- Replace one already-validated common header without changing the heap
+frontier. Callers choose the updated mutable metadata. -/
+def writeLiveHeader (state : MemoryState) (address : Word32) (header : Header) :
+    Except ConcreteError MemoryState := do
+  let memory ← liftMemory <| header.write state.memory address
+  return { state with memory }
+
+/-- Concrete nonrecursive increment. Promoted tags retain semantic tagged
+behavior even though their physical word classifies as a heap address. -/
+def incrementReference (state : MemoryState) (object : Word32)
+    (amount : Nat) (check : Bool) : Except ConcreteError MemoryState := do
+  match object.classify with
+  | .immediate =>
+      if check then return state else throw (.source .expectedHeapReference)
+  | .heap =>
+      let header ← liftMemory <| state.readLiveHeader object
+      if header.isPromotedTag then
+        if check then return state else throw (.source .expectedHeapReference)
+      else if header.persistent then
+        return state
+      else
+        let refCount ← uint32Field "reference count" (header.refCount.toNat + amount)
+        writeLiveHeader state object { header with refCount }
+  | .sentinel | .invalid => throw (.source .expectedObject)
+
 /-- Concrete FIR boxing. The allocation choice follows the source semantic
 tagged limit, not the narrower wasm32 immediate limit. The existing
 `encodeTagged` refinement owns the intermediate persistent representation. -/
