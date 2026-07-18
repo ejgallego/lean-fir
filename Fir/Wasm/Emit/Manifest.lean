@@ -184,9 +184,9 @@ def heapObjectJson : HeapObject → Except String Json
         ("scalarFields", Json.arr (object.scalarFields.toArray.map scalarFieldJson))]
   | .string value => return Json.mkObj [("kind", "string"), ("value", value)]
   | .natural value => return Json.mkObj [("kind", "natural"), ("value", s!"{value}")]
+  | .integer value => return Json.mkObj [("kind", "integer"), ("value", s!"{value}")]
   | .closure .. => throw "closure objects are outside the A0 initial-runtime contract"
   | .boxed .. => throw "boxed objects are outside the A0 initial-runtime contract"
-  | .integer .. => throw "integer objects are outside the A0 initial-runtime contract"
   | .byteArray .. => throw "byte-array objects are outside the A0 initial-runtime contract"
   | .opaque .. => throw "opaque objects are outside the A0 initial-runtime contract"
 

@@ -117,6 +117,8 @@ function runtimeHeapObject(object) {
       return { kind: "string", value: object.value };
     case "natural":
       return { kind: "natural", value: BigInt(object.value) };
+    case "integer":
+      return { kind: "integer", value: BigInt(object.value) };
     default:
       throw new Error(`unsupported initial-runtime heap object: ${object.kind}`);
   }

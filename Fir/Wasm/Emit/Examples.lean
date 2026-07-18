@@ -188,4 +188,6 @@ def w5ManifestOperations : Array RuntimeOp := #[
   | .error _ => true
   | .ok _ => false
 
+#guard (Fir.Wasm.Emit.Manifest.heapObjectJson (.integer (-2147483649))).isOk
+
 end Fir.Wasm.Emit.Examples

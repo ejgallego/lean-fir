@@ -783,7 +783,10 @@ Compiler-generated direct calls, captured and underapplied closures, recursive
 empty and traversal paths, and an exact `Nat.add` external now run in V8 as
 well.  A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
-through the semantic host.  The independent artifact corpus separately compares external
+through the semantic host.  Signed `Int` identity programs cover positive and
+negative immediates, both exact 32-bit boundaries, and the first positive and
+negative values represented by heap integer objects.  The independent artifact
+corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Large odd naturals remain excluded from this adapter because the version-1
 validation protocol encodes `Nat` as an inexact JSON number; the limitation is

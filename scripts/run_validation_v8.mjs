@@ -32,6 +32,25 @@ function naturalValue(host, value, context) {
   return object.value;
 }
 
+function integerValue(host, value, context) {
+  if (value.kind === "tagged") {
+    assert.ok(value.payload >= 0n && value.payload <= 0xffffffffn,
+      `${context} immediate integer payload is out of range`);
+    return BigInt.asIntN(32, value.payload);
+  }
+  assert.equal(value.kind, "heap", `${context} must be a tagged or heap integer`);
+  const object = host.liveCell(value.location).object;
+  assert.equal(object.kind, "integer", `${context} heap object must be an integer`);
+  return object.value;
+}
+
+function exactJsonInteger(value, context) {
+  const result = Number(value);
+  assert.ok(Number.isSafeInteger(result) && BigInt(result) === value,
+    `${context} cannot be represented exactly by the validation JSON protocol`);
+  return result;
+}
+
 const validationExternalRegistry = {
   "Nat.add": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Nat.add external arity mismatch");
@@ -62,6 +81,10 @@ function semanticDatum(schema, value, host, context) {
       case "nat":
         return {
           nat: { value: exactJsonNatural(naturalValue(host, value, context), context) },
+        };
+      case "int":
+        return {
+          int: { value: exactJsonInteger(integerValue(host, value, context), context) },
         };
       case "string": {
         assert.equal(value.kind, "heap", `${context} must be a heap string`);

@@ -27,6 +27,9 @@ validate-v8:
 		--case uint32-roundtrip --case uint64-roundtrip --case usize-roundtrip \
 		--case nat-list-nonempty --case nat-list-nonempty-bool \
 		--case nat-list-empty-bool --case unicode-string-roundtrip \
+		--case int-positive-roundtrip --case int-negative-roundtrip \
+		--case int-immediate-max --case int-immediate-min \
+		--case int-heap-positive-boundary --case int-heap-negative-boundary \
 		--plan validation-plans/native-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \
