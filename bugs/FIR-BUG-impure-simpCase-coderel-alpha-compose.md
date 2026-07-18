@@ -31,6 +31,7 @@ From a clean checkout:
 
 ```sh
 lake build Fir.LeanIR.Passes.SimpCaseExamples
+lake build Fir.LeanIR.Passes.SimpCaseAlphaBridge
 lake build Fir.LeanIR.Passes.SimpCaseCompilerBridge
 ```
 
@@ -58,14 +59,17 @@ to `alphaLeft`, even though `CodeRelated` and `CodeEquivalentAt` do.
 `alphaFoldTrueCodeEquivalent` closes the local observational proof. The actual
 pass and the transparent shadow both produce `alphaFoldExpected`.
 
-`alphaFoldComposedCorrect` now closes the same fixture at whole-program scope.
-It factors the result through `alphaFoldIntermediateProgram`: recursive
-`CodeRel` stuttering replaces the selected source cases with a default holding
-`alphaRight`, then the program-aware alpha bisimulation renames that default
-to `alphaLeft`. The generic compiler traversal theorem still reduces arbitrary
-results to `CaseBoundarySound`; it cannot instantiate that premise directly
-because its result relation remains `CodeRel` rather than the semantic
-composition.
+`SimpCaseAlphaBridge.StructuralThenAlphaPrograms` now packages this factorization
+at whole-program scope. `alphaFoldComposedCorrect` instantiates the reusable
+theorem through `alphaFoldIntermediateProgram`: recursive `CodeRel` stuttering
+replaces the selected source cases with a default holding `alphaRight`, then
+the program-aware alpha bisimulation renames that default to `alphaLeft`.
+
+`ShadowThenAlphaPrograms` additionally lifts any transparent traversal run to
+the same theorem while retaining `CaseBoundarySound` as an explicit field.
+The traversal theorem still cannot instantiate that premise directly for an
+alpha-default fold: `CaseBoundarySound` has no declaration-local variable or
+join scopes with which to state `AlphaEqv.CodeRelated`.
 
 ## Semantic impact
 
@@ -83,11 +87,11 @@ as `fir-semantics`.
 
 ## Workaround
 
-Keep `CaseBoundarySound` explicit for the generic shadow theorem and factor
-concrete alpha folds through a structural intermediate plus
-`ProgramsBirelated`. Continue to compare the actual pass with the pinned
-transparent traversal shadow. Do not weaken `CodeRel` or add a trusted alpha
-constructor.
+Use `StructuralThenAlphaPrograms` for proof-produced structural intermediates,
+and `ShadowThenAlphaPrograms` when the transparent shadow itself produces that
+intermediate. Keep `CaseBoundarySound` explicit and continue to compare the
+actual pass with the pinned traversal shadow. Do not weaken `CodeRel` or add a
+trusted alpha constructor.
 
 ## Upstream tracking
 
@@ -95,13 +99,13 @@ none
 
 ## Resolution and regression
 
-Partially resolved. `ProgramsRelated` now relates named declarations across
+Partially resolved. `ProgramsRelated` relates named declarations across
 distinct programs, including partial-application arities and external ABIs;
 its bidirectional machine simulation proves whole-program observational
-equivalence. `alphaFoldComposedCorrect` composes that theorem with recursive
-stuttering and is the permanent whole-program regression.
+equivalence. `SimpCaseAlphaBridge` makes structural-then-alpha composition
+generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
-The card stays confirmed until the generic `CaseBoundarySound` interface is
-generalized to a relation closed under structural stuttering followed by
-alpha equivalence, so arbitrary shadow results can use the same composition
-without a fixture-specific intermediate.
+The card stays confirmed for direct compiler traversal. Closing it requires a
+scope-indexed case-boundary interface (or an upstream transformation graph)
+that can justify the alpha edge produced inside the private recursive pass;
+the scope-free `CaseBoundarySound` statement cannot safely express that edge.

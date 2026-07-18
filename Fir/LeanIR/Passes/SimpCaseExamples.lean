@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
-import Fir.LeanIR.Passes.SimpCaseCompilerBridge
+import Fir.LeanIR.Passes.SimpCaseAlphaBridge
 import Fir.LeanIR.Passes.SimpCaseCorrectness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
@@ -13,6 +13,7 @@ open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseAlphaBridge
 open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseCorrectness
 open Fir.LeanIR.Passes.NonLockstep.Structural
@@ -588,16 +589,25 @@ theorem alphaFoldAlphaCorrect :
       alphaFoldIntermediateProgram alphaFoldAfterProgram alphaFoldEntries :=
   samePhaseCorrect_of_programsBirelated alphaFoldAlphaProgramsBirelated
 
-/-- The recursive stuttering theorem and the cross-program alpha theorem
-compose to close the alpha-default-folding fixture at whole-program scope. -/
+def alphaFoldStructuralThenAlpha :
+    StructuralThenAlphaPrograms alphaFoldValidCase
+      alphaFoldBeforeProgram alphaFoldAfterProgram := {
+  middle := alphaFoldIntermediateProgram
+  structural := alphaFoldStructuralProgramsRelated
+  alpha := alphaFoldAlphaProgramsBirelated
+}
+
+/-- The reusable structural/alpha compiler boundary closes alpha-default
+folding at whole-program scope. -/
 theorem alphaFoldComposedCorrect :
     SamePhaseCorrectOn (Impure.semantics externals)
       alphaFoldBeforeProgram alphaFoldAfterProgram alphaFoldEntries
       (ReachablyReadyAdmissible externals alphaFoldValidCase
         alphaFoldBeforeProgram alphaFoldIntermediateProgram) := by
   intro entry member args admissible observation
-  exact (alphaFoldStructuralCorrect entry member args admissible observation).trans
-    (alphaFoldAlphaCorrect entry member args observation)
+  exact structuralThenAlphaSamePhaseCorrectOn
+    (externals := externals) (entries := alphaFoldEntries)
+    alphaFoldStructuralThenAlpha entry member args admissible observation
 
 def nestedInnerLeftCases : LCNF.Cases .impure :=
   .mk ``Bool objType c #[

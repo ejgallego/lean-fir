@@ -77,6 +77,12 @@ pass with that shadow over the rewrite fixtures, a nested closed program, and
 an array spanning every impure `Code` constructor. The missing public
 transformation graph is the remaining link between those facts.
 
+`SimpCaseAlphaBridge` now composes a proved structural intermediate with
+whole-program bidirectional alpha equivalence, and offers the same corollary
+for a transparent-shadow run. This closes the semantic composition layer
+without pretending to prove that Lean's private traversal produced the
+intermediate. The upstream correspondence boundary therefore remains explicit.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -108,8 +114,10 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to one case-node contract. Once the kernels or graph
-theorems are public, prove `filterUnreachable` equal to `removeUnreachable`,
-connect `addDefaultAlt` to bidirectional alpha equivalence, discharge
-`CaseBoundarySound`, and replace the executable actual-vs-shadow check with a
+Unresolved, but narrowed to one case-node contract. The downstream
+structural-then-alpha program composition is now reusable. Once the kernels or
+graph theorems are public, prove `filterUnreachable` equal to
+`removeUnreachable`, connect `addDefaultAlt` to the scope-indexed alpha
+relation, discharge `CaseBoundarySound` (or replace it with a correspondingly
+indexed boundary), and replace the executable actual-vs-shadow check with a
 kernel correspondence theorem.
