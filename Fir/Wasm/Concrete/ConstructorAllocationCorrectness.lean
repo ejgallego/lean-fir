@@ -310,7 +310,8 @@ theorem allocateConstructor_nonempty_objectRel
   · exact ⟨Header.forAllocation .constructor layout.allocationBytes false
       (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize), exactHeader,
-      rfl, allocationBytesToNat, rfl, tagToNat, objectFieldsToNat,
+      rfl, (by simpa [layout, Header.forAllocation] using
+        Nat.le_of_eq allocationBytesToNat.symm), rfl, tagToNat, objectFieldsToNat,
       usizeFieldsToNat,
       scalarBytesToNat⟩
   · intro index kind value kindAt valueAt

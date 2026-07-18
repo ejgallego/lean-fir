@@ -15,7 +15,8 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
   header : ∃ header,
     state.readLiveHeader address = .ok header ∧
     header.kind = .constructor ∧
-    header.allocationBytes.toNat = (ConstructorLayout.ofInfo info).allocationBytes ∧
+    (ConstructorLayout.ofInfo info).allocationBytes ≤
+      header.allocationBytes.toNat ∧
     header.persistent = false ∧
     header.aux0.toNat = semantic.tag ∧
     header.aux1.toNat = info.size ∧

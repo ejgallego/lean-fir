@@ -132,15 +132,48 @@ theorem allocateConstructor_nonempty_liveHeapRel
   have objectRelatedNext := objectRelated.witnessExtension witnessExtension
   obtain ⟨_, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts result address header headerRead
+  let layout := ConstructorLayout.ofInfo info
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa [target, layout] using ConstructorLayout.ofInfo_allocation_aligned info
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  obtain ⟨rawState, rawAllocation, _, _, _⟩ :=
+    MemoryState.allocateObject_header state middle .constructor
+      (layout.allocationBytes - headerBytes) false
+      (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+      (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize) address (by
+        simpa [layout] using objectAllocation)
+  have allocationPost := MemoryState.allocate_spec state rawState
+    (align8 (headerBytes + (layout.allocationBytes - headerBytes))) address
+      rawAllocation
+  have layoutLt : layout.allocationBytes < UInt32.size := by
+    have endWithin := allocationPost.endWithinAddressSpace
+    have allocatedBytesEq :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) =
+          layout.allocationBytes := by
+      rw [align8_align8, allocationEq]
+    have nonzero : address.value ≠ 0 := by
+      intro zero
+      have addressClass := allocationPost.addressClass
+      simp [Word32.classify, zero] at addressClass
+    have allocatedLt :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) <
+          wordModulus := by omega
+    rw [allocatedBytesEq] at allocatedLt
+    simpa [wordModulus] using allocatedLt
+  have headerCapacity : header.allocationBytes.toNat = layout.allocationBytes := by
+    simpa [header, layout, Header.forAllocation] using
+      UInt32.toNat_ofNat_of_lt' layoutLt
   have newExtent :
       address.value + header.allocationBytes.toNat ≤ result.heapCursor := by
-    obtain ⟨objectHeader, objectHeaderRead, _, allocationBytes, _, _, _, _, _⟩ :=
-      objectRelatedNext.header
-    rw [headerRead] at objectHeaderRead
-    have headerEq := Except.ok.inj objectHeaderRead
-    subst objectHeader
-    rw [allocationBytes]
-    exact objectRelatedNext.extent
+    rw [headerCapacity]
+    simpa [layout] using objectRelatedNext.extent
   have newRegion : ∃ newHeader,
       Header.read result.memory address = .ok newHeader ∧
       headerBytes ≤ newHeader.allocationBytes.toNat ∧

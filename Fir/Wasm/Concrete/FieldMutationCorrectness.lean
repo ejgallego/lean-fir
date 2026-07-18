@@ -38,9 +38,13 @@ theorem ConstructorObjectRel.writeUSizeField
   have writeInBounds : offset + 7 < state.memory.size := by
     have layoutBound := align8_ge
       (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
-    rw [allocationBytes] at extentInMemory
+    have layoutInMemory :
+        address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
+          state.memory.size :=
+      Nat.le_trans (Nat.add_le_add_left allocationBytes address.value)
+        extentInMemory
     rw [offsetEq]
-    simp [ConstructorLayout.ofInfo, target] at extentInMemory layoutBound ⊢
+    simp [ConstructorLayout.ofInfo, target] at layoutInMemory layoutBound ⊢
     omega
   obtain ⟨middle, lowWrite, middleSize, _, _, _, _, _⟩ :=
     LinearMemory.writeUInt32_spec state.memory offset value.toUInt32 (by omega)

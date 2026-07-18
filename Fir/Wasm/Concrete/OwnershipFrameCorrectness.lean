@@ -16,6 +16,16 @@ structure MemoryState.AllocationFrame (before after : MemoryState)
     after.memory.readByte (address.value + offset) =
       before.memory.readByte (address.value + offset)
 
+/-- A complete physical-allocation frame also frames every smaller logical
+prefix rooted at the same address. -/
+theorem MemoryState.AllocationFrame.shrink
+    {before after : MemoryState} {address : Word32} {large small : Nat}
+    (frame : before.AllocationFrame after address large)
+    (fits : small ≤ large) :
+    before.AllocationFrame after address small := by
+  exact ⟨frame.cursor, frame.memorySize,
+    fun offset within => frame.readByte offset (Nat.lt_of_lt_of_le within fits)⟩
+
 /-- A header write produces an allocation frame for every allocation interval
 disjoint from the complete target interval. -/
 theorem MemoryState.AllocationFrame.ofHeaderWrite
@@ -351,8 +361,13 @@ theorem ConstructorObjectRel.allocationFrame
     MemoryState.PrefixExtension.readLiveHeader_facts before address header headerRead
   have layoutMinimum : headerBytes ≤
       (ConstructorLayout.ofInfo info).allocationBytes := by
-    rw [← allocationBytes]
-    exact minimum
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+        info.ssize)
+    simpa [ConstructorLayout.ofInfo, target] using
+      Nat.le_trans (by omega : headerBytes ≤
+        headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+          info.ssize) aligned
   have headerAfter : after.readLiveHeader address = .ok header := by
     rw [frame.readLiveHeader layoutMinimum]
     exact headerRead
@@ -799,8 +814,7 @@ theorem LiveCellRel.allocationFrame
       subst objectHeader
       have objectFrame : before.AllocationFrame after address
           (ConstructorLayout.ofInfo info).allocationBytes := by
-        rw [← allocationBytes]
-        exact frame
+        exact frame.shrink allocationBytes
       have headerAfter : after.readLiveHeader address = .ok actualHeader := by
         rw [frame.readLiveHeader minimum]
         exact liveHeaderRead

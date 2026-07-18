@@ -441,6 +441,31 @@ def reusedMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
             field.value == 27 && usize == 0 && scalar == 0
       | _, _, _, _, _ => false
 
+def smallerReuseInfo : LCNF.CtorInfo := {
+  name := `Concrete.smallerReuse
+  cidx := 12
+  size := 1
+  usize := 0
+  ssize := 0 }
+
+/- Shrinking reuse changes the active constructor layout while retaining the
+complete old physical allocation capacity for spatial decoding. -/
+#guard match resetMixedConstructor with
+  | .error _ => false
+  | .ok (state, token) =>
+      match reuseObject state token smallerReuseInfo true
+          #[Word32.encodeImmediate 15 (by decide)] with
+      | .error _ => false
+      | .ok (result, object) =>
+          object == token &&
+            match result.readLiveHeader object,
+                readObjectField result object 0 with
+            | .ok header, .ok field =>
+                header.allocationBytes == 56 && header.aux0 == 12 &&
+                  header.aux1 == 1 && header.aux2 == 0 && header.aux3 == 0 &&
+                  field.value == 31
+            | _, _ => false
+
 #guard match reuseObject MemoryState.initial Word32.zero mixedConstructorInfo false
     #[Word32.encodeImmediate 17 (by decide)] with
   | .ok (state, object) =>

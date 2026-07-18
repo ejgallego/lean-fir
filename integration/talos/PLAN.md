@@ -1404,6 +1404,16 @@ The composed frontier theorem carries `FrontierInvariant` through all three
 writes. The next slice lifts this exact transaction through the descriptor
 and reset-token protocol relations.
 
+W6.3ai separates a reused constructor's active layout from its retained
+physical allocation capacity. The invariant discrepancy is recorded and
+resolved by `FIR-BUG-wasm-none-reuse-retained-capacity-relation`:
+`ConstructorObjectRel` now requires the active `ConstructorLayout` to fit the
+decoded header capacity rather than equal it. The complete retained extent
+remains owned by `LiveHeapRel.descriptorRegion`, and allocation frames may be
+restricted to the smaller logical prefix. A strict shrinking-reuse guard
+checks that new metadata and fields decode while the old 56-byte capacity is
+preserved. This is the capacity model required by the reset-token protocol.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

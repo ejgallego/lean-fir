@@ -47,8 +47,12 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
   have writeInBounds : offset + 7 < state.memory.size := by
     have layoutBound := align8_ge
       (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
-    rw [allocationBytes] at extentInMemory
-    simp [ConstructorLayout.ofInfo, target] at extentInMemory
+    have layoutInMemory :
+        address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
+          state.memory.size :=
+      Nat.le_trans (Nat.add_le_add_left allocationBytes address.value)
+        extentInMemory
+    simp [ConstructorLayout.ofInfo, target] at layoutInMemory
     simp [target] at layoutBound
     dsimp [offset]
     rw [slotIndexEq]
@@ -262,8 +266,12 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
   have writeInBounds : offset + 3 < state.memory.size := by
     have layoutBound := align8_ge
       (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
-    rw [allocationBytes] at extentInMemory
-    simp [ConstructorLayout.ofInfo, target] at extentInMemory
+    have layoutInMemory :
+        address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
+          state.memory.size :=
+      Nat.le_trans (Nat.add_le_add_left allocationBytes address.value)
+        extentInMemory
+    simp [ConstructorLayout.ofInfo, target] at layoutInMemory
     simp [target] at layoutBound
     dsimp [offset]
     rw [slotIndexEq]
@@ -456,8 +464,12 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
   have writeInBounds : offset < state.memory.size := by
     have layoutBound := align8_ge
       (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
-    rw [allocationBytes] at extentInMemory
-    simp [ConstructorLayout.ofInfo, target] at extentInMemory
+    have layoutInMemory :
+        address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
+          state.memory.size :=
+      Nat.le_trans (Nat.add_le_add_left allocationBytes address.value)
+        extentInMemory
+    simp [ConstructorLayout.ofInfo, target] at layoutInMemory
     simp [target] at layoutBound
     dsimp [offset]
     rw [slotIndexEq]
@@ -633,8 +645,12 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
   have writeInBounds : offset + 1 < state.memory.size := by
     have layoutBound := align8_ge
       (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
-    rw [allocationBytes] at extentInMemory
-    simp [ConstructorLayout.ofInfo, target] at extentInMemory
+    have layoutInMemory :
+        address.value + (ConstructorLayout.ofInfo info).allocationBytes ≤
+          state.memory.size :=
+      Nat.le_trans (Nat.add_le_add_left allocationBytes address.value)
+        extentInMemory
+    simp [ConstructorLayout.ofInfo, target] at layoutInMemory
     simp [target] at layoutBound
     dsimp [offset]
     rw [slotIndexEq]
