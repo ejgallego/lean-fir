@@ -35,23 +35,22 @@ theorem MemoryState.initial_frontierInvariant :
 are zero by construction. -/
 theorem LinearMemory.growToFit_zero_from (memory : LinearMemory)
     (oldFrontier requiredBytes : Nat)
-    (frontierLe : oldFrontier ≤ requiredBytes)
     (zeroFrom : ∀ address, oldFrontier ≤ address →
       address < memory.size → memory[address]? = some 0) :
-    ∀ address, requiredBytes ≤ address →
+    ∀ address, oldFrontier ≤ address →
       address < (memory.growToFit requiredBytes).size →
       (memory.growToFit requiredBytes)[address]? = some 0 := by
-  intro address afterRequired inBounds
+  intro address afterFrontier inBounds
   unfold LinearMemory.growToFit at inBounds ⊢
   split
   next enough =>
     simp only [if_pos enough] at inBounds ⊢
-    exact zeroFrom address (by omega) inBounds
+    exact zeroFrom address afterFrontier inBounds
   next notEnough =>
     simp only [if_neg notEnough] at inBounds ⊢
     by_cases inOld : address < memory.size
     · rw [Array.getElem?_append, if_pos inOld]
-      exact zeroFrom address (by omega) inOld
+      exact zeroFrom address afterFrontier inOld
     · rw [Array.getElem?_append, if_neg inOld, Array.getElem?_replicate]
       rw [if_pos (by
         simp only [Array.size_append, Array.size_replicate] at inBounds
@@ -87,7 +86,7 @@ theorem MemoryState.FrontierInvariant.allocate
   · intro byte afterCursor inBounds
     rw [memoryEq]
     apply LinearMemory.growToFit_zero_from state.memory state.heapCursor
-      result.heapCursor frontierLe valid.unusedZero byte afterCursor
+      result.heapCursor valid.unusedZero byte (Nat.le_trans frontierLe afterCursor)
     simpa [memoryEq] using inBounds
 
 /-- Writing a header wholly inside the allocated prefix preserves alignment,
@@ -152,5 +151,61 @@ theorem MemoryState.FrontierInvariant.allocateObject
     cases result
     simp_all
   simpa [stateEq] using finalValid
+
+/-- Before kind-specific payload writers run, every byte after the installed
+header and before the new allocation end is still zero. -/
+theorem MemoryState.FrontierInvariant.allocateObject_payload_zero
+    {state result : MemoryState} {kind : ObjectKind} {payloadBytes : Nat}
+    {persistent : Bool} {aux0 aux1 aux2 aux3 : UInt32} {address : Word32}
+    (valid : state.FrontierInvariant)
+    (allocated : state.allocateObject kind payloadBytes persistent
+      aux0 aux1 aux2 aux3 = .ok (result, address)) :
+    ∀ byte,
+      address.value + headerBytes ≤ byte →
+      byte < address.value + align8 (headerBytes + payloadBytes) →
+      result.memory[byte]? = some 0 := by
+  obtain ⟨middle, allocateResult, headerWrite, _, _⟩ :=
+    MemoryState.allocateObject_header state result kind payloadBytes persistent
+      aux0 aux1 aux2 aux3 address allocated
+  have allocationPost := MemoryState.allocate_spec state middle
+    (align8 (headerBytes + payloadBytes)) address allocateResult
+  have oldCursorAligned : align8 state.heapCursor = state.heapCursor := by
+    exact align8_eq_of_mod_eq_zero state.heapCursor (by
+      simpa [target] using valid.cursorAligned)
+  have allocationAligned :
+      align8 (align8 (headerBytes + payloadBytes)) =
+        align8 (headerBytes + payloadBytes) := by simp
+  have grownZero : ∀ byte, state.heapCursor ≤ byte →
+      byte < middle.memory.size → middle.memory[byte]? = some 0 := by
+    rw [allocationPost.memory]
+    exact LinearMemory.growToFit_zero_from state.memory state.heapCursor
+      (align8 state.heapCursor + align8 (align8 (headerBytes + payloadBytes)))
+      valid.unusedZero
+  have headerInBounds : address.value + headerBytes ≤ middle.memory.size := by
+    have endInBounds := allocationPost.endInBounds
+    rw [allocationAligned] at endInBounds
+    have minimum := align8_ge (headerBytes + payloadBytes)
+    omega
+  have finalSize := Header.write_preserves_size middle.memory result.memory address
+    (Header.forAllocation kind (align8 (headerBytes + payloadBytes)) persistent
+      aux0 aux1 aux2 aux3) headerInBounds headerWrite
+  intro byte afterHeader beforeEnd
+  have afterOldCursor : state.heapCursor ≤ byte := by
+    rw [allocationPost.addressValue, oldCursorAligned] at afterHeader
+    omega
+  have middleInBounds : byte < middle.memory.size := by
+    have endInBounds := allocationPost.endInBounds
+    rw [allocationAligned] at endInBounds
+    omega
+  have middleZero := grownZero byte afterOldCursor middleInBounds
+  have framed := Header.readByte_of_write_eq_ok_other middle.memory result.memory
+    address (Header.forAllocation kind (align8 (headerBytes + payloadBytes))
+      persistent aux0 aux1 aux2 aux3) byte headerInBounds headerWrite (.inr afterHeader)
+  cases resultByte : result.memory[byte]? with
+  | none => simp [LinearMemory.readByte, resultByte, middleZero] at framed
+  | some value =>
+      simp [LinearMemory.readByte, resultByte, middleZero] at framed
+      subst value
+      rfl
 
 end Fir.Wasm.Concrete

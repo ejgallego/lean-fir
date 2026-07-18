@@ -65,11 +65,18 @@ def readTag (state : MemoryState) (word : Word32) : Except ConcreteError UInt64 
         throw (.source .expectedConstructor)
   | .sentinel | .invalid => throw (.source .expectedConstructor)
 
-private def writeObjectFields (memory : LinearMemory) (base index : Nat) :
+/-- Address of one eight-byte constructor object slot. -/
+def objectFieldAddress (base index : Nat) : Nat :=
+  base + headerBytes + target.semanticSlotBytes * index
+
+/-- Install constructor object words and their required zero high padding.
+This remains public so the concrete-correctness layer can state exact payload
+postconditions at the runtime operation boundary. -/
+def writeObjectFields (memory : LinearMemory) (base index : Nat) :
     List Word32 → Except MemoryError LinearMemory
   | [] => .ok memory
   | field :: rest => do
-      let offset := base + headerBytes + target.semanticSlotBytes * index
+      let offset := objectFieldAddress base index
       let memory ← memory.writeWord32 offset field
       let memory ← memory.writeUInt32 (offset + 4) 0
       writeObjectFields memory base (index + 1) rest

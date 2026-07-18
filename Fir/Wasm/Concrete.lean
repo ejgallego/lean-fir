@@ -5,4 +5,5 @@ import Fir.Wasm.Concrete.HeaderCorrectness
 import Fir.Wasm.Concrete.AllocationCorrectness
 import Fir.Wasm.Concrete.FrontierCorrectness
 import Fir.Wasm.Concrete.Runtime
+import Fir.Wasm.Concrete.ObjectFieldsCorrectness
 import Fir.Wasm.Concrete.HeapRefinement
