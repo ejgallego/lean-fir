@@ -175,6 +175,20 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
               tag == 3 && field.value == 23 && usize == 77
           | _, _, _ => false
 
+#guard match concreteMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      -- Lean 4.32 emits the total fixed-slot count as the scalar operand.
+      match writeScalarUInt64Field state object 2 0 66 with
+      | .error _ => false
+      | .ok result =>
+          match readScalarUInt64Field result object 2 0,
+              readTag result object, readObjectField result object 0,
+              readUSizeField result object 0 with
+          | .ok scalar, .ok tag, .ok field, .ok usize =>
+              scalar == 66 && tag == 3 && field.value == 23 && usize == 0
+          | _, _, _, _ => false
+
 #guard match allocateNatural MemoryState.initial
     (Fir.LeanIR.Impure.maxTaggedPayload + 1) with
   | .error _ => false

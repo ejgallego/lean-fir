@@ -954,6 +954,16 @@ mixed-constructor regression checks the same frame. During this slice,
 hand-written scalar fixture uses operand `size` where Lean 4.32 emits
 `size + usize`; concrete scalar work follows the compiler-shaped contract.
 
+W6.2c adds the compiler-shaped packed-scalar address boundary and the first
+typed scalar mutation operation. `writeScalarUInt64Field` requires the emitted
+fixed-slot operand `size + usize`, validates the byte range against `ssize`,
+and performs one checked little-endian write. Its local correctness theorem
+proves exact `UInt64` readback while framing the constructor tag and every
+object and `USize` projection. The executable mixed-constructor regression
+uses operand `2`, retaining the discrepancy above as a visible guard against
+the handwritten operand `1`. Packaging packed bytes as typed semantic scalar
+fields, then boxing and unboxing those fields, is the next W6.2 slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

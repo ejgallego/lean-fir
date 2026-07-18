@@ -165,6 +165,29 @@ def writeUSizeField (state : MemoryState) (object : Word32) (index : Nat)
   let memory ← liftMemory <| state.memory.writeUInt64 offset value
   return { state with memory }
 
+/-- Validate a compiler-shaped packed scalar address. The first operand is
+the number of fixed semantic slots, not the scalar type width. -/
+def scalarFieldAddress (object : Word32) (header : Header)
+    (slotIndex byteOffset bytes : Nat) : Except ConcreteError Nat := do
+  unless slotIndex = header.aux1.toNat + header.aux2.toNat do
+    throw (.source (.scalarFieldMissing slotIndex byteOffset))
+  unless byteOffset + bytes ≤ header.aux3.toNat do
+    throw (.source (.scalarFieldMissing slotIndex byteOffset))
+  return object.value + headerBytes + target.semanticSlotBytes * slotIndex + byteOffset
+
+def readScalarUInt64Field (state : MemoryState) (object : Word32)
+    (slotIndex byteOffset : Nat) : Except ConcreteError UInt64 := do
+  let header ← readConstructorHeader state object
+  let address ← scalarFieldAddress object header slotIndex byteOffset 8
+  liftMemory <| state.memory.readUInt64 address
+
+def writeScalarUInt64Field (state : MemoryState) (object : Word32)
+    (slotIndex byteOffset : Nat) (value : UInt64) : Except ConcreteError MemoryState := do
+  let header ← readConstructorHeader state object
+  let address ← scalarFieldAddress object header slotIndex byteOffset 8
+  let memory ← liftMemory <| state.memory.writeUInt64 address value
+  return { state with memory }
+
 partial def naturalLimbs (value : Nat) : List UInt64 :=
   if value < UInt64.size then
     [UInt64.ofNat value]
