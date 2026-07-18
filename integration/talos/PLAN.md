@@ -1488,6 +1488,14 @@ The resulting concrete and semantic intermediate states satisfy strict
 regions, disjointness, non-target cells, and promoted tags preserved. Existing
 verified decrement refinement can now drive the released-child fold.
 
+W6.3as connects that intermediate relation to reset's exact child traversals.
+`readOwnedPrefix` proves the concrete `List.range count` snapshot corresponds
+in order to FIR's `objectFields.extract 0 count`, retaining an ownership
+relation at each slot. `foldlM_public_refines` then composes the public checked
+concrete decrement with FIR's public `decValueOnce` over those lists, carrying
+`LiveHeapRel` through every successful step. The remaining unique-reset proof
+is now operation decomposition and recomposition around these boundaries.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

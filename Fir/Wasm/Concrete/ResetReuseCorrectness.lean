@@ -733,6 +733,143 @@ theorem LiveHeapRel.writeObjectFields_resetPrefix
       targetAfter protocolDescriptorRegion protocolDescriptorDisjoint cellFrame
         promotedFrame
 
+/-- Ownership correspondence composes across adjacent released prefixes. -/
+theorem OwnershipValuesRel.append
+    {witness : RefinementWitness} {leftWords rightWords : List Word32}
+    {leftValues rightValues : List Value}
+    (left : OwnershipValuesRel witness leftWords leftValues)
+    (right : OwnershipValuesRel witness rightWords rightValues) :
+    OwnershipValuesRel witness (leftWords ++ rightWords)
+      (leftValues ++ rightValues) := by
+  induction left with
+  | nil => simpa using right
+  | cons head tail ih =>
+      simpa using OwnershipValuesRel.cons head ih
+
+/-- The concrete prefix snapshot performed by reset returns words in the same
+order as FIR's semantic `extract 0 count`, with an ownership relation at every
+position. -/
+theorem ConstructorObjectRel.readOwnedPrefix
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (count : Nat) (countFits : count ≤ semantic.objectFields.size) :
+    ∃ words,
+      (List.range count).mapM (fun index =>
+        readObjectField state address index) = .ok words ∧
+      OwnershipValuesRel witness words
+        (semantic.objectFields.extract 0 count).toList := by
+  have countFitsInfo : count ≤ info.size := by
+    rw [← related.semanticObjectFields]
+    exact countFits
+  induction count with
+  | zero =>
+      exact ⟨[], rfl, by simp; exact .nil⟩
+  | succ count ih =>
+      have countLtSemantic : count < semantic.objectFields.size := by omega
+      have countLtInfo : count < info.size := by omega
+      obtain ⟨words, wordsRead, wordsRelated⟩ :=
+        ih (by omega) (by omega)
+      let value := semantic.objectFields[count]'countLtSemantic
+      have valueAt : semantic.objectFields[count]? = some value := by
+        exact Array.getElem?_eq_getElem countLtSemantic
+      obtain ⟨kind, kindAt, admissible⟩ := related.fieldKind countLtInfo
+      obtain ⟨word, wordRead, valueRelated⟩ :=
+        related.objectFields count kind value kindAt valueAt
+      have prefixRead :
+          (List.range (count + 1)).mapM (fun index =>
+            readObjectField state address index) = .ok (words ++ [word]) := by
+        rw [List.range_succ, List.mapM_append, wordsRead]
+        simp [wordRead]
+        rfl
+      have semanticTake : semantic.objectFields.toList.take (count + 1) =
+          semantic.objectFields.toList.take count ++ [value] := by
+        rw [List.take_succ_eq_append_getElem (by simpa using countLtSemantic)]
+        simp [value]
+      refine ⟨words ++ [word], prefixRead, ?_⟩
+      have wordsRelatedTake : OwnershipValuesRel witness words
+          (semantic.objectFields.toList.take count) := by
+        simpa [Array.toList_extract, List.extract_eq_take_drop] using wordsRelated
+      have appended := wordsRelatedTake.append
+        (OwnershipValuesRel.cons
+          (OwnershipValueRel.intro kind admissible valueRelated)
+          OwnershipValuesRel.nil)
+      rw [← semanticTake] at appended
+      simpa [Array.toList_extract, List.extract_eq_take_drop] using appended
+
+/-- Ordered ownership correspondence lifts the public checked decrement
+through reset's concrete and semantic released-prefix folds. -/
+theorem OwnershipValuesRel.foldlM_public_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : RuntimeState} {words : List Word32}
+    {values : List Value}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (semanticOperation : values.foldlM (init := runtime) (fun next value =>
+      Fir.LeanIR.Impure.decValueOnce next value true) = .ok finalRuntime) :
+    ∃ finalState,
+      words.foldlM (init := state) (fun next child =>
+        decrementReferenceOnce next child true) = .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime := by
+  induction related generalizing state runtime finalRuntime with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation ⊢
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst finalRuntime
+      exact ⟨state, rfl, heap⟩
+  | @cons word value words values head tail ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation ⊢
+      cases headSemantic : Fir.LeanIR.Impure.decValueOnce runtime value true with
+      | error fault =>
+          rw [headSemantic] at semanticOperation
+          contradiction
+      | ok middleRuntime =>
+          rw [headSemantic] at semanticOperation
+          have releaseStep := head.releaseStep heap
+            (state.heapCursor / headerBytes + 1)
+          rcases releaseStep with heapChild | noOp
+          · obtain ⟨location, valueEq, mapped⟩ := heapChild
+            subst value
+            have semanticHead : Fir.LeanIR.Impure.decLocation runtime location =
+                .ok middleRuntime := by
+              simpa [Fir.LeanIR.Impure.decValueOnce] using headSemantic
+            obtain ⟨middleState, concreteHead, middleHeap⟩ :=
+              heap.decrementReferenceOnce_refines mapped semanticHead
+            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+              ih middleHeap semanticOperation
+            exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
+          · obtain ⟨notHeap, concreteFuelNoOp⟩ := noOp
+            have runtimeEq : middleRuntime = runtime := by
+              cases value with
+              | object reference =>
+                  cases reference with
+                  | heap location => exact False.elim (notHeap location rfl)
+                  | tagged payload =>
+                      have equal : runtime = middleRuntime := by
+                        have operation :
+                            (Except.ok runtime : Except RuntimeFault RuntimeState) =
+                              .ok middleRuntime := by
+                          simpa [Fir.LeanIR.Impure.decValueOnce] using headSemantic
+                        exact Except.ok.inj operation
+                      exact equal.symm
+              | usize value =>
+                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+              | scalar value =>
+                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+              | erased =>
+                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+              | reuseToken location =>
+                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+            subst middleRuntime
+            have concreteHead : decrementReferenceOnce state word true =
+                .ok state := by
+              unfold decrementReferenceOnce
+              exact concreteFuelNoOp
+            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+              ih heap semanticOperation
+            exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated
