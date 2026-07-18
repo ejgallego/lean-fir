@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.Runtime
+import Fir.Wasm.Concrete.FrontierCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -78,6 +79,7 @@ promoted tags. Later slices extend this to dead cells, globals, world/trace,
 and the remaining object kinds. -/
 structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     (semantic : RuntimeState) : Prop where
+  frontier : state.FrontierInvariant
   witnessWellFormed : witness.WellFormed
   semanticToConcrete : ∀ location cell,
     findCell? semantic.heap location = some cell → cell.live = true →

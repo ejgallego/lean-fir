@@ -14,6 +14,9 @@ structure WriteUInt32sPost (before after : LinearMemory) (address : Nat)
   frame : ∀ other,
     other + 4 ≤ address ∨ address + 4 * writtenValues.length ≤ other →
     readUInt32 after other = readUInt32 before other
+  byteFrame : ∀ other,
+    other < address ∨ address + 4 * writtenValues.length ≤ other →
+    readByte after other = readByte before other
 
 theorem writeUInt32s_spec (memory : LinearMemory) (address : Nat)
     (values : List UInt32) (inBounds : address + 4 * values.length ≤ memory.size) :
@@ -23,9 +26,11 @@ theorem writeUInt32s_spec (memory : LinearMemory) (address : Nat)
   induction values generalizing memory address with
   | nil =>
       refine ⟨memory, rfl, ?_⟩
-      refine ⟨rfl, ?_, ?_⟩
+      refine ⟨rfl, ?_, ?_, ?_⟩
       · intro index value atIndex
         simp at atIndex
+      · intro other _
+        rfl
       · intro other _
         rfl
   | cons value rest ih =>
@@ -42,7 +47,7 @@ theorem writeUInt32s_spec (memory : LinearMemory) (address : Nat)
         rw [headWrite]
         change writeUInt32s middle (address + 4) rest = .ok result
         exact tailWrite
-      · refine ⟨tailPost.size.trans middleSize, ?_, ?_⟩
+      · refine ⟨tailPost.size.trans middleSize, ?_, ?_, ?_⟩
         · intro index item atIndex
           cases index with
           | zero =>
@@ -77,6 +82,19 @@ theorem writeUInt32s_spec (memory : LinearMemory) (address : Nat)
             _ = readUInt32 memory other :=
               readUInt32_of_writeUInt32_eq_ok_other memory middle address other
                 value headInBounds headWrite headSeparated
+        · intro other separated
+          simp only [List.length_cons] at separated
+          have tailSeparated :
+              other < address + 4 ∨
+                address + 4 + 4 * rest.length ≤ other := by
+            omega
+          calc
+            readByte result other = readByte middle other :=
+              tailPost.byteFrame other tailSeparated
+            _ = readByte memory other :=
+              readByte_of_writeUInt32_eq_ok memory middle address value
+                headInBounds headWrite other (by omega) (by omega) (by omega)
+                  (by omega)
 
 end LinearMemory
 
@@ -135,6 +153,21 @@ theorem Header.readUInt32_of_write_eq_ok_other (memory result : LinearMemory)
   rw [actualWrite] at written
   cases written
   apply post.frame other
+  simpa [Header.words, headerBytes] using disjoint
+
+/-- A common-header write leaves every byte outside the 32-byte header
+unchanged. -/
+theorem Header.readByte_of_write_eq_ok_other (memory result : LinearMemory)
+    (address : Word32) (header : Header) (other : Nat)
+    (inBounds : address.value + headerBytes ≤ memory.size)
+    (written : header.write memory address = .ok result)
+    (disjoint : other < address.value ∨
+      address.value + headerBytes ≤ other) :
+    result.readByte other = memory.readByte other := by
+  obtain ⟨actual, actualWrite, post⟩ := Header.write_spec memory address header inBounds
+  rw [actualWrite] at written
+  cases written
+  apply post.byteFrame other
   simpa [Header.words, headerBytes] using disjoint
 
 /-- Exact common-header write/read round trip. This is the first composition

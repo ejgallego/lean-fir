@@ -869,7 +869,13 @@ round trips. Successful monotone allocation now has an exact postcondition for
 the grown memory, aligned address/cursor, wasm32 address-space bound, heap-word
 classification, and in-bounds extent. Object allocation composes that result
 with the header proof and passes the complete checked `readLiveHeader` path.
-The next preservation step frames headers across payload writes and packages
+The live-heap boundary now also carries an aligned, in-bounds allocation
+frontier whose unused suffix is byte-for-byte zero. Initial memory satisfies
+that invariant; page growth, allocation, and in-prefix header installation
+preserve it, with a byte-level header frame theorem. This makes the claimed
+zero initialization of `USize` and packed-scalar storage explicit rather than
+an ambient-memory assumption. The next preservation step proves the same
+frontier and old-object framing for constructor payload writes, then packages
 constructor allocation as a `LiveHeapRel` extension.
 
 ## Parallel agent packages
