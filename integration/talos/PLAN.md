@@ -1665,6 +1665,16 @@ ordinary flag, and fixed count needed to lift that result through the public
 `readOwnedReferences`. The next slice constructs this complete cell relation
 after allocation and embeds it in `LiveCellRel`.
 
+W6.4k constructs that complete cell relation after allocation. The local
+allocation theorem now retains its exact live header and semantic capture
+extent instead of discarding them after proving `ClosureObjectRel`.
+`ClosureObjectRel.freshCellRel` checks that the caller's dispatch and
+descriptor tables are exactly the module tables, then packages the canonical
+fresh semantic closure cell with reference count one, ordinary persistence,
+and live status. `allocateClosure_cellRel` exposes the resulting frontier and
+cell relation as one public vertical postcondition. The next slice can add a
+single `LiveCellRel.closure` constructor backed by this package.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

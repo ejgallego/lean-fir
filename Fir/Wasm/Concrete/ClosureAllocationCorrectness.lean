@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.ClosureCorrectness
+import Fir.Wasm.Concrete.ClosureHeapCorrectness
 import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
@@ -452,7 +453,12 @@ theorem allocateClosure_objectRel
     result.FrontierInvariant ∧
     ClosureObjectRel result
       (witness.bindClosure location address function arity captureKinds)
-      dispatch descriptors address function arity captureKinds semantic := by
+      dispatch descriptors address function arity captureKinds semantic ∧
+    result.readLiveHeader address = .ok
+      (Header.forAllocation .closure
+        (ClosureLayout.ofCaptures captureKinds).allocationBytes false targetId
+        (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId) ∧
+    closureCaptureAddress address.value semantic.size ≤ result.heapCursor := by
   let layout := ClosureLayout.ofCaptures captureKinds
   let captureList := captureKinds.toList.zip captures.toList
   have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
@@ -626,27 +632,133 @@ theorem allocateClosure_objectRel
     rfl
   have extension := witness.bindClosure_extends location address function arity
     captureKinds locationFresh descriptorFresh
-  refine ⟨finalValid, ?_⟩
-  refine {
-    descriptor := by
-      exact witness.lookup_bindClosure_descriptor location address function arity
-        captureKinds
-    metadata := ⟨metadata, metadataRead, rfl, rfl, ?_, rfl⟩
-    captureKindsSize := count.trans semanticCount.symm
-    captures := ?_ }
-  · exact semanticCount.symm
-  · intro index kind value kindAt valueAt
-    obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
-    have captureIndex : index < captures.size := by omega
-    let lane := captures[index]'captureIndex
-    have laneAt : captures[index]? = some lane := by
-      simp [lane, captureIndex]
-    have listAt : captureList[index]? = some (kind, lane) := by
-      apply Array.lookup_zip_toList_of kindAt laneAt
-    have read := capturePost.captureAt index kind lane listAt
-    exact ⟨lane, by simpa only [Nat.zero_add] using read,
-      (captureRelated index kind lane value kindAt laneAt valueAt).witnessExtension
-        extension⟩
+  have objectRelated : ClosureObjectRel result
+      (witness.bindClosure location address function arity captureKinds)
+      dispatch descriptors address function arity captureKinds semantic := by
+    refine {
+      descriptor := by
+        exact witness.lookup_bindClosure_descriptor location address function arity
+          captureKinds
+      metadata := ⟨metadata, metadataRead, rfl, rfl, ?_, rfl⟩
+      captureKindsSize := count.trans semanticCount.symm
+      captures := ?_ }
+    · exact semanticCount.symm
+    · intro index kind value kindAt valueAt
+      obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+      have captureIndex : index < captures.size := by omega
+      let lane := captures[index]'captureIndex
+      have laneAt : captures[index]? = some lane := by
+        simp [lane, captureIndex]
+      have listAt : captureList[index]? = some (kind, lane) := by
+        apply Array.lookup_zip_toList_of kindAt laneAt
+      have read := capturePost.captureAt index kind lane listAt
+      exact ⟨lane, by simpa only [Nat.zero_add] using read,
+        (captureRelated index kind lane value kindAt laneAt valueAt).witnessExtension
+          extension⟩
+  have semanticExtent : closureCaptureAddress address.value semantic.size ≤
+      result.heapCursor := by
+    have endAtMiddle : closureCaptureAddress address.value captures.size =
+        middle.heapCursor := by
+      rw [middleExtent, layoutExact]
+      simp [closureCaptureAddress, target]
+      omega
+    rw [semanticCount, cursorEq, endAtMiddle]
+    omega
+  exact ⟨finalValid, objectRelated, by simpa [layout] using exactHeader,
+    semanticExtent⟩
+
+/-- The strengthened allocation postcondition assembles the canonical fresh
+semantic closure cell. Exact module-table agreement prevents the local
+decoder from being installed under unrelated whole-heap metadata. -/
+theorem ClosureObjectRel.freshCellRel
+    {result : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {captures : Array LaneValue} {semantic : Array Value}
+    {location : Location} {address : Word32} {targetId descriptorId : UInt32}
+    (related : ClosureObjectRel result
+      (witness.bindClosure location address function arity captureKinds)
+      dispatch descriptors address function arity captureKinds semantic)
+    (dispatchEq : witness.closureDispatch = dispatch)
+    (descriptorsEq : witness.closureDescriptors = descriptors)
+    (descriptorLookup : descriptors.lookup? descriptorId = some captureKinds)
+    (fixedFits : captures.size < UInt32.size)
+    (semanticCount : semantic.size = captures.size)
+    (headerRead : result.readLiveHeader address = .ok
+      (Header.forAllocation .closure
+        (ClosureLayout.ofCaptures captureKinds).allocationBytes false targetId
+        (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId))
+    (extent : closureCaptureAddress address.value semantic.size ≤
+      result.heapCursor) :
+    ClosureCellRel result
+      (witness.bindClosure location address function arity captureKinds) address
+      ({ object := .closure function arity semantic } : HeapCell) := by
+  let header := Header.forAllocation .closure
+    (ClosureLayout.ofCaptures captureKinds).allocationBytes false targetId
+    (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId
+  have tablesRelated : ClosureObjectRel result
+      (witness.bindClosure location address function arity captureKinds)
+      (witness.bindClosure location address function arity captureKinds).closureDispatch
+      (witness.bindClosure location address function arity captureKinds).closureDescriptors
+      address function arity captureKinds semantic := by
+    simpa [RefinementWitness.bindClosure, dispatchEq, descriptorsEq] using related
+  have descriptorAt :
+      (witness.bindClosure location address function arity captureKinds).closureDescriptors.lookup?
+          header.aux3 = some captureKinds := by
+    simpa [header, Header.forAllocation, RefinementWitness.bindClosure,
+      descriptorsEq] using descriptorLookup
+  have fixedCount : header.aux2.toNat = semantic.size := by
+    rw [semanticCount]
+    simp [header, Header.forAllocation,
+      UInt32.toNat_ofNat_of_lt' fixedFits]
+  exact .closure rfl tablesRelated (by simpa [header] using headerRead) rfl
+    descriptorAt rfl fixedCount extent rfl rfl rfl
+
+/-- Successful allocation establishes both the concrete frontier invariant
+and the canonical fresh semantic closure cell under the module's tables. -/
+theorem allocateClosure_cellRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (function : Lean.Name) (arity : Nat)
+    (captureKinds : Array AbiKind) (captures : Array LaneValue)
+    (semantic : Array Value) (location : Location) (address : Word32)
+    (targetId descriptorId : UInt32)
+    (valid : state.FrontierInvariant)
+    (count : captureKinds.size = captures.size)
+    (semanticCount : semantic.size = captures.size)
+    (capturesLtArity : captures.size < arity)
+    (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (targetLookup : dispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds = .ok descriptorId)
+    (descriptorLookup : descriptors.lookup? descriptorId = some captureKinds)
+    (dispatchEq : witness.closureDispatch = dispatch)
+    (descriptorsEq : witness.closureDescriptors = descriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.size < UInt32.size)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value)
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
+    result.FrontierInvariant ∧
+    ClosureCellRel result
+      (witness.bindClosure location address function arity captureKinds) address
+      ({ object := .closure function arity semantic } : HeapCell) := by
+  obtain ⟨finalValid, objectRelated, headerRead, extent⟩ :=
+    allocateClosure_objectRel state result witness dispatch descriptors function
+      arity captureKinds captures semantic location address targetId descriptorId
+      valid count semanticCount capturesLtArity targetIdEq targetLookup descriptorIdEq
+      descriptorLookup arityFits fixedFits captureRelated locationFresh
+      descriptorFresh allocated
+  exact ⟨finalValid, objectRelated.freshCellRel dispatchEq descriptorsEq
+    descriptorLookup fixedFits semanticCount headerRead extent⟩
 
 /-- A public closure allocation preserves every byte below the old frontier,
 so all previously decoded objects can be transported uniformly. -/
