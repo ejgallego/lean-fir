@@ -1307,6 +1307,16 @@ therefore dispatch above-one and childless count-one cells directly, leaving
 only count-one constructors to assemble from parent release plus W6.3v's
 paired child folds.
 
+W6.3x completes that same-fuel recursive induction. A successful semantic
+decrement now determines a live, nonzero mapped cell; above-one and childless
+count-one cells use W6.3w directly. A count-one constructor first installs the
+related dead parent through the verified header-write frame, then W6.3v applies
+the induction hypothesis to each mapped heap child while preserving concrete
+no-ops for non-owning fields. The result is a whole-heap theorem relating the
+complete concrete and semantic recursive decrements at any common explicit
+fuel. The remaining public-operation wrapper only needs W6.3r's semantic-to-
+concrete fuel bound and W6.3s's concrete fuel monotonicity.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

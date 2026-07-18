@@ -1247,4 +1247,156 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
     rw [semanticFuelEq, ← semanticPublicEq]
     exact semanticPublic, finalRelated⟩
 
+/-- Complete same-fuel recursive ownership simulation for one mapped semantic
+heap location. Successful semantic execution determines every branch; the
+count-one constructor branch releases the parent first and then applies the
+paired ownership-fold theorem with the fuel induction hypothesis. -/
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines
+    {fuel : Nat} {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel fuel runtime location = .ok nextRuntime) :
+    ∃ result,
+      decrementReferenceOnceFuel fuel state address true = .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  induction fuel generalizing state runtime location address nextRuntime with
+  | zero =>
+      simp [Fir.LeanIR.Impure.decLocationFuel] at semanticOperation
+  | succ fuel ih =>
+      obtain ⟨cell, found, cellRelation⟩ :=
+        related.concreteToSemantic location address mapped
+      have live : cell.live = true := by
+        cases liveEq : cell.live with
+        | false =>
+            simp [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found, liveEq,
+              Bind.bind, Except.bind] at semanticOperation
+        | true => rfl
+      have targetRelated := cellRelation.live_of_eq_true live
+      have ordinary : cell.persistent = false := targetRelated.persistent_eq_false
+      have nonzero : cell.rc ≠ 0 := by
+        intro zero
+        simp [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found, live, ordinary,
+          zero, Bind.bind, Except.bind] at semanticOperation
+      by_cases oneLt : 1 < cell.rc
+      · obtain ⟨result, branchRuntime, concreteBranch, semanticBranch, finalRelated⟩ :=
+          related.decrementReferenceOnceFuel_refines_above_one mapped found live oneLt
+            fuel true
+        have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
+        subst branchRuntime
+        exact ⟨result, concreteBranch, finalRelated⟩
+      · have one : cell.rc = 1 := by omega
+        cases targetRelated with
+        | @boxed kind scalar header _ descriptor objectEq objectRelated refCount
+              persistent cellLive =>
+            let leafCell :
+                (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+                  cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+                (∃ value : Nat, cell.object = .natural value) :=
+              .inl ⟨kind, scalar, objectEq⟩
+            obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
+                finalRelated⟩ :=
+              related.decrementReferenceOnceFuel_refines_leaf_one mapped found live
+                leafCell one fuel true
+            have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
+            subst branchRuntime
+            exact ⟨result, concreteBranch, finalRelated⟩
+        | @natural value header _ descriptor objectEq headerRead headerKind
+              headerOrdinary marker extent limbsFit decoded refCount persistent cellLive =>
+            let leafCell :
+                (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+                  cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+                (∃ value : Nat, cell.object = .natural value) :=
+              .inr ⟨value, objectEq⟩
+            obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
+                finalRelated⟩ :=
+              related.decrementReferenceOnceFuel_refines_leaf_one mapped found live
+                leafCell one fuel true
+            have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
+            subst branchRuntime
+            exact ⟨result, concreteBranch, finalRelated⟩
+        | @constructor info fieldKinds semantic header _ descriptor objectEq objectRelated
+              headerRead headerKind refCount persistent cellLive =>
+            obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+              objectRelated.readOwnedReferences headerRead
+            obtain ⟨released, memory, releasedOperation, releasedEq, headerWrite,
+                finalValid, deadRelated⟩ :=
+              releaseHeader related.frontier headerRead objectRelated.headerOwned
+            obtain ⟨_, rawRead, _, _, _, _⟩ :=
+              MemoryState.PrefixExtension.readLiveHeader_facts state address header
+                headerRead
+            have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+              Nat.le_trans objectRelated.headerOwned related.frontier.cursorInBounds
+            let replacement : HeapCell := { cell with rc := 0, live := false }
+            have targetAfter : CellRel released witness address replacement :=
+              .dead (by simp [replacement]) (by simp [replacement])
+                ⟨.constructor info fieldKinds, descriptor⟩ deadRelated
+            obtain ⟨parentRuntime, parentSemantic, parentRelated⟩ :=
+              related.setCell_of_headerWrite mapped found descriptor rawRead releasedEq
+                headerInBounds headerWrite rfl finalValid targetAfter
+            let releaseChild : RuntimeState → Fir.LeanIR.Impure.Value →
+                Except Fir.LeanIR.Impure.RuntimeFault RuntimeState := fun next value =>
+              match value with
+              | .object (.heap child) =>
+                  Fir.LeanIR.Impure.decLocationFuel fuel next child
+              | _ => .ok next
+            have semanticFoldArray :
+                Array.foldlM releaseChild parentRuntime semantic.objectFields =
+                  .ok nextRuntime := by
+              simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found, live,
+                ↓reduceIte, Bind.bind, Except.bind] at semanticOperation
+              rw [if_neg (by simp [ordinary])] at semanticOperation
+              rw [if_neg nonzero, if_neg oneLt] at semanticOperation
+              rw [parentSemantic] at semanticOperation
+              rw [objectEq] at semanticOperation
+              change Array.foldlM releaseChild parentRuntime semantic.objectFields =
+                .ok nextRuntime at semanticOperation
+              exact semanticOperation
+            have semanticFoldList :
+                semantic.objectFields.toList.foldlM (init := parentRuntime)
+                  releaseChild = .ok nextRuntime := by
+              simpa only [Array.foldlM_toList] using semanticFoldArray
+            have recurse : ∀ {before : MemoryState}
+                {semanticState nextSemantic : RuntimeState}
+                {childLocation : Location} {childAddress : Word32},
+                LiveHeapRel before witness semanticState →
+                witness.locations.lookup? childLocation = some childAddress →
+                Fir.LeanIR.Impure.decLocationFuel fuel semanticState childLocation =
+                  .ok nextSemantic →
+                ∃ after,
+                  decrementReferenceOnceFuel fuel before childAddress true = .ok after ∧
+                  LiveHeapRel after witness nextSemantic := by
+              intro before semanticState nextSemantic childLocation childAddress
+                childRelated childMapped childOperation
+              exact ih childRelated childMapped childOperation
+            obtain ⟨result, concreteFold, finalRelated⟩ :=
+              ownershipRelated.foldlM_refines parentRelated recurse semanticFoldList
+            have addressHeap :=
+              (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+                headerRead).1
+            have notPromoted : header.isPromotedTag = false := by
+              have different : (ObjectKind.constructor == ObjectKind.natural) = false :=
+                by decide
+              have headerOrdinary : header.persistent = false := persistent.trans ordinary
+              simp [Header.isPromotedTag, headerKind, headerOrdinary, different]
+            have headerOrdinary : header.persistent = false := persistent.trans ordinary
+            have concreteOperation :
+                decrementReferenceOnceFuel (fuel + 1) state address true = .ok result := by
+              simp only [decrementReferenceOnceFuel]
+              rw [addressHeap, headerRead]
+              simp only [Bind.bind, Except.bind, liftMemory]
+              rw [if_neg (by simp [notPromoted])]
+              rw [if_neg (by simp [headerOrdinary])]
+              have headerNonzero : header.refCount ≠ 0 := by
+                intro zero
+                rw [zero] at refCount
+                simp at refCount
+                omega
+              rw [if_neg (by simpa using headerNonzero)]
+              rw [refCount, if_neg oneLt]
+              rw [ownedRead, releasedOperation]
+              exact concreteFold
+            exact ⟨result, concreteOperation, finalRelated⟩
+
 end Fir.Wasm.Concrete
