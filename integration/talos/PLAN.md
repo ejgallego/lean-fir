@@ -1147,6 +1147,18 @@ owned values contain no heap reference, and the composed theorem joins both
 executions at the dead-cell update. Recursive constructor release and the
 whole-heap live/dead relation remain the next slice.
 
+W6.3i lifts that local boundary into the shape required by the whole heap.
+`CellRel` now distinguishes fully decoded live payloads from canonical dead
+allocations, and `LiveHeapRel` covers every mapped semantic cell instead of
+deregistering released locations. Allocation, promoted-tag, projection,
+boxing, unboxing, and sharing proofs transport or recover the live branch
+from a successful source operation. In particular, `isShared` refinement now
+requires semantic success: a mapping can legitimately denote a released
+cell, and a stale reference must fault rather than regain a live-cell proof.
+The next slice proves whole-heap preservation for the above-one and leaf-one
+transitions before recursive constructor release folds those steps over owned
+children.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -80,13 +80,17 @@ theorem LiveHeapRel.readIsShared_tagged
       rw [persistent]
       rfl
 
-/-- Complete `tobject -> UInt8` sharing refinement. The result is a direct
-scalar lane, matching Lean 4.32's final impure ABI. -/
+/-- Complete `tobject -> UInt8` sharing refinement for a semantically valid
+object. The success premise is essential because witness mappings persist for
+released cells, whose stale references must report `deadObject`. The result is
+a direct scalar lane, matching Lean 4.32's final impure ABI. -/
 theorem LiveHeapRel.readIsShared_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {word : Word32} {value : Value}
     (related : LiveHeapRel state witness runtime)
-    (valueRelated : ValueRel witness .tobject (.word32 word) value) :
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (semanticSuccess : ∃ result,
+      Fir.LeanIR.Impure.isShared runtime value = .ok result) :
     ∃ shared : UInt8,
       readIsShared state word = .ok shared ∧
       Fir.LeanIR.Impure.isShared runtime value = .ok (.scalar (.uint8 shared)) ∧
@@ -101,8 +105,16 @@ theorem LiveHeapRel.readIsShared_refines
           cases heapRelated with
           | mapped mapped =>
               rename_i location
-              obtain ⟨cell, found, live, cellRelated⟩ :=
+              obtain ⟨cell, found, cellRelation⟩ :=
                 related.concreteToSemantic _ word mapped
+              have live : cell.live = true := by
+                obtain ⟨_, succeeded⟩ := semanticSuccess
+                cases liveEq : cell.live with
+                | false =>
+                    simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, liveEq,
+                      Bind.bind, Except.bind] at succeeded
+                | true => rfl
+              have cellRelated := cellRelation.live_of_eq_true live
               let shared : UInt8 :=
                 if cell.persistent || cell.rc != 1 then 1 else 0
               have concrete : readIsShared state word = .ok shared := by

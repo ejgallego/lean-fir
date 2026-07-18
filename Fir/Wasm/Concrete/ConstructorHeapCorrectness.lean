@@ -79,7 +79,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     | none => rfl
     | some oldAddress =>
         exfalso
-        obtain ⟨cell, semanticFound, _, _⟩ :=
+        obtain ⟨cell, semanticFound, _⟩ :=
           related.concreteToSemantic runtime.nextLocation oldAddress found
         have beforeNext :=
           related.locationsBeforeNext runtime.nextLocation cell semanticFound
@@ -97,7 +97,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
   have locationAddressFresh : ∀ old oldAddress,
       witness.locations.lookup? old = some oldAddress → oldAddress ≠ address := by
     intro old oldAddress found equal
-    obtain ⟨cell, _, _, cellRelated⟩ :=
+    obtain ⟨cell, _, cellRelated⟩ :=
       related.concreteToSemantic old oldAddress found
     have owned := cellRelated.headerOwned
     subst oldAddress
@@ -166,7 +166,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
         other info fieldKinds isNew] at found
       exact Nat.le_trans (related.descriptorsOwned other descriptor found)
         extension.cursor
-  · intro location cell found live
+  · intro location cell found
     by_cases isNew : location = runtime.nextLocation
     · subst location
       have cellEq : cell = semanticConstructorCell info semanticFields := by
@@ -175,11 +175,11 @@ theorem allocateConstructor_nonempty_liveHeapRel
       exact ⟨address,
         RefinementWitness.lookup_bindConstructor_location witness runtime.nextLocation
           address info fieldKinds,
-        newCellRelated⟩
+        .live newCellRelated⟩
     · have oldFound : findCell? runtime.heap location = some cell := by
         simpa [semanticConstructorResult, findCell?, isNew, Ne.symm isNew] using found
       obtain ⟨oldAddress, mapped, cellRelated⟩ :=
-        related.semanticToConcrete location cell oldFound live
+        related.semanticToConcrete location cell oldFound
       exact ⟨oldAddress, witnessExtension.locations _ _ mapped,
         (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro location concreteAddress mapped
@@ -188,14 +188,14 @@ theorem allocateConstructor_nonempty_liveHeapRel
       simp [RefinementWitness.bindConstructor, LocationMap.lookup?] at mapped
       subst concreteAddress
       exact ⟨semanticConstructorCell info semanticFields,
-        by simp [semanticConstructorResult, findCell?], rfl, newCellRelated⟩
+        by simp [semanticConstructorResult, findCell?], .live newCellRelated⟩
     · rw [witness.lookup_bindConstructor_location_other runtime.nextLocation location
         address info fieldKinds isNew] at mapped
-      obtain ⟨cell, oldFound, live, cellRelated⟩ :=
+      obtain ⟨cell, oldFound, cellRelated⟩ :=
         related.concreteToSemantic location concreteAddress mapped
       exact ⟨cell, by
           simpa [semanticConstructorResult, findCell?, isNew, Ne.symm isNew],
-        live, (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
+        (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro payload concreteAddress mapped
     exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension

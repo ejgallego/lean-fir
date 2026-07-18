@@ -571,6 +571,58 @@ theorem LiveCellRel.headerOwned
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
       omega
 
+/-- Whole-cell relation used once ownership can make semantic cells dead.
+Live cells retain their complete payload decoder; dead cells retain only the
+canonical freed allocation and the semantic zero-count/dead flags. -/
+inductive CellRel (state : MemoryState) (witness : RefinementWitness)
+    (address : Word32) : HeapCell → Prop where
+  | live (related : LiveCellRel state witness address cell) :
+      CellRel state witness address cell
+  | dead (semanticCount : cell.rc = 0) (semanticDead : cell.live = false)
+      (related : DeadCellRel state address) :
+      CellRel state witness address cell
+
+theorem CellRel.headerOwned
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : CellRel state witness address cell) :
+    address.value + headerBytes ≤ state.heapCursor := by
+  cases related with
+  | live liveRelated => exact liveRelated.headerOwned
+  | dead _ _ deadRelated => exact deadRelated.headerOwned
+
+theorem CellRel.prefixExtension
+    {before after : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : CellRel before witness address cell)
+    (extension : before.PrefixExtension after) :
+    CellRel after witness address cell := by
+  cases related with
+  | live liveRelated => exact .live (liveRelated.prefixExtension extension)
+  | dead count dead deadRelated =>
+      exact .dead count dead (deadRelated.prefixExtension extension)
+
+theorem CellRel.witnessExtension
+    {state : MemoryState} {before after : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : CellRel state before address cell)
+    (extension : before.Extends after) :
+    CellRel state after address cell := by
+  cases related with
+  | live liveRelated => exact .live (liveRelated.witnessExtension extension)
+  | dead count dead deadRelated => exact .dead count dead deadRelated
+
+/-- A whole-cell relation known semantically live exposes its complete live
+payload relation. -/
+theorem CellRel.live_of_eq_true
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : CellRel state witness address cell) (live : cell.live = true) :
+    LiveCellRel state witness address cell := by
+  cases related with
+  | live liveRelated => exact liveRelated
+  | dead _ dead _ => simp_all
+
 /-- A promoted tag is a concrete allocation without a semantic heap location.
 It must decode to the original tagged payload and retain persistent/no-RC
 behavior. -/
@@ -631,10 +683,10 @@ theorem PromotedTagRel.witnessExtension
   header := related.header
   decoded := related.decoded }
 
-/-- Heap-only state refinement for the W6.1 live allocation fragment. It is
-bidirectional over live semantic cells and separately accounts for concrete
-promoted tags. Later slices extend this to dead cells, globals, world/trace,
-and the remaining object kinds. -/
+/-- Heap-only state refinement. It is bidirectional over every mapped semantic
+cell, distinguishes live payload decoding from canonical dead allocations,
+and separately accounts for concrete promoted tags. Globals and world/trace
+join it in their W6 slices. -/
 structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     (semantic : RuntimeState) : Prop where
   frontier : state.FrontierInvariant
@@ -645,13 +697,13 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     witness.descriptors.lookup? address = some descriptor →
     address.value + headerBytes ≤ state.heapCursor
   semanticToConcrete : ∀ location cell,
-    findCell? semantic.heap location = some cell → cell.live = true →
+    findCell? semantic.heap location = some cell →
     ∃ address, witness.locations.lookup? location = some address ∧
-      LiveCellRel state witness address cell
+      CellRel state witness address cell
   concreteToSemantic : ∀ location address,
     witness.locations.lookup? location = some address →
-    ∃ cell, findCell? semantic.heap location = some cell ∧ cell.live = true ∧
-      LiveCellRel state witness address cell
+    ∃ cell, findCell? semantic.heap location = some cell ∧
+      CellRel state witness address cell
   promoted : ∀ payload address,
     witness.promotedTags.Contains payload address →
     PromotedTagRel state witness payload address
@@ -676,14 +728,14 @@ theorem LiveHeapRel.prefixExtension
   · intro address descriptor found
     exact Nat.le_trans (related.descriptorsOwned address descriptor found)
       extension.cursor
-  · intro location cell found live
+  · intro location cell found
     obtain ⟨address, mapped, cellRelated⟩ :=
-      related.semanticToConcrete location cell found live
+      related.semanticToConcrete location cell found
     exact ⟨address, mapped, cellRelated.prefixExtension extension⟩
   · intro location address mapped
-    obtain ⟨cell, found, live, cellRelated⟩ :=
+    obtain ⟨cell, found, cellRelated⟩ :=
       related.concreteToSemantic location address mapped
-    exact ⟨cell, found, live, cellRelated.prefixExtension extension⟩
+    exact ⟨cell, found, cellRelated.prefixExtension extension⟩
   · intro payload address mapped
     exact (related.promoted payload address mapped).prefixExtension extension
 

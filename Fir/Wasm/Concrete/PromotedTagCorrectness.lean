@@ -232,7 +232,7 @@ theorem allocatePromotedTag_liveHeapRel
   have locationAddressFresh : ∀ location oldAddress,
       witness.locations.lookup? location = some oldAddress → oldAddress ≠ address := by
     intro location oldAddress found equal
-    obtain ⟨cell, _, _, cellRelated⟩ :=
+    obtain ⟨cell, _, cellRelated⟩ :=
       related.concreteToSemantic location oldAddress found
     have owned := cellRelated.headerOwned
     subst oldAddress
@@ -271,15 +271,15 @@ theorem allocatePromotedTag_liveHeapRel
         at found
       exact Nat.le_trans (related.descriptorsOwned other descriptor found)
         extension.cursor
-  · intro location cell found live
+  · intro location cell found
     obtain ⟨oldAddress, mapped, cellRelated⟩ :=
-      related.semanticToConcrete location cell found live
+      related.semanticToConcrete location cell found
     exact ⟨oldAddress, mapped,
       (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro location oldAddress mapped
-    obtain ⟨cell, found, live, cellRelated⟩ :=
+    obtain ⟨cell, found, cellRelated⟩ :=
       related.concreteToSemantic location oldAddress mapped
-    exact ⟨cell, found, live,
+    exact ⟨cell, found,
       (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro oldPayload oldAddress mapped
     change (oldPayload, oldAddress) ∈

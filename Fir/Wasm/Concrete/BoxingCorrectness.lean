@@ -289,7 +289,7 @@ theorem allocateBoxedScalar_liveHeapRel
     | none => rfl
     | some oldAddress =>
         exfalso
-        obtain ⟨cell, semanticFound, _, _⟩ :=
+        obtain ⟨cell, semanticFound, _⟩ :=
           related.concreteToSemantic runtime.nextLocation oldAddress found
         have beforeNext :=
           related.locationsBeforeNext runtime.nextLocation cell semanticFound
@@ -306,7 +306,7 @@ theorem allocateBoxedScalar_liveHeapRel
   have locationAddressFresh : ∀ old oldAddress,
       witness.locations.lookup? old = some oldAddress → oldAddress ≠ address := by
     intro old oldAddress found equal
-    obtain ⟨cell, _, _, cellRelated⟩ :=
+    obtain ⟨cell, _, cellRelated⟩ :=
       related.concreteToSemantic old oldAddress found
     have owned := cellRelated.headerOwned
     subst oldAddress
@@ -362,7 +362,7 @@ theorem allocateBoxedScalar_liveHeapRel
         other scalar.kind isNew] at found
       exact Nat.le_trans (related.descriptorsOwned other descriptor found)
         extension.cursor
-  · intro location cell found live
+  · intro location cell found
     by_cases isNew : location = runtime.nextLocation
     · subst location
       have cellEq : cell = semanticBoxCell scalar := by
@@ -371,11 +371,11 @@ theorem allocateBoxedScalar_liveHeapRel
       exact ⟨address,
         RefinementWitness.lookup_bindBoxed_location witness runtime.nextLocation
           address scalar.kind,
-        newCellRelated⟩
+        .live newCellRelated⟩
     · have oldFound : findCell? runtime.heap location = some cell := by
         simpa [semanticBoxResult, findCell?, isNew, Ne.symm isNew] using found
       obtain ⟨oldAddress, mapped, cellRelated⟩ :=
-        related.semanticToConcrete location cell oldFound live
+        related.semanticToConcrete location cell oldFound
       exact ⟨oldAddress, witnessExtension.locations _ _ mapped,
         (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro location concreteAddress mapped
@@ -384,14 +384,14 @@ theorem allocateBoxedScalar_liveHeapRel
       simp [RefinementWitness.bindBoxed, LocationMap.lookup?] at mapped
       subst concreteAddress
       exact ⟨semanticBoxCell scalar,
-        by simp [semanticBoxResult, findCell?], rfl, newCellRelated⟩
+        by simp [semanticBoxResult, findCell?], .live newCellRelated⟩
     · rw [witness.lookup_bindBoxed_location_other runtime.nextLocation location
         address scalar.kind isNew] at mapped
-      obtain ⟨cell, oldFound, live, cellRelated⟩ :=
+      obtain ⟨cell, oldFound, cellRelated⟩ :=
         related.concreteToSemantic location concreteAddress mapped
       exact ⟨cell, by
           simpa [semanticBoxResult, findCell?, isNew, Ne.symm isNew],
-        live, (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
+        (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro payload concreteAddress mapped
     exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension
@@ -446,8 +446,15 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       readBoxedScalar state kind address = .ok scalar ∧
       value = scalar.semanticValue ∧
       ValueRel witness kind.abiKind scalar.lane value := by
-  obtain ⟨cell, found, live, cellRelated⟩ :=
+  obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [Fir.LeanIR.Impure.unbox, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at unboxed
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
   cases cellRelated
   case constructor storedDescriptor objectEq objectRelated headerRead headerKind
       refCount persistent cellLive =>

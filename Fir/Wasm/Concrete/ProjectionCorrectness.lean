@@ -68,8 +68,15 @@ theorem LiveHeapRel.readObjectField_refines
     (projected : getObjectField runtime (.object (.heap location)) index = .ok value) :
     ∃ word, readObjectField state address index = .ok word ∧
       ValueRel witness kind (.word32 word) value := by
-  obtain ⟨cell, found, live, cellRelated⟩ :=
+  obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getObjectField, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
   cases cellRelated with
   | constructor storedDescriptor objectEq objectRelated _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
@@ -103,8 +110,15 @@ theorem LiveHeapRel.readUSizeField_refines
       .ok (.usize value)) :
     readUSizeField state address index = .ok value ∧
       ValueRel witness .usize (.word64 value) (.usize value) := by
-  obtain ⟨cell, found, live, cellRelated⟩ :=
+  obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getUSizeField, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
   cases cellRelated with
   | constructor storedDescriptor objectEq objectRelated _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
@@ -133,8 +147,15 @@ theorem LiveHeapRel.readTag_refines
     (mapped : witness.locations.lookup? location = some address)
     (semanticTag : getTag runtime (.object (.heap location)) = .ok tag) :
     readTag state address = .ok (UInt64.ofNat tag) := by
-  obtain ⟨cell, found, live, cellRelated⟩ :=
+  obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getTag, getLiveCell, found, liveEq, Bind.bind, Except.bind]
+          at semanticTag
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
   cases cellRelated with
   | constructor _ objectEq objectRelated _ _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
