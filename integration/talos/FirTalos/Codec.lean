@@ -146,6 +146,18 @@ theorem decodeArgs_singleton_of_decodesValue
   simp [decodeArgs, decodeValueList, decoded]
   rfl
 
+/-- A successfully decoded heap-only object can never use the erased sentinel. -/
+theorem decodeArgs_object_handle_ne_reserved
+    {table : HandleTable} {handle : Handle} {semantic : Value}
+    (decoded : decodeArgs table #[.object] [.i32 handle] = .ok #[semantic]) :
+    handle ≠ reservedHandle := by
+  intro reserved
+  subst handle
+  have reservedDecode :
+      decodeValue table .object (.i32 reservedHandle) =
+        .error (.invalidHandle reservedHandle) := rfl
+  simp [decodeArgs, decodeValueList, reservedDecode, Bind.bind, Except.bind] at decoded
+
 /-- Proof-side relation for a successful single-value encode. -/
 def EncodesValue (before after : HandleTable) (kind : AbiKind) (semantic : Value)
     (physical : Wasm.Value) : Prop :=

@@ -335,11 +335,25 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
           | 1 => .ok (runtime, #[response.value])
           | count => .error (.target (.arityMismatch 1 count))
 
+/--
+Decode one host call, retaining the operation-specific erased sentinel accepted
+by `delete`. Ordinary `.object` decoding remains heap-only; physical zero is
+recognized here only because `ExpandResetReuse` can retain `del` on its
+failed-reset path.
+ -/
+@[simp] def decodeHostArgs (operation : HostOperation) (table : HandleTable)
+    (physicalArgs : List Wasm.Value) : Except TargetFailure (Array Value) :=
+  match operation, physicalArgs with
+  | .delete, [.i32 handle] =>
+      if handle == reservedHandle then .ok #[.erased]
+      else decodeArgs table #[.object] physicalArgs
+  | _, _ => decodeArgs table operation.signature.params physicalArgs
+
 /-- The semantic host step, factored independently from Talos's `HostFn` record. -/
 def hostStep (operation : HostOperation) (initial : Wasm.Store RuntimeHost)
     (physicalArgs : List Wasm.Value) : Wasm.HostResult RuntimeHost :=
   let initial := clearTrapState initial
-  match decodeArgs initial.host.handles operation.signature.params physicalArgs with
+  match decodeHostArgs operation initial.host.handles physicalArgs with
   | .error failure => targetTrap initial failure
   | .ok args =>
       match evaluate operation initial.host.runtime initial.host.externals args with
@@ -826,8 +840,31 @@ theorem hostStep_delete_of_decode
           runtime := sourceRuntime
           fault? := none
           targetFailure? := none } } := by
+  have decodedHost :
+      decodeHostArgs .delete initial.host.handles physicalArgs = .ok #[sourceObject] := by
+    simp only [decodeHostArgs]
+    split
+    · next handle =>
+      have notReserved := decodeArgs_object_handle_ne_reserved decoded
+      simp [notReserved, decoded]
+    · simpa [HostOperation.signature, HostOperation.runtimeOp, RuntimeOp.signature]
+        using decoded
+  unfold hostStep
+  simp only [clearTrapState]
+  rw [decodedHost]
+  simp [evaluate, HostOperation.signature, HostOperation.runtimeOp,
+    RuntimeOp.signature, updated]
+
+/-- Physical zero is the erased failed-reset token for `delete` only. -/
+theorem hostStep_delete_erased (initial : Wasm.Store RuntimeHost) :
+    hostStep .delete initial [.i32 reservedHandle] =
+      .Return [] {
+        initial with host := {
+          initial.host with
+          fault? := none
+          targetFailure? := none } } := by
   simp [hostStep, clearTrapState, evaluate, HostOperation.signature,
-    HostOperation.runtimeOp, RuntimeOp.signature, decoded, updated]
+    HostOperation.runtimeOp, RuntimeOp.signature, decodeHostArgs]
 
 theorem hostStep_getTag_of_decode
     (initial : Wasm.Store RuntimeHost) (physicalArgs : List Wasm.Value)

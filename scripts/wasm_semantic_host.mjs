@@ -670,6 +670,13 @@ export class SemanticHost {
 
   delete(physicalArgs) {
     assert.equal(physicalArgs.length, 1, "delete host arity mismatch");
+    assert.equal(typeof physicalArgs[0], "number", "delete must use the WebAssembly i32 lane");
+    if ((Number(physicalArgs[0]) >>> 0) === 0) {
+      // `ExpandResetReuse` uses physical zero for the failed-reset token and
+      // may retain `del` on that path. Lean's native `lean_del_object` treats
+      // this operation-specific sentinel as a no-op.
+      return;
+    }
     const source = this.decode("object", physicalArgs[0]);
     const cell = this.liveCell(source.location);
     cell.rc = 0;

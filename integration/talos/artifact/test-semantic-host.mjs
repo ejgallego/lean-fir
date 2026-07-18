@@ -237,6 +237,13 @@ function ctorRuntime() {
 }
 
 {
+  const host = new SemanticHost(ctorRuntime());
+  host.importFunction({ kind: "delete" })(0);
+  assert.equal(host.liveCell(0).rc, 1);
+  assert.equal(host.liveCell(1).rc, 1);
+}
+
+{
   const host = new SemanticHost();
   const captured = host.encode("tobject", tagged(21));
   const closurePhysical = host.importFunction({

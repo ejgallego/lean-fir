@@ -193,6 +193,11 @@ def changeOrGrow (change : Bool) : GrowSwitch → GrowSwitch
   | value => value
 
 @[noinline]
+def changeOrGrowShared (change : Bool) (value : GrowSwitch) : GrowSwitch × GrowSwitch :=
+  let updated := changeOrGrow change value
+  (value, updated)
+
+@[noinline]
 def applyCaptureList (f : Nat → List Nat) (y : Nat) : List Nat :=
   f y
 
@@ -496,6 +501,10 @@ private def growSwitchDatum : Source.GrowSwitch → ValidationDatum
   | .left value => .ctor "GrowSwitch.left" 0 #[.nat value]
   | .right value => .ctor "GrowSwitch.right" 1 #[.nat value]
   | .big first second => .ctor "GrowSwitch.big" 2 #[.nat first, .nat second]
+
+private def growSwitchPairDatum (value : Source.GrowSwitch × Source.GrowSwitch) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0 #[growSwitchDatum value.1, growSwitchDatum value.2]
 
 private def assocInput : Source.Assoc :=
   .node (.node (.atom 1) (.atom 2)) (.node (.atom 3) (.atom 4))
@@ -849,6 +858,23 @@ def cases : Array Case := #[
         "del", "ctor"]
     provenance := firProvenance
       "Delete a unique constructor before allocating a larger replacement" },
+  { id := "reuse-grow-delete-shared"
+    entry := ``Source.changeOrGrowShared
+    dependencies := #[``Source.changeOrGrow, ``Source.holdNat]
+    args := #[.bool false, .ctor "GrowSwitch.left" 0 #[.nat 7]]
+    argSchemas := #[.bool, .ctor "GrowSwitch.left" 0 #[.nat]]
+    resultSchema := .ctor "Prod.mk" 0 #[
+      .ctor "GrowSwitch.left" 0 #[.nat],
+      .ctor "GrowSwitch.big" 2 #[.nat, .nat]]
+    native := fun _ => growSwitchPairDatum
+      (Source.changeOrGrowShared false (.left 7))
+    tags := #["stress", "ownership", "reuse", "constructor", "delete", "shared"]
+    requiredLcnfForms :=
+      #["inc", "fap", "cases", "join", "isShared", "jump", "del", "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["inc", "fap", "cases", "join", "isShared", "jump", "del", "ctor", "return"]
+    provenance := firProvenance
+      "Retain the original constructor while growing a shared replacement" },
   { id := "capture-17-list"
     entry := ``Source.capture17List
     dependencies := #[``Source.applyCaptureList]

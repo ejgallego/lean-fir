@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-expandResetReuse-delete-erased
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -21,34 +21,30 @@ the sentinel.
 
 ## Minimal reproduction
 
-`changeOrGrow false` contains a reset followed by a reuse whose replacement is
-larger than the original constructor. `ExpandResetReuse` creates a reset join,
-passes `.erased` to it when `isShared` is true, and rewrites the original token
+`changeOrGrowShared false value` retains `value` while calling
+`changeOrGrow false value`, forcing Lean's ownership lowering to pass a shared
+`GrowSwitch.left` constructor. `ExpandResetReuse` creates a reset join, passes
+`.erased` to it when `isShared` is true, and rewrites the original token
 decrement in the join body to `del`. The `change == false` arm executes that
 `del` independently of the sharing discriminator.
-
-Run the generated declaration with a shared `GrowSwitch.left` cell (reference
-count greater than one). The slow path binds the reset parameter to `.erased`
-and reaches `deleteValue runtime .erased`.
 
 ## Exact commands
 
 ```sh
 python3 scripts/validate_interpreters.py \
-  --case reuse-grow-delete \
-  --plan validation-plans/native-v8.json \
-  --out-dir /tmp/fir-reuse-grow-delete
+  --case reuse-grow-delete-shared \
+  --plan validation-plans/native-lcnf.json \
+  --out-dir /tmp/fir-reuse-grow-delete-shared
 ```
-
-The existing corpus invocation exercises the unique branch. A permanent
-shared-input regression must be added before resolving this card.
 
 ## Expected semantics
 
 FIR's impure interpreter must agree with the pinned compiler's expanded reset
-path for the erased/boxed-zero sentinel. Deleting the failed-reuse sentinel
+path for the erased/physical-zero sentinel. Deleting the failed-reuse sentinel
 must have the same no-op behavior as Lean's generated code, while deleting a
-live unique constructor must still release that allocation.
+live unique constructor must still release that allocation. This is a
+delete-specific exception; it does not make `.erased` refine `.object`
+globally.
 
 ## Actual behavior
 
@@ -63,8 +59,12 @@ admitting the current source behavior would disagree with native Lean.
 The pinned `ExpandResetReuse.mkSlowPath` passes `.erased` to the reset join.
 `processResetCont` rewrites a decrement of the reset token to `.del` before it
 expands the reuse. The generated `changeOrGrow` LCNF places that `del` in the
-larger-replacement arm outside the later `isShared` case split. FIR's
-`deleteValue` definition then rejects the value constructed by the same pass.
+larger-replacement arm outside the later `isShared` case split. Before the
+fix, `reuse-grow-delete-shared` executed `inc`, `fap`, `cases`, `join`,
+`isShared`, `jump`, and `del`, then faulted with `expectedHeapReference`;
+native Lean returned the retained `left 7` and new `big 7 7` pair. Lean's C
+emitter maps `del` to `lean_del_object`, and the native run confirms that the
+physical-zero operand is a no-op.
 
 ## Semantic impact
 
@@ -81,10 +81,7 @@ between the Wasm encoder and its host.
 
 ## Workaround
 
-Do not admit `changeOrGrow` based only on the current unique-input corpus
-invocations. Keep the whole declaration outside `WasmSupported` until the
-shared `del` contract has a native/LCNF regression and an integration-owner
-change.
+none
 
 ## Upstream tracking
 
@@ -92,7 +89,18 @@ none
 
 ## Resolution and regression
 
-Open. The integration owner should add a shared-input compiler-generated
-regression, settle erased/tagged `del` behavior against Lean 4.32, update the
-interpreter and semantic Wasm host contract together, and then rebase both
-feature tracks before Wasm admission continues.
+Resolved by making `deleteValue runtime .erased` return the unchanged runtime
+and retaining the previous heap-delete and invalid-nonsentinel behavior.
+`reuse-grow-delete-shared` is the permanent compiler-generated native/LCNF
+regression.
+
+The Node/V8 semantic host recognizes physical zero only in its `delete`
+operation. The proof-facing Talos host mirrors this with `decodeHostArgs` and
+`hostStep_delete_erased`; `decodeArgs_object_handle_ne_reserved` preserves the
+ordinary heap-only object theorem. `AbiKind.object`, generic handle decoding,
+and other object operations remain unchanged.
+
+Generation must now admit `del` as a safe use of the guarded erased join
+parameter before the case can reach V8. W6 must mirror the new source contract
+by treating concrete word zero as a no-op in `deleteObject`. Both are consumer
+adaptations to this fixed shared contract, not local semantic workarounds.

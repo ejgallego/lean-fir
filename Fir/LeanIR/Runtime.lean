@@ -266,10 +266,24 @@ def decValue (runtime : RuntimeState) (value : Value) (amount : Nat) (check : Bo
   List.replicate amount value |>.foldlM (init := runtime) fun runtime value =>
     decValueOnce runtime value check
 
-def deleteValue (runtime : RuntimeState) (value : Value) : Except RuntimeFault RuntimeState := do
-  let .object (.heap location) := value | throw .expectedHeapReference
-  let cell ← getLiveCell runtime location
-  setCell runtime location { cell with rc := 0, live := false }
+/--
+Delete one compiler-owned heap object without recursively releasing its fields.
+
+`ExpandResetReuse` passes `.erased` as the failed-reset token and may retain a
+rewritten `del` on that path. Lean's native `lean_del_object` treats that zero
+sentinel as a no-op. This is an operation-specific exception: tagged objects,
+scalars, and reuse tokens remain invalid delete operands.
+ -/
+def deleteValue (runtime : RuntimeState) (value : Value) : Except RuntimeFault RuntimeState :=
+  match value with
+  | .erased => .ok runtime
+  | .object (.heap location) => do
+      let cell ← getLiveCell runtime location
+      setCell runtime location { cell with rc := 0, live := false }
+  | _ => .error .expectedHeapReference
+
+@[simp] theorem deleteValue_erased (runtime : RuntimeState) :
+    deleteValue runtime .erased = .ok runtime := rfl
 
 def literal (runtime : RuntimeState) : LCNF.LitValue → RuntimeState × Value
   | .nat value =>
