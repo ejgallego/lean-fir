@@ -1702,6 +1702,18 @@ existing `LiveHeapRel`, so later W6.5 effects can reuse the heap proofs rather
 than duplicating them. The next checkpoint adds the external request/response
 contract and structured effect/fault correspondence.
 
+W6.5a establishes the successful external-call boundary. Concrete requests
+retain exact source types alongside typed physical arguments; concrete
+responses carry the returned lane, updated linear memory, and world. The host
+contract permits allocation and mutation only when it supplies an extended
+witness, a complete post-call `LiveHeapRel`, and a result related at the
+declared ABI kind. From those obligations, `ConcreteRuntimeRel` proves the
+exact source `resumeExternal` runtime: generated globals are preserved, world
+is replaced by the response, one related event is appended to the trace, and
+the result lane refines the semantic value. The next W6.5 slice freezes the
+source/target fault encoding and proves failing host calls cannot masquerade
+as successful effects.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

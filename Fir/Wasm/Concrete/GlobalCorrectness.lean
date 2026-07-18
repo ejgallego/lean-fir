@@ -135,6 +135,24 @@ structure ConcreteGlobalsRel (witness : RefinementWitness)
       findGlobal? semantic name = some value ∧
         ValueRel witness slot.kind lane value
 
+/-- Generated globals remain related when an allocation-producing operation
+extends the proof witness. The physical table itself does not move. -/
+theorem ConcreteGlobalsRel.witnessExtension
+    {before after : RefinementWitness} {concrete : ConcreteGlobals}
+    {semantic : Globals} (extension : before.Extends after)
+    (related : ConcreteGlobalsRel before concrete semantic) :
+    ConcreteGlobalsRel after concrete semantic := by
+  constructor
+  · intro name value found
+    obtain ⟨slot, lane, slotFound, initialized, valueRelated⟩ :=
+      related.semanticToConcrete name value found
+    exact ⟨slot, lane, slotFound, initialized,
+      valueRelated.witnessExtension extension⟩
+  · intro name slot lane slotFound initialized
+    obtain ⟨value, found, valueRelated⟩ :=
+      related.concreteToSemantic name slot lane slotFound initialized
+    exact ⟨value, found, valueRelated.witnessExtension extension⟩
+
 /-- A freshly generated global table refines the empty semantic cache: every
 declaration exists physically, but none is observable until its initialization
 flag is set. -/
@@ -251,6 +269,21 @@ structure ConcreteExternalEventRel (witness : RefinementWitness)
     ValueRel witness kind lane value
   result : ValueRel witness concrete.resultKind concrete.result semantic.result
 
+theorem ConcreteExternalEventRel.witnessExtension
+    {before after : RefinementWitness}
+    {concrete : ConcreteExternalEvent} {semantic : ExternalEvent}
+    (extension : before.Extends after)
+    (related : ConcreteExternalEventRel before concrete semantic) :
+    ConcreteExternalEventRel after concrete semantic := {
+  name := related.name
+  paramKindsSize := related.paramKindsSize
+  argsSize := related.argsSize
+  arguments := by
+    intro index kind lane value kindFound laneFound valueFound
+    exact (related.arguments index kind lane value kindFound laneFound valueFound).witnessExtension
+      extension
+  result := related.result.witnessExtension extension }
+
 structure ConcreteTraceRel (witness : RefinementWitness)
     (concrete : Array ConcreteExternalEvent)
     (semantic : Array ExternalEvent) : Prop where
@@ -260,6 +293,47 @@ structure ConcreteTraceRel (witness : RefinementWitness)
     concrete[index]? = some concreteEvent →
     semantic[index]? = some semanticEvent →
     ConcreteExternalEventRel witness concreteEvent semanticEvent
+
+theorem ConcreteTraceRel.witnessExtension
+    {before after : RefinementWitness}
+    {concrete : Array ConcreteExternalEvent}
+    {semantic : Array ExternalEvent}
+    (extension : before.Extends after)
+    (related : ConcreteTraceRel before concrete semantic) :
+    ConcreteTraceRel after concrete semantic := {
+  size := related.size
+  events := by
+    intro index concreteEvent semanticEvent concreteFound semanticFound
+    exact (related.events index concreteEvent semanticEvent concreteFound semanticFound).witnessExtension
+      extension }
+
+theorem ConcreteTraceRel.push
+    {witness : RefinementWitness}
+    {concrete : Array ConcreteExternalEvent}
+    {semantic : Array ExternalEvent}
+    {concreteEvent : ConcreteExternalEvent}
+    {semanticEvent : ExternalEvent}
+    (related : ConcreteTraceRel witness concrete semantic)
+    (eventRelated : ConcreteExternalEventRel witness concreteEvent semanticEvent) :
+    ConcreteTraceRel witness (concrete.push concreteEvent)
+      (semantic.push semanticEvent) := by
+  constructor
+  · simp [related.size]
+  · intro index foundConcrete foundSemantic concreteFound semanticFound
+    by_cases last : index = concrete.size
+    · subst index
+      have semanticLast : concrete.size = semantic.size := related.size
+      rw [Array.getElem?_push, if_pos rfl] at concreteFound
+      rw [Array.getElem?_push, if_pos semanticLast] at semanticFound
+      cases Option.some.inj concreteFound
+      cases Option.some.inj semanticFound
+      exact eventRelated
+    · have semanticNotLast : index ≠ semantic.size := by
+        simpa [related.size] using last
+      rw [Array.getElem?_push, if_neg last] at concreteFound
+      rw [Array.getElem?_push, if_neg semanticNotLast] at semanticFound
+      exact related.events index foundConcrete foundSemantic
+        concreteFound semanticFound
 
 theorem ConcreteTraceRel.empty (witness : RefinementWitness) :
     ConcreteTraceRel witness #[] #[] := by

@@ -1,0 +1,221 @@
+import Fir.Wasm.Concrete.GlobalCorrectness
+import Fir.LeanIR.Interpreter
+
+namespace Fir.Wasm.Concrete
+
+open Fir.LeanIR.Impure
+
+/-- The physical request presented to a generated external import. Source
+types are retained exactly, while ABI kinds describe the concrete lanes. -/
+structure ConcreteExternalRequest where
+  name : Lean.Name
+  paramTypes : Array Lean.Expr
+  resultType : Lean.Expr
+  paramKinds : Array AbiKind
+  resultKind : AbiKind
+  args : Array LaneValue
+
+def ConcreteExternalRequest.event (request : ConcreteExternalRequest)
+    (result : LaneValue) : ConcreteExternalEvent := {
+  name := request.name
+  paramKinds := request.paramKinds
+  args := request.args
+  resultKind := request.resultKind
+  result }
+
+def semanticExternalEvent (request : ExternalRequest)
+    (result : Value) : ExternalEvent := {
+  name := request.name
+  args := request.args
+  result }
+
+/-- The concrete request has exactly the source declaration metadata and a
+typed physical lane for every semantic argument. -/
+structure ConcreteExternalRequestRel (witness : RefinementWitness)
+    (concrete : ConcreteExternalRequest) (semantic : ExternalRequest) : Prop where
+  name : concrete.name = semantic.name
+  paramTypes : concrete.paramTypes = semantic.paramTypes
+  resultType : concrete.resultType = semantic.resultType
+  paramTypesSize : concrete.paramTypes.size = concrete.paramKinds.size
+  paramKindsSize : concrete.paramKinds.size = semantic.args.size
+  argsSize : concrete.args.size = semantic.args.size
+  arguments : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue) (value : Value),
+    concrete.paramKinds[index]? = some kind →
+    concrete.args[index]? = some lane →
+    semantic.args[index]? = some value →
+    ValueRel witness kind lane value
+
+theorem ConcreteExternalRequestRel.witnessExtension
+    {before after : RefinementWitness}
+    {concrete : ConcreteExternalRequest} {semantic : ExternalRequest}
+    (extension : before.Extends after)
+    (related : ConcreteExternalRequestRel before concrete semantic) :
+    ConcreteExternalRequestRel after concrete semantic := {
+  name := related.name
+  paramTypes := related.paramTypes
+  resultType := related.resultType
+  paramTypesSize := related.paramTypesSize
+  paramKindsSize := related.paramKindsSize
+  argsSize := related.argsSize
+  arguments := by
+    intro index kind lane value kindFound laneFound valueFound
+    exact (related.arguments index kind lane value kindFound laneFound valueFound).witnessExtension
+      extension }
+
+theorem ConcreteExternalRequestRel.event
+    {before after : RefinementWitness}
+    {concrete : ConcreteExternalRequest} {semantic : ExternalRequest}
+    {concreteResult : LaneValue} {semanticResult : Value}
+    (extension : before.Extends after)
+    (requestRelated : ConcreteExternalRequestRel before concrete semantic)
+    (resultRelated : ValueRel after concrete.resultKind concreteResult semanticResult) :
+    ConcreteExternalEventRel after (concrete.event concreteResult)
+      (semanticExternalEvent semantic semanticResult) := {
+  name := requestRelated.name
+  paramKindsSize := requestRelated.paramKindsSize
+  argsSize := requestRelated.argsSize
+  arguments := by
+    intro index kind lane value kindFound laneFound valueFound
+    exact (requestRelated.arguments index kind lane value
+      kindFound laneFound valueFound).witnessExtension extension
+  result := resultRelated }
+
+/-- Successful physical response from a concrete external implementation.
+The updated memory is returned explicitly because foreign primitives may
+allocate, mutate, or release FIR objects. -/
+structure ConcreteExternalResponse where
+  value : LaneValue
+  heap : MemoryState
+  world : Nat
+
+structure ConcreteExternalImpl where
+  call : ConcreteExternalRequest → ConcreteRuntimeState →
+    Except ConcreteError ConcreteExternalResponse
+
+/-- Source runtime after a successful response, stated independently of the
+interpreter control stack. This is definitionally the runtime component of
+`resumeExternal`. -/
+def semanticExternalRuntimeAfter (request : ExternalRequest)
+    (before : RuntimeState) (response : ExternalResponse) : RuntimeState := {
+  before with
+  heap := response.heap
+  nextLocation := response.nextLocation
+  world := response.world
+  trace := before.trace.push (semanticExternalEvent request response.value) }
+
+theorem semanticExternalRuntimeAfter_eq_resumeExternal
+    (request : ExternalRequest) (waiting : MachineState)
+    (response : ExternalResponse) :
+    (resumeExternal request waiting response).runtime =
+      semanticExternalRuntimeAfter request waiting.runtime response := rfl
+
+def ConcreteRuntimeState.applyExternalResponse
+    (request : ConcreteExternalRequest) (before : ConcreteRuntimeState)
+    (response : ConcreteExternalResponse) : ConcreteRuntimeState := {
+  before with
+  heap := response.heap
+  world := response.world
+  trace := before.trace.push (request.event response.value) }
+
+def ConcreteExternalImpl.invoke (implementation : ConcreteExternalImpl)
+    (request : ConcreteExternalRequest) (before : ConcreteRuntimeState) :
+    Except ConcreteError (ConcreteRuntimeState × LaneValue) := do
+  let response ← implementation.call request before
+  return (before.applyExternalResponse request response, response.value)
+
+/-- Contract required of one successful concrete foreign response. External
+code may change the heap and extend its witness, but it must establish the
+complete post-heap relation and return a lane related at the declared ABI. -/
+structure ConcreteExternalResponseRel
+    (beforeWitness afterWitness : RefinementWitness)
+    (request : ExternalRequest) (before : RuntimeState)
+    (resultKind : AbiKind)
+    (concrete : ConcreteExternalResponse) (semantic : ExternalResponse) : Prop where
+  witnessExtension : beforeWitness.Extends afterWitness
+  heap : LiveHeapRel concrete.heap afterWitness
+    (semanticExternalRuntimeAfter request before semantic)
+  value : ValueRel afterWitness resultKind concrete.value semantic.value
+  world : concrete.world = semantic.world
+
+/-- Applying related successful responses preserves heap, generated globals,
+world, trace, and the returned value simultaneously. -/
+theorem ConcreteRuntimeRel.applyExternalResponse
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {concreteResponse : ConcreteExternalResponse}
+    {semanticResponse : ExternalResponse}
+    (runtimeRelated : ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel beforeWitness
+      concreteRequest semanticRequest)
+    (responseRelated : ConcreteExternalResponseRel beforeWitness afterWitness
+      semanticRequest semanticBefore concreteRequest.resultKind
+      concreteResponse semanticResponse) :
+    ConcreteRuntimeRel
+      (concreteBefore.applyExternalResponse concreteRequest concreteResponse)
+      afterWitness
+      (semanticExternalRuntimeAfter semanticRequest semanticBefore semanticResponse) ∧
+    ValueRel afterWitness concreteRequest.resultKind concreteResponse.value
+      semanticResponse.value := by
+  constructor
+  · exact {
+      heap := responseRelated.heap
+      globals := by
+        simpa [ConcreteRuntimeState.applyExternalResponse,
+          semanticExternalRuntimeAfter] using
+          runtimeRelated.globals.witnessExtension responseRelated.witnessExtension
+      world := by
+        simpa [ConcreteRuntimeState.applyExternalResponse,
+          semanticExternalRuntimeAfter] using responseRelated.world
+      trace := by
+        have traceRelated := runtimeRelated.trace.witnessExtension
+          responseRelated.witnessExtension
+        have eventRelated := requestRelated.event
+          responseRelated.witnessExtension responseRelated.value
+        simpa [ConcreteRuntimeState.applyExternalResponse,
+          semanticExternalRuntimeAfter] using traceRelated.push eventRelated }
+  · exact responseRelated.value
+
+/-- One successful concrete/source call pair refines end to end. The theorem
+keeps both call equations visible so later generated-host composition cannot
+replace the foreign implementation with an unconstrained response. -/
+theorem ConcreteExternalImpl.invoke_refines
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {concreteResponse : ConcreteExternalResponse}
+    {semanticResponse : ExternalResponse}
+    (runtimeRelated : ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel beforeWitness
+      concreteRequest semanticRequest)
+    (concreteCalled : concreteImplementation.call concreteRequest concreteBefore =
+      .ok concreteResponse)
+    (semanticCalled : semanticImplementation.call semanticRequest semanticBefore =
+      .ok semanticResponse)
+    (responseRelated : ConcreteExternalResponseRel beforeWitness afterWitness
+      semanticRequest semanticBefore concreteRequest.resultKind
+      concreteResponse semanticResponse) :
+    concreteImplementation.invoke concreteRequest concreteBefore =
+        .ok (concreteBefore.applyExternalResponse concreteRequest concreteResponse,
+          concreteResponse.value) ∧
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok semanticResponse ∧
+      ConcreteRuntimeRel
+        (concreteBefore.applyExternalResponse concreteRequest concreteResponse)
+        afterWitness
+        (semanticExternalRuntimeAfter semanticRequest semanticBefore semanticResponse) ∧
+      ValueRel afterWitness concreteRequest.resultKind concreteResponse.value
+        semanticResponse.value := by
+  refine ⟨?_, semanticCalled, ?_⟩
+  · unfold ConcreteExternalImpl.invoke
+    rw [concreteCalled]
+    rfl
+  · exact runtimeRelated.applyExternalResponse requestRelated responseRelated
+
+end Fir.Wasm.Concrete

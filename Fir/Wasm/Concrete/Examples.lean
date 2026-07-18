@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.GlobalCorrectness
+import Fir.Wasm.Concrete.ExternalCorrectness
 import Fir.Wasm.Concrete.ClosureRuntime
 
 namespace Fir.Wasm.Concrete
@@ -29,6 +29,29 @@ def exampleGlobals : ConcreteGlobals :=
 #guard match exampleGlobals.read `cachedValue .uint64 with
   | .error (.targetGlobal (.kindMismatch `cachedValue .uint32 .uint64)) => true
   | _ => false
+
+def exampleExternalRequest : ConcreteExternalRequest := {
+  name := `record
+  paramTypes := #[Lean.mkConst ``UInt32]
+  resultType := Lean.mkConst ``UInt32
+  paramKinds := #[.uint32]
+  resultKind := .uint32
+  args := #[.word32 (Word32.ofUInt32 17)] }
+
+def incrementWorldExternal : ConcreteExternalImpl where
+  call request before :=
+    match request.args[0]? with
+    | some value => .ok { value, heap := before.heap, world := before.world + 1 }
+    | none => .error (.source (.externalFailure request.name "missing argument"))
+
+#guard match incrementWorldExternal.invoke exampleExternalRequest { world := 4 } with
+  | .error _ => false
+  | .ok (after, .word32 result) =>
+      result.value == 17 && after.world == 5 && after.trace.size == 1 &&
+        match after.trace[0]? with
+        | some event => event.name == `record && event.args.size == 1
+        | none => false
+  | .ok _ => false
 
 #guard (Word32.encodeImmediate? 0).map (·.value) == some 1
 #guard (Word32.encodeImmediate? maxImmediatePayload).map (·.value) ==
