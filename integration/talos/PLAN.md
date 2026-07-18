@@ -1317,6 +1317,15 @@ complete concrete and semantic recursive decrements at any common explicit
 fuel. The remaining public-operation wrapper only needs W6.3r's semantic-to-
 concrete fuel bound and W6.3s's concrete fuel monotonicity.
 
+W6.3y closes that public recursive-release wrapper. Successful FIR
+`decLocation` execution is first simulated at its heap-length fuel by W6.3x;
+W6.3r proves that budget fits inside the concrete cursor-derived public fuel,
+and W6.3s lifts the concrete success without changing the final memory. Thus
+the checked public `decrementReferenceOnce` now preserves `LiveHeapRel` for
+the complete supported constructor/box/natural ownership fragment. The final
+W6.3 audit is reset/reuse and repeated-decrement packaging over this one-step
+theorem.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

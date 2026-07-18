@@ -1399,4 +1399,27 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
               exact concreteFold
             exact ⟨result, concreteOperation, finalRelated⟩
 
+/-- The public concrete recursive decrement refines FIR's public semantic
+decrement. Related heaps guarantee that the semantic heap-length fuel fits
+inside the concrete cursor-derived budget, and concrete success is monotone
+when that budget is enlarged. -/
+theorem LiveHeapRel.decrementReferenceOnce_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime) :
+    ∃ result,
+      decrementReferenceOnce state address true = .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  unfold Fir.LeanIR.Impure.decLocation at semanticOperation
+  obtain ⟨result, concreteSemanticFuel, finalRelated⟩ :=
+    related.decrementReferenceOnceFuel_refines mapped semanticOperation
+  have concretePublic := decrementReferenceOnceFuel_ok_mono
+    related.semanticFuel_le_concreteFuel concreteSemanticFuel
+  exact ⟨result, by
+    unfold decrementReferenceOnce
+    exact concretePublic, finalRelated⟩
+
 end Fir.Wasm.Concrete
