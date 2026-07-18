@@ -126,7 +126,30 @@ theorem ConstructorObjectRel.writeTag
     cases valueEq : field.value with
     | uint8 value => simp [valueEq] at beforeField
     | uint16 value => simp [valueEq] at beforeField
-    | uint32 value => simp [valueEq] at beforeField
+    | uint32 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 4 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt32Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        change (do
+          let fieldAddress ← scalarFieldAddress address header field.width
+            field.offset 4
+          liftMemory (memory.readUInt32 fieldAddress)) = .ok value
+        rw [scalarAddress]
+        change liftMemory (memory.readUInt32 _) = .ok value
+        rw [readUInt32Frame _ (by omega)]
+        exact readBefore
     | uint64 value =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField

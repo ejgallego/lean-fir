@@ -978,6 +978,15 @@ the first field, yielding a new `ConstructorObjectRel` rather than only a
 byte-local readback fact. Generalizing this typed predicate to `UInt8`,
 `UInt16`, and `UInt32` precedes boxing and unboxing.
 
+W6.2e extends that boundary to packed `UInt32`. The runtime validates a
+four-byte range, uses the verified little-endian 32-bit lane, and exposes
+checked read and write operations. Prefix extension, header mutation, and
+`USize` mutation preserve related 32-bit fields; the scalar-write theorem
+installs the exact semantic head-and-filter update while framing tag, object,
+and `USize` observations. A mixed-constructor regression writes the upper
+four bytes of the eight-byte packed region and reads back `UInt32.max`.
+`UInt8` and `UInt16` remain before boxing/unboxing.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
