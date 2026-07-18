@@ -1425,6 +1425,15 @@ ABI value relation unchanged. The next slice proves unique reset enters this
 transition relation; the following reuse slice consumes it and re-establishes
 the normal whole-heap relation.
 
+W6.3ak defines the protocol descriptor used while reset releases the old
+children. `resetProtocolFieldKinds` changes exactly the cleared prefix to
+`.tobject`, retains every suffix kind, preserves descriptor arity, and keeps
+the object-field validity check true. Tagged zero then has its ordinary strict
+`.tobject` relation in every cleared slot, while untouched suffix relations
+transport through descriptor rebinding. This makes the temporary target a
+normal decoded constructor under protocol-only proof metadata, so the existing
+recursive decrement refinement can drive the child-release fold unchanged.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

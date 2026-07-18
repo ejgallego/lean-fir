@@ -29,6 +29,81 @@ structure ResetReuseProtocolRel
     Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
       .ok (nextRuntime, .reuseToken (some location))
 
+/-- Protocol-only descriptor kinds for the reset target. Cleared prefix slots
+are decoded as tagged-capable objects; untouched suffix slots retain their
+frozen allocation-time ABI kinds. -/
+def resetProtocolFieldKinds (fieldKinds : Array AbiKind) (count : Nat) :
+    Array AbiKind :=
+  fieldKinds.mapIdx fun index kind =>
+    if index < count then .tobject else kind
+
+@[simp] theorem resetProtocolFieldKinds_size (fieldKinds : Array AbiKind)
+    (count : Nat) :
+    (resetProtocolFieldKinds fieldKinds count).size = fieldKinds.size := by
+  simp [resetProtocolFieldKinds]
+
+theorem resetProtocolFieldKinds_prefix
+    {fieldKinds : Array AbiKind} {count index : Nat} {kind : AbiKind}
+    (atIndex : fieldKinds[index]? = some kind) (cleared : index < count) :
+    (resetProtocolFieldKinds fieldKinds count)[index]? = some .tobject := by
+  rw [resetProtocolFieldKinds, Array.getElem?_mapIdx, atIndex]
+  simp [cleared]
+
+theorem resetProtocolFieldKinds_suffix
+    {fieldKinds : Array AbiKind} {count index : Nat} {kind : AbiKind}
+    (atIndex : fieldKinds[index]? = some kind) (retained : count ≤ index) :
+    (resetProtocolFieldKinds fieldKinds count)[index]? = some kind := by
+  rw [resetProtocolFieldKinds, Array.getElem?_mapIdx, atIndex]
+  simp [Nat.not_lt.mpr retained]
+
+theorem resetProtocolFieldKinds_valid
+    (fieldKinds : Array AbiKind) (count : Nat)
+    (valid : fieldKinds.all AbiKind.isObjectField = true) :
+    (resetProtocolFieldKinds fieldKinds count).all AbiKind.isObjectField = true := by
+  apply Array.all_eq_true.mpr
+  intro index indexLt
+  simp only [resetProtocolFieldKinds] at indexLt ⊢
+  rw [Array.getElem_mapIdx]
+  split
+  · rfl
+  · exact Array.all_eq_true.mp valid index (by simpa using indexLt)
+
+/-- Canonical cleared reset slots have an exact strict relation at the
+protocol-only tagged-capable kind. -/
+theorem ValueRel.taggedZero_tobject (witness : RefinementWitness) :
+    ValueRel witness .tobject (.word32 taggedZero)
+      (.object (.tagged 0)) := by
+  exact .tobject (.tagged (.immediate 0 (by decide)))
+
+theorem resetProtocolFieldKinds_prefix_rel
+    (witness : RefinementWitness) (address : Word32) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (count index : Nat) (kind : AbiKind)
+    (atIndex : fieldKinds[index]? = some kind) (cleared : index < count) :
+    ∃ protocolKind,
+      (resetProtocolFieldKinds fieldKinds count)[index]? = some protocolKind ∧
+      ValueRel (witness.rebindConstructor address info
+        (resetProtocolFieldKinds fieldKinds count)) protocolKind
+        (.word32 taggedZero) (.object (.tagged 0)) := by
+  exact ⟨.tobject,
+    resetProtocolFieldKinds_prefix atIndex cleared,
+    ValueRel.taggedZero_tobject _⟩
+
+theorem resetProtocolFieldKinds_suffix_rel
+    (witness : RefinementWitness) (address : Word32) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (count index : Nat) (kind : AbiKind)
+    {word : Word32} {value : Value}
+    (atIndex : fieldKinds[index]? = some kind) (retained : count ≤ index)
+    (related : ValueRel witness kind (.word32 word) value) :
+    ∃ protocolKind,
+      (resetProtocolFieldKinds fieldKinds count)[index]? = some protocolKind ∧
+      ValueRel (witness.rebindConstructor address info
+        (resetProtocolFieldKinds fieldKinds count)) protocolKind
+        (.word32 word) value := by
+  exact ⟨kind,
+    resetProtocolFieldKinds_suffix atIndex retained,
+    related.rebindConstructor address info
+      (resetProtocolFieldKinds fieldKinds count)⟩
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated
