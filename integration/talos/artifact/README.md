@@ -24,7 +24,9 @@ Direct calls, saturated and underapplied closures, and recursion execute as
 ordinary Wasm calls around the semantic closure metadata imports.
 Compiler-produced source fixtures also cover heap-backed string and `List Nat`
 arguments through the explicit initial-runtime manifest. The semantic host is
-shared with the repository's native↔V8 validation adapter.
+shared with the repository's native↔V8 validation adapter, whose generated
+corpus now also round-trips immediate and heap `Int` values and exact
+`ByteArray` boundary payloads.
 
 Run the complete lane-local check with:
 
