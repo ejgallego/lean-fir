@@ -1297,6 +1297,16 @@ W6.3 proof can now focus exclusively on the fuel-indexed transition for one
 heap location; constructor child enumeration and fold ordering no longer
 appear in that induction.
 
+W6.3w normalizes the already-proved nonrecursive ownership cases to explicit
+fuel. Concrete above-one decrement and count-one box/natural release now prove
+that every positive fuel budget has the exact public-operation result; the
+semantic counterparts expose the same fuel-indexed `setCell` equations.
+Whole-heap wrappers reuse the existing header-write frame and return
+`LiveHeapRel` for any positive explicit fuel. The recursive induction can
+therefore dispatch above-one and childless count-one cells directly, leaving
+only count-one constructors to assemble from parent release plus W6.3v's
+paired child folds.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

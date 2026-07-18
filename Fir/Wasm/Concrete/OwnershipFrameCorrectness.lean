@@ -1174,4 +1174,77 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
     by rw [semanticEq, show { cell with rc := 0, live := false } = replacement by rfl,
       semanticUpdate], finalRelated⟩
 
+/-- The established whole-heap above-one refinement is valid at every
+positive explicit fuel budget, not only the two public derived budgets. -/
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (oneLt : 1 < cell.rc) (fuel : Nat) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnceFuel (fuel + 1) state address check = .ok result ∧
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, _, notPromoted, ordinary, refCount⟩ :=
+    targetRelated.ordinaryHeader
+  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated⟩ :=
+    related.decrementReferenceOnce_refines_above_one mapped found live oneLt check
+  have concreteEq :=
+    Fir.Wasm.Concrete.decrementReferenceOnceFuel_above_one_eq_public headerRead
+      notPromoted ordinary cell.rc refCount oneLt fuel check
+  have semanticFuelEq :=
+    targetRelated.decLocationFuel_above_one_eq runtime location found oneLt fuel
+  have semanticPublicEq :=
+    targetRelated.decValueOnce_above_one_eq runtime location found oneLt check
+  exact ⟨result, nextRuntime, by rw [concreteEq]; exact concretePublic, by
+    rw [semanticFuelEq, ← semanticPublicEq]
+    exact semanticPublic, finalRelated⟩
+
+/-- The whole-heap box/natural leaf refinement is likewise valid for every
+positive explicit fuel budget. -/
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnceFuel (fuel + 1) state address check = .ok result ∧
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated⟩ :=
+    related.decrementReferenceOnce_refines_leaf_one mapped found live leafCell one check
+  have concreteEq :=
+    targetRelated.decrementReferenceOnceFuel_leaf_one_eq_public leafCell one fuel check
+  have semanticFuelEq :=
+    targetRelated.decLocationFuel_leaf_one_eq leafCell runtime location found one fuel
+  have semanticPublicEq :=
+    targetRelated.decValueOnce_leaf_one_eq leafCell runtime location found one check
+  exact ⟨result, nextRuntime, by rw [concreteEq]; exact concretePublic, by
+    rw [semanticFuelEq, ← semanticPublicEq]
+    exact semanticPublic, finalRelated⟩
+
 end Fir.Wasm.Concrete

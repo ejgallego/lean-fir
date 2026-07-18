@@ -739,6 +739,52 @@ theorem releaseHeader
         exact extentInMemory⟩
     headerOwned := headerOwned }
 
+/-- The ordinary above-one branch is independent of the chosen positive fuel
+budget and therefore agrees with the public cursor-derived entry point. -/
+theorem decrementReferenceOnceFuel_above_one_eq_public
+    {state : MemoryState} {address : Word32} {header : Header}
+    (headerRead : state.readLiveHeader address = .ok header)
+    (notPromoted : header.isPromotedTag = false)
+    (ordinary : header.persistent = false)
+    (oldCount : Nat) (refCount : header.refCount.toNat = oldCount)
+    (oneLt : 1 < oldCount) (fuel : Nat) (check : Bool) :
+    decrementReferenceOnceFuel (fuel + 1) state address check =
+      decrementReferenceOnce state address check := by
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
+  have refCountNe : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+    omega
+  unfold decrementReferenceOnce
+  simp only [decrementReferenceOnceFuel, heap, headerRead, Bind.bind, Except.bind,
+    liftMemory]
+  simp [notPromoted, ordinary, refCountNe, refCount, oneLt]
+
+/-- A count-one branch with no owned words is likewise independent of the
+chosen positive fuel budget. -/
+theorem decrementReferenceOnceFuel_leaf_one_eq_public
+    {state : MemoryState} {address : Word32} {header : Header}
+    (headerRead : state.readLiveHeader address = .ok header)
+    (notPromoted : header.isPromotedTag = false)
+    (ordinary : header.persistent = false)
+    (refCount : header.refCount.toNat = 1)
+    (owned : readOwnedReferences state address header = .ok [])
+    (fuel : Nat) (check : Bool) :
+    decrementReferenceOnceFuel (fuel + 1) state address check =
+      decrementReferenceOnce state address check := by
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead).1
+  have refCountNe : header.refCount ≠ 0 := by
+    intro zero
+    rw [zero] at refCount
+    simp at refCount
+  unfold decrementReferenceOnce
+  simp only [decrementReferenceOnceFuel, heap, headerRead, Bind.bind, Except.bind,
+    liftMemory]
+  simp [notPromoted, ordinary, refCountNe, refCount, owned]
+
 /-- The count-one leaf branch is exactly canonical header release: there are
 no recursively owned references to visit after the write. -/
 theorem decrementReferenceOnce_leaf_one
@@ -1770,6 +1816,49 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
       exact ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
         finalValid, deadRelated⟩
 
+/-- The local box/natural leaf branch agrees with the public concrete entry
+point for every positive explicit fuel budget. -/
+theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
+    decrementReferenceOnceFuel (fuel + 1) state address check =
+      decrementReferenceOnce state address check := by
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      rcases leafCell with boxedCell | naturalCell
+      · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+        rw [objectEq] at boxedEq
+        contradiction
+      · obtain ⟨value, naturalEq⟩ := naturalCell
+        rw [objectEq] at naturalEq
+        contradiction
+  | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.boxed == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header = .ok [] := by
+        simp [readOwnedReferences, objectRelated.headerKind]
+      exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public
+        objectRelated.headerRead notPromoted objectRelated.ordinary countOne owned fuel check
+  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        extent limbsFit decoded refCount persistent live =>
+      have notPromoted : header.isPromotedTag = false := by
+        simp [Header.isPromotedTag, headerKind, ordinary]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header = .ok [] := by
+        simp [readOwnedReferences, headerKind]
+      exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public headerRead
+        notPromoted ordinary countOne owned fuel check
+
 /-- Complete local increment theorem for every live-cell representation in
 the current W6 heap relation. -/
 theorem LiveCellRel.incrementReference
@@ -1860,8 +1949,25 @@ theorem LiveCellRel.persistent_eq_false
       rw [← persistent]
       exact ordinary
 
-/-- Above one, the source ownership operation takes the same nonrecursive
-count-rewrite step for every ordinary cell in the concrete heap relation. -/
+/-- Above one, every positive semantic fuel budget takes the same
+nonrecursive count-rewrite step. -/
+theorem LiveCellRel.decLocationFuel_above_one_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (oneLt : 1 < cell.rc) (fuel : Nat) :
+    Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+      setCell runtime location { cell with rc := cell.rc - 1 } := by
+  have nonzero : cell.rc ≠ 0 := by omega
+  simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
+    related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
+  rw [if_neg (by simp [related.persistent_eq_false])]
+  rw [if_neg nonzero, if_pos oneLt]
+
+/-- Above one, the public source ownership operation selects that same
+fuel-independent branch. -/
 theorem LiveCellRel.decValueOnce_above_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
@@ -1871,13 +1977,14 @@ theorem LiveCellRel.decValueOnce_above_one_eq
     (oneLt : 1 < cell.rc) (check : Bool) :
     Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
       setCell runtime location { cell with rc := cell.rc - 1 } := by
-  unfold Fir.LeanIR.Impure.decValueOnce
-  exact Fir.LeanIR.Impure.decLocation_above_one runtime location cell found
-    related.live_eq_true related.persistent_eq_false oneLt
+  unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
+  exact related.decLocationFuel_above_one_eq runtime location found oneLt
+    runtime.heap.length
 
-/-- Source count-one release of a box or natural marks the cell dead directly:
-their semantic payloads contain no heap references requiring recursion. -/
-theorem LiveCellRel.decValueOnce_leaf_one_eq
+/-- At any positive fuel, source count-one release of a box or natural marks
+the cell dead directly: their semantic payloads contain no heap references
+requiring recursion. -/
+theorem LiveCellRel.decLocationFuel_leaf_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
@@ -1887,12 +1994,11 @@ theorem LiveCellRel.decValueOnce_leaf_one_eq
       (∃ value : Nat, cell.object = .natural value))
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
-    (one : cell.rc = 1) (check : Bool) :
-    Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+    (one : cell.rc = 1) (fuel : Nat) :
+    Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
       setCell runtime location { cell with rc := 0, live := false } := by
   have nonzero : cell.rc ≠ 0 := by omega
   have notAboveOne : ¬1 < cell.rc := by omega
-  unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
   simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
     related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
   rw [if_neg (by simp [related.persistent_eq_false])]
@@ -1907,7 +2013,7 @@ theorem LiveCellRel.decValueOnce_leaf_one_eq
         Array.foldlM (fun next value =>
           match value with
           | .object (.heap child) =>
-              Fir.LeanIR.Impure.decLocationFuel runtime.heap.length next child
+              Fir.LeanIR.Impure.decLocationFuel fuel next child
           | _ => .ok next) next #[scalar.semanticValue] = .ok next := by
       cases scalar <;>
         simp [BoxedScalar.semanticValue, Array.foldlM, Array.foldlM.loop]
@@ -1924,6 +2030,25 @@ theorem LiveCellRel.decValueOnce_leaf_one_eq
     | ok next =>
         change Except.ok next = Except.ok next
         rfl
+
+/-- The public count-one leaf operation selects the same fuel-independent
+branch. -/
+theorem LiveCellRel.decValueOnce_leaf_one_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (leafCell :
+      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value))
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell)
+    (one : cell.rc = 1) (check : Bool) :
+    Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+      setCell runtime location { cell with rc := 0, live := false } := by
+  unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
+  exact related.decLocationFuel_leaf_one_eq leafCell runtime location found one
+    runtime.heap.length
 
 /-- Complete local source/concrete composition for count-one boxes and heap
 naturals: both executions make the semantic cell dead, and concrete memory
