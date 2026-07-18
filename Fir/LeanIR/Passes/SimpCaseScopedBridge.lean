@@ -680,6 +680,40 @@ structure ScopedCodePhaseResult
   targetRefl : CodeRel validCase target target
   targetAlpha : ScopedAlphaBireflexive index target
 
+/-- Explicit endpoint identities needed to turn a local phase factor into a
+traversal result. They are kept as evidence because neither structural nor
+scoped alpha reflexivity is globally valid for arbitrary selectors/scopes. -/
+structure ScopedCodeTargetIdentities
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (target : LCNF.Code .impure) : Prop where
+  structural : CodeRel validCase target target
+  alpha : ScopedAlphaBireflexive index target
+
+theorem ScopedCodePhaseResult.identities
+    (result : ScopedCodePhaseResult validCase index source target) :
+    ScopedCodeTargetIdentities validCase index target := {
+  structural := result.targetRefl
+  alpha := result.targetAlpha
+}
+
+def ScopedCodeBifactor.phaseResult
+    (factor : ScopedCodeBifactor validCase index source target)
+    (identities : ScopedCodeTargetIdentities validCase index target) :
+    ScopedCodePhaseResult validCase index source target := {
+  factor := .twoPhase factor
+  targetRefl := identities.structural
+  targetAlpha := identities.alpha
+}
+
+def ScopedCodeTrifactor.phaseResult
+    (factor : ScopedCodeTrifactor validCase index source target)
+    (identities : ScopedCodeTargetIdentities validCase index target) :
+    ScopedCodePhaseResult validCase index source target := {
+  factor := .threePhase factor
+  targetRefl := identities.structural
+  targetAlpha := identities.alpha
+}
+
 def ScopedCodePhaseResult.trifactor
     (result : ScopedCodePhaseResult validCase index source target) :
     ScopedCodeTrifactor validCase index source target :=
@@ -714,6 +748,17 @@ def ScopedCodePhaseResult.identity
   }
   targetRefl := structural
   targetAlpha := alpha
+}
+
+theorem scopedUnreachTargetIdentities
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (type : Expr) :
+    ScopedCodeTargetIdentities validCase index (.unreach type) := {
+  structural := .aligned (.unreach type)
+  alpha := {
+    forward := .terminal .unreachable
+    backward := .terminal .unreachable
+  }
 }
 
 /-- Nonempty sequence of local phase rounds. Nested case simplifiers append
@@ -1714,12 +1759,12 @@ structure ScopedAlignedCaseEvidence
       (chooseAlt tag target.alts.toList)
       (chooseAlt tag middleAlts.toList)
 
-theorem ScopedAlignedCaseEvidence.factored
+def ScopedAlignedCaseEvidence.bifactor
     (evidence : ScopedAlignedCaseEvidence validCase index source target) :
-    ScopedCodeFactored validCase index (.cases source) (.cases target) := by
+    ScopedCodeBifactor validCase index (.cases source) (.cases target) := by
   cases source with
   | mk typeName resultType discr sourceAlts =>
-      exact ⟨{
+      exact {
         middle := .cases
           (.mk typeName resultType discr evidence.middleAlts)
         structural := .aligned (.cases typeName resultType discr
@@ -1728,7 +1773,18 @@ theorem ScopedAlignedCaseEvidence.factored
           evidence.alphaForwardSelected
         alphaBackward := .cases evidence.alphaBackwardDiscr
           evidence.alphaBackwardSelected
-      }⟩
+      }
+
+theorem ScopedAlignedCaseEvidence.factored
+    (evidence : ScopedAlignedCaseEvidence validCase index source target) :
+    ScopedCodeFactored validCase index (.cases source) (.cases target) :=
+  evidence.bifactor.factored
+
+def ScopedAlignedCaseEvidence.phaseResult
+    (evidence : ScopedAlignedCaseEvidence validCase index source target)
+    (identities : ScopedCodeTargetIdentities validCase index (.cases target)) :
+    ScopedCodePhaseResult validCase index (.cases source) (.cases target) :=
+  evidence.bifactor.phaseResult identities
 
 /-- Selection-local evidence for zero/singleton simplification, where the
 source case table is eliminated to one structural intermediate before the
@@ -1747,17 +1803,29 @@ structure ScopedEliminatedCaseEvidence
     (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
     index.backwardRho index.targetScope index.sourceScope target middle
 
-theorem ScopedEliminatedCaseEvidence.factored
+def ScopedEliminatedCaseEvidence.bifactor
     (evidence : ScopedEliminatedCaseEvidence
       validCase index source target) :
-    ScopedCodeFactored validCase index (.cases source) target :=
-  ⟨{
+    ScopedCodeBifactor validCase index (.cases source) target :=
+  {
     middle := evidence.middle
     structural := .eliminate source evidence.middle
       evidence.structuralSelected
     alphaForward := evidence.alphaForward
     alphaBackward := evidence.alphaBackward
-  }⟩
+  }
+
+theorem ScopedEliminatedCaseEvidence.factored
+    (evidence : ScopedEliminatedCaseEvidence
+      validCase index source target) :
+    ScopedCodeFactored validCase index (.cases source) target :=
+  evidence.bifactor.factored
+
+def ScopedEliminatedCaseEvidence.phaseResult
+    (evidence : ScopedEliminatedCaseEvidence validCase index source target)
+    (identities : ScopedCodeTargetIdentities validCase index target) :
+    ScopedCodePhaseResult validCase index (.cases source) target :=
+  evidence.bifactor.phaseResult identities
 
 /-- Phase evidence that every valid source selection for a singleton prepared
 table converges on one structural intermediate, with alpha proofs from that
@@ -1786,6 +1854,15 @@ def ScopedSingletonSelectionConvergence.eliminated
   alphaBackward := converges.alphaBackward
 }
 
+def ScopedEliminatedCaseEvidence.converges
+    (evidence : ScopedEliminatedCaseEvidence validCase index source target) :
+    ScopedSingletonSelectionConvergence validCase index source target := {
+  middle := evidence.middle
+  structuralSelected := evidence.structuralSelected
+  alphaForward := evidence.alphaForward
+  alphaBackward := evidence.alphaBackward
+}
+
 /-- Corrected local singleton classification. A pre-existing singleton uses
 one common structural branch. A singleton created by alpha folding records
 the final structural elimination as a third phase. -/
@@ -1807,6 +1884,28 @@ theorem ScopedSingletonPhaseEvidence.phaseFactored
         converges.alphaForward converges.alphaBackward).phaseFactored
   | folded factor =>
       exact factor.phaseFactored
+
+def ScopedSingletonPhaseEvidence.phaseResult
+    (evidence : ScopedSingletonPhaseEvidence validCase index source target)
+    (identities : ScopedCodeTargetIdentities validCase index target) :
+    ScopedCodePhaseResult validCase index (.cases source) target :=
+  match evidence with
+  | .direct converges => converges.eliminated.phaseResult identities
+  | .folded factor => factor.phaseResult identities
+
+/-- Phase-classified singleton evidence plus the endpoint identities needed
+to continue recursive traversal. -/
+structure ScopedSingletonPhaseResultEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) (target : LCNF.Code .impure) : Type where
+  phase : ScopedSingletonPhaseEvidence validCase index source target
+  identities : ScopedCodeTargetIdentities validCase index target
+
+def ScopedSingletonPhaseResultEvidence.result
+    (evidence : ScopedSingletonPhaseResultEvidence
+      validCase index source target) :
+    ScopedCodePhaseResult validCase index (.cases source) target :=
+  evidence.phase.phaseResult evidence.identities
 
 /-- Empty prepared tables need no branch intermediate: once the phase rules
 out every valid source tag, `unreach` is the fixed structural and alpha
@@ -1889,6 +1988,26 @@ def ScopedRetainedPhaseEvidence.aligned
         alphaBackwardSelected := evidence.folded.backward
       }
 
+/-- Retained-table evidence plus endpoint identities for the prepared target
+table. -/
+structure ScopedRetainedPhaseResultEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure)
+    (targetAlts : Array (LCNF.Alt .impure)) : Type where
+  phase : ScopedRetainedPhaseEvidence validCase index source targetAlts
+  identities : ScopedCodeTargetIdentities validCase index
+    (.cases (source.updateAlts
+      (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts))))
+
+def ScopedRetainedPhaseResultEvidence.result
+    (evidence : ScopedRetainedPhaseResultEvidence
+      validCase index source targetAlts)
+    (root : ScopedAlphaBireflexive index (.cases source)) :
+    ScopedCodePhaseResult validCase index (.cases source)
+      (.cases (source.updateAlts
+        (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts)))) :=
+  (evidence.phase.aligned root).phaseResult evidence.identities
+
 /-- Output-shape classification for one admissible nonrecursive case-kernel
 step. -/
 inductive ScopedCaseFactorEvidence
@@ -1967,6 +2086,41 @@ structure ScopedCaseShapeLaws
     Nonempty (ScopedRetainedPhaseEvidence validCase index
       (.mk typeName resultType discr sourceAlts)
       targetAlts.toArray)
+
+/-- Phase-aware local output-shape contract. Empty tables retain the ordinary
+elimination evidence; singleton tables explicitly classify direct versus
+fold-created results; retained tables carry target identities for subsequent
+recursive rounds. -/
+structure ScopedCasePhaseShapeLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 0 →
+    Nonempty (ScopedEliminatedCaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) (.unreach resultType))
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (singleton : (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1) →
+    Nonempty (ScopedSingletonPhaseResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
+    Nonempty (ScopedRetainedPhaseResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) sourceAlts)
 
 /-- The retained-table half of the phase contract. Genuine default folding
 remains isolated here; empty and singleton tables are derived generically
@@ -2062,6 +2216,31 @@ structure ScopedLocalCasePhaseLaws
     Nonempty (ScopedCodePhaseResult validCase index
       (.cases (.mk typeName resultType discr alts))
       (shadowSimplifyCases (.mk typeName resultType discr alts)))
+
+/-- Assemble the exact local phase law by following
+`shadowSimplifyCases`' output-shape decision tree. Unlike the older two-phase
+assembly, the singleton branch preserves the direct/folded classification. -/
+theorem scopedLocalCasePhaseLaws_of_shapes
+    (shapes : ScopedCasePhaseShapeLaws validCase) :
+    ScopedLocalCasePhaseLaws validCase where
+  simplify := by
+    intro index typeName resultType discr alts root
+    let cases : LCNF.Cases .impure :=
+      .mk typeName resultType discr alts
+    by_cases empty : (shadowPrepareAlts cases).size = 0
+    · rw [shadowSimplifyCases_eq_unreach empty]
+      rcases shapes.empty root empty with ⟨evidence⟩
+      exact ⟨evidence.phaseResult
+        (scopedUnreachTargetIdentities validCase index resultType)⟩
+    · by_cases singleton : (shadowPrepareAlts cases).size = 1
+      · rw [shadowSimplifyCases_eq_singleton singleton]
+        rcases shapes.singleton root singleton with ⟨evidence⟩
+        exact ⟨evidence.result⟩
+      · rw [shadowSimplifyCases_eq_cases empty singleton]
+        rcases shapes.retained root empty singleton with ⟨evidence⟩
+        exact ⟨by
+          simpa [cases, shadowPrepareAlts, LCNF.Cases.alts] using
+            evidence.result root⟩
 
 /-- The trace-aware recursive case kernel. It synchronizes all recursive
 alternative traces, lifts them to the source case table, and appends the one
@@ -3194,6 +3373,13 @@ theorem scopedCaseBoundarySoundTraceTree_of_localPhases
     scopedCodePhaseTracedOnAlphaTree_traversalLaws
     (scopedCaseTraceKernelLaws_of_localPhases phases)
 
+theorem scopedCaseBoundarySoundTraceTree_of_phaseShapes
+    (shapes : ScopedCasePhaseShapeLaws validCase) :
+    ScopedCaseBoundarySound
+      (ScopedCodePhaseTracedOnAlphaTree validCase) :=
+  scopedCaseBoundarySoundTraceTree_of_localPhases
+    (scopedLocalCasePhaseLaws_of_shapes shapes)
+
 /-- End-to-end arbitrary recursive trace under full lexical hygiene. Every
 nested case contributes a separate local round. -/
 theorem shadowCode_scopedPhaseTracedTree
@@ -3204,6 +3390,16 @@ theorem shadowCode_scopedPhaseTracedTree
   (shadowCode_scopedRelated_of_caseKernel
     scopedCodePhaseTracedOnAlphaTree_traversalLaws
     (scopedCaseTraceKernelLaws_of_localPhases phases) run) hygiene
+
+/-- End-to-end recursive trace from independently proved phase-aware empty,
+singleton, and retained output-shape laws. -/
+theorem shadowCode_scopedPhaseTracedTree_of_phaseShapes
+    (shapes : ScopedCasePhaseShapeLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  shadowCode_scopedPhaseTracedTree
+    (scopedLocalCasePhaseLaws_of_shapes shapes) hygiene run
 
 /-- Recursive correctness for the trace relation reduces exactly to a local
 case-kernel law, just as it does for the one-round result relation. -/

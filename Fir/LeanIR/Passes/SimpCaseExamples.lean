@@ -821,6 +821,19 @@ def alphaSingletonFoldPhaseResult :
   targetAlpha := alphaLeftAlphaBireflexiveAtFoldScope
 }
 
+def alphaSingletonFoldPhaseResultEvidence :
+    ScopedSingletonPhaseResultEvidence alphaSingletonFoldValidCase
+      alphaFoldScopeIndex alphaSingletonFoldCases alphaLeft := {
+  phase := alphaSingletonFoldPhaseEvidence
+  identities := alphaSingletonFoldPhaseResult.identities
+}
+
+/-- Fold-created singleton witness through the new phase-shape packaging. -/
+def alphaSingletonFoldPhaseShapeResult :
+    ScopedCodePhaseResult alphaSingletonFoldValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft :=
+  alphaSingletonFoldPhaseResultEvidence.result
+
 def alphaSingletonFoldTrace :
     ScopedCodePhaseTrace alphaSingletonFoldValidCase alphaFoldScopeIndex
       alphaSingletonFoldCode alphaLeft :=
@@ -1226,6 +1239,27 @@ def singletonDefaultDirectPhaseEvidence :
       alphaFoldScopeIndex singletonDefaultCases selectedBranch :=
   .direct singletonDefaultSelectionConvergence
 
+theorem singletonDefaultTargetIdentities :
+    ScopedCodeTargetIdentities singletonDefaultValidCase
+      alphaFoldScopeIndex selectedBranch := {
+  structural := singletonDefaultScopedCodeFactor.structural
+  alpha := selectedBranchAlphaBireflexiveAtFoldScope
+}
+
+def singletonDefaultPhaseResultEvidence :
+    ScopedSingletonPhaseResultEvidence singletonDefaultValidCase
+      alphaFoldScopeIndex singletonDefaultCases selectedBranch := {
+  phase := singletonDefaultDirectPhaseEvidence
+  identities := singletonDefaultTargetIdentities
+}
+
+/-- Direct singleton witness through the same phase-shape packaging used by
+fold-created singletons. -/
+def singletonDefaultPhaseShapeResult :
+    ScopedCodePhaseResult singletonDefaultValidCase alphaFoldScopeIndex
+      singletonDefaultCode selectedBranch :=
+  singletonDefaultPhaseResultEvidence.result
+
 theorem singletonDefaultDirectPhaseFactored :
     ScopedCodePhaseFactored singletonDefaultValidCase alphaFoldScopeIndex
       singletonDefaultCode selectedBranch :=
@@ -1248,6 +1282,98 @@ theorem singletonDefaultAddDefaultSelectionEvidence :
       (.default selectedBranchAlphaBireflexiveAtFoldScope.forward) .nil
   · exact .cons
       (.default selectedBranchAlphaBireflexiveAtFoldScope.backward) .nil
+
+theorem retainedIdentityAlphaBireflexive :
+    ScopedAlphaBireflexive alphaFoldScopeIndex
+      (.cases alphaSingletonStructuralCases) := by
+  constructor
+  · apply CodeRelated.cases cRelatedAtFoldScope
+    intro tag
+    exact chooseAlt_related (.cons
+      (.ctor alphaLeftAlphaBireflexiveAtFoldScope.forward)
+      (.cons (.default alphaRightAlphaBireflexiveAtFoldScope.forward) .nil))
+  · apply CodeRelated.cases cRelatedAtFoldScope
+    intro tag
+    exact chooseAlt_related (.cons
+      (.ctor alphaLeftAlphaBireflexiveAtFoldScope.backward)
+      (.cons (.default alphaRightAlphaBireflexiveAtFoldScope.backward) .nil))
+
+theorem retainedIdentityStructuralRefl :
+    CodeRel nestedPhaseDepthValidCase
+      (.cases alphaSingletonStructuralCases)
+      (.cases alphaSingletonStructuralCases) := by
+  apply CodeRel.aligned
+  apply HeadRel.cases
+  intro tag valid
+  exact structuralChooseAlt_related (.cons
+    (.ctor nestedAlphaLeftStructuralRefl)
+    (.cons (.default nestedAlphaRightStructuralRefl) .nil))
+
+theorem retainedIdentityTargetIdentities :
+    ScopedCodeTargetIdentities nestedPhaseDepthValidCase alphaFoldScopeIndex
+      (.cases alphaSingletonStructuralCases) := {
+  structural := retainedIdentityStructuralRefl
+  alpha := retainedIdentityAlphaBireflexive
+}
+
+theorem retainedIdentityFilter_eq :
+    shadowFilterUnreachable alphaSingletonStructuralCases.alts =
+      alphaSingletonStructuralCases.alts := by
+  rfl
+
+theorem retainedIdentityAddDefault_eq :
+    shadowAddDefaultAlt alphaSingletonStructuralCases.alts =
+      alphaSingletonStructuralCases.alts := by
+  apply shadowAddDefaultAlt_eq_of_hasDefault
+  native_decide
+
+theorem retainedIdentityPreparedCases_eq :
+    alphaSingletonStructuralCases.updateAlts
+      (shadowAddDefaultAlt
+        (shadowFilterUnreachable alphaSingletonStructuralCases.alts)) =
+      alphaSingletonStructuralCases := by
+  rw [retainedIdentityFilter_eq, retainedIdentityAddDefault_eq]
+  rfl
+
+def retainedIdentityPhaseEvidence :
+    ScopedRetainedPhaseEvidence nestedPhaseDepthValidCase alphaFoldScopeIndex
+      alphaSingletonStructuralCases alphaSingletonStructuralCases.alts := {
+  middleAlts := alphaSingletonStructuralCases.alts
+  structuralSelected := by
+    intro tag valid
+    exact structuralChooseAlt_related (.cons
+      (.ctor nestedAlphaLeftStructuralRefl)
+      (.cons (.default nestedAlphaRightStructuralRefl) .nil))
+  folded := by
+    rw [retainedIdentityFilter_eq]
+    exact scopedAddDefaultSelectionEvidence_of_eq
+      retainedIdentityAddDefault_eq
+      (.cons (.ctor alphaLeftAlphaBireflexiveAtFoldScope.forward)
+        (.cons (.default alphaRightAlphaBireflexiveAtFoldScope.forward) .nil))
+      (.cons (.ctor alphaLeftAlphaBireflexiveAtFoldScope.backward)
+        (.cons (.default alphaRightAlphaBireflexiveAtFoldScope.backward) .nil))
+}
+
+def retainedIdentityPhaseResultEvidence :
+    ScopedRetainedPhaseResultEvidence nestedPhaseDepthValidCase
+      alphaFoldScopeIndex alphaSingletonStructuralCases
+      alphaSingletonStructuralCases.alts := {
+  phase := retainedIdentityPhaseEvidence
+  identities := by
+    rw [retainedIdentityPreparedCases_eq]
+    exact retainedIdentityTargetIdentities
+}
+
+/-- Retained-table witness through the phase-shape packaging. Filtering and
+default insertion are both transparently inert for this constructor/default
+table. -/
+def retainedIdentityPhaseShapeResult :
+    ScopedCodePhaseResult nestedPhaseDepthValidCase alphaFoldScopeIndex
+      (.cases alphaSingletonStructuralCases)
+      (.cases alphaSingletonStructuralCases) := by
+  simpa only [retainedIdentityPreparedCases_eq] using
+    retainedIdentityPhaseResultEvidence.result
+      retainedIdentityAlphaBireflexive
 
 /-- The traversal index reconstructs the declaration-body scope from its
 parameters in the same order as `ParamBodyRelated`. -/
@@ -1498,6 +1624,14 @@ def emptyCaseEliminationEvidence :
   alphaBackward := .terminal .unreachable
 }
 
+/-- Empty-table witness through the automatic unreachable endpoint
+identities used by the phase-shape assembly. -/
+def emptyCasePhaseShapeResult :
+    ScopedCodePhaseResult noCaseTagValid emptyCaseScopeIndex
+      (.cases emptyCaseTable) (.unreach objType) :=
+  emptyCaseEliminationEvidence.phaseResult
+    (scopedUnreachTargetIdentities noCaseTagValid emptyCaseScopeIndex objType)
+
 theorem emptyCaseFactoredWithPhaseEvidence :
     ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
       (.cases emptyCaseTable) (.unreach objType) :=
@@ -1530,6 +1664,15 @@ theorem nestedEmptyCaseFactored_of_shapes
       nestedEmptyCaseCode nestedEmptyCaseExpected :=
   shadowCode_scopedFactoredTree_of_shapes shapes nestedEmptyCaseAlphaTree
     nestedEmptyCaseShadowRun
+
+/-- The recursive empty-table regression through the phase-aware shape
+assembly, with no direct `ScopedLocalCasePhaseLaws` premise. -/
+theorem nestedEmptyCaseTraced_of_phaseShapes
+    (shapes : ScopedCasePhaseShapeLaws noCaseTagValid) :
+    ScopedCodePhaseTraced noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedPhaseTracedTree_of_phaseShapes shapes
+    nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
 
 /-- The same recursive empty-table regression through the reduced two-phase
 interface. This path consults neither singleton nor retained folding evidence. -/

@@ -106,3 +106,12 @@ boundary under full-tree hygiene.
 `nestedPhaseDepthTrace` is the original reproducer closed with two explicit
 rounds under a non-vacuous Boolean-tag predicate. Its round-count guard and
 the existing transparent/actual-pass result checks pin the regression.
+
+The follow-up `ScopedCasePhaseShapeLaws` contract now splits the remaining
+local simplifier premise into empty, phase-classified singleton, and retained
+output evidence. `scopedLocalCasePhaseLaws_of_shapes` derives the local law by
+following `shadowSimplifyCases`' decision tree, and
+`shadowCode_scopedPhaseTracedTree_of_phaseShapes` feeds those independent
+shape proofs directly into arbitrary recursive traversal. Examples cover
+empty, direct-singleton, fold-created-singleton, and retained-table result
+packaging.
