@@ -1414,6 +1414,17 @@ restricted to the smaller logical prefix. A strict shrinking-reuse guard
 checks that new metadata and fields decode while the old 56-byte capacity is
 preserved. This is the capacity model required by the reset-token protocol.
 
+W6.3aj introduces that protocol boundary without weakening normal heap
+decoding. `ResetReuseProtocolRel` relates a unique reset as a paired concrete
+and semantic transition whose input satisfies `LiveHeapRel`; it deliberately
+does not assert `LiveHeapRel` for the temporary cleared states. The returned
+nonempty token remains related through `RefinementWitness.rebindConstructor`,
+which shadows the active constructor descriptor at the same address while
+leaving semantic locations, promoted tags, witness well-formedness, and every
+ABI value relation unchanged. The next slice proves unique reset enters this
+transition relation; the following reuse slice consumes it and re-establishes
+the normal whole-heap relation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

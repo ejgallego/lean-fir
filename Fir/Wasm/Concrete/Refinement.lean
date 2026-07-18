@@ -79,6 +79,17 @@ def RefinementWitness.bindConstructor (witness : RefinementWitness)
       locations := (location, address) :: witness.locations
       descriptors := (address, .constructor info fieldKinds) :: witness.descriptors }
 
+/-- Replace the proof-only active constructor descriptor at an existing
+address. Location and promoted-tag identities are unchanged; the new head
+entry shadows the allocation-time descriptor after successful in-place
+reuse. -/
+def RefinementWitness.rebindConstructor (witness : RefinementWitness)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) : RefinementWitness :=
+  { witness with
+      descriptors := (address, .constructor info fieldKinds) ::
+        witness.descriptors }
+
 def RefinementWitness.bindNatural (witness : RefinementWitness)
     (location : Location) (address : Word32) (value : Nat) : RefinementWitness :=
   { witness with
@@ -128,6 +139,33 @@ theorem RefinementWitness.lookup_promoteTag_descriptor_other
     (witness.bindConstructor location address info fieldKinds).descriptors.lookup? address =
       some (.constructor info fieldKinds) := by
   simp [RefinementWitness.bindConstructor, DescriptorMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_rebindConstructor_descriptor
+    (witness : RefinementWitness) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.rebindConstructor address info fieldKinds).descriptors.lookup? address =
+      some (.constructor info fieldKinds) := by
+  simp [RefinementWitness.rebindConstructor, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_rebindConstructor_descriptor_other
+    (witness : RefinementWitness) (address other : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (different : address.value ≠ other.value) :
+    (witness.rebindConstructor address info fieldKinds).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.rebindConstructor, DescriptorMap.lookup?, different]
+
+@[simp] theorem RefinementWitness.rebindConstructor_locations
+    (witness : RefinementWitness) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.rebindConstructor address info fieldKinds).locations =
+      witness.locations := rfl
+
+@[simp] theorem RefinementWitness.rebindConstructor_promotedTags
+    (witness : RefinementWitness) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.rebindConstructor address info fieldKinds).promotedTags =
+      witness.promotedTags := rfl
 
 theorem RefinementWitness.lookup_bindConstructor_location_other
     (witness : RefinementWitness) (location other : Location) (address : Word32)
@@ -308,6 +346,20 @@ structure RefinementWitness.WellFormed (witness : RefinementWitness) : Prop wher
   locationPromotionDisjoint : ∀ location payload left right,
     witness.locations.lookup? location = some left →
     witness.promotedTags.Contains payload right → left ≠ right
+
+/-- Rebinding only a descriptor leaves all reference-identity invariants
+definitionally unchanged. -/
+theorem RefinementWitness.WellFormed.rebindConstructor
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) :
+    (witness.rebindConstructor address info fieldKinds).WellFormed := by
+  refine {
+    locationHeap := valid.locationHeap
+    locationInjective := valid.locationInjective
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := valid.locationPromotionDisjoint }
 
 /-- Fresh constructor metadata preserves witness injectivity and the
 location/promoted-tag address partition. -/
@@ -567,6 +619,75 @@ theorem ValueRel.witnessExtension
   | erased => exact .erased
   | reuseNone => exact .reuseNone
   | reuseSome heapRelated => exact .reuseSome (heapRelated.witnessExtension extension)
+  | uint8 encoded => exact .uint8 encoded
+  | uint16 encoded => exact .uint16 encoded
+  | uint32 encoded => exact .uint32 encoded
+  | uint64 => exact .uint64
+  | usize => exact .usize
+
+/-- Descriptor rebinding preserves every mapped heap reference because the
+semantic-location map is unchanged. -/
+theorem HeapReferenceRel.rebindConstructor
+    {witness : RefinementWitness} {word : Word32} {location : Location}
+    (related : HeapReferenceRel witness word location)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) :
+    HeapReferenceRel (witness.rebindConstructor address info fieldKinds)
+      word location := by
+  cases related with
+  | mapped found =>
+      exact .mapped (by
+        simpa [RefinementWitness.rebindConstructor] using found)
+
+/-- Descriptor rebinding preserves both immediate and promoted tagged-value
+representations because the promoted-tag table is unchanged. -/
+theorem TaggedReferenceRel.rebindConstructor
+    {witness : RefinementWitness} {word : Word32} {payload : UInt64}
+    (related : TaggedReferenceRel witness word payload)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) :
+    TaggedReferenceRel (witness.rebindConstructor address info fieldKinds)
+      word payload := by
+  cases related with
+  | immediate payload fits => exact .immediate payload fits
+  | promoted found =>
+      exact .promoted (by
+        simpa [RefinementWitness.rebindConstructor] using found)
+
+theorem ObjectReferenceRel.rebindConstructor
+    {witness : RefinementWitness} {word : Word32} {reference : ObjectRef}
+    (related : ObjectReferenceRel witness word reference)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) :
+    ObjectReferenceRel (witness.rebindConstructor address info fieldKinds)
+      word reference := by
+  cases related with
+  | heap heapRelated =>
+      exact .heap (heapRelated.rebindConstructor address info fieldKinds)
+  | tagged taggedRelated =>
+      exact .tagged (taggedRelated.rebindConstructor address info fieldKinds)
+
+/-- All ABI value relations survive active-descriptor rebinding; only heap
+decoding, not lane/reference identity, consults descriptors. -/
+theorem ValueRel.rebindConstructor
+    {witness : RefinementWitness} {kind : AbiKind}
+    {concrete : LaneValue} {semantic : Value}
+    (related : ValueRel witness kind concrete semantic)
+    (address : Word32) (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) :
+    ValueRel (witness.rebindConstructor address info fieldKinds)
+      kind concrete semantic := by
+  cases related with
+  | object heapRelated =>
+      exact .object (heapRelated.rebindConstructor address info fieldKinds)
+  | tagged taggedRelated =>
+      exact .tagged (taggedRelated.rebindConstructor address info fieldKinds)
+  | tobject objectRelated =>
+      exact .tobject (objectRelated.rebindConstructor address info fieldKinds)
+  | erased => exact .erased
+  | reuseNone => exact .reuseNone
+  | reuseSome heapRelated =>
+      exact .reuseSome (heapRelated.rebindConstructor address info fieldKinds)
   | uint8 encoded => exact .uint8 encoded
   | uint16 encoded => exact .uint16 encoded
   | uint32 encoded => exact .uint32 encoded

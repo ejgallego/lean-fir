@@ -6,6 +6,67 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- Explicit transition relation for the unique reset-to-reuse protocol.
+`LiveHeapRel` is required only before reset; the exact concrete and semantic
+reset equations name the temporary states without claiming that cleared
+heap-only slots satisfy the normal ABI-indexed value relation. A later reuse
+must consume both states together and re-establish `LiveHeapRel`. -/
+structure ResetReuseProtocolRel
+    (before after : MemoryState) (witness : RefinementWitness)
+    (runtime nextRuntime : RuntimeState) (location : Location)
+    (address : Word32) (cell : HeapCell) (object : ConstructorObject)
+    (count : Nat) : Prop where
+  relatedBefore : LiveHeapRel before witness runtime
+  mapped : witness.locations.lookup? location = some address
+  found : findCell? runtime.heap location = some cell
+  live : cell.live = true
+  ordinary : cell.persistent = false
+  unique : cell.rc = 1
+  constructor : cell.object = .ctor object
+  countFits : count ≤ object.objectFields.size
+  concreteReset : resetObject before count address = .ok (after, address)
+  semanticReset :
+    Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken (some location))
+
+/-- The protocol transition returns the same already-mapped location/address
+pair in both reuse-token representations. -/
+theorem ResetReuseProtocolRel.tokenRelated
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {object : ConstructorObject}
+    {count : Nat}
+    (protocol : ResetReuseProtocolRel before after witness runtime nextRuntime
+      location address cell object count) :
+    ValueRel witness .reuseToken (.word32 address)
+      (.reuseToken (some location)) :=
+  .reuseSome (.mapped protocol.mapped)
+
+/-- Rebinding the active constructor descriptor after reuse does not change
+the protocol token's semantic location identity. -/
+theorem ResetReuseProtocolRel.tokenRelated_rebindConstructor
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {object : ConstructorObject}
+    {count : Nat}
+    (protocol : ResetReuseProtocolRel before after witness runtime nextRuntime
+      location address cell object count)
+    (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    ValueRel (witness.rebindConstructor address info fieldKinds) .reuseToken
+      (.word32 address) (.reuseToken (some location)) :=
+  protocol.tokenRelated.rebindConstructor address info fieldKinds
+
+theorem ResetReuseProtocolRel.reboundWitnessWellFormed
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {object : ConstructorObject}
+    {count : Nat}
+    (protocol : ResetReuseProtocolRel before after witness runtime nextRuntime
+      location address cell object count)
+    (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    (witness.rebindConstructor address info fieldKinds).WellFormed :=
+  protocol.relatedBefore.witnessWellFormed.rebindConstructor address info fieldKinds
+
 /-- Both physical tagged encodings take reset's empty-token path without
 changing concrete memory. -/
 theorem LiveHeapRel.resetObject_tagged
