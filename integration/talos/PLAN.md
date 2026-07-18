@@ -1457,6 +1457,14 @@ bounded cleared prefix is proven invisible to checked `USize` plus packed
 protocol target by changing only its object-field clause; all header, extent,
 `USize`, and scalar observations transport unchanged.
 
+W6.3ao completes that target reconstruction. `resetProtocolObject` names the
+semantic constructor immediately after its ownership prefix is cleared, and
+`ConstructorObjectRel.resetPrefix` proves the concrete bulk write represents
+it under the rebound protocol descriptor. Cleared slots decode canonical
+tagged zero at `.tobject`; retained slots preserve their original ABI kind,
+semantic value, concrete word, and value relation. The protocol state now has
+a complete strict constructor relation suitable for the child-release fold.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

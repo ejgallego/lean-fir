@@ -104,6 +104,181 @@ theorem resetProtocolFieldKinds_suffix_rel
     related.rebindConstructor address info
       (resetProtocolFieldKinds fieldKinds count)⟩
 
+/-- Semantic reset target immediately after the ownership prefix has been
+cleared but before those former children are released. -/
+def resetProtocolObject (object : ConstructorObject) (count : Nat) :
+    ConstructorObject := {
+  object with
+  objectFields := object.objectFields.mapIdx fun index field =>
+    if index < count then .object (.tagged 0) else field }
+
+/-- Clearing a bounded concrete prefix establishes the normal constructor
+relation under reset's protocol-only descriptor. All non-object observations
+are framed; object slots split into canonical tagged-zero prefix values and
+unchanged suffix values. -/
+theorem ConstructorObjectRel.resetPrefix
+    (state : MemoryState) (memory : LinearMemory) (witness : RefinementWitness)
+    (address : Word32) (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (semantic : ConstructorObject) (count : Nat)
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (countFits : count ≤ semantic.objectFields.size)
+    (post : WriteObjectFieldsPost state.memory memory address.value 0
+      (List.replicate count taggedZero)) :
+    ConstructorObjectRel ({ state with memory } : MemoryState)
+      (witness.rebindConstructor address info
+        (resetProtocolFieldKinds fieldKinds count))
+      address info (resetProtocolFieldKinds fieldKinds count)
+      (resetProtocolObject semantic count) := by
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      (List.replicate count taggedZero) post]
+    exact headerRead
+  have countFitsInfo : count ≤ info.size := by
+    rw [← related.semanticObjectFields]
+    exact countFits
+  have writtenFits : (List.replicate count taggedZero).length ≤
+      header.aux1.toNat := by
+    simp only [List.length_replicate]
+    rw [objectCount]
+    exact countFitsInfo
+  refine {
+    header := ⟨header, headerAfter, headerKind, allocationBytes, persistent,
+      tag, objectCount, usizeCount, scalarCount⟩
+    headerOwned := related.headerOwned
+    extent := related.extent
+    semanticObjectFields := by
+      simp [resetProtocolObject, related.semanticObjectFields]
+    semanticUSizeFields := by
+      simpa [resetProtocolObject] using related.semanticUSizeFields
+    semanticScalarFields := ?_
+    fieldKindsSize := by
+      simpa using related.fieldKindsSize
+    fieldKindsValid := resetProtocolFieldKinds_valid fieldKinds count
+      related.fieldKindsValid
+    objectFields := ?_
+    usizeFields := ?_ }
+  · intro field member
+    have oldMember : field ∈ semantic.scalarFields := by
+      simpa [resetProtocolObject] using member
+    have beforeField := related.semanticScalarFields field oldMember
+    cases valueEq : field.value with
+    | uint8 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt8Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
+    | uint16 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt16Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
+    | uint32 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt32Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
+    | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt64Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
+  · intro index protocolKind value protocolKindAt valueAt
+    have indexLtSemantic : index < semantic.objectFields.size := by
+      obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+      simpa [resetProtocolObject] using indexLt
+    have indexLtInfo : index < info.size := by
+      rw [← related.semanticObjectFields]
+      exact indexLtSemantic
+    have indexLtKinds : index < fieldKinds.size := by
+      rw [related.fieldKindsSize]
+      exact indexLtInfo
+    let originalKind := fieldKinds[index]
+    let originalValue := semantic.objectFields[index]
+    have originalKindAt : fieldKinds[index]? = some originalKind :=
+      Array.getElem?_eq_getElem indexLtKinds
+    have originalValueAt : semantic.objectFields[index]? = some originalValue :=
+      Array.getElem?_eq_getElem indexLtSemantic
+    have indexValid : index < header.aux1.toNat := by
+      rw [objectCount]
+      exact indexLtInfo
+    by_cases cleared : index < count
+    · have protocolAt := resetProtocolFieldKinds_prefix originalKindAt cleared
+      rw [protocolAt] at protocolKindAt
+      have protocolKindEq : protocolKind = .tobject :=
+        Option.some.inj protocolKindAt.symm
+      subst protocolKind
+      have clearedAt : (resetProtocolObject semantic count).objectFields[index]? =
+          some (.object (.tagged 0)) := by
+        rw [resetProtocolObject, Array.getElem?_mapIdx, originalValueAt]
+        simp [cleared]
+      rw [clearedAt] at valueAt
+      have valueEq : value = .object (.tagged 0) :=
+        Option.some.inj valueAt.symm
+      subst value
+      have installedAt : (List.replicate count taggedZero)[index]? =
+          some taggedZero := by
+        simp [cleared]
+      exact ⟨taggedZero,
+        readObjectField_of_writeObjectFields_at state memory address header
+          (List.replicate count taggedZero) index taggedZero headerRead headerKind
+          indexValid post installedAt,
+        ValueRel.taggedZero_tobject _⟩
+    · have retained : count ≤ index := Nat.le_of_not_gt cleared
+      have protocolAt := resetProtocolFieldKinds_suffix originalKindAt retained
+      rw [protocolAt] at protocolKindAt
+      have protocolKindEq : protocolKind = originalKind :=
+        Option.some.inj protocolKindAt.symm
+      subst protocolKind
+      have retainedAt : (resetProtocolObject semantic count).objectFields[index]? =
+          some originalValue := by
+        rw [resetProtocolObject, Array.getElem?_mapIdx, originalValueAt]
+        simp [cleared]
+      rw [retainedAt] at valueAt
+      have valueEq : value = originalValue := Option.some.inj valueAt.symm
+      subst value
+      obtain ⟨word, readBefore, valueRelated⟩ :=
+        related.objectFields index originalKind originalValue originalKindAt
+          originalValueAt
+      exact ⟨word,
+        readObjectField_of_writeObjectFields_suffix state memory address header
+          (List.replicate count taggedZero) index headerRead headerKind (by
+            simpa using retained) post ▸ readBefore,
+        valueRelated.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)⟩
+  · intro index value valueAt
+    have oldAt : semantic.usizeFields[index]? = some value := by
+      simpa [resetProtocolObject] using valueAt
+    rw [readUSizeField_of_writeObjectFields state memory address header
+      (List.replicate count taggedZero) index headerRead headerKind writtenFits post]
+    exact related.usizeFields index value oldAt
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated
