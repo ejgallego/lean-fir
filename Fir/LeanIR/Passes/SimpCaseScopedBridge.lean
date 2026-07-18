@@ -882,6 +882,73 @@ abbrev ScopedAltsFactored
     (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :=
   ListRel (ScopedAltFactored validCase index)
 
+/-- Pointwise structural relation between alternatives with identical
+selectors. -/
+inductive StructuralAltRelated
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor (body : CodeRel validCase left right) :
+      StructuralAltRelated validCase
+        (.ctorAlt info left) (.ctorAlt info right)
+  | default (body : CodeRel validCase left right) :
+      StructuralAltRelated validCase (.default left) (.default right)
+
+abbrev StructuralAltsRelated
+    (validCase : LCNF.Cases .impure → Nat → Prop) :=
+  ListRel (StructuralAltRelated validCase)
+
+/-- A materialized pointwise factor for an entire alternative list. The
+structural intermediate list is explicit, while both alpha orientations use
+the exact recursive scope index. -/
+structure ScopedAltsBifactor
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : List (LCNF.Alt .impure)) : Type where
+  middle : List (LCNF.Alt .impure)
+  structural : StructuralAltsRelated validCase source middle
+  alphaForward : AltsRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope middle target
+  alphaBackward : AltsRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope target middle
+
+/-- Materialize the existential body intermediate from every pointwise
+`ScopedAltFactored` proof. -/
+theorem scopedAltsBifactor_of_factored
+    (factored : ScopedAltsFactored validCase index source target) :
+    Nonempty (ScopedAltsBifactor validCase index source target) := by
+  induction factored with
+  | nil =>
+      exact ⟨{
+        middle := []
+        structural := .nil
+        alphaForward := .nil
+        alphaBackward := .nil
+      }⟩
+  | cons head tail ih =>
+      rcases ih with ⟨rest⟩
+      cases head with
+      | ctor body =>
+          rcases body with ⟨factor⟩
+          exact ⟨{
+            middle := .ctorAlt _ factor.middle :: rest.middle
+            structural := .cons (.ctor factor.structural) rest.structural
+            alphaForward := .cons (.ctor factor.alphaForward)
+              rest.alphaForward
+            alphaBackward := .cons (.ctor factor.alphaBackward)
+              rest.alphaBackward
+          }⟩
+      | default body =>
+          rcases body with ⟨factor⟩
+          exact ⟨{
+            middle := .default factor.middle :: rest.middle
+            structural := .cons (.default factor.structural) rest.structural
+            alphaForward := .cons (.default factor.alphaForward)
+              rest.alphaForward
+            alphaBackward := .cons (.default factor.alphaBackward)
+              rest.alphaBackward
+          }⟩
+
 theorem scopedAltsFactored_of_tree
     (related : ScopedAltsRelated
       (ScopedCodeFactoredOnAlphaTree validCase) index source target)
@@ -973,6 +1040,75 @@ theorem ScopedEliminatedCaseEvidence.factored
     alphaBackward := evidence.alphaBackward
   }⟩
 
+/-- Phase evidence that every valid source selection for a singleton prepared
+table converges on one structural intermediate, with alpha proofs from that
+intermediate to the sole compiler body in both directions. -/
+structure ScopedSingletonSelectionConvergence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) (target : LCNF.Code .impure) : Type where
+  middle : LCNF.Code .impure
+  structuralSelected : ∀ tag, validCase source tag →
+    ElimSelectionRel validCase middle
+      (chooseAlt tag source.alts.toList)
+  alphaForward : CodeRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope middle target
+  alphaBackward : CodeRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope target middle
+
+def ScopedSingletonSelectionConvergence.eliminated
+    (converges : ScopedSingletonSelectionConvergence
+      validCase index source target) :
+    ScopedEliminatedCaseEvidence validCase index source target := {
+  middle := converges.middle
+  structuralSelected := converges.structuralSelected
+  alphaForward := converges.alphaForward
+  alphaBackward := converges.alphaBackward
+}
+
+/-- Empty prepared tables need no branch intermediate: once the phase rules
+out every valid source tag, `unreach` is the fixed structural and alpha
+intermediate. -/
+theorem scopedEmptyCaseEvidence_of_noValid
+    (noValid : ∀ tag, validCase source tag → False) :
+    Nonempty (ScopedEliminatedCaseEvidence validCase index source
+      (.unreach type)) :=
+  ⟨{
+    middle := .unreach type
+    structuralSelected := by
+      intro tag valid
+      exact False.elim (noValid tag valid)
+    alphaForward := .terminal .unreachable
+    alphaBackward := .terminal .unreachable
+  }⟩
+
+/-- The sole phase-specific assumption needed for small prepared tables.
+Pointwise branch factors have already been materialized. An empty result rules
+out every phase-valid source tag; a singleton result makes every such tag
+converge on one fixed intermediate. -/
+structure ScopedCaseSelectionSurvivalLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsBifactor validCase index sourceAlts.toList targetAlts →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size = 0 →
+    ∀ tag, validCase (.mk typeName resultType discr sourceAlts) tag →
+      False
+  singleton : ∀ {index : ScopeIndex} {typeName : Name}
+      {resultType : Expr} {discr : FVarId}
+      {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsBifactor validCase index sourceAlts.toList targetAlts →
+    (singleton : (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size = 1) →
+    Nonempty (ScopedSingletonSelectionConvergence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr targetAlts.toArray))[0]!.getCode)
+
 /-- Minimal retained-table phase witness. The structural middle may differ
 from the recursively transformed table; its selected branches are connected
 to the prepared compiler table by the explicit default-fold contract. -/
@@ -1055,7 +1191,7 @@ actual output shapes. The recursive branch factors and source hygiene are
 shared inputs; a concrete phase can establish empty, singleton, and retained
 case tables independently. -/
 structure ScopedCaseShapeLaws
-    (validCase : LCNF.Cases .impure → Nat → Prop) : Type where
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
       {targetAlts : List (LCNF.Alt .impure)},
@@ -1064,8 +1200,8 @@ structure ScopedCaseShapeLaws
       (.cases (.mk typeName resultType discr sourceAlts)) →
     (shadowPrepareAlts
       (.mk typeName resultType discr targetAlts.toArray)).size = 0 →
-    ScopedEliminatedCaseEvidence validCase index
-      (.mk typeName resultType discr sourceAlts) (.unreach resultType)
+    Nonempty (ScopedEliminatedCaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) (.unreach resultType))
   singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
       {targetAlts : List (LCNF.Alt .impure)},
@@ -1074,10 +1210,10 @@ structure ScopedCaseShapeLaws
       (.cases (.mk typeName resultType discr sourceAlts)) →
     (singleton : (shadowPrepareAlts
       (.mk typeName resultType discr targetAlts.toArray)).size = 1) →
-    ScopedEliminatedCaseEvidence validCase index
+    Nonempty (ScopedEliminatedCaseEvidence validCase index
       (.mk typeName resultType discr sourceAlts)
       (shadowPrepareAlts
-        (.mk typeName resultType discr targetAlts.toArray))[0]!.getCode
+        (.mk typeName resultType discr targetAlts.toArray))[0]!.getCode)
   retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
       {targetAlts : List (LCNF.Alt .impure)},
@@ -1086,9 +1222,47 @@ structure ScopedCaseShapeLaws
       (.mk typeName resultType discr targetAlts.toArray)).size ≠ 0 →
     (shadowPrepareAlts
       (.mk typeName resultType discr targetAlts.toArray)).size ≠ 1 →
-    ScopedRetainedPhaseEvidence validCase index
+    Nonempty (ScopedRetainedPhaseEvidence validCase index
       (.mk typeName resultType discr sourceAlts)
-      targetAlts.toArray
+      targetAlts.toArray)
+
+/-- The retained-table half of the phase contract. Genuine default folding
+remains isolated here; empty and singleton tables are derived generically
+from `ScopedCaseSelectionSurvivalLaws`. -/
+structure ScopedRetainedCaseShapeLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsFactored validCase index sourceAlts.toList targetAlts →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size ≠ 1 →
+    Nonempty (ScopedRetainedPhaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      targetAlts.toArray)
+
+/-- Materialize pointwise branch factors once, use the single phase survival
+invariant for the two eliminating outputs, and leave only the retained fold
+law as a separate compiler-facing premise. -/
+theorem scopedCaseShapeLaws_of_selectionSurvival
+    (survival : ScopedCaseSelectionSurvivalLaws validCase)
+    (retained : ScopedRetainedCaseShapeLaws validCase) :
+    ScopedCaseShapeLaws validCase where
+  empty := by
+    intro index typeName resultType discr sourceAlts targetAlts
+      factors root empty
+    rcases scopedAltsBifactor_of_factored factors with ⟨materialized⟩
+    exact scopedEmptyCaseEvidence_of_noValid
+      (fun tag valid => survival.empty materialized empty tag valid)
+  singleton := by
+    intro index typeName resultType discr sourceAlts targetAlts
+      factors root singleton
+    rcases scopedAltsBifactor_of_factored factors with ⟨materialized⟩
+    rcases survival.singleton materialized singleton with ⟨converges⟩
+    exact ⟨converges.eliminated⟩
+  retained := retained.retained
 
 /-- Assemble the exact local admissibility law by following
 `shadowSimplifyCases`' empty/singleton/retained decision tree. -/
@@ -1102,13 +1276,25 @@ theorem scopedCaseAdmissibilityLaws_of_shapes
       .mk typeName resultType discr targetAlts.toArray
     by_cases empty : (shadowPrepareAlts targetCases).size = 0
     · rw [shadowSimplifyCases_eq_unreach empty]
-      exact .eliminated (shapes.empty factors root empty)
+      rcases shapes.empty factors root empty with ⟨evidence⟩
+      exact .eliminated evidence
     · by_cases singleton : (shadowPrepareAlts targetCases).size = 1
       · rw [shadowSimplifyCases_eq_singleton singleton]
-        exact .eliminated (shapes.singleton factors root singleton)
+        rcases shapes.singleton factors root singleton with ⟨evidence⟩
+        exact .eliminated evidence
       · rw [shadowSimplifyCases_eq_cases empty singleton]
+        rcases shapes.retained factors empty singleton with ⟨evidence⟩
         exact .aligned
-          ((shapes.retained factors empty singleton).aligned root)
+          (evidence.aligned root)
+
+/-- Direct phase constructor: small outputs use only selection survival;
+genuine retained/default-folding outputs remain in their own law. -/
+theorem scopedCaseAdmissibilityLaws_of_selectionSurvival
+    (survival : ScopedCaseSelectionSurvivalLaws validCase)
+    (retained : ScopedRetainedCaseShapeLaws validCase) :
+    ScopedCaseAdmissibilityLaws validCase :=
+  scopedCaseAdmissibilityLaws_of_shapes
+    (scopedCaseShapeLaws_of_selectionSurvival survival retained)
 
 theorem scopedCaseKernelLaws_of_admissibility
     (admissible : ScopedCaseAdmissibilityLaws validCase) :
@@ -1545,6 +1731,15 @@ theorem scopedCaseBoundarySoundTree_of_shapes
   scopedCaseBoundarySoundTree_of_admissibility
     (scopedCaseAdmissibilityLaws_of_shapes shapes)
 
+/-- Universal boundary where small outputs need only phase-valid selection
+survival and the retained law contains the sole genuine fold witness. -/
+theorem scopedCaseBoundarySoundTree_of_selectionSurvival
+    (survival : ScopedCaseSelectionSurvivalLaws validCase)
+    (retained : ScopedRetainedCaseShapeLaws validCase) :
+    ScopedCaseBoundarySound (ScopedCodeFactoredOnAlphaTree validCase) :=
+  scopedCaseBoundarySoundTree_of_admissibility
+    (scopedCaseAdmissibilityLaws_of_selectionSurvival survival retained)
+
 /-- Arbitrary recursive shadow traversal once the local case kernel consumes
 full-tree scope/hygiene evidence. -/
 theorem shadowCode_scopedFactoredTree_of_caseKernel
@@ -1575,6 +1770,18 @@ theorem shadowCode_scopedFactoredTree_of_shapes
     ScopedCodeFactored validCase index source target :=
   shadowCode_scopedFactoredTree
     (scopedCaseAdmissibilityLaws_of_shapes shapes) hygiene run
+
+/-- End-to-end recursive result with empty/singleton assumptions reduced to
+selection survival and genuine folding isolated in the retained law. -/
+theorem shadowCode_scopedFactoredTree_of_selectionSurvival
+    (survival : ScopedCaseSelectionSurvivalLaws validCase)
+    (retained : ScopedRetainedCaseShapeLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodeFactored validCase index source target :=
+  shadowCode_scopedFactoredTree
+    (scopedCaseAdmissibilityLaws_of_selectionSurvival survival retained)
+    hygiene run
 
 /-- The remaining proof input is now strictly local to
 `shadowSimplifyCases`: recursive alternative bodies and every surrounding

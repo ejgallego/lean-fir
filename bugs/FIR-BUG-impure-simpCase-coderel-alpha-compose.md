@@ -116,6 +116,16 @@ Unreachable filtering preserves both concrete reachable selections and
 pointwise alpha relations. No-fold `addDefaultAlt` paths discharge the fold
 witness automatically.
 
+`ScopedAltsBifactor` now materializes the existential structural middle and
+both alpha orientations for a complete pointwise alternative list.
+`ScopedCaseSelectionSurvivalLaws` is the single remaining small-output phase
+invariant: an empty prepared table excludes every valid tag, while a singleton
+prepared table makes every valid selection converge on one intermediate.
+These existential witnesses remain proposition-valued through `Nonempty`.
+`scopedCaseShapeLaws_of_selectionSurvival` derives both eliminating fields;
+`ScopedRetainedCaseShapeLaws` is separate, so genuine default folding remains
+the only private-output witness.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
@@ -156,10 +166,12 @@ generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
 The scope-indexed case-boundary interface and concrete alpha-fold regression
 are now implemented. Full-tree hygiene supplies every recursive branch
-certificate, `ScopedCaseShapeLaws` supplies the phase-local selection facts by
-compiler output shape, and the generic theorem lifts them through arbitrary
-recursive shadow traversal. `nestedEmptyCaseFactored_of_shapes` exercises the
-complete assembly through a non-case parent. Concrete folded tables still
-need the private `addDefaultAlt` output equation; connecting that fact and the
-shadow theorem to the actual private pass remains the separate upstream
-proof-interface issue.
+certificate, materialized pointwise factors plus
+`ScopedCaseSelectionSurvivalLaws` derive the empty and singleton shape fields,
+and the generic theorem lifts them through arbitrary recursive shadow
+traversal. Singleton and empty-table fixtures exercise materialization and
+convergence; `nestedEmptyCaseFactored_of_selectionSurvival` exercises the
+complete reduced interface through a non-case parent. Concrete folded tables
+still need the private `addDefaultAlt` output equation; connecting that fact
+and the shadow theorem to the actual private pass remains the separate
+upstream proof-interface issue.

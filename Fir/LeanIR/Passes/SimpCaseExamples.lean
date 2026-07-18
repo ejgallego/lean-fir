@@ -547,6 +547,55 @@ theorem selectedBranchAlphaBireflexiveAtFoldScope :
       (({} : FVarIdMap FVarId).insert c c) x x⟩)
 }
 
+def singletonDefaultValidCase
+    (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
+  True
+
+def singletonDefaultScopedCodeFactor :
+    ScopedCodeBifactor singletonDefaultValidCase alphaFoldScopeIndex
+      selectedBranch selectedBranch := {
+  middle := selectedBranch
+  structural := .aligned (.return x)
+  alphaForward := selectedBranchAlphaBireflexiveAtFoldScope.forward
+  alphaBackward := selectedBranchAlphaBireflexiveAtFoldScope.backward
+}
+
+theorem singletonDefaultAltsFactored :
+    ScopedAltsFactored singletonDefaultValidCase alphaFoldScopeIndex
+      singletonDefaultCases.alts.toList singletonDefaultCases.alts.toList :=
+  .cons (.default singletonDefaultScopedCodeFactor.factored) .nil
+
+/-- A nonempty regression for existential intermediate materialization. -/
+theorem singletonDefaultAltsMaterialized :
+    Nonempty (ScopedAltsBifactor singletonDefaultValidCase
+      alphaFoldScopeIndex singletonDefaultCases.alts.toList
+      singletonDefaultCases.alts.toList) :=
+  scopedAltsBifactor_of_factored singletonDefaultAltsFactored
+
+theorem singletonDefaultPrepared_eq :
+    shadowPrepareAlts singletonDefaultCases = singletonDefaultCases.alts := by
+  rfl
+
+def singletonDefaultSelectionConvergence :
+    ScopedSingletonSelectionConvergence singletonDefaultValidCase
+      alphaFoldScopeIndex singletonDefaultCases selectedBranch := {
+  middle := selectedBranch
+  structuralSelected := by
+    intro tag valid
+    change ElimSelectionRel singletonDefaultValidCase selectedBranch
+      (some selectedBranch)
+    exact .some (.aligned (.return x))
+  alphaForward := selectedBranchAlphaBireflexiveAtFoldScope.forward
+  alphaBackward := selectedBranchAlphaBireflexiveAtFoldScope.backward
+}
+
+theorem singletonDefaultPreparedSelectionConverges :
+    Nonempty (ScopedSingletonSelectionConvergence singletonDefaultValidCase
+      alphaFoldScopeIndex singletonDefaultCases
+      (shadowPrepareAlts singletonDefaultCases)[0]!.getCode) := by
+  rw [singletonDefaultPrepared_eq]
+  exact ⟨singletonDefaultSelectionConvergence⟩
+
 theorem singletonDefaultAddDefaultSelectionEvidence :
     ScopedAddDefaultSelectionEvidence alphaFoldScopeIndex
       singletonDefaultCases.alts singletonDefaultCases.alts := by
@@ -771,6 +820,29 @@ theorem scopedCaseBoundaryTreeNotUnconditional :
 def noCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
   False
 
+theorem emptyCaseAltsFactored :
+    ScopedAltsFactored noCaseTagValid emptyCaseScopeIndex
+      emptyCaseTable.alts.toList emptyCaseTable.alts.toList :=
+  .nil
+
+theorem emptyCaseAltsMaterialized :
+    Nonempty (ScopedAltsBifactor noCaseTagValid emptyCaseScopeIndex
+      emptyCaseTable.alts.toList emptyCaseTable.alts.toList) :=
+  scopedAltsBifactor_of_factored emptyCaseAltsFactored
+
+/-- Empty-output regression: phase validity alone rules out every source tag;
+the generic constructor supplies the fixed `unreach` intermediate. -/
+theorem emptyCaseDerivedEliminationEvidence :
+    Nonempty (ScopedEliminatedCaseEvidence noCaseTagValid
+      emptyCaseScopeIndex emptyCaseTable (.unreach objType)) :=
+  scopedEmptyCaseEvidence_of_noValid (fun _ impossible => impossible)
+
+theorem emptyCaseFactoredFromNoValid :
+    ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
+      (.cases emptyCaseTable) (.unreach objType) := by
+  rcases emptyCaseDerivedEliminationEvidence with ⟨evidence⟩
+  exact evidence.factored
+
 /-- The same kernel result becomes admissible when the phase predicate makes
 the empty source table unreachable. -/
 def emptyCaseEliminationEvidence :
@@ -816,6 +888,16 @@ theorem nestedEmptyCaseFactored_of_shapes
       nestedEmptyCaseCode nestedEmptyCaseExpected :=
   shadowCode_scopedFactoredTree_of_shapes shapes nestedEmptyCaseAlphaTree
     nestedEmptyCaseShadowRun
+
+/-- The same recursive regression through the reduced phase interface: small
+outputs use survival, while only retained outputs consult the fold law. -/
+theorem nestedEmptyCaseFactored_of_selectionSurvival
+    (survival : ScopedCaseSelectionSurvivalLaws noCaseTagValid)
+    (retained : ScopedRetainedCaseShapeLaws noCaseTagValid) :
+    ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedFactoredTree_of_selectionSurvival survival retained
+    nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
 
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])

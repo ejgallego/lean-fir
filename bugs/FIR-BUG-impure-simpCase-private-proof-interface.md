@@ -122,6 +122,15 @@ and alpha obligation from one explicit equation identifying the private fold
 output. The executable guard confirms that equation, but opacity prevents it
 from becoming a kernel theorem.
 
+Pointwise factors now materialize as `ScopedAltsBifactor`, exposing one
+structural-middle alternative list and alpha relations in both directions.
+The proposition-valued `ScopedCaseSelectionSurvivalLaws` consumes that
+materialization only for small outputs. It rules out valid tags for an empty
+prepared table and supplies one convergent intermediate for a singleton.
+`scopedCaseAdmissibilityLaws_of_selectionSurvival` derives the full local law
+from this invariant plus `ScopedRetainedCaseShapeLaws`; the latter is the only
+interface that retains the genuine default-fold output witness.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -155,9 +164,9 @@ none
 
 Unresolved, but narrowed to compiler correspondence and the folded-table
 output equation consumed by the phase-specific shape law. Downstream
-structural-then-alpha composition, full-tree traversal, pointwise alternative
-factoring, shape-law assembly, and the kernel-to-boundary lift are reusable.
-The unreachable-filter and no-fold `addDefaultAlt` paths are kernel-proved.
-Once the private kernels or graph theorems are public, prove the genuine fold
-equation and replace executable actual-vs-shadow checks with a kernel
-correspondence theorem.
+structural-then-alpha composition, full-tree traversal, existential
+alternative materialization, small-output survival, shape-law assembly, and
+the kernel-to-boundary lift are reusable. The unreachable-filter and no-fold
+`addDefaultAlt` paths are kernel-proved. Once the private kernels or graph
+theorems are public, prove the genuine fold equation and replace executable
+actual-vs-shadow checks with a kernel correspondence theorem.
