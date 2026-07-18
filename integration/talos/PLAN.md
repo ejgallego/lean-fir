@@ -1580,6 +1580,15 @@ and a typed `ValueRel` capture. The next W6.4 slice proves that successful
 concrete allocation establishes this relation before lifting closure
 allocation across the complete live heap.
 
+W6.4c proves that allocation boundary. Each `i32`, `i64`, `f32`, and `f64`
+capture lane has an exact checked write/read theorem with an eight-byte frame;
+their heterogeneous bulk writer preserves the common header, recovers every
+typed slot, and maintains the zero frontier. `allocateClosure_objectRel`
+decomposes the public allocator, validates the dispatch id and header metadata,
+extends the fresh closure witness, and establishes `ClosureObjectRel` for the
+semantic capture array. The next slice adds closures to `LiveCellRel` and
+transports every old mapped cell through this fresh prefix extension.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
