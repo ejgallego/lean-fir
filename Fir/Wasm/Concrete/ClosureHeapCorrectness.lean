@@ -14,8 +14,8 @@ inductive ClosureCellRel (state : MemoryState) (witness : RefinementWitness)
       {captureKinds : Array AbiKind} {captures : Array Value}
       {header : Header} {cell : HeapCell}
       (objectEq : cell.object = .closure function arity captures)
-      (related : ClosureObjectRel state witness witness.closureDispatch address
-        function arity captureKinds captures)
+      (related : ClosureObjectRel state witness witness.closureDispatch
+        witness.closureDescriptors address function arity captureKinds captures)
       (headerRead : state.readLiveHeader address = .ok header)
       (headerKind : header.kind = .closure)
       (extent : closureCaptureAddress address.value captures.size ≤
@@ -69,7 +69,7 @@ theorem ClosureCellRel.witnessExtension
   | closure objectEq objectRelated headerRead headerKind extent refCount
       persistent live =>
       exact .closure objectEq (by
-        rw [extension.closureDispatch]
+        rw [extension.closureDispatch, extension.closureDescriptors]
         exact objectRelated.witnessExtension extension) headerRead headerKind
         extent refCount persistent live
 

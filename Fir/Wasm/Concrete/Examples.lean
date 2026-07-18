@@ -49,8 +49,11 @@ def mixedClosureLayout : ClosureLayout :=
 def concreteClosureDispatch : ClosureDispatchTable :=
   #[`Concrete.closureTarget, `Concrete.otherTarget]
 
+def concreteClosureDescriptors : ClosureDescriptorTable :=
+  #[#[.object, .uint64, .uint8]]
+
 def concreteMixedClosure : Except ConcreteError (MemoryState × Word32) :=
-  allocateClosure MemoryState.initial concreteClosureDispatch
+  allocateClosure MemoryState.initial concreteClosureDispatch concreteClosureDescriptors
     `Concrete.closureTarget 4 #[.object, .uint64, .uint8]
       #[.word32 (Word32.encodeImmediate 5 (by decide)),
         .word64 42, .word32 (Word32.ofUInt8 7)]
@@ -58,31 +61,51 @@ def concreteMixedClosure : Except ConcreteError (MemoryState × Word32) :=
 #guard match concreteMixedClosure with
   | .error _ => false
   | .ok (state, closure) =>
-      match readClosureMetadata state concreteClosureDispatch closure with
+      match readClosureMetadata state concreteClosureDispatch
+          concreteClosureDescriptors closure with
       | .error _ => false
       | .ok metadata =>
-          match (closureMatches state concreteClosureDispatch closure
+          match (closureMatches state concreteClosureDispatch
+              concreteClosureDescriptors closure
               `Concrete.closureTarget 4 3) with
           | .error _ => false
           | .ok matched =>
-              match (projectClosureCapture state concreteClosureDispatch closure
-                  `Concrete.closureTarget 4 3 1 .uint64) with
+              match (projectClosureCapture state concreteClosureDispatch
+                  concreteClosureDescriptors closure `Concrete.closureTarget 4 3 1
+                    .uint64) with
               | .error _ => false
               | .ok (.word64 captured) =>
                   state.heapCursor == heapBase + 56 &&
                     metadata.targetId == 0 &&
+                    metadata.descriptorId == 0 &&
                     metadata.function == `Concrete.closureTarget &&
                     metadata.arity == 4 && metadata.fixed == 3 &&
+                    metadata.captureKinds == #[.object, .uint64, .uint8] &&
                     matched == 1 && captured == 42
               | .ok _ => false
 
 #guard match concreteMixedClosure with
   | .error _ => false
   | .ok (state, closure) =>
-      match (closureMatches state concreteClosureDispatch closure
+      match (closureMatches state concreteClosureDispatch
+          concreteClosureDescriptors closure
           `Concrete.otherTarget 4 3) with
       | .ok matched => matched == 0
       | .error _ => false
+
+#guard match allocateClosure MemoryState.initial concreteClosureDispatch #[]
+    `Concrete.closureTarget 4 #[.object] #[.word32
+      (Word32.encodeImmediate 5 (by decide))] with
+  | .error (.target (.unknownClosureDescriptor kinds)) => kinds == #[.object]
+  | _ => false
+
+#guard match concreteMixedClosure with
+  | .error _ => false
+  | .ok (state, closure) =>
+      match projectClosureCapture state concreteClosureDispatch
+          concreteClosureDescriptors closure `Concrete.closureTarget 4 3 1 .object with
+      | .error (.target .closureMetadataMismatch) => true
+      | _ => false
 
 example : ValueRel (witness := {}) .tobject
     (.word32 (Word32.encodeImmediate 42 (by decide)))

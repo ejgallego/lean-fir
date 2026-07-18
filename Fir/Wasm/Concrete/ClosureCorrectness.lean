@@ -10,15 +10,16 @@ supplies the static capture kinds; the header recovers target/arity/fixed
 metadata, and every occupied slot decodes to the corresponding semantic
 capture under the allocation witness. -/
 structure ClosureObjectRel (state : MemoryState) (witness : RefinementWitness)
-    (dispatch : ClosureDispatchTable) (address : Word32)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (address : Word32)
     (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
     (semantic : Array Value) : Prop where
   descriptor : witness.descriptors.lookup? address =
     some (.closure function arity captureKinds)
   metadata : ∃ metadata,
-    readClosureMetadata state dispatch address = .ok metadata ∧
+    readClosureMetadata state dispatch descriptors address = .ok metadata ∧
       metadata.function = function ∧ metadata.arity = arity ∧
-      metadata.fixed = semantic.size
+      metadata.fixed = semantic.size ∧ metadata.captureKinds = captureKinds
   captureKindsSize : captureKinds.size = semantic.size
   captures : ∀ index kind value,
     captureKinds[index]? = some kind →
@@ -32,14 +33,16 @@ structure ClosureObjectRel (state : MemoryState) (witness : RefinementWitness)
 used by the generated Wasm-level trampoline. -/
 theorem ClosureObjectRel.matches
     {state : MemoryState} {witness : RefinementWitness}
-    {dispatch : ClosureDispatchTable} {address : Word32}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32}
     {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
     {semantic : Array Value}
-    (related : ClosureObjectRel state witness dispatch address function arity
-      captureKinds semantic) :
-    closureMatches state dispatch address function arity semantic.size = .ok 1 := by
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds semantic) :
+    closureMatches state dispatch descriptors address function arity semantic.size =
+      .ok 1 := by
   obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
-      metadataFixed⟩ := related.metadata
+      metadataFixed, metadataKinds⟩ := related.metadata
   unfold closureMatches
   rw [metadataRead]
   simp only [Bind.bind, Except.bind]
@@ -50,34 +53,42 @@ theorem ClosureObjectRel.matches
 related to the matching semantic capture. -/
 theorem ClosureObjectRel.project
     {state : MemoryState} {witness : RefinementWitness}
-    {dispatch : ClosureDispatchTable} {address : Word32}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32}
     {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
     {semantic : Array Value}
-    (related : ClosureObjectRel state witness dispatch address function arity
-      captureKinds semantic)
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds semantic)
     (index : Nat) (kind : AbiKind) (value : Value)
     (kindAt : captureKinds[index]? = some kind)
     (valueAt : semantic[index]? = some value) :
     ∃ lane,
-      projectClosureCapture state dispatch address function arity semantic.size
-          index kind = .ok lane ∧
+      projectClosureCapture state dispatch descriptors address function arity
+          semantic.size index kind = .ok lane ∧
         ValueRel witness kind lane value := by
   obtain ⟨lane, read, laneRelated⟩ :=
     related.captures index kind value kindAt valueAt
   obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
-      metadataFixed⟩ := related.metadata
+      metadataFixed, metadataKinds⟩ := related.metadata
   obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
   have metadataCheck :
       (metadata.function == function && metadata.arity == arity &&
         metadata.fixed == semantic.size) = true := by
     simp [metadataFunction, metadataArity, metadataFixed]
   have indexCheck : index < semantic.size := indexLt
+  have kindCheck : metadata.captureKinds[index]? = some kind := by
+    rw [metadataKinds]
+    exact kindAt
   refine ⟨lane, ?_, laneRelated⟩
   unfold projectClosureCapture
   rw [metadataRead]
   simp only [Bind.bind, Except.bind]
   rw [if_pos metadataCheck]
   rw [if_pos indexCheck]
+  rw [show (metadata.captureKinds[index]? == some kind) = true by
+    rw [kindCheck]
+    cases kind <;> decide]
+  simp only [if_true]
   exact congrArg liftMemory read
 
 /-- An eight-byte capture decoder depends only on the bytes in its slot. -/
@@ -134,12 +145,14 @@ theorem MemoryState.PrefixExtension.readClosureCapture
 preserved prefix. -/
 theorem MemoryState.PrefixExtension.readClosureMetadata
     {before after : MemoryState} (extension : before.PrefixExtension after)
-    (dispatch : ClosureDispatchTable) (address : Word32)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (address : Word32)
     (headerOwned : address.value + headerBytes ≤ before.heapCursor)
     (metadata : ClosureMetadata)
-    (read : Fir.Wasm.Concrete.readClosureMetadata before dispatch address =
-      .ok metadata) :
-    Fir.Wasm.Concrete.readClosureMetadata after dispatch address = .ok metadata := by
+    (read : Fir.Wasm.Concrete.readClosureMetadata before dispatch descriptors
+      address = .ok metadata) :
+    Fir.Wasm.Concrete.readClosureMetadata after dispatch descriptors address =
+      .ok metadata := by
   by_cases heap : address.classify = .heap
   · cases headerResult : before.readLiveHeader address with
     | error failure =>
@@ -163,17 +176,18 @@ theorem MemoryState.PrefixExtension.readClosureMetadata
 header and complete capture extent are owned by the old state. -/
 theorem ClosureObjectRel.prefixExtension
     {before after : MemoryState} {witness : RefinementWitness}
-    {dispatch : ClosureDispatchTable} {address : Word32}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32}
     {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
     {semantic : Array Value}
-    (related : ClosureObjectRel before witness dispatch address function arity
-      captureKinds semantic)
+    (related : ClosureObjectRel before witness dispatch descriptors address
+      function arity captureKinds semantic)
     (extension : before.PrefixExtension after)
     (headerOwned : address.value + headerBytes ≤ before.heapCursor)
     (capturesOwned : closureCaptureAddress address.value semantic.size ≤
       before.heapCursor) :
-    ClosureObjectRel after witness dispatch address function arity captureKinds
-      semantic := by
+    ClosureObjectRel after witness dispatch descriptors address function arity
+      captureKinds semantic := by
   refine {
     descriptor := related.descriptor
     metadata := ?_
@@ -182,8 +196,8 @@ theorem ClosureObjectRel.prefixExtension
   · obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
         metadataFixed⟩ := related.metadata
     refine ⟨metadata, ?_, metadataFunction, metadataArity, metadataFixed⟩
-    exact extension.readClosureMetadata dispatch address headerOwned metadata
-      metadataRead
+    exact extension.readClosureMetadata dispatch descriptors address headerOwned
+      metadata metadataRead
   · intro index kind value kindAt valueAt
     obtain ⟨lane, readBefore, laneRelated⟩ :=
       related.captures index kind value kindAt valueAt
@@ -199,14 +213,15 @@ theorem ClosureObjectRel.prefixExtension
 /-- Local closure decoding is monotone in proof-only witness metadata. -/
 theorem ClosureObjectRel.witnessExtension
     {state : MemoryState} {before after : RefinementWitness}
-    {dispatch : ClosureDispatchTable} {address : Word32}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32}
     {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
     {semantic : Array Value}
-    (related : ClosureObjectRel state before dispatch address function arity
-      captureKinds semantic)
+    (related : ClosureObjectRel state before dispatch descriptors address
+      function arity captureKinds semantic)
     (extension : before.Extends after) :
-    ClosureObjectRel state after dispatch address function arity captureKinds
-      semantic := by
+    ClosureObjectRel state after dispatch descriptors address function arity
+      captureKinds semantic := by
   refine {
     descriptor := extension.descriptors _ _ related.descriptor
     metadata := related.metadata

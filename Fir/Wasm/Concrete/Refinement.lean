@@ -37,6 +37,11 @@ inductive AllocationDescriptor where
 
 abbrev DescriptorMap := List (Word32 × AllocationDescriptor)
 
+/-- Deterministic module-level table of static closure capture descriptors.
+Concrete closure headers store a checked index into this table so ownership
+traversal can distinguish object captures from scalar lanes at run time. -/
+abbrev ClosureDescriptorTable := Array (Array AbiKind)
+
 def LocationMap.lookup? : LocationMap → Location → Option Word32
   | [], _ => none
   | (candidate, address) :: rest, location =>
@@ -65,11 +70,23 @@ structure RefinementWitness where
   closure proofs consult this proof-only copy, which allocation extensions
   preserve rather than replacing per object. -/
   closureDispatch : Array Lean.Name := #[]
+  /-- Static capture descriptors indexed by closure-header `aux3`. This is
+  immutable module metadata and is preserved by every witness extension. -/
+  closureDescriptors : ClosureDescriptorTable := #[]
   deriving Inhabited, Repr
 
 def RefinementWitness.withClosureDispatch (witness : RefinementWitness)
     (dispatch : Array Lean.Name) : RefinementWitness :=
   { witness with closureDispatch := dispatch }
+
+def RefinementWitness.withClosureDescriptors (witness : RefinementWitness)
+    (descriptors : ClosureDescriptorTable) : RefinementWitness :=
+  { witness with closureDescriptors := descriptors }
+
+def RefinementWitness.withClosureTables (witness : RefinementWitness)
+    (dispatch : Array Lean.Name) (descriptors : ClosureDescriptorTable) :
+    RefinementWitness :=
+  { witness with closureDispatch := dispatch, closureDescriptors := descriptors }
 
 def RefinementWitness.bindLocation (witness : RefinementWitness)
     (location : Location) (address : Word32) : RefinementWitness :=
@@ -283,12 +300,13 @@ structure RefinementWitness.Extends (before after : RefinementWitness) : Prop wh
     before.descriptors.lookup? address = some descriptor →
     after.descriptors.lookup? address = some descriptor
   closureDispatch : after.closureDispatch = before.closureDispatch
+  closureDescriptors : after.closureDescriptors = before.closureDescriptors
 
 namespace RefinementWitness.Extends
 
 theorem refl (witness : RefinementWitness) : witness.Extends witness := by
   exact ⟨fun _ _ found => found, fun _ _ found => found,
-    fun _ _ found => found, rfl⟩
+    fun _ _ found => found, rfl, rfl⟩
 
 theorem trans {first second third : RefinementWitness}
     (left : first.Extends second) (right : second.Extends third) :
@@ -297,7 +315,8 @@ theorem trans {first second third : RefinementWitness}
     fun _ _ found => right.locations _ _ (left.locations _ _ found),
     fun _ _ found => right.promotedTags _ _ (left.promotedTags _ _ found),
     fun _ _ found => right.descriptors _ _ (left.descriptors _ _ found),
-    right.closureDispatch.trans left.closureDispatch⟩
+    right.closureDispatch.trans left.closureDispatch,
+    right.closureDescriptors.trans left.closureDescriptors⟩
 
 end RefinementWitness.Extends
 
@@ -315,7 +334,8 @@ theorem RefinementWitness.bindConstructor_extends
     locations := ?_
     promotedTags := ?_
     descriptors := ?_
-    closureDispatch := rfl }
+    closureDispatch := rfl
+    closureDescriptors := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -346,7 +366,8 @@ theorem RefinementWitness.bindClosure_extends
     locations := ?_
     promotedTags := ?_
     descriptors := ?_
-    closureDispatch := rfl }
+    closureDispatch := rfl
+    closureDescriptors := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -375,7 +396,8 @@ theorem RefinementWitness.bindBoxed_extends
     locations := ?_
     promotedTags := ?_
     descriptors := ?_
-    closureDispatch := rfl }
+    closureDispatch := rfl
+    closureDescriptors := rfl }
   · intro old oldAddress found
     have different : old ≠ location := by
       intro equal
@@ -403,7 +425,8 @@ theorem RefinementWitness.promoteTag_extends
     locations := fun _ _ found => found
     promotedTags := ?_
     descriptors := ?_
-    closureDispatch := rfl }
+    closureDispatch := rfl
+    closureDescriptors := rfl }
   · intro oldPayload oldAddress found
     change (oldPayload, oldAddress) ∈
       (payload, address) :: witness.promotedTags

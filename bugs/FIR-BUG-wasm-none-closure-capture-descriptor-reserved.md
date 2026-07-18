@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-closure-capture-descriptor-reserved
-status: candidate
+status: confirmed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-18
 reproduction: Fir/Wasm/Concrete/Runtime.lean
-regression: none
+regression: Fir/Wasm/Concrete/Examples.lean
 ---
 
 # Summary
@@ -86,4 +86,13 @@ none
 
 ## Resolution and regression
 
-unresolved
+W6.4h restores the frozen header boundary: allocation resolves the exact
+capture descriptor in a deterministic generated table and writes its checked
+index to `aux3`; metadata decoding recovers that descriptor, rejects unknown
+or wrong-sized entries, and typed projection rejects a same-width kind
+reinterpretation. `Fir/Wasm/Concrete/Examples.lean` guards successful index
+round-tripping plus both missing-descriptor and wrong-kind failures.
+
+The card remains confirmed until `readOwnedReferences` consumes the table and
+a permanent one-to-zero closure-release regression establishes recursive
+ownership behavior.

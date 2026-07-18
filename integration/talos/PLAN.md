@@ -1626,6 +1626,17 @@ the next checkpoint restores the descriptor-table contract, then closure
 ownership can enter `LiveCellRel` without using proof-only metadata at run
 time.
 
+W6.4h restores that frozen descriptor-table boundary. Closure allocation now
+resolves both a generated target id and a generated capture-descriptor id,
+writes the latter to `aux3`, and metadata decoding rejects unknown ids or a
+descriptor whose size disagrees with the fixed count. Typed projection also
+checks the selected static `AbiKind`, preventing same-width object/scalar
+reinterpretation. Both immutable tables live in the refinement witness and
+are preserved exactly across allocation extensions. The local decoder,
+allocation, prefix, and closure-cell transport proofs have been strengthened
+to use the descriptor table; the next slice consumes it in executable
+ownership traversal.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

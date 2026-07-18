@@ -23,6 +23,8 @@ inductive MemoryError where
   | reuseAllocationTooSmall (available required : Nat)
   | unknownClosureTarget (name : Lean.Name)
   | unknownClosureTargetId (id : UInt32)
+  | unknownClosureDescriptor (kinds : Array AbiKind)
+  | unknownClosureDescriptorId (id : UInt32)
   | closureMetadataMismatch
   | closureCaptureCountMismatch (kinds values : Nat)
   | closureCaptureIndexOutOfBounds (index fixed : Nat)

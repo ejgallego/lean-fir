@@ -15,11 +15,25 @@ def ClosureDispatchTable.lookup? (table : ClosureDispatchTable)
     (id : UInt32) : Option Lean.Name :=
   table[id.toNat]?
 
+def ClosureDescriptorTable.resolve? (table : ClosureDescriptorTable)
+    (descriptor : Array AbiKind) : Option Nat :=
+  table.findIdx? (· == descriptor)
+
+def ClosureDescriptorTable.lookup? (table : ClosureDescriptorTable)
+    (id : UInt32) : Option (Array AbiKind) :=
+  table[id.toNat]?
+
 def closureTargetId (table : ClosureDispatchTable) (function : Lean.Name) :
     Except ConcreteError UInt32 := do
   let some index := table.resolve? function |
     throw (.target (.unknownClosureTarget function))
   uint32Field "closure target id" index
+
+def closureDescriptorId (table : ClosureDescriptorTable)
+    (descriptor : Array AbiKind) : Except ConcreteError UInt32 := do
+  let some index := table.resolve? descriptor |
+    throw (.target (.unknownClosureDescriptor descriptor))
+  uint32Field "closure capture descriptor id" index
 
 def closureCaptureAddress (base index : Nat) : Nat :=
   base + headerBytes + target.semanticSlotBytes * index
@@ -70,6 +84,7 @@ def LinearMemory.writeClosureCaptures (memory : LinearMemory) (base index : Nat)
 arity, fixed-capture count, and reserved zero; captures follow in typed
 eight-byte slots. -/
 def allocateClosure (state : MemoryState) (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable)
     (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
     (captures : Array LaneValue) : Except ConcreteError (MemoryState × Word32) := do
   unless captureKinds.size = captures.size do
@@ -77,12 +92,13 @@ def allocateClosure (state : MemoryState) (dispatch : ClosureDispatchTable)
   unless captures.size < arity do
     throw (.target .closureMetadataMismatch)
   let targetId ← closureTargetId dispatch function
+  let descriptorId ← closureDescriptorId descriptors captureKinds
   let arityField ← uint32Field "closure arity" arity
   let fixedField ← uint32Field "closure fixed count" captures.size
   let layout := ClosureLayout.ofCaptures captureKinds
   let (state, address) ← liftMemory <|
     state.allocateObject .closure (layout.allocationBytes - headerBytes) false
-      targetId arityField fixedField 0
+      targetId arityField fixedField descriptorId
   let memory ← liftMemory <| state.memory.writeClosureCaptures address.value 0
     (captureKinds.toList.zip captures.toList)
   return ({ state with memory }, address)
@@ -92,9 +108,11 @@ operation-specific static data supplied by the generated trampoline. -/
 structure ClosureMetadata where
   header : Header
   targetId : UInt32
+  descriptorId : UInt32
   function : Lean.Name
   arity : Nat
   fixed : Nat
+  captureKinds : Array AbiKind
   deriving Inhabited, BEq, Repr
 
 def readClosureHeader (state : MemoryState) (object : Word32) :
@@ -108,39 +126,50 @@ def readClosureHeader (state : MemoryState) (object : Word32) :
   let fixed := header.aux2.toNat
   let requiredBytes :=
     align8 (headerBytes + target.semanticSlotBytes * fixed)
-  unless header.aux3 == 0 && fixed < arity &&
+  unless fixed < arity &&
       requiredBytes ≤ header.allocationBytes.toNat do
     throw (.target .closureMetadataMismatch)
   return header
 
 def readClosureMetadata (state : MemoryState) (dispatch : ClosureDispatchTable)
-    (object : Word32) : Except ConcreteError ClosureMetadata := do
+    (descriptors : ClosureDescriptorTable) (object : Word32) :
+    Except ConcreteError ClosureMetadata := do
   let header ← readClosureHeader state object
   let some function := dispatch.lookup? header.aux0 |
     throw (.target (.unknownClosureTargetId header.aux0))
+  let some captureKinds := descriptors.lookup? header.aux3 |
+    throw (.target (.unknownClosureDescriptorId header.aux3))
+  unless captureKinds.size == header.aux2.toNat do
+    throw (.target .closureMetadataMismatch)
   return {
     header
     targetId := header.aux0
+    descriptorId := header.aux3
     function
     arity := header.aux1.toNat
-    fixed := header.aux2.toNat }
+    fixed := header.aux2.toNat
+    captureKinds }
 
 def closureMatches (state : MemoryState) (dispatch : ClosureDispatchTable)
-    (object : Word32) (function : Lean.Name) (arity fixed : Nat) :
+    (descriptors : ClosureDescriptorTable) (object : Word32)
+    (function : Lean.Name) (arity fixed : Nat) :
     Except ConcreteError UInt32 := do
-  let metadata ← readClosureMetadata state dispatch object
+  let metadata ← readClosureMetadata state dispatch descriptors object
   return if metadata.function == function && metadata.arity == arity &&
       metadata.fixed == fixed then 1 else 0
 
 def projectClosureCapture (state : MemoryState) (dispatch : ClosureDispatchTable)
-    (object : Word32) (function : Lean.Name) (arity fixed index : Nat)
-    (kind : AbiKind) : Except ConcreteError LaneValue := do
-  let metadata ← readClosureMetadata state dispatch object
+    (descriptors : ClosureDescriptorTable) (object : Word32)
+    (function : Lean.Name) (arity fixed index : Nat) (kind : AbiKind) :
+    Except ConcreteError LaneValue := do
+  let metadata ← readClosureMetadata state dispatch descriptors object
   unless metadata.function == function && metadata.arity == arity &&
       metadata.fixed == fixed do
     throw (.target .closureMetadataMismatch)
   unless index < fixed do
     throw (.target (.closureCaptureIndexOutOfBounds index fixed))
+  unless metadata.captureKinds[index]? == some kind do
+    throw (.target .closureMetadataMismatch)
   liftMemory <| state.memory.readClosureCapture
     (closureCaptureAddress object.value index) kind
 

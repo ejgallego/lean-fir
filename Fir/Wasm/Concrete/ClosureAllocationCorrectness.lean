@@ -299,37 +299,43 @@ theorem MemoryState.readLiveHeader_of_writeClosureCaptures
 allocation followed by the heterogeneous capture writer. -/
 theorem allocateClosure_decompose
     (state result : MemoryState) (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable)
     (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
-    (captures : Array LaneValue) (address : Word32) (targetId : UInt32)
+    (captures : Array LaneValue) (address : Word32) (targetId descriptorId : UInt32)
     (count : captureKinds.size = captures.size)
     (capturesLtArity : captures.size < arity)
     (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds = .ok descriptorId)
     (arityFits : arity < UInt32.size)
     (fixedFits : captures.size < UInt32.size)
-    (allocated : allocateClosure state dispatch function arity captureKinds captures =
-      .ok (result, address)) :
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
     ∃ middle,
       state.allocateObject .closure
         ((ClosureLayout.ofCaptures captureKinds).allocationBytes - headerBytes)
-        false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0 =
+        false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size)
+          descriptorId =
           .ok (middle, address) ∧
       middle.memory.writeClosureCaptures address.value 0
         (captureKinds.toList.zip captures.toList) = .ok result.memory ∧
       result.heapCursor = middle.heapCursor := by
   unfold allocateClosure at allocated
-  simp [count, capturesLtArity, targetIdEq, uint32Field, arityFits, fixedFits] at allocated
+  simp [count, capturesLtArity, targetIdEq, descriptorIdEq, uint32Field,
+    arityFits, fixedFits] at allocated
   change (do
     let (middle, actualAddress) ← liftMemory <|
       state.allocateObject .closure
         ((ClosureLayout.ofCaptures captureKinds).allocationBytes - headerBytes)
-        false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0
+        false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size)
+          descriptorId
     let memory ← liftMemory <| middle.memory.writeClosureCaptures
       actualAddress.value 0 (captureKinds.toList.zip captures.toList)
     return ({ middle with memory }, actualAddress)) =
       .ok (result, address) at allocated
   cases objectAllocation : state.allocateObject .closure
       ((ClosureLayout.ofCaptures captureKinds).allocationBytes - headerBytes)
-      false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0 with
+      false targetId (UInt32.ofNat arity) (UInt32.ofNat captures.size)
+        descriptorId with
   | error failure =>
       rw [objectAllocation] at allocated
       change Except.error (ConcreteError.target failure) =
@@ -416,16 +422,19 @@ theorem Array.lookup_zip_toList_of
 metadata and every typed capture slot under the fresh closure witness. -/
 theorem allocateClosure_objectRel
     (state result : MemoryState) (witness : RefinementWitness)
-    (dispatch : ClosureDispatchTable) (function : Lean.Name) (arity : Nat)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (function : Lean.Name) (arity : Nat)
     (captureKinds : Array AbiKind) (captures : Array LaneValue)
     (semantic : Array Value) (location : Location) (address : Word32)
-    (targetId : UInt32)
+    (targetId descriptorId : UInt32)
     (valid : state.FrontierInvariant)
     (count : captureKinds.size = captures.size)
     (semanticCount : semantic.size = captures.size)
     (capturesLtArity : captures.size < arity)
     (targetIdEq : closureTargetId dispatch function = .ok targetId)
     (targetLookup : dispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds = .ok descriptorId)
+    (descriptorLookup : descriptors.lookup? descriptorId = some captureKinds)
     (arityFits : arity < UInt32.size)
     (fixedFits : captures.size < UInt32.size)
     (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
@@ -438,12 +447,12 @@ theorem allocateClosure_objectRel
     (descriptorFresh : ∀ old descriptor,
       witness.descriptors.lookup? old = some descriptor →
       address.value ≠ old.value)
-    (allocated : allocateClosure state dispatch function arity captureKinds captures =
-      .ok (result, address)) :
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
     result.FrontierInvariant ∧
     ClosureObjectRel result
       (witness.bindClosure location address function arity captureKinds)
-      dispatch address function arity captureKinds semantic := by
+      dispatch descriptors address function arity captureKinds semantic := by
   let layout := ClosureLayout.ofCaptures captureKinds
   let captureList := captureKinds.toList.zip captures.toList
   have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
@@ -466,9 +475,9 @@ theorem allocateClosure_objectRel
     apply align8_eq_of_mod_eq_zero
     simp [target, headerBytes]
   obtain ⟨middle, objectAllocation, captureWrite, cursorEq⟩ :=
-    allocateClosure_decompose state result dispatch function arity captureKinds
-      captures address targetId count capturesLtArity targetIdEq arityFits fixedFits
-      allocated
+    allocateClosure_decompose state result dispatch descriptors function arity
+      captureKinds captures address targetId descriptorId count capturesLtArity
+      targetIdEq descriptorIdEq arityFits fixedFits allocated
   have middleValid := valid.allocateObject objectAllocation
   have captureListLength : captureList.length = captures.size := by
     simp [captureList, count]
@@ -535,12 +544,13 @@ theorem allocateClosure_objectRel
   have headerBefore :=
     MemoryState.readLiveHeader_of_allocateObject_eq_ok state middle .closure
       (layout.allocationBytes - headerBytes) false targetId
-      (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0 address objectAllocation
+      (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId address
+      objectAllocation
   have headerAfter := MemoryState.readLiveHeader_of_writeClosureCaptures middle
     result.memory address captureList capturePost
   have exactHeader : result.readLiveHeader address = .ok
       (Header.forAllocation .closure layout.allocationBytes false targetId
-        (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0) := by
+        (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId) := by
     rw [← stateEq, headerAfter]
     simpa [allocationEq] using headerBefore
   have addressHeap : address.classify = .heap := by
@@ -556,7 +566,8 @@ theorem allocateClosure_objectRel
   obtain ⟨rawState, rawAllocation, _, _, _⟩ :=
     MemoryState.allocateObject_header state middle .closure
       (layout.allocationBytes - headerBytes) false targetId
-      (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0 address objectAllocation
+      (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId address
+      objectAllocation
   have allocationPost := MemoryState.allocate_spec state rawState
     (align8 (headerBytes + (layout.allocationBytes - headerBytes))) address
       rawAllocation
@@ -584,7 +595,7 @@ theorem allocateClosure_objectRel
     rw [← layoutExact, layoutAligned]
   have closureHeader : readClosureHeader result address = .ok
       (Header.forAllocation .closure layout.allocationBytes false targetId
-        (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0) := by
+        (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId) := by
     unfold readClosureHeader
     simp only [addressHeap, if_true]
     rw [exactHeader]
@@ -595,18 +606,22 @@ theorem allocateClosure_objectRel
     rfl
   let metadata : ClosureMetadata := {
     header := Header.forAllocation .closure layout.allocationBytes false targetId
-      (UInt32.ofNat arity) (UInt32.ofNat captures.size) 0
+      (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId
     targetId
+    descriptorId
     function
     arity
-    fixed := captures.size }
-  have metadataRead : readClosureMetadata result dispatch address = .ok metadata := by
+    fixed := captures.size
+    captureKinds }
+  have metadataRead : readClosureMetadata result dispatch descriptors address =
+      .ok metadata := by
     unfold readClosureMetadata
     rw [closureHeader]
     simp only [Bind.bind, Except.bind]
     simp only [Header.forAllocation]
     rw [targetLookup]
-    simp [metadata, arityToNat, fixedToNat]
+    rw [descriptorLookup]
+    simp [metadata, arityToNat, fixedToNat, count]
     change Except.ok metadata = Except.ok metadata
     rfl
   have extension := witness.bindClosure_extends location address function arity
@@ -616,7 +631,7 @@ theorem allocateClosure_objectRel
     descriptor := by
       exact witness.lookup_bindClosure_descriptor location address function arity
         captureKinds
-    metadata := ⟨metadata, metadataRead, rfl, rfl, ?_⟩
+    metadata := ⟨metadata, metadataRead, rfl, rfl, ?_, rfl⟩
     captureKindsSize := count.trans semanticCount.symm
     captures := ?_ }
   · exact semanticCount.symm
@@ -637,20 +652,22 @@ theorem allocateClosure_objectRel
 so all previously decoded objects can be transported uniformly. -/
 theorem allocateClosure_prefixExtension
     (state result : MemoryState) (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable)
     (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
-    (captures : Array LaneValue) (address : Word32) (targetId : UInt32)
+    (captures : Array LaneValue) (address : Word32) (targetId descriptorId : UInt32)
     (valid : state.FrontierInvariant)
     (count : captureKinds.size = captures.size)
     (capturesLtArity : captures.size < arity)
     (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds = .ok descriptorId)
     (arityFits : arity < UInt32.size)
     (fixedFits : captures.size < UInt32.size)
     (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
       captureKinds[index]? = some kind →
       captures[index]? = some lane →
       lane.valueType = kind.valueType)
-    (allocated : allocateClosure state dispatch function arity captureKinds captures =
-      .ok (result, address)) :
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
     state.PrefixExtension result := by
   let layout := ClosureLayout.ofCaptures captureKinds
   let captureList := captureKinds.toList.zip captures.toList
@@ -667,9 +684,9 @@ theorem allocateClosure_prefixExtension
         layout.allocationBytes := by
     rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
   obtain ⟨middle, objectAllocation, captureWrite, cursorEq⟩ :=
-    allocateClosure_decompose state result dispatch function arity captureKinds
-      captures address targetId count capturesLtArity targetIdEq arityFits fixedFits
-      allocated
+    allocateClosure_decompose state result dispatch descriptors function arity
+      captureKinds captures address targetId descriptorId count capturesLtArity
+      targetIdEq descriptorIdEq arityFits fixedFits allocated
   have objectExtension := valid.allocateObject_prefixExtension objectAllocation
   have middleValid := valid.allocateObject objectAllocation
   have captureListLength : captureList.length = captures.size := by
