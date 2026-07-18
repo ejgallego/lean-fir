@@ -541,7 +541,7 @@ It must decode to the original tagged payload and retain persistent/no-RC
 behavior. -/
 structure PromotedTagRel (state : MemoryState) (witness : RefinementWitness)
     (payload : UInt64) (address : Word32) : Prop where
-  mapped : witness.promotedTags.lookup? payload = some address
+  mapped : witness.promotedTags.Contains payload address
   descriptor : witness.descriptors.lookup? address = some (.promotedTag payload)
   header : ∃ header,
     state.readLiveHeader address = .ok header ∧
@@ -618,7 +618,7 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     ∃ cell, findCell? semantic.heap location = some cell ∧ cell.live = true ∧
       LiveCellRel state witness address cell
   promoted : ∀ payload address,
-    witness.promotedTags.lookup? payload = some address →
+    witness.promotedTags.Contains payload address →
     PromotedTagRel state witness payload address
 
 /-- The complete decoded W6.1 heap relation is stable under a fresh concrete

@@ -128,6 +128,26 @@ def promotedTagged : Except ConcreteError (MemoryState × Word32) :=
               value.toNat == maxImmediatePayload + 1
         | _, _ => false
 
+/-- Equal tagged payloads are not interned: both immutable representations
+remain valid concrete values at distinct fresh addresses. -/
+def repeatedPromotedTagged :
+    Except ConcreteError (MemoryState × Word32 × Word32) := do
+  let payload := UInt64.ofNat (maxImmediatePayload + 1)
+  let (state, first) ← encodeTagged MemoryState.initial payload
+  let (state, second) ← encodeTagged state payload
+  return (state, first, second)
+
+#guard match repeatedPromotedTagged with
+  | .error _ => false
+  | .ok (state, first, second) =>
+      first.value == heapBase && second.value == heapBase + 40 &&
+        state.heapCursor == heapBase + 80 &&
+        match readTag state first, readTag state second with
+        | .ok firstPayload, .ok secondPayload =>
+            firstPayload.toNat == maxImmediatePayload + 1 &&
+              secondPayload.toNat == maxImmediatePayload + 1
+        | _, _ => false
+
 def boxedUInt8Max : Except ConcreteError (MemoryState × Word32) :=
   boxScalar MemoryState.initial (.uint8 255)
 
@@ -346,5 +366,17 @@ example : ValueRel (({} : RefinementWitness).promoteTag
     .tagged (.word32 firstHeapAddress)
     (.object (.tagged (UInt64.ofNat (maxImmediatePayload + 1)))) :=
   ValueRel.new_promoted_tag {} _ firstHeapAddress
+
+def secondHeapAddress : Word32 := ⟨heapBase + 40, by decide⟩
+
+/-- Regression for `FIR-BUG-wasm-none-promoted-tag-aliasing`: recording a
+second representation of an equal payload retains membership of the first. -/
+example :
+    let payload := UInt64.ofNat (maxImmediatePayload + 1)
+    let first := ({} : RefinementWitness).promoteTag payload firstHeapAddress
+    let second := first.promoteTag payload secondHeapAddress
+    second.promotedTags.Contains payload firstHeapAddress ∧
+      second.promotedTags.Contains payload secondHeapAddress := by
+  simp [RefinementWitness.promoteTag, PromotedTags.Contains]
 
 end Fir.Wasm.Concrete

@@ -110,6 +110,11 @@ def BoxedScalar.ofPayload : BoxedScalarKind → UInt64 → BoxedScalar
   | .uint64, payload => .uint64 payload
   | .usize, payload => .usize payload
 
+@[simp] theorem BoxedScalar.kind_ofPayload (kind : BoxedScalarKind)
+    (payload : UInt64) :
+    (BoxedScalar.ofPayload kind payload).kind = kind := by
+  cases kind <;> rfl
+
 @[simp] theorem BoxedScalar.ofPayload_kind_payload (scalar : BoxedScalar) :
     BoxedScalar.ofPayload scalar.kind scalar.payload = scalar := by
   cases scalar <;> simp [BoxedScalar.kind, BoxedScalar.payload, BoxedScalar.ofPayload]

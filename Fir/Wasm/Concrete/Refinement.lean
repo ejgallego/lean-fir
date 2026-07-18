@@ -41,10 +41,11 @@ def LocationMap.lookup? : LocationMap → Location → Option Word32
   | (candidate, address) :: rest, location =>
       if candidate = location then some address else lookup? rest location
 
-def PromotedTags.lookup? : PromotedTags → UInt64 → Option Word32
-  | [], _ => none
-  | (candidate, address) :: rest, payload =>
-      if candidate = payload then some address else lookup? rest payload
+/-- One semantic tagged payload may have several immutable concrete
+representations: `encodeTagged` allocates afresh rather than interning. -/
+def PromotedTags.Contains (tags : PromotedTags) (payload : UInt64)
+    (address : Word32) : Prop :=
+  (payload, address) ∈ tags
 
 def DescriptorMap.lookup? : DescriptorMap → Word32 → Option AllocationDescriptor
   | [], _ => none
@@ -96,16 +97,23 @@ def RefinementWitness.bindBoxed (witness : RefinementWitness)
     (witness.bindLocation location address).locations.lookup? location = some address := by
   simp [RefinementWitness.bindLocation, LocationMap.lookup?]
 
-@[simp] theorem RefinementWitness.lookup_promoteTag_self
+@[simp] theorem RefinementWitness.contains_promoteTag_self
     (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
-    (witness.promoteTag payload address).promotedTags.lookup? payload = some address := by
-  simp [RefinementWitness.promoteTag, PromotedTags.lookup?]
+    (witness.promoteTag payload address).promotedTags.Contains payload address := by
+  simp [RefinementWitness.promoteTag, PromotedTags.Contains]
 
 @[simp] theorem RefinementWitness.lookup_promoteTag_descriptor
     (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
     (witness.promoteTag payload address).descriptors.lookup? address =
       some (.promotedTag payload) := by
   simp [RefinementWitness.promoteTag, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_promoteTag_descriptor_other
+    (witness : RefinementWitness) (payload : UInt64) (address other : Word32)
+    (different : address.value ≠ other.value) :
+    (witness.promoteTag payload address).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.promoteTag, DescriptorMap.lookup?, different]
 
 @[simp] theorem RefinementWitness.lookup_bindConstructor_location
     (witness : RefinementWitness) (location : Location) (address : Word32)
@@ -184,8 +192,8 @@ structure RefinementWitness.Extends (before after : RefinementWitness) : Prop wh
     before.locations.lookup? location = some address →
     after.locations.lookup? location = some address
   promotedTags : ∀ payload address,
-    before.promotedTags.lookup? payload = some address →
-    after.promotedTags.lookup? payload = some address
+    before.promotedTags.Contains payload address →
+    after.promotedTags.Contains payload address
   descriptors : ∀ address descriptor,
     before.descriptors.lookup? address = some descriptor →
     after.descriptors.lookup? address = some descriptor
@@ -261,6 +269,28 @@ theorem RefinementWitness.bindBoxed_extends
       (descriptorFresh old descriptor found)]
     exact found
 
+/-- Recording a fresh promoted representation preserves every old lookup and
+every old promoted representation, including representations of the same
+payload at other addresses. -/
+theorem RefinementWitness.promoteTag_extends
+    (witness : RefinementWitness) (payload : UInt64) (address : Word32)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.promoteTag payload address) := by
+  refine {
+    locations := fun _ _ found => found
+    promotedTags := ?_
+    descriptors := ?_ }
+  · intro oldPayload oldAddress found
+    change (oldPayload, oldAddress) ∈
+      (payload, address) :: witness.promotedTags
+    exact List.Mem.tail _ found
+  · intro old descriptor found
+    rw [witness.lookup_promoteTag_descriptor_other payload address old
+      (descriptorFresh old descriptor found)]
+    exact found
+
 /-- The lookup-visible part of a witness is injective and every related word
 is a concrete heap address. This avoids baking proof-only location identities
 into linear memory. -/
@@ -271,13 +301,13 @@ structure RefinementWitness.WellFormed (witness : RefinementWitness) : Prop wher
     witness.locations.lookup? left = some address →
     witness.locations.lookup? right = some address → left = right
   promotedHeap : ∀ payload address,
-    witness.promotedTags.lookup? payload = some address → address.classify = .heap
+    witness.promotedTags.Contains payload address → address.classify = .heap
   promotedInjective : ∀ left right address,
-    witness.promotedTags.lookup? left = some address →
-    witness.promotedTags.lookup? right = some address → left = right
+    witness.promotedTags.Contains left address →
+    witness.promotedTags.Contains right address → left = right
   locationPromotionDisjoint : ∀ location payload left right,
     witness.locations.lookup? location = some left →
-    witness.promotedTags.lookup? payload = some right → left ≠ right
+    witness.promotedTags.Contains payload right → left ≠ right
 
 /-- Fresh constructor metadata preserves witness injectivity and the
 location/promoted-tag address partition. -/
@@ -289,7 +319,7 @@ theorem RefinementWitness.WellFormed.bindConstructor
     (locationAddressFresh : ∀ old oldAddress,
       witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
     (promotedAddressFresh : ∀ payload oldAddress,
-      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress) :
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
     (witness.bindConstructor location address info fieldKinds).WellFormed := by
   refine {
     locationHeap := ?_
@@ -348,7 +378,7 @@ theorem RefinementWitness.WellFormed.bindBoxed
     (locationAddressFresh : ∀ old oldAddress,
       witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
     (promotedAddressFresh : ∀ payload oldAddress,
-      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress) :
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
     (witness.bindBoxed location address kind).WellFormed := by
   refine {
     locationHeap := ?_
@@ -397,6 +427,55 @@ theorem RefinementWitness.WellFormed.bindBoxed
         at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
 
+/-- Adding a fresh concrete address for a promoted tag preserves witness
+well-formedness even when the same payload already has another address. -/
+theorem RefinementWitness.WellFormed.promoteTag
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (payload : UInt64) (address : Word32)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ location oldAddress,
+      witness.locations.lookup? location = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ oldPayload oldAddress,
+      witness.promotedTags.Contains oldPayload oldAddress → oldAddress ≠ address) :
+    (witness.promoteTag payload address).WellFormed := by
+  refine {
+    locationHeap := valid.locationHeap
+    locationInjective := valid.locationInjective
+    promotedHeap := ?_
+    promotedInjective := ?_
+    locationPromotionDisjoint := ?_ }
+  · intro oldPayload oldAddress found
+    change (oldPayload, oldAddress) ∈
+      (payload, address) :: witness.promotedTags at found
+    rcases List.mem_cons.mp found with new | old
+    · have addressEq : oldAddress = address := congrArg Prod.snd new
+      rw [addressEq]
+      exact addressHeap
+    · exact valid.promotedHeap oldPayload oldAddress old
+  · intro left right common leftFound rightFound
+    change (left, common) ∈ (payload, address) :: witness.promotedTags at leftFound
+    change (right, common) ∈ (payload, address) :: witness.promotedTags at rightFound
+    rcases List.mem_cons.mp leftFound with leftNew | leftOld
+    · rcases List.mem_cons.mp rightFound with rightNew | rightOld
+      · exact (congrArg Prod.fst leftNew).trans (congrArg Prod.fst rightNew).symm
+      · have commonEq : common = address := congrArg Prod.snd leftNew
+        rw [commonEq] at rightOld
+        exact False.elim ((promotedAddressFresh right address rightOld) rfl)
+    · rcases List.mem_cons.mp rightFound with rightNew | rightOld
+      · have commonEq : common = address := congrArg Prod.snd rightNew
+        rw [commonEq] at leftOld
+        exact False.elim ((promotedAddressFresh left address leftOld) rfl)
+      · exact valid.promotedInjective left right common leftOld rightOld
+  · intro location oldPayload left right locationFound promotedFound
+    change (oldPayload, right) ∈
+      (payload, address) :: witness.promotedTags at promotedFound
+    rcases List.mem_cons.mp promotedFound with new | old
+    · have rightEq : right = address := congrArg Prod.snd new
+      rw [rightEq]
+      exact locationAddressFresh location left locationFound
+    · exact valid.locationPromotionDisjoint location oldPayload left right
+        locationFound old
+
 inductive HeapReferenceRel (witness : RefinementWitness) :
     Word32 → Location → Prop where
   | mapped {location address}
@@ -410,7 +489,7 @@ inductive TaggedReferenceRel (witness : RefinementWitness) :
       TaggedReferenceRel witness
         (Word32.encodeImmediate payload.toNat fits) payload
   | promoted {payload address}
-      (found : witness.promotedTags.lookup? payload = some address) :
+      (found : witness.promotedTags.Contains payload address) :
       TaggedReferenceRel witness address payload
 
 inductive ObjectReferenceRel (witness : RefinementWitness) :
@@ -503,11 +582,12 @@ theorem ValueRel.physical_type {witness : RefinementWitness} {kind : AbiKind}
 theorem TaggedReferenceRel.immediate_not_sentinel
     {witness : RefinementWitness} {word : Word32} {payload : UInt64}
     (related : TaggedReferenceRel witness word payload)
-    (notPromoted : witness.promotedTags.lookup? payload = none) :
+    (notPromoted : ∀ address,
+      ¬ witness.promotedTags.Contains payload address) :
     word ≠ Word32.zero := by
   cases related with
   | immediate payload fits => exact Word32.immediate_ne_zero payload.toNat fits
-  | promoted found => simp [notPromoted] at found
+  | promoted found => exact False.elim (notPromoted _ found)
 
 theorem HeapReferenceRel.is_heap {witness : RefinementWitness}
     (valid : witness.WellFormed) {word : Word32} {location : Location}
@@ -535,7 +615,14 @@ theorem ValueRel.new_promoted_tag (witness : RefinementWitness)
     (payload : UInt64) (address : Word32) :
     ValueRel (witness.promoteTag payload address) .tagged (.word32 address)
       (.object (.tagged payload)) :=
-  .tagged (.promoted (RefinementWitness.lookup_promoteTag_self witness payload address))
+  .tagged (.promoted (RefinementWitness.contains_promoteTag_self witness payload address))
+
+theorem ValueRel.new_promoted_tobject (witness : RefinementWitness)
+    (payload : UInt64) (address : Word32) :
+    ValueRel (witness.promoteTag payload address) .tobject (.word32 address)
+      (.object (.tagged payload)) :=
+  .tobject (.tagged
+    (.promoted (RefinementWitness.contains_promoteTag_self witness payload address)))
 
 theorem ValueRel.new_boxed_result (witness : RefinementWitness)
     (location : Location) (address : Word32) (kind : BoxedScalarKind) :

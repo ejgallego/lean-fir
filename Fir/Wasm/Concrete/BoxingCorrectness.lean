@@ -1,5 +1,4 @@
-import Fir.Wasm.Concrete.HeapRefinement
-import Fir.Wasm.Concrete.FreshAllocationCorrectness
+import Fir.Wasm.Concrete.PromotedTagCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -314,7 +313,7 @@ theorem allocateBoxedScalar_liveHeapRel
     simp [headerBytes] at owned
     omega
   have promotedAddressFresh : ∀ payload oldAddress,
-      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress := by
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress := by
     intro payload oldAddress found equal
     have promoted := related.promoted payload oldAddress found
     obtain ⟨oldHeader, _, _, _, _, _, extent, payloadFits⟩ := promoted.header
@@ -394,8 +393,7 @@ theorem allocateBoxedScalar_liveHeapRel
           simpa [semanticBoxResult, findCell?, isNew, Ne.symm isNew],
         live, (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro payload concreteAddress mapped
-    have oldMapped : witness.promotedTags.lookup? payload = some concreteAddress := mapped
-    exact ((related.promoted payload concreteAddress oldMapped).prefixExtension extension)
+    exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension
 
 theorem scalarFromType_boxedScalarKind (kind : BoxedScalarKind) (payload : UInt64) :
@@ -497,5 +495,91 @@ theorem boxScalar_heap_liveHeapRel
   exact ⟨semanticBox_heap_eq runtime scalar heap,
     allocateBoxedScalar_liveHeapRel state result witness runtime scalar address
       related allocated⟩
+
+/-- Below FIR's 63-bit tagged limit, semantic boxing leaves the heap unchanged
+and returns the tagged payload for every supported integer scalar kind. -/
+theorem semanticBox_tagged_eq (runtime : RuntimeState) (scalar : BoxedScalar)
+    (tagged : scalar.payload.toNat ≤ maxTaggedPayload) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+      .ok (runtime, .object (.tagged scalar.payload)) := by
+  cases scalar <;>
+    simp_all [Fir.LeanIR.Impure.box, BoxedScalar.semanticValue,
+      BoxedScalar.payload, ScalarValue.toUInt64, Bind.bind, Except.bind] <;>
+    rfl
+
+/-- The public concrete boxing operation and semantic boxing agree throughout
+the tagged range, whether wasm32 can use a direct immediate or must allocate a
+persistent promoted representation. -/
+theorem boxScalar_tagged_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (scalar : BoxedScalar) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (tagged : scalar.payload.toNat ≤ maxTaggedPayload)
+    (boxed : boxScalar state scalar = .ok (result, word)) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+        .ok (runtime, .object (.tagged scalar.payload)) ∧
+      ∃ nextWitness,
+        LiveHeapRel result nextWitness runtime ∧
+        ValueRel nextWitness .tobject (.word32 word)
+          (.object (.tagged scalar.payload)) := by
+  have encoded : encodeTagged state scalar.payload = .ok (result, word) := by
+    rw [← boxScalar_of_tagged state scalar tagged]
+    exact boxed
+  exact ⟨semanticBox_tagged_eq runtime scalar tagged,
+    encodeTagged_liveHeapRel state result witness runtime scalar.payload word
+      related encoded⟩
+
+/-- Direct immediates and persistent promoted naturals decode identically at
+the typed scalar boundary. -/
+theorem LiveHeapRel.readBoxedScalar_tagged_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload)
+    (kind : BoxedScalarKind) :
+    let scalar := BoxedScalar.ofPayload kind payload
+    readBoxedScalar state kind word = .ok scalar ∧
+      Fir.LeanIR.Impure.unbox runtime kind.semanticType
+        (.object (.tagged payload)) = .ok scalar.semanticValue ∧
+      ValueRel witness kind.abiKind scalar.lane scalar.semanticValue := by
+  dsimp only
+  have semantic : Fir.LeanIR.Impure.unbox runtime kind.semanticType
+      (.object (.tagged payload)) =
+        .ok (BoxedScalar.ofPayload kind payload).semanticValue := by
+    unfold Fir.LeanIR.Impure.unbox
+    exact scalarFromType_boxedScalarKind kind payload
+  have valueRelated := BoxedScalar.valueRel witness
+    (BoxedScalar.ofPayload kind payload)
+  simp only [BoxedScalar.kind_ofPayload] at valueRelated
+  refine ⟨?_, semantic, valueRelated⟩
+  cases tagged with
+  | immediate actualPayload fits =>
+      unfold readBoxedScalar
+      simp [Word32.classify_encodeImmediate, Word32.decode_encodeImmediate]
+      rfl
+  | promoted found =>
+      have promoted := related.promoted payload word found
+      obtain ⟨header, headerRead, headerKind, persistent, _, marker, _, _⟩ :=
+        promoted.header
+      have addressHeap :=
+        (MemoryState.PrefixExtension.readLiveHeader_facts state word header
+          headerRead).1
+      have notBoxed : (header.kind == ObjectKind.boxed) = false := by
+        rw [headerKind]
+        decide
+      have isPromoted :
+          (header.kind == ObjectKind.natural && header.persistent &&
+            header.aux0 == promotedTagMarker) = true := by
+        rw [headerKind, persistent, marker]
+        decide
+      unfold readBoxedScalar
+      rw [addressHeap]
+      simp only
+      rw [headerRead]
+      simp only [Bind.bind, Except.bind, liftMemory]
+      rw [if_neg (by simp [notBoxed])]
+      rw [if_pos (by simpa using isPromoted)]
+      rw [promoted.decoded]
+      rfl
 
 end Fir.Wasm.Concrete

@@ -1033,6 +1033,22 @@ agreement. The next W6.2 slice proves allocation-side refinement for the
 concrete-only promoted-tag branch and then packages tagged unboxing; no runtime
 import switches before that full representation split is covered.
 
+W6.2j completes that split. The promoted-tag allocator now has checked
+decomposition, prefix framing, frontier preservation, exact persistent-natural
+header/decoder facts, witness well-formedness, and a `LiveHeapRel` theorem that
+leaves the semantic heap unchanged. `encodeTagged` composes direct wasm32
+immediates with promoted allocation, and public boxing agrees with FIR across
+the entire semantic tagged range. Tagged unboxing proves the same typed result
+for both representations.
+
+The proof exposed `FIR-BUG-wasm-none-promoted-tag-aliasing`: the original ghost
+map stored only one address per payload, but repeated concrete encoding
+allocates distinct immutable objects. Promoted tags are now modeled by
+many-address membership, preserving both old `ValueRel`s and equal-payload
+re-encodings. Executable and proof regressions cover the repeated allocation.
+The next W6.2 slice proves `isShared` for immediate, promoted, and ordinary
+heap representations before reference-counting work begins.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -105,7 +105,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     have addressEq := freshAddress
     omega
   have promotedAddressFresh : ∀ payload oldAddress,
-      witness.promotedTags.lookup? payload = some oldAddress → address ≠ oldAddress := by
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress := by
     intro payload oldAddress found equal
     have promoted := related.promoted payload oldAddress found
     obtain ⟨header, _, _, _, _, _, extent, payloadFits⟩ := promoted.header
@@ -190,8 +190,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
           simpa [semanticConstructorResult, findCell?, isNew, Ne.symm isNew],
         live, (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
   · intro payload concreteAddress mapped
-    have oldMapped : witness.promotedTags.lookup? payload = some concreteAddress := mapped
-    exact ((related.promoted payload concreteAddress oldMapped).prefixExtension extension)
+    exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension
 
 end Fir.Wasm.Concrete
