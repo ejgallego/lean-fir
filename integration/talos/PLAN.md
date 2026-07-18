@@ -1370,6 +1370,14 @@ uses delete plus fresh allocation. Guards cover fresh, in-place tag-changing,
 payload-zeroing, and too-small cases. The nonempty empty-token theorem reuses
 W6.1's witness extension and whole-heap allocation refinement.
 
+W6.3ae establishes the payload-scrubbing proof boundary used by in-place
+reuse. `ZeroBytesPost` proves that a successful checked zero-range write keeps
+memory size fixed, reads zero at every byte of the half-open interval, and
+preserves every byte outside it. The reusable success extractor lets the
+later constructor proof combine this complete old-payload erase with the
+existing object-field writer and final header rewrite without inspecting the
+recursive implementation again.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
