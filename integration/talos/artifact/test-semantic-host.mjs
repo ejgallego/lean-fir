@@ -4,6 +4,9 @@ import {
   SemanticFault,
   SemanticHost,
 } from "../../../scripts/wasm_semantic_host.mjs";
+import {
+  validationExternalRegistry,
+} from "../../../scripts/wasm_validation_externals.mjs";
 
 function scalar(kind, value) {
   return { kind: "scalar", scalarKind: kind, value: BigInt(value) };
@@ -153,6 +156,30 @@ function ctorRuntime() {
     kind: "integer",
     value: -2147483649n,
   });
+}
+
+{
+  const host = new SemanticHost(undefined, validationExternalRegistry);
+  const decLt = host.importFunction({
+    kind: "external",
+    declaration: "Int.decLt",
+    params: ["tobject", "tobject"],
+    results: ["uint8"],
+  });
+  const compare = (left, right) => {
+    const result = decLt(
+      host.encode("tobject", host.integer(left)),
+      host.encode("tobject", host.integer(right)),
+    );
+    return host.decode("uint8", result).value;
+  };
+  assert.equal(compare(-2147483648n, 0n), 1n);
+  assert.equal(compare(2147483647n, 0n), 0n);
+  assert.equal(compare(-2147483649n, 0n), 1n);
+  assert.equal(compare(2147483648n, 0n), 0n);
+  assert.equal(host.world, 0);
+  assert.deepStrictEqual(host.trace.map((event) => event.name),
+    ["Int.decLt", "Int.decLt", "Int.decLt", "Int.decLt"]);
 }
 
 {

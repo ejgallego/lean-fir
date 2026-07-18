@@ -16,7 +16,8 @@
   "runCommand": [
     "node",
     "scripts/run_validation_v8.mjs",
-    "scripts/wasm_semantic_host.mjs"
+    "scripts/wasm_semantic_host.mjs",
+    "scripts/wasm_validation_externals.mjs"
   ],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
@@ -50,6 +51,11 @@
       "kind": "runtime",
       "name": "scripts/wasm_semantic_host.mjs",
       "path": "../scripts/wasm_semantic_host.mjs"
+    },
+    {
+      "kind": "external-registry",
+      "name": "scripts/wasm_validation_externals.mjs",
+      "path": "../scripts/wasm_validation_externals.mjs"
     }
   ]
 }
