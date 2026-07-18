@@ -1191,6 +1191,18 @@ This isolates mixed-layout constructor framing as the final non-target cell
 case before the common header mutation can instantiate
 `LiveHeapRel.setCell_of_frames`.
 
+W6.3m closes that first whole-heap ownership transition. Mixed-layout
+constructor observations—including object and USize slots, alignment padding,
+and packed 8/16/32/64-bit scalar fields—now preserve their complete decoded
+relation under an allocation frame. Consequently every current live or dead
+`CellRel`, as well as promoted tags and the descriptor-region/disjointness
+invariant, survives an extent-preserving header rewrite. The composed
+decrement-above-one theorem exposes the exact concrete common-header write,
+performs the matching semantic `setCell`, frames every non-target allocation,
+and reconstructs `LiveHeapRel` for the resulting runtime. Count-one release is
+the next immediate whole-heap case; it reuses the same frame assembly while
+changing the target to the canonical dead-cell relation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
