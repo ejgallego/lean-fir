@@ -1603,6 +1603,12 @@ This prevents a future closure-cell proof from choosing a convenient decoder
 per object; the pending `LiveCellRel` case will use the one table installed for
 the module.
 
+W6.4f moves the generic closure read/prefix/witness transport lemmas into the
+local correctness layer, below `HeapRefinement`. This is a dependency-only
+checkpoint: it leaves the proved contracts unchanged while allowing the next
+slice to import `ClosureObjectRel` into the exhaustive live-cell relation
+without creating a cycle through allocation correctness.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
