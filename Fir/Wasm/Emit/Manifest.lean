@@ -22,6 +22,16 @@ def abiKindName : AbiKind → String
   | .float32 => "float32"
   | .float => "float"
 
+def abiKindsJson (kinds : Array AbiKind) : Json :=
+  Json.arr (kinds.map fun kind => abiKindName kind)
+
+private def ctorInfoJsonFields (info : Compiler.LCNF.CtorInfo) : List (String × Json) :=
+  [("name", info.name.toString),
+   ("tag", s!"{info.cidx}"),
+   ("size", info.size),
+   ("usize", info.usize),
+   ("ssize", info.ssize)]
+
 def operationJson : RuntimeOp → Except String Json
   | .literal (.nat value) result =>
       return Json.mkObj [
@@ -33,31 +43,107 @@ def operationJson : RuntimeOp → Except String Json
         ("kind", "stringLiteral"),
         ("value", value),
         ("result", abiKindName result)]
+  | .literal _ _ => throw "scalar literals do not require semantic-host imports"
   | .allocCtor info fields result =>
-      return Json.mkObj [
-        ("kind", "allocCtor"),
-        ("name", info.name.toString),
-        ("tag", s!"{info.cidx}"),
-        ("size", info.size),
-        ("usize", info.usize),
-        ("ssize", info.ssize),
-        ("fields", Json.arr (fields.map fun kind => abiKindName kind)),
+      return Json.mkObj <| [("kind", ("allocCtor" : Json))] ++ ctorInfoJsonFields info ++ [
+        ("fields", abiKindsJson fields),
         ("result", abiKindName result)]
   | .objectProj index result =>
       return Json.mkObj [
         ("kind", "objectProj"),
         ("index", index),
         ("result", abiKindName result)]
+  | .usizeProj index =>
+      return Json.mkObj [("kind", "usizeProj"), ("index", index)]
+  | .scalarProj width offset result =>
+      return Json.mkObj [
+        ("kind", "scalarProj"),
+        ("width", width),
+        ("offset", offset),
+        ("result", abiKindName result)]
+  | .cacheSet declaration value =>
+      return Json.mkObj [
+        ("kind", "cacheSet"),
+        ("declaration", declaration.toString),
+        ("value", abiKindName value)]
+  | .partialApply function arity fixed fields result =>
+      return Json.mkObj [
+        ("kind", "partialApply"),
+        ("function", function.toString),
+        ("arity", arity),
+        ("fixed", fixed),
+        ("fields", abiKindsJson fields),
+        ("result", abiKindName result)]
+  | .closureApply .. => throw "legacy closureApply host callbacks are outside A0"
+  | .closureMatches function arity fixed =>
+      return Json.mkObj [
+        ("kind", "closureMatches"),
+        ("function", function.toString),
+        ("arity", arity),
+        ("fixed", fixed)]
+  | .closureProj function arity fixed index result =>
+      return Json.mkObj [
+        ("kind", "closureProj"),
+        ("function", function.toString),
+        ("arity", arity),
+        ("fixed", fixed),
+        ("index", index),
+        ("result", abiKindName result)]
+  | .reset objectFields =>
+      return Json.mkObj [("kind", "reset"), ("objectFields", objectFields)]
+  | .reuse info updateHeader fields result =>
+      return Json.mkObj <| [("kind", ("reuse" : Json))] ++ ctorInfoJsonFields info ++ [
+        ("updateHeader", (updateHeader : Json)),
+        ("fields", abiKindsJson fields),
+        ("result", abiKindName result)]
+  | .box scalar result =>
+      return Json.mkObj [
+        ("kind", "box"),
+        ("scalar", abiKindName scalar),
+        ("result", abiKindName result)]
+  | .unbox scalar =>
+      return Json.mkObj [("kind", "unbox"), ("scalar", abiKindName scalar)]
+  | .isShared => return Json.mkObj [("kind", "isShared")]
+  | .objectSet index field =>
+      return Json.mkObj [
+        ("kind", "objectSet"),
+        ("index", index),
+        ("field", abiKindName field)]
+  | .usizeSet index =>
+      return Json.mkObj [("kind", "usizeSet"), ("index", index)]
+  | .scalarSet width offset field =>
+      return Json.mkObj [
+        ("kind", "scalarSet"),
+        ("width", width),
+        ("offset", offset),
+        ("field", abiKindName field)]
+  | .setTag tag => return Json.mkObj [("kind", "setTag"), ("tag", s!"{tag}")]
+  | .inc amount check =>
+      return Json.mkObj [("kind", "inc"), ("amount", amount), ("check", check)]
+  | .dec amount check objectFields? =>
+      return Json.mkObj [
+        ("kind", "dec"),
+        ("amount", amount),
+        ("check", check),
+        ("objectFields", objectFields?.map (fun value => (value : Json)) |>.getD Json.null)]
+  | .delete => return Json.mkObj [("kind", "delete")]
   | .getTag => return Json.mkObj [("kind", "getTag")]
-  | operation => throw s!"unsupported A0 host operation: {operation.stem}"
 
 def importJson (import_ : Fir.Wasm.Import) : Except String Json := do
-  let some operation := import_.operation? |
-    throw s!"external import is outside A0: {import_.moduleName}.{import_.itemName}"
+  let operation ← match import_.key with
+    | .runtime operation => operationJson operation
+    | .external declaration =>
+        let some _ := import_.externalTypes? |
+          throw s!"external import lacks source types: {declaration}"
+        pure <| Json.mkObj [
+          ("kind", "external"),
+          ("declaration", declaration.toString),
+          ("params", abiKindsJson import_.signature.params),
+          ("results", abiKindsJson import_.signature.results)]
   return Json.mkObj [
     ("module", import_.moduleName),
     ("name", import_.itemName),
-    ("operation", ← operationJson operation)]
+    ("operation", operation)]
 
 def scalarValueJson : ScalarValue → Json
   | .uint8 value => Json.mkObj [("kind", "uint8"), ("value", s!"{value}")]

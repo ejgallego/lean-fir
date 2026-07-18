@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.Binary
+import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.Examples
 
 namespace Fir.Wasm.Emit.Examples
@@ -136,5 +137,33 @@ standard Wasm module for the lazy-cache path. -/
 #guard (encodeProgram Fir.Wasm.abiClosureCallProgram).isOk
 #guard (encodeProgram Fir.Wasm.abiClosureUnderApplyProgram).isOk
 #guard (encodeProgram Fir.Wasm.abiRecursiveCallProgram).isOk
+
+def w5ManifestOperations : Array RuntimeOp := #[
+  .usizeProj 0,
+  .scalarProj 4 0 .uint32,
+  .cacheSet `cached .uint64,
+  .partialApply `callee 2 1 #[.tobject] .tobject,
+  .closureMatches `callee 2 1,
+  .closureProj `callee 2 1 0 .tobject,
+  .box .uint32 .tobject,
+  .unbox .uint32,
+  .isShared,
+  .reset 2,
+  .reuse pairInfo true #[.tobject, .tobject] .object,
+  .objectSet 0 .tobject,
+  .usizeSet 0,
+  .scalarSet 4 0 .uint32,
+  .setTag 1,
+  .inc 1 false,
+  .dec 1 false (some 2),
+  .delete]
+
+#guard w5ManifestOperations.all fun operation =>
+  (Fir.Wasm.Emit.Manifest.operationJson operation).isOk
+
+#guard match Fir.Wasm.Emit.Manifest.operationJson
+    (.closureApply #[.tobject] #[.tobject]) with
+  | .error _ => true
+  | .ok _ => false
 
 end Fir.Wasm.Emit.Examples
