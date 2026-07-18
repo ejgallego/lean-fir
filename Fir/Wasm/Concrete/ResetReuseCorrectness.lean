@@ -1,5 +1,6 @@
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 import Fir.Wasm.Concrete.ConstructorHeapCorrectness
+import Fir.Wasm.Concrete.ReuseMemoryCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -111,6 +112,211 @@ def resetProtocolObject (object : ConstructorObject) (count : Nat) :
   object with
   objectFields := object.objectFields.mapIdx fun index field =>
     if index < count then .object (.tagged 0) else field }
+
+/-- Canonical semantic constructor installed when a nonempty reuse token is
+consumed. The old tag is retained exactly when `updateHeader` is false; all
+non-object payload is reset to the FIR runtime's zero/empty state. -/
+def reusedConstructorObject (old : ConstructorObject) (info : LCNF.CtorInfo)
+    (updateHeader : Bool) (fields : Array Value) : ConstructorObject := {
+  tag := if updateHeader then info.cidx else old.tag
+  objectFields := fields
+  usizeFields := Array.replicate info.usize 0
+  scalarFields := [] }
+
+/-- The complete in-place byte transaction reconstructs a normal constructor
+decoder relation under the replacement descriptor. The active layout may be
+smaller than the retained allocation; every replacement `USize` byte is read
+from the scrubbed payload, while object fields come from the exact field-write
+postcondition. -/
+theorem ConstructorObjectRel.ofReuseConstructorMemory
+    (state : MemoryState) (memory scrubbed fieldMemory : LinearMemory)
+    (witness : RefinementWitness) (address : Word32)
+    (oldInfo : LCNF.CtorInfo) (oldFieldKinds : Array AbiKind)
+    (old : ConstructorObject) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (fields : Array Word32)
+    (semanticFields : Array Value) (updateHeader : Bool)
+    (header replacement : Header)
+    (related : ConstructorObjectRel state witness address oldInfo oldFieldKinds old)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (retainedExtent : address.value + header.allocationBytes.toNat ≤
+      state.heapCursor)
+    (replacementKind : replacement.kind = .constructor)
+    (replacementLive : replacement.live = true)
+    (replacementPersistent : replacement.persistent = false)
+    (replacementAllocation : replacement.allocationBytes = header.allocationBytes)
+    (replacementTag : replacement.aux0.toNat =
+      if updateHeader then info.cidx else old.tag)
+    (replacementObjectFields : replacement.aux1.toNat = info.size)
+    (replacementUSizeFields : replacement.aux2.toNat = info.usize)
+    (replacementScalarBytes : replacement.aux3.toNat = info.ssize)
+    (layoutFits : (ConstructorLayout.ofInfo info).allocationBytes ≤
+      header.allocationBytes.toNat)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (post : ReuseConstructorMemoryPost state.memory scrubbed fieldMemory memory
+      address header.allocationBytes.toNat replacement fields.toList) :
+    ConstructorObjectRel ({ state with memory } : MemoryState)
+      (witness.rebindConstructor address info fieldKinds) address info fieldKinds
+      (reusedConstructorObject old info updateHeader semanticFields) := by
+  obtain ⟨addressHeap, _, _, headerMinimum, headerAligned, headerInBounds⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have finalHeader :
+      ({ state with memory } : MemoryState).readLiveHeader address =
+        .ok replacement := by
+    unfold MemoryState.readLiveHeader
+    rw [addressHeap, post.headerRead]
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos replacementLive]
+    have replacementMinimum : headerBytes ≤ replacement.allocationBytes.toNat := by
+      rw [replacementAllocation]
+      exact headerMinimum
+    have replacementAligned :
+        replacement.allocationBytes.toNat % target.heapAlignment = 0 := by
+      rw [replacementAllocation]
+      exact headerAligned
+    have replacementInBounds :
+        address.value + replacement.allocationBytes.toNat ≤ memory.size := by
+      rw [replacementAllocation, post.size]
+      exact headerInBounds
+    have checks :
+        (decide (headerBytes ≤ replacement.allocationBytes.toNat) &&
+          decide (replacement.allocationBytes.toNat % target.heapAlignment = 0) &&
+          decide (address.value + replacement.allocationBytes.toNat ≤ memory.size)) =
+            true := by
+      simp [replacementMinimum, replacementAligned, replacementInBounds]
+    rw [if_pos checks]
+    rfl
+  have headerWriteInBounds : address.value + headerBytes ≤ fieldMemory.size := by
+    rw [post.fieldPost.size, post.scrubPost.size]
+    exact Nat.le_trans (Nat.add_le_add_left headerMinimum address.value)
+      headerInBounds
+  have constructorHeader :
+      readConstructorHeader ({ state with memory } : MemoryState) address =
+        .ok replacement := by
+    have kindCheck : (replacement.kind == ObjectKind.constructor) = true := by
+      rw [replacementKind]
+      decide
+    unfold readConstructorHeader
+    rw [addressHeap, finalHeader]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_pos kindCheck]
+    rfl
+  refine {
+    header := ⟨replacement, finalHeader, replacementKind, ?_,
+      replacementPersistent, replacementTag, replacementObjectFields,
+      replacementUSizeFields, replacementScalarBytes⟩
+    headerOwned := related.headerOwned
+    extent := ?_
+    semanticObjectFields := by simpa [reusedConstructorObject] using semanticArity
+    semanticUSizeFields := by simp [reusedConstructorObject]
+    semanticScalarFields := by simp [reusedConstructorObject]
+    fieldKindsSize
+    fieldKindsValid
+    objectFields := ?_
+    usizeFields := ?_ }
+  · simpa [replacementAllocation] using layoutFits
+  · exact Nat.le_trans (Nat.add_le_add_left layoutFits address.value) retainedExtent
+  · intro index kind value kindAt valueAt
+    have semanticAt : semanticFields[index]? = some value := by
+      simpa [reusedConstructorObject] using valueAt
+    obtain ⟨word, wordAt, valueRelated⟩ :=
+      fieldRelated index kind value kindAt semanticAt
+    have indexLt : index < info.size := by
+      obtain ⟨indexLtFields, _⟩ := Array.getElem?_eq_some_iff.mp wordAt
+      omega
+    have listAt : fields.toList[index]? = some word := by simpa using wordAt
+    have fieldRead := post.fieldAt index word listAt
+    have paddingRead := post.paddingAt index word listAt
+    have concreteRead :
+        readObjectField ({ state with memory } : MemoryState) address index =
+          .ok word := by
+      have exactField : memory.readWord32
+          (address.value + headerBytes + target.semanticSlotBytes * index) =
+          .ok word := by
+        simpa [objectFieldAddress] using fieldRead
+      have exactPadding : memory.readUInt32
+          (address.value + headerBytes + target.semanticSlotBytes * index + 4) =
+          .ok 0 := by
+        simpa [objectFieldAddress] using paddingRead
+      unfold readObjectField
+      rw [constructorHeader]
+      simp only [Bind.bind, Except.bind]
+      simp [replacementObjectFields, indexLt, exactField, exactPadding, liftMemory]
+      rfl
+    exact ⟨word, concreteRead,
+      valueRelated.rebindConstructor address info fieldKinds⟩
+  · intro index value valueAt
+    change (Array.replicate info.usize (0 : UInt64))[index]? = some value at valueAt
+    rw [Array.getElem?_replicate] at valueAt
+    have indexLt : index < info.usize := by
+      by_cases inBounds : index < info.usize
+      · exact inBounds
+      · rw [if_neg inBounds] at valueAt
+        contradiction
+    rw [if_pos indexLt] at valueAt
+    have valueZero : value = 0 := Option.some.inj valueAt.symm
+    subst value
+    let offset := address.value + headerBytes +
+      target.semanticSlotBytes * (info.size + index)
+    have zeroBytes : ∀ byteOffset, byteOffset < 8 →
+        memory[offset + byteOffset]? = some 0 := by
+      intro byteOffset byteOffsetLt
+      have afterFields : objectFieldAddress address.value fields.toList.length ≤
+          offset + byteOffset := by
+        simp [offset, objectFieldAddress, arity, target]
+        omega
+      have withinRetained :
+          target.semanticSlotBytes * (info.size + index) + byteOffset <
+            header.allocationBytes.toNat - headerBytes := by
+        have aligned := align8_ge
+          (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+            info.ssize)
+        have beforeLayout :
+            headerBytes + target.semanticSlotBytes * (info.size + index) +
+                byteOffset < (ConstructorLayout.ofInfo info).allocationBytes := by
+          simp [ConstructorLayout.ofInfo, target] at aligned ⊢
+          omega
+        have beforeAllocation :
+            headerBytes + target.semanticSlotBytes * (info.size + index) +
+                byteOffset < header.allocationBytes.toNat :=
+          Nat.lt_of_lt_of_le beforeLayout layoutFits
+        omega
+      have scrubRead := post.scrubPost.zeroAt
+        (target.semanticSlotBytes * (info.size + index) + byteOffset)
+        withinRetained
+      have fieldRead : fieldMemory.readByte (offset + byteOffset) = .ok 0 := by
+        rw [post.fieldPost.byteFrame (offset + byteOffset) (.inr (by
+          simpa only [Nat.zero_add] using afterFields))]
+        simpa [offset, Nat.add_assoc] using scrubRead
+      have finalRead : memory.readByte (offset + byteOffset) = .ok 0 := by
+        have payloadStart : address.value + headerBytes ≤ offset + byteOffset := by
+          simp [offset]
+          omega
+        rw [Header.readByte_of_write_eq_ok_other fieldMemory memory address
+          replacement (offset + byteOffset) headerWriteInBounds post.headerWrite
+          (.inr payloadStart)]
+        exact fieldRead
+      unfold LinearMemory.readByte at finalRead
+      cases byte : memory[offset + byteOffset]? with
+      | none => simp [byte] at finalRead
+      | some actual =>
+          simp [byte] at finalRead
+          subst actual
+          rfl
+    have usizeRead : memory.readUInt64 offset = .ok 0 :=
+      LinearMemory.readUInt64_of_zero_bytes memory offset zeroBytes
+    unfold readUSizeField
+    rw [constructorHeader]
+    simp only [Bind.bind, Except.bind]
+    simp [replacementObjectFields, replacementUSizeFields, indexLt, offset,
+      usizeRead, liftMemory]
 
 /-- Clearing a bounded concrete prefix establishes the normal constructor
 relation under reset's protocol-only descriptor. All non-object observations

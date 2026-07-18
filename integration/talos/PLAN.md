@@ -1506,6 +1506,16 @@ token remains related to the same semantic location. The discrepancy card
 stays open until in-place reuse consumes this protocol state and restores the
 ordinary replacement-constructor descriptor.
 
+W6.3au reconstructs the replacement constructor decoder after the complete
+in-place byte transaction. `reusedConstructorObject` names FIR's exact
+replacement payload, while `ofReuseConstructorMemory` combines the retained
+allocation header, payload scrub, object-field write, and final header
+publication. It proves strict replacement-kind object fields, scrub-derived
+zero `USize` fields, empty packed scalars, the selected old-or-new tag, and an
+active layout bounded by the retained capacity under the ordinary rebound
+descriptor. The next slice frames this local result across the complete heap
+and semantic `setCell` step.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
