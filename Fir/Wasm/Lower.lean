@@ -153,6 +153,97 @@ def checkedAbiKind (type : Expr) : Except CompileError AbiKind :=
   | .ok kind => pure kind
   | .error error => throw (.abi error)
 
+def sameFVar (left right : FVarId) : Bool :=
+  left.name == right.name
+
+def argReferencesFVar (target : FVarId) : LCNF.Arg .impure → Bool
+  | .erased => false
+  | .fvar fvarId => sameFVar target fvarId
+  | .type _ h => nomatch h
+
+def argsReferenceFVar (target : FVarId) (args : Array (LCNF.Arg .impure)) : Bool :=
+  args.any (argReferencesFVar target)
+
+def letValueReferencesFVar (target : FVarId) : LCNF.LetValue .impure → Bool
+  | .lit _ | .erased => false
+  | .proj _ _ _ h | .const _ _ _ h => nomatch h
+  | .fvar fvarId args => sameFVar target fvarId || argsReferenceFVar target args
+  | .ctor _ args | .fap _ args | .pap _ args => argsReferenceFVar target args
+  | .oproj _ fvarId | .uproj _ fvarId | .sproj _ _ fvarId
+  | .reset _ fvarId | .box _ fvarId | .unbox fvarId | .isShared fvarId =>
+      sameFVar target fvarId
+  | .reuse fvarId _ _ args =>
+      sameFVar target fvarId || argsReferenceFVar target args
+
+/-
+Check the source-level control invariant emitted by Lean 4.32's
+`ExpandResetReuse`: an optional object parameter may be consumed only below
+the constructor-zero arm of its companion `UInt8` sharing discriminator.
+-/
+mutual
+
+partial def fvarUsesOnlyInFalseGuard (target guard : FVarId) (guarded : Bool) :
+    LCNF.Code .impure → Bool
+  | .let decl continuation =>
+      !sameFVar decl.fvarId target && !sameFVar decl.fvarId guard &&
+        (!letValueReferencesFVar target decl.value || guarded) &&
+        fvarUsesOnlyInFalseGuard target guard guarded continuation
+  | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      !decl.params.any (fun param =>
+          sameFVar param.fvarId target || sameFVar param.fvarId guard) &&
+        fvarUsesOnlyInFalseGuard target guard guarded decl.value &&
+        fvarUsesOnlyInFalseGuard target guard guarded continuation
+  | .jmp _ args => !argsReferenceFVar target args || guarded
+  | .cases cases =>
+      (!sameFVar target cases.discr || guarded) &&
+        cases.alts.all (fvarUsesOnlyInFalseGuardAlt target guard guarded cases.discr)
+  | .return fvarId => !sameFVar target fvarId || guarded
+  | .unreach _ => true
+  | .oset objectId _ arg continuation =>
+      (!(sameFVar target objectId || argReferencesFVar target arg) || guarded) &&
+        fvarUsesOnlyInFalseGuard target guard guarded continuation
+  | .uset objectId _ fieldId continuation
+  | .sset objectId _ _ fieldId _ continuation =>
+      (!(sameFVar target objectId || sameFVar target fieldId) || guarded) &&
+        fvarUsesOnlyInFalseGuard target guard guarded continuation
+  | .setTag objectId _ continuation
+  | .inc objectId _ _ _ continuation
+  | .dec objectId _ _ _ _ continuation
+  | .del objectId continuation =>
+      (!sameFVar target objectId || guarded) &&
+        fvarUsesOnlyInFalseGuard target guard guarded continuation
+
+partial def fvarUsesOnlyInFalseGuardAlt (target guard : FVarId) (guarded : Bool)
+    (discr : FVarId) : LCNF.Alt .impure → Bool
+  | .ctorAlt info code =>
+      let guarded := guarded || (sameFVar discr guard && info.cidx == 0)
+      fvarUsesOnlyInFalseGuard target guard guarded code
+  | .default code => fvarUsesOnlyInFalseGuard target guard guarded code
+  | .alt _ _ _ h => nomatch h
+
+end
+
+/-- A `tobject` reset-join parameter whose live path is known to contain a heap object. -/
+def guardedObjectJoinParam (decl : LCNF.FunDecl .impure)
+    (targetParam : LCNF.Param .impure) : Bool :=
+  targetParam.type == LCNF.ImpureType.tobject &&
+    decl.params.any fun guardParam =>
+      guardParam.type == LCNF.ImpureType.uint8 &&
+        fvarUsesOnlyInFalseGuard targetParam.fvarId guardParam.fvarId false decl.value
+
+def joinParamAbiKind? (decl : LCNF.FunDecl .impure)
+    (param : LCNF.Param .impure) : Option AbiKind :=
+  match abiKind? param.type with
+  | .ok (some kind) =>
+      if kind == .tobject && guardedObjectJoinParam decl param then some .object else some kind
+  | _ => none
+
+def checkedJoinParamKind (decl : LCNF.FunDecl .impure)
+    (param : LCNF.Param .impure) : Except CompileError AbiKind := do
+  let kind ← checkedAbiKind param.type
+  return if kind == .tobject && guardedObjectJoinParam decl param then .object else kind
+
 def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
   match decl.value with
   | .erased => pure .erased
@@ -166,6 +257,12 @@ def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     | some kind => return insertLocal locals param.fvarId kind
     | none => return locals
 
+def addJoinParams (locals : LocalKinds) (decl : LCNF.FunDecl .impure) :
+    Except CompileError LocalKinds := do
+  decl.params.foldlM (init := locals) fun locals param => do
+    let kind ← checkedJoinParamKind decl param
+    return insertLocal locals param.fvarId kind
+
 partial def collectLocals (locals : LocalKinds) :
     LCNF.Code .impure → Except CompileError LocalKinds
   | .let decl continuation => do
@@ -173,7 +270,7 @@ partial def collectLocals (locals : LocalKinds) :
       collectLocals (insertLocal locals decl.fvarId kind) continuation
   | .fun _ _ h => nomatch h
   | .jp decl continuation => do
-      let locals ← addParams locals decl.params
+      let locals ← addJoinParams locals decl
       let locals ← collectLocals locals decl.value
       collectLocals locals continuation
   | .jmp .. | .return .. | .unreach .. => pure locals
@@ -449,7 +546,23 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
   let some decl := findJoinPoint? context.joins fvarId | throw (.unknownJoinPoint fvarId)
   if args.size != decl.params.size then
     throw (.arityMismatch decl.params.size args.size)
-  let (arguments, _) ← compileArgs context args
+  let arguments ← (decl.params.zip args).foldlM (init := []) fun instructions pair => do
+    let expected ← checkedJoinParamKind decl pair.fst
+    let (argument, actual) ←
+      match pair.snd, expected with
+      | .erased, .object =>
+          /-
+          `ExpandResetReuse` uses zero as an optional-object sentinel on its
+          guarded slow path. `WasmSupported` proves that the corresponding
+          join parameter is dead outside the companion `Bool.false` arm.
+          Physically the value is still zero; the annotation records the
+          local lane selected by that proved source invariant.
+          -/
+          pure ([.i32Const .object 0], .object)
+      | arg, _ => compileArg context arg
+    unless actual.refines expected do
+      throw (.malformed "jump argument does not refine its join parameter ABI")
+    return instructions ++ argument
   let assignments := decl.params.toList.reverse.map fun param => .localSet param.fvarId
   return arguments ++ assignments ++ [.br fvarId]
 

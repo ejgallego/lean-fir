@@ -202,17 +202,96 @@ def resultKindRefines (actual expected : Option AbiKind) : Bool :=
   | some actual, some expected => actual.refines expected
   | _, _ => false
 
+abbrev SupportedCaseFacts := List (FVarId × Nat)
+abbrev SupportedSharingFacts := List (FVarId × FVarId)
+
+def findSupportedCaseFact? : SupportedCaseFacts → FVarId → Option Nat
+  | [], _ => none
+  | (candidate, tag) :: rest, fvarId =>
+      if sameFVar candidate fvarId then some tag else findSupportedCaseFact? rest fvarId
+
+def eraseSupportedCaseFact (facts : SupportedCaseFacts) (fvarId : FVarId) :
+    SupportedCaseFacts :=
+  facts.filter fun entry => !sameFVar entry.fst fvarId
+
+def insertSupportedCaseFact (facts : SupportedCaseFacts) (fvarId : FVarId) (tag : Nat) :
+    SupportedCaseFacts :=
+  (fvarId, tag) :: eraseSupportedCaseFact facts fvarId
+
+def findSupportedSharingObject? : SupportedSharingFacts → FVarId → Option FVarId
+  | [], _ => none
+  | (candidate, objectId) :: rest, fvarId =>
+      if sameFVar candidate fvarId then some objectId
+      else findSupportedSharingObject? rest fvarId
+
+def eraseSupportedSharingFact (facts : SupportedSharingFacts) (fvarId : FVarId) :
+    SupportedSharingFacts :=
+  facts.filter fun entry => !sameFVar entry.fst fvarId
+
+def insertSupportedSharingFact (facts : SupportedSharingFacts)
+    (fvarId objectId : FVarId) : SupportedSharingFacts :=
+  (fvarId, objectId) :: eraseSupportedSharingFact facts fvarId
+
+def guardedErasedJoinArgumentSafe (facts : SupportedCaseFacts)
+    (sharing : SupportedSharingFacts) (decl : LCNF.FunDecl .impure)
+    (args : Array (LCNF.Arg .impure)) (targetParam : LCNF.Param .impure) : Bool :=
+  (decl.params.zip args).any fun pair =>
+    abiValueKind? pair.fst.type == some .uint8 &&
+      match pair.snd with
+      | .fvar actualGuard =>
+          findSupportedCaseFact? facts actualGuard == some 1 &&
+            (findSupportedSharingObject? sharing actualGuard).isSome &&
+            fvarUsesOnlyInFalseGuard targetParam.fvarId pair.fst.fvarId false decl.value
+      | _ => false
+
+def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
+    (sharing : SupportedSharingFacts) (decl : LCNF.FunDecl .impure)
+    (args : Array (LCNF.Arg .impure)) : Bool :=
+  args.size == decl.params.size &&
+    (decl.params.zip args).all fun pair =>
+      match joinParamAbiKind? decl pair.fst, supportedArgKind? locals pair.snd with
+      | some expected, some actual =>
+          actual.refines expected ||
+            (actual == .erased && expected == .object &&
+              guardedErasedJoinArgumentSafe facts sharing decl args pair.fst)
+      | _, _ => false
+
 mutual
 
-partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
-    (locals : LocalKinds) (expectedResult : Option AbiKind) :
+partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
+    (joins : JoinPoints) (locals : LocalKinds) (expectedResult : Option AbiKind)
+    (facts : SupportedCaseFacts) (sharing : SupportedSharingFacts) :
     LCNF.Code .impure → Bool
   | .let decl continuation =>
       match supportedLetDeclKind? program locals decl with
-      | some kind => supportedCode program (insertLocal locals decl.fvarId kind)
-          expectedResult continuation
+      | some kind =>
+          let sharing :=
+            match decl.value with
+            | .isShared objectId =>
+                insertSupportedSharingFact sharing decl.fvarId objectId
+            | _ => eraseSupportedSharingFact sharing decl.fvarId
+          supportedCodeWithJoins program joins (insertLocal locals decl.fvarId kind)
+            expectedResult facts sharing continuation
       | none => false
   | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      let joins := (decl.fvarId, decl) :: joins
+      match decl.params.foldlM (init := locals) (fun locals param => do
+          let kind ← joinParamAbiKind? decl param
+          some (insertLocal locals param.fvarId kind)) with
+      | some bodyLocals =>
+          abiTypeKnown decl.type &&
+            resultKindRefines (abiValueKind? decl.type) expectedResult &&
+            supportedCodeWithJoins program joins bodyLocals
+              (abiValueKind? decl.type) [] [] decl.value &&
+            supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
+      | none => false
+  | .jmp fvarId args =>
+      match findJoinPoint? joins fvarId with
+      | some decl =>
+          resultKindRefines (abiValueKind? decl.type) expectedResult &&
+            supportedJumpArgs locals facts sharing decl args
+      | none => false
   | .cases cases =>
       let resultKnown := abiTypeKnown cases.resultType
       let altsSupported :=
@@ -220,7 +299,8 @@ partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
         | some kind =>
             match supportedCaseDiscriminatorMode? kind with
             | some mode =>
-                cases.alts.all (supportedAlt program locals expectedResult mode)
+                cases.alts.all (supportedAltWithJoins program joins locals expectedResult
+                  facts sharing mode cases.discr)
             | none => false
         | none => false
       resultKnown &&
@@ -236,50 +316,61 @@ partial def supportedCode (program : Fir.LeanIR.ImpureProgram)
       match findLocalKind? locals objectId, supportedArgKind? locals arg with
       | some .object, some fieldKind =>
           fieldKind.isObjectField &&
-            supportedCode program locals expectedResult continuation
+            supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
       | _, _ => false
   | .uset objectId _ fieldId continuation =>
       findLocalKind? locals objectId == some .object &&
         findLocalKind? locals fieldId == some .usize &&
-        supportedCode program locals expectedResult continuation
+        supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
   | .sset objectId _ _ fieldId type continuation =>
       match findLocalKind? locals objectId, findLocalKind? locals fieldId,
           abiValueKind? type with
       | some .object, some fieldKind, some annotationKind =>
           fieldKind == annotationKind && supportedScalarProjectionKind fieldKind &&
-            supportedCode program locals expectedResult continuation
+            supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
       | _, _, _ => false
   | .setTag objectId _ continuation =>
       findLocalKind? locals objectId == some .object &&
-        supportedCode program locals expectedResult continuation
+        supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
   | .inc objectId _ _ persistent continuation =>
       if persistent then
-        supportedCode program locals expectedResult continuation
+        supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
       else
         (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
-          supportedCode program locals expectedResult continuation
+          supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
   | .dec objectId _ _ persistent _ continuation =>
       if persistent then
-        supportedCode program locals expectedResult continuation
+        supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
       else
         (findLocalKind? locals objectId).any AbiKind.isObjectLike &&
-          supportedCode program locals expectedResult continuation
+          supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
   | .del objectId continuation =>
       findLocalKind? locals objectId == some .object &&
-        supportedCode program locals expectedResult continuation
-  | .jp .. | .jmp .. => false
+        supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
 
-partial def supportedAlt (program : Fir.LeanIR.ImpureProgram)
-    (locals : LocalKinds) (expectedResult : Option AbiKind)
-    (mode : CaseDiscriminatorMode) :
-    LCNF.Alt .impure → Bool
+partial def supportedAltWithJoins (program : Fir.LeanIR.ImpureProgram)
+    (joins : JoinPoints) (locals : LocalKinds) (expectedResult : Option AbiKind)
+    (facts : SupportedCaseFacts) (sharing : SupportedSharingFacts)
+    (mode : CaseDiscriminatorMode) (discr : FVarId) : LCNF.Alt .impure → Bool
   | .ctorAlt info code =>
       caseConstructorTagFits mode info &&
-        supportedCode program locals expectedResult code
-  | .default code => supportedCode program locals expectedResult code
+        supportedCodeWithJoins program joins locals expectedResult
+          (insertSupportedCaseFact facts discr info.cidx) sharing code
+  | .default code => supportedCodeWithJoins program joins locals expectedResult
+      (eraseSupportedCaseFact facts discr) sharing code
   | .alt _ _ _ h => nomatch h
 
 end
+
+def supportedCode (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (expectedResult : Option AbiKind) :
+    LCNF.Code .impure → Bool :=
+  supportedCodeWithJoins program [] locals expectedResult [] []
+
+def supportedAlt (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) (expectedResult : Option AbiKind)
+    (mode : CaseDiscriminatorMode) : LCNF.Alt .impure → Bool :=
+  supportedAltWithJoins program [] locals expectedResult [] [] mode ⟨`discr⟩
 
 structure ClosureShape where
   function : Name
@@ -336,7 +427,12 @@ partial def closureFlowSafeCode (program : Fir.LeanIR.ImpureProgram)
           (insertClosureShape shapes decl.fvarId
             (closureResultShape? program shapes decl.value)) continuation
   | .fun _ _ h => nomatch h
-  | .jp .. | .jmp .. => false
+  | .jp decl continuation =>
+      let bodyShapes := decl.params.foldl (init := shapes) fun shapes param =>
+        insertClosureShape shapes param.fvarId none
+      closureFlowSafeCode program bodyShapes decl.value &&
+        closureFlowSafeCode program shapes continuation
+  | .jmp .. => true
   | .cases cases => cases.alts.all (closureFlowSafeAlt program shapes)
   | .oset _ _ _ continuation
   | .uset _ _ _ continuation

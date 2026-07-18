@@ -411,6 +411,55 @@ def scalarUInt8CaseProgram : Fir.LeanIR.ImpureProgram :=
         .ctorAlt trueInfo
           (.let (letDecl r tobjectType (.lit (.nat 1))) (.return r))]))] }
 
+def guardedResetJoinBody : LCNF.Code .impure :=
+  .cases (.mk ``Bool objType u #[
+    .ctorAlt falseInfo (.return p),
+    .ctorAlt trueInfo (.return x)])
+
+def abiJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType] objType (.code <|
+      .jp (.mk j `abiJoin #[param p objType] objType (.return p))
+        (.jmp j #[.fvar x]))] }
+
+def guardedResetJoinDecl : LCNF.FunDecl .impure :=
+  .mk j `guardedResetJoin #[param p tobjectType, param u u8Type]
+    objType guardedResetJoinBody
+
+def guardedResetJoinContinuation : LCNF.Code .impure :=
+  .cases (.mk ``Bool objType c #[
+    .ctorAlt falseInfo (.jmp j #[.fvar x, .fvar c]),
+    .ctorAlt trueInfo (.jmp j #[.erased, .fvar c])])
+
+/-- Minimal form of Lean 4.32's guarded optional-object reset join. -/
+def guardedResetJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType] objType (.code <|
+      .let (letDecl c u8Type (.isShared x)) <|
+      .jp guardedResetJoinDecl guardedResetJoinContinuation)] }
+
+def unknownJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code (.jmp j #[]))] }
+
+def joinArityMismatchProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code <|
+      .jp (.mk j `joinArity #[param p objType] objType (.return p))
+        (.jmp j #[]))] }
+
+def joinKindMismatchProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code <|
+      .jp (.mk j `joinKind #[param p objType] objType (.return p)) <|
+      .let (letDecl s u64Type (.lit (.uint64 1))) <|
+      .jmp j #[.fvar s])] }
+
+def unguardedErasedJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType] objType (.code <|
+      .jp (.mk j `unguardedErased #[param p tobjectType] objType (.return x))
+        (.jmp j #[.erased]))] }
+
+/-- A Boolean-looking guard is insufficient without `isShared(object)` provenance. -/
+def unprovenGuardedJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType, param c u8Type] objType (.code <|
+      .jp guardedResetJoinDecl guardedResetJoinContinuation)] }
+
 def abiDefaultCaseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] tobjectType (.code <|
       .let (letDecl c taggedType (.ctor trueInfo #[])) <|
@@ -520,6 +569,13 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiCtorProjectionProgram
 #guard supportedProgram abiCaseProgram
 #guard supportedProgram scalarUInt8CaseProgram
+#guard supportedProgram abiJoinProgram
+#guard supportedProgram guardedResetJoinProgram
+#guard !supportedProgram unknownJoinProgram
+#guard !supportedProgram joinArityMismatchProgram
+#guard !supportedProgram joinKindMismatchProgram
+#guard !supportedProgram unguardedErasedJoinProgram
+#guard !supportedProgram unprovenGuardedJoinProgram
 #guard supportedProgram abiDefaultCaseProgram
 #guard !supportedProgram oversizedTagCaseProgram
 #guard !supportedProgram oversizedScalarTagCaseProgram
@@ -548,6 +604,13 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
           function.body[0]? == some (.localGet c) &&
             function.body[1]? == some (.i32Const .uint8 0) &&
             function.body[2]? == some .i32Eq
+  | .error _ => false
+
+#guard match lowerSupported guardedResetJoinProgram with
+  | .ok module =>
+      match validateModule module with
+      | .ok _ => true
+      | .error _ => false
   | .error _ => false
 
 #guard match lower oversizedTagCaseProgram with
@@ -599,6 +662,7 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   abiErasedProgram,
   abiCtorProjectionProgram,
   abiCaseProgram,
+  guardedResetJoinProgram,
   abiDefaultCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
 
 #guard !validates? erasedProgram
