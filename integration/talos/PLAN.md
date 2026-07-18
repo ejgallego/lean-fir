@@ -1181,6 +1181,16 @@ frames. The remaining work is purely spatial: show that one disjoint common-
 header write supplies those frame premises for the above-one and leaf-one
 ownership branches.
 
+W6.3l starts that spatial discharge with a reusable allocation-frame module.
+A successful header write now produces byte equality over any descriptor
+interval proved disjoint by `LiveHeapRel`; typed 16/32/64-bit reads, raw and
+checked headers, and recursive natural limbs lift that byte frame to decoder
+equalities. Canonical dead cells, live boxed scalars, live heap naturals, and
+promoted tagged objects all preserve their exact relations across the frame.
+This isolates mixed-layout constructor framing as the final non-target cell
+case before the common header mutation can instantiate
+`LiveHeapRel.setCell_of_frames`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
