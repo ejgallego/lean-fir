@@ -356,6 +356,7 @@ theorem allocateBoxedScalar_liveHeapRel
     frontier := finalFrontier
     witnessWellFormed
     locationsBeforeNext := ?_
+    releaseFuelBound := ?_
     descriptorsOwned := ?_
     descriptorRegion
     descriptorDisjoint
@@ -371,6 +372,12 @@ theorem allocateBoxedScalar_liveHeapRel
         simpa [semanticBoxResult, findCell?, isNew, Ne.symm isNew] using found
       have oldBefore := related.locationsBeforeNext location cell oldFound
       exact Nat.lt_trans oldBefore (Nat.lt_succ_self runtime.nextLocation)
+  · have cursorGrowth : state.heapCursor + headerBytes ≤ result.heapCursor := by
+      rw [← freshAddress]
+      exact objectRelated.headerOwned
+    have oldFuel := related.releaseFuelBound
+    simp [semanticBoxResult, headerBytes] at oldFuel cursorGrowth ⊢
+    omega
   · intro other descriptor found
     by_cases isNew : address.value = other.value
     · rw [← isNew]

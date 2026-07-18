@@ -169,6 +169,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     frontier := finalFrontier
     witnessWellFormed
     locationsBeforeNext := ?_
+    releaseFuelBound := ?_
     descriptorsOwned := ?_
     descriptorRegion
     descriptorDisjoint
@@ -185,6 +186,12 @@ theorem allocateConstructor_nonempty_liveHeapRel
       have oldBefore := related.locationsBeforeNext location cell oldFound
       change location < runtime.nextLocation + 1
       exact Nat.lt_trans oldBefore (Nat.lt_succ_self runtime.nextLocation)
+  · have cursorGrowth : state.heapCursor + headerBytes ≤ result.heapCursor := by
+      rw [← freshAddress]
+      exact objectRelatedNext.headerOwned
+    have oldFuel := related.releaseFuelBound
+    simp [semanticConstructorResult, headerBytes] at oldFuel cursorGrowth ⊢
+    omega
   · intro other descriptor found
     by_cases isNew : address.value = other.value
     · rw [← isNew]

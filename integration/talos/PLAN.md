@@ -1246,6 +1246,17 @@ semantic `objectFields` value in fold order. The remaining recursive step is
 to show that paired folds preserve `LiveHeapRel` as heap children decrement and
 tagged/erased fields take their checked no-op branches.
 
+W6.3r connects the two public recursive-fuel policies. Bug card
+`FIR-BUG-wasm-none-heap-refinement-release-fuel` records that semantic heap
+coverage and concrete descriptor ownership previously had no aggregate
+capacity consequence. `LiveHeapRel` now retains
+`semantic.heap.length * headerBytes ≤ state.heapCursor`; semantic allocation
+adds one heap entry and at least one concrete header, concrete-only allocation
+only increases capacity, and ownership replacement preserves heap length and
+cursor. The derived theorem proves `heap.length + 1` is no greater than the
+concrete cursor-derived fuel. Same-fuel recursive simulation can therefore be
+lifted to the actual public runtime entry points.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

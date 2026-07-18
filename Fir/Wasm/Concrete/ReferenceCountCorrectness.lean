@@ -127,6 +127,7 @@ structure HeapReplacePost (before after : Heap) (location : Location)
   target : findCell? after location = some replacement
   frame : ∀ other, other ≠ location →
     findCell? after other = findCell? before other
+  length : after.length = before.length
 
 theorem replaceCell_spec_of_find
     (heap : Heap) (location : Location) (current replacement : HeapCell)
@@ -138,7 +139,7 @@ theorem replaceCell_spec_of_find
       obtain ⟨candidate, cell⟩ := entry
       by_cases here : candidate = location
       · subst candidate
-        refine ⟨(location, replacement) :: rest, ?_, ?_, ?_⟩
+        refine ⟨(location, replacement) :: rest, ?_, ?_, ?_, rfl⟩
         · simp [replaceCell]
         · simp [findCell?]
         · intro other different
@@ -146,7 +147,7 @@ theorem replaceCell_spec_of_find
       · have tailFound : findCell? rest location = some current := by
           simpa [findCell?, here] using found
         obtain ⟨after, post⟩ := ih tailFound
-        refine ⟨(candidate, cell) :: after, ?_, ?_, ?_⟩
+        refine ⟨(candidate, cell) :: after, ?_, ?_, ?_, ?_⟩
         · simp [replaceCell, here, post.replaced]
         · simp [findCell?, here, post.target]
         · intro other different
@@ -154,6 +155,7 @@ theorem replaceCell_spec_of_find
           · subst candidate
             simp [findCell?]
           · simp [findCell?, atHead, post.frame other different]
+        · simp [post.length]
 
 /-- `setCell` succeeds whenever its source lookup succeeded and exposes the
 same target/other-location frame at the `RuntimeState` boundary. -/
@@ -165,10 +167,12 @@ theorem setCell_spec_of_find
       findCell? result.heap location = some replacement ∧
       (∀ other, other ≠ location →
         findCell? result.heap other = findCell? runtime.heap other) ∧
+      result.heap.length = runtime.heap.length ∧
       result.nextLocation = runtime.nextLocation := by
   obtain ⟨after, post⟩ := replaceCell_spec_of_find runtime.heap location current
     replacement found
-  refine ⟨{ runtime with heap := after }, ?_, post.target, post.frame, rfl⟩
+  refine ⟨{ runtime with heap := after }, ?_, post.target, post.frame,
+    post.length, rfl⟩
   unfold setCell
   rw [post.replaced]
 
@@ -183,6 +187,7 @@ theorem LiveHeapRel.setCell_of_frames
     (related : LiveHeapRel state witness runtime)
     (mapped : witness.locations.lookup? location = some address)
     (found : findCell? runtime.heap location = some cell)
+    (cursor : result.heapCursor = state.heapCursor)
     (frontier : result.FrontierInvariant)
     (targetRelated : CellRel result witness address replacement)
     (descriptorRegion : ∀ other descriptor,
@@ -213,13 +218,16 @@ theorem LiveHeapRel.setCell_of_frames
     ∃ nextRuntime,
       setCell runtime location replacement = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨nextRuntime, updated, targetFound, otherFound, nextLocation⟩ :=
+  obtain ⟨nextRuntime, updated, targetFound, otherFound, heapLength, nextLocation⟩ :=
     setCell_spec_of_find runtime location cell replacement found
   refine ⟨nextRuntime, updated, ?_⟩
   refine {
     frontier
     witnessWellFormed := related.witnessWellFormed
     locationsBeforeNext := ?_
+    releaseFuelBound := by
+      rw [heapLength, cursor]
+      exact related.releaseFuelBound
     descriptorsOwned := ?_
     descriptorRegion
     descriptorDisjoint

@@ -272,6 +272,7 @@ theorem allocatePromotedTag_liveHeapRel
     frontier := finalFrontier
     witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
+    releaseFuelBound := Nat.le_trans related.releaseFuelBound extension.cursor
     descriptorsOwned := ?_
     descriptorRegion
     descriptorDisjoint

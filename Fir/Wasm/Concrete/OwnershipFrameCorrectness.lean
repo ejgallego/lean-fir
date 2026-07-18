@@ -968,7 +968,7 @@ theorem LiveHeapRel.setCell_of_headerWrite
       promoted.descriptor different oldRead promotedRawRead resultEq headerInBounds
         written
     exact promoted.allocationFrame promotedHeaderRead frame
-  exact related.setCell_of_frames mapped found finalValid targetRelated
+  exact related.setCell_of_frames mapped found (by rw [resultEq]) finalValid targetRelated
     descriptorRegion descriptorDisjoint cellFrame promotedFrame
 
 /-- Uniform ordinary-header facts needed to expose the exact common-header
@@ -1116,7 +1116,8 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
         headerWrite
     exact promoted.allocationFrame promotedHeaderRead frame
   obtain ⟨nextRuntime, semanticUpdate, finalRelated⟩ :=
-    related.setCell_of_frames mapped found finalValid (.live targetAfter)
+    related.setCell_of_frames mapped found (by rw [resultEq]) finalValid
+      (.live targetAfter)
       descriptorRegion descriptorDisjoint cellFrame promotedFrame
   have semanticEq := targetRelated.decValueOnce_above_one_eq runtime location found
     oneLt check

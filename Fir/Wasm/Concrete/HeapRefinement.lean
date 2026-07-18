@@ -735,6 +735,9 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
   witnessWellFormed : witness.WellFormed
   locationsBeforeNext : ∀ location cell,
     findCell? semantic.heap location = some cell → location < semantic.nextLocation
+  /-- Semantic release depth fits in the concrete header capacity. This is
+  preserved by every semantic allocation and concrete-only prefix extension. -/
+  releaseFuelBound : semantic.heap.length * headerBytes ≤ state.heapCursor
   descriptorsOwned : ∀ address descriptor,
     witness.descriptors.lookup? address = some descriptor →
     address.value + headerBytes ≤ state.heapCursor
@@ -770,6 +773,16 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     witness.promotedTags.Contains payload address →
     PromotedTagRel state witness payload address
 
+/-- The public semantic recursive-release fuel always fits within the public
+concrete cursor-derived fuel for related heaps. -/
+theorem LiveHeapRel.semanticFuel_le_concreteFuel
+    {state : MemoryState} {witness : RefinementWitness}
+    {semantic : RuntimeState} (related : LiveHeapRel state witness semantic) :
+    semantic.heap.length + 1 ≤ state.heapCursor / headerBytes + 1 := by
+  have capacity : semantic.heap.length ≤ state.heapCursor / headerBytes :=
+    (Nat.le_div_iff_mul_le (by simp [headerBytes])).2 related.releaseFuelBound
+  omega
+
 /-- The complete decoded W6.1 heap relation is stable under a fresh concrete
 allocation before the ghost witness or semantic heap is extended. -/
 theorem LiveHeapRel.prefixExtension
@@ -783,6 +796,7 @@ theorem LiveHeapRel.prefixExtension
     frontier
     witnessWellFormed := related.witnessWellFormed
     locationsBeforeNext := related.locationsBeforeNext
+    releaseFuelBound := Nat.le_trans related.releaseFuelBound extension.cursor
     descriptorsOwned := ?_
     descriptorRegion := ?_
     descriptorDisjoint := ?_
