@@ -119,6 +119,13 @@ function runtimeHeapObject(object) {
       return { kind: "natural", value: BigInt(object.value) };
     case "integer":
       return { kind: "integer", value: BigInt(object.value) };
+    case "byteArray":
+      assert.ok(Array.isArray(object.value), "runtime byte-array value must be an array");
+      for (const byte of object.value) {
+        assert.ok(Number.isInteger(byte) && byte >= 0 && byte <= 0xff,
+          "runtime byte-array element must be a byte");
+      }
+      return { kind: "byteArray", value: [...object.value] };
     default:
       throw new Error(`unsupported initial-runtime heap object: ${object.kind}`);
   }
@@ -896,6 +903,10 @@ export class SemanticHost {
         return { kind: "string", value: object.value };
       case "natural":
         return { kind: "natural", value: object.value.toString() };
+      case "integer":
+        return { kind: "integer", value: object.value.toString() };
+      case "byteArray":
+        return { kind: "byteArray", value: [...object.value] };
       default:
         throw new Error(`cannot observe heap object kind ${object.kind}`);
     }

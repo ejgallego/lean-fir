@@ -30,6 +30,7 @@ validate-v8:
 		--case int-positive-roundtrip --case int-negative-roundtrip \
 		--case int-immediate-max --case int-immediate-min \
 		--case int-heap-positive-boundary --case int-heap-negative-boundary \
+		--case byte-array-roundtrip \
 		--plan validation-plans/native-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \

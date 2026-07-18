@@ -94,6 +94,23 @@ function ctorRuntime() {
 }
 
 {
+  const host = new SemanticHost({
+    nextLocation: 1,
+    heap: [{
+      location: 0,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: { kind: "byteArray", value: [0, 127, 128, 255] },
+    }],
+  });
+  assert.deepStrictEqual(host.liveCell(0).object, {
+    kind: "byteArray",
+    value: [0, 127, 128, 255],
+  });
+}
+
+{
   const host = new SemanticHost();
   const maximum = scalar("uint64", 0xffffffffffffffffn);
   const boxed = host.importFunction({ kind: "box", scalar: "uint64", result: "tobject" })(

@@ -92,6 +92,12 @@ function semanticDatum(schema, value, host, context) {
         assert.equal(object.kind, "string", `${context} heap object must be a string`);
         return { string: { value: object.value } };
       }
+      case "bytes": {
+        assert.equal(value.kind, "heap", `${context} must be a heap byte array`);
+        const object = host.liveCell(value.location).object;
+        assert.equal(object.kind, "byteArray", `${context} heap object must be a byte array`);
+        return { bytes: { value: [...object.value] } };
+      }
       case "usize":
         assert.equal(value.kind, "usize", `${context} must be a usize value`);
         return { usize: { value: value.value.toString() } };

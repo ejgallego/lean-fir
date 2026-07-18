@@ -18,7 +18,8 @@ def caseIds : Array String :=
     "nat-list-empty-bool", "unicode-string-roundtrip",
     "int-positive-roundtrip", "int-negative-roundtrip",
     "int-immediate-max", "int-immediate-min",
-    "int-heap-positive-boundary", "int-heap-negative-boundary"]
+    "int-heap-positive-boundary", "int-heap-negative-boundary",
+    "byte-array-roundtrip"]
 
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
