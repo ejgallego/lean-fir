@@ -16,3 +16,4 @@ import Fir.Wasm.Concrete.TagMutationCorrectness
 import Fir.Wasm.Concrete.FieldMutationCorrectness
 import Fir.Wasm.Concrete.ScalarMutationCorrectness
 import Fir.Wasm.Concrete.BoxingCorrectness
+import Fir.Wasm.Concrete.SharingCorrectness

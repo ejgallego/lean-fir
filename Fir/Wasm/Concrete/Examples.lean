@@ -208,6 +208,18 @@ def semanticBoxedUInt64Max :=
         | _, _ => false
   | _, _ => false
 
+/- Sharing follows the semantic representation split: direct and promoted
+tags are shared, while a fresh ordinary heap box is unique. -/
+#guard match smallTagged, promotedTagged, boxedUInt64Max with
+  | .ok (immediateState, immediate), .ok (promotedState, promoted),
+      .ok (boxedState, boxed) =>
+      match readIsShared immediateState immediate,
+          readIsShared promotedState promoted, readIsShared boxedState boxed with
+      | .ok immediateShared, .ok promotedShared, .ok boxedShared =>
+          immediateShared == 1 && promotedShared == 1 && boxedShared == 0
+      | _, _, _ => false
+  | _, _, _ => false
+
 def emptyConcreteInfo : LCNF.CtorInfo := {
   name := `Concrete.empty
   cidx := 3

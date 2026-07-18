@@ -1049,6 +1049,15 @@ re-encodings. Executable and proof regressions cover the repeated allocation.
 The next W6.2 slice proves `isShared` for immediate, promoted, and ordinary
 heap representations before reference-counting work begins.
 
+W6.2k completes that sharing boundary. The checked concrete operation returns
+Lean 4.32's direct `UInt8` ABI result, treats direct and promoted tagged values
+as shared, and reads ordinary heap persistence/refcount metadata from the
+validated live header. The full `tobject` theorem proves agreement with FIR
+for every currently represented live cell and relates the result at `uint8`.
+Executable guards cover immediate/shared, promoted/shared, and fresh
+heap/unique outcomes. W6.3 can now make refcount transitions concrete and
+reuse these header-level sharing facts.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -211,6 +211,18 @@ def readBoxedScalar (state : MemoryState) (expected : BoxedScalarKind)
         throw (.source .expectedScalar)
   | .sentinel | .invalid => throw (.source .expectedObject)
 
+/-- Checked concrete implementation of FIR's `isShared`. Tagged immediates
+and persistent promoted tags are shared; ordinary heap objects are shared
+exactly when persistent or not uniquely referenced. -/
+def readIsShared (state : MemoryState) (object : Word32) :
+    Except ConcreteError UInt8 := do
+  match object.classify with
+  | .immediate => return 1
+  | .heap =>
+      let header ← liftMemory <| state.readLiveHeader object
+      return if header.persistent || header.refCount != 1 then 1 else 0
+  | .sentinel | .invalid => throw (.source .expectedObject)
+
 /-- Concrete FIR boxing. The allocation choice follows the source semantic
 tagged limit, not the narrower wasm32 immediate limit. The existing
 `encodeTagged` refinement owns the intermediate persistent representation. -/
