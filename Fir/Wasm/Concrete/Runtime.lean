@@ -175,6 +175,12 @@ def scalarFieldAddress (object : Word32) (header : Header)
     throw (.source (.scalarFieldMissing slotIndex byteOffset))
   return object.value + headerBytes + target.semanticSlotBytes * slotIndex + byteOffset
 
+def readScalarUInt8Field (state : MemoryState) (object : Word32)
+    (slotIndex byteOffset : Nat) : Except ConcreteError UInt8 := do
+  let header ← readConstructorHeader state object
+  let address ← scalarFieldAddress object header slotIndex byteOffset 1
+  liftMemory <| state.memory.readByte address
+
 def readScalarUInt32Field (state : MemoryState) (object : Word32)
     (slotIndex byteOffset : Nat) : Except ConcreteError UInt32 := do
   let header ← readConstructorHeader state object

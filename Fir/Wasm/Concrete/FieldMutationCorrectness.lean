@@ -72,6 +72,14 @@ theorem ConstructorObjectRel.writeUSizeField
       memory.readUInt32 other = state.memory.readUInt32 other :=
     LinearMemory.readUInt32_of_writeUInt64_eq_ok_other state.memory memory offset other
       value writeInBounds fieldWrite disjoint
+  have readByteFrame (other : Nat) (afterField : offset + 7 < other) :
+      memory.readByte other = state.memory.readByte other := by
+    rw [LinearMemory.readByte_of_writeUInt32_eq_ok middle memory (offset + 4)
+      (value >>> (32 : UInt64)).toUInt32 (by omega) highWrite other
+      (by omega) (by omega) (by omega) (by omega)]
+    rw [LinearMemory.readByte_of_writeUInt32_eq_ok state.memory middle offset
+      value.toUInt32 (by omega) lowWrite other
+      (by omega) (by omega) (by omega) (by omega)]
   have decodedAfter : Header.read memory address = .ok header := by
     unfold Header.read at decodedBefore ⊢
     dsimp only at decodedBefore ⊢
@@ -168,7 +176,29 @@ theorem ConstructorObjectRel.writeUSizeField
   · intro field member
     have beforeField := related.semanticScalarFields field member
     cases valueEq : field.value with
-    | uint8 scalar => simp [valueEq] at beforeField
+    | uint8 scalar =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 1 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt8Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        rw [scalarAddress]
+        change liftMemory (memory.readByte _) = .ok scalar
+        rw [readByteFrame _ (by
+          rw [offsetEq, widthEq]
+          simp [target]
+          omega)]
+        exact readBefore
     | uint16 scalar => simp [valueEq] at beforeField
     | uint32 scalar =>
         simp only [valueEq] at beforeField ⊢

@@ -987,6 +987,14 @@ and `USize` observations. A mixed-constructor regression writes the upper
 four bytes of the eight-byte packed region and reads back `UInt32.max`.
 `UInt8` and `UInt16` remain before boxing/unboxing.
 
+W6.2f starts the narrow packed-lane boundary with checked `UInt8` projection.
+The decoded relation now admits byte fields with exact compiler-base and
+`ssize` bounds; fresh-prefix transport, tag updates, and `USize` updates prove
+that those byte observations are preserved. The executable mixed constructor
+reads its zero-initialized first packed byte. Byte mutation, followed by the
+two-byte `UInt16` memory lane, is next; no concrete import switches to these
+operations before their mutation proofs land.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
