@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-simpCase-nested-phase-depth
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: simpCase-0
 discovered-by: proof
 first-seen: 2026-07-18
 reproduction: Fir/LeanIR/Passes/SimpCaseExamples.lean#nestedPhaseDepthCode
-regression: Fir/LeanIR/Passes/SimpCaseExamples.lean#nestedPhaseDepthCode
+regression: Fir/LeanIR/Passes/SimpCaseExamples.lean#nestedPhaseDepthTrace
 ---
 
 # Summary
@@ -72,9 +72,8 @@ classified as `fir-semantics`.
 
 ## Workaround
 
-Keep each local case factor explicit and compose the corresponding
-whole-program correctness theorems manually. Do not postulate `CodeRel`
-transitivity or erase intermediate alpha phases.
+None required. Each local case factor remains explicit in the phase trace;
+no `CodeRel` transitivity or intermediate alpha-phase erasure is assumed.
 
 ## Upstream tracking
 
@@ -82,7 +81,7 @@ none
 
 ## Resolution and regression
 
-Partially resolved. `ScopedCodePhaseResult` now retains both structural and
+Resolved. `ScopedCodePhaseResult` retains both structural and
 alpha identity at its target. `ScopedCodePhaseTrace` records a nonempty
 sequence of local rounds, supports sequential composition and explicit
 identity padding, and has endpoint/round-count regressions.
@@ -96,6 +95,14 @@ shorter endpoint; `scopedCodePhaseTracedOnAlphaReflexive_traversalLaws`
 instantiates this construction for every non-case constructor, with an
 unequal-depth join-point regression in `mixedDepthJoinTraced`.
 
-Full resolution still requires consuming the trace in the case-kernel shape
-laws, including recursive alternative alignment before the parent case round
-is appended.
+`ScopedAltsPhaseTrace` synchronizes recursively transformed alternatives,
+including unequal depths, and lifts each synchronized round to its enclosing
+case table. `scopedCaseTraceKernelLaws_of_localPhases` appends the exact local
+`shadowSimplifyCases` round, while
+`scopedCaseBoundarySoundTraceTree_of_localPhases` and
+`shadowCode_scopedPhaseTracedTree` expose the reusable universal recursive
+boundary under full-tree hygiene.
+
+`nestedPhaseDepthTrace` is the original reproducer closed with two explicit
+rounds under a non-vacuous Boolean-tag predicate. Its round-count guard and
+the existing transparent/actual-pass result checks pin the regression.

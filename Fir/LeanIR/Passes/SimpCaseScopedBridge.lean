@@ -907,6 +907,148 @@ theorem ScopedCodePhaseTrace.zip
           rcases ih rightRest liftedRound.targetAlpha with ⟨liftedRest⟩
           exact (ScopedCodePhaseTrace.trans liftedRound liftedRest).traced
 
+/-- One synchronized phase round over an alternative list. Constructor
+metadata is unchanged; every body carries its own scoped phase result. -/
+inductive ScopedAltsPhaseResult
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    List (LCNF.Alt .impure) → List (LCNF.Alt .impure) → Type where
+  | nil : ScopedAltsPhaseResult validCase index [] []
+  | ctor
+      (body : ScopedCodePhaseResult validCase index left right)
+      (rest : ScopedAltsPhaseResult validCase index leftRest rightRest) :
+      ScopedAltsPhaseResult validCase index
+        (.ctorAlt info left :: leftRest) (.ctorAlt info right :: rightRest)
+  | default
+      (body : ScopedCodePhaseResult validCase index left right)
+      (rest : ScopedAltsPhaseResult validCase index leftRest rightRest) :
+      ScopedAltsPhaseResult validCase index
+        (.default left :: leftRest) (.default right :: rightRest)
+
+/-- Endpoint identity round for a synchronized alternative result. -/
+def ScopedAltsPhaseResult.targetIdentity
+    (result : ScopedAltsPhaseResult validCase index source target) :
+    ScopedAltsPhaseResult validCase index target target :=
+  match result with
+  | .nil => .nil
+  | .ctor body rest =>
+      .ctor (.identity body.targetRefl body.targetAlpha) rest.targetIdentity
+  | .default body rest =>
+      .default (.identity body.targetRefl body.targetAlpha)
+        rest.targetIdentity
+
+/-- A nonempty sequence of synchronized alternative rounds. -/
+inductive ScopedAltsPhaseTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    List (LCNF.Alt .impure) → List (LCNF.Alt .impure) → Type where
+  | single (round : ScopedAltsPhaseResult validCase index source target) :
+      ScopedAltsPhaseTrace validCase index source target
+  | trans (round : ScopedAltsPhaseResult validCase index source middle)
+      (rest : ScopedAltsPhaseTrace validCase index middle target) :
+      ScopedAltsPhaseTrace validCase index source target
+
+def ScopedAltsPhaseTrace.rounds
+    (trace : ScopedAltsPhaseTrace validCase index source target) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+/-- Pad an already-finished constructor body while the remaining alternatives
+continue through later rounds. -/
+def ScopedAltsPhaseTrace.prependCtorIdentity
+    (trace : ScopedAltsPhaseTrace validCase index source target)
+    (structural : CodeRel validCase code code)
+    (alpha : ScopedAlphaBireflexive index code) :
+    ScopedAltsPhaseTrace validCase index
+      (.ctorAlt info code :: source) (.ctorAlt info code :: target) :=
+  match trace with
+  | .single round =>
+      .single (.ctor (.identity structural alpha) round)
+  | .trans round rest =>
+      .trans (.ctor (.identity structural alpha) round)
+        (rest.prependCtorIdentity structural alpha)
+
+/-- Default-alternative counterpart of `prependCtorIdentity`. -/
+def ScopedAltsPhaseTrace.prependDefaultIdentity
+    (trace : ScopedAltsPhaseTrace validCase index source target)
+    (structural : CodeRel validCase code code)
+    (alpha : ScopedAlphaBireflexive index code) :
+    ScopedAltsPhaseTrace validCase index
+      (.default code :: source) (.default code :: target) :=
+  match trace with
+  | .single round =>
+      .single (.default (.identity structural alpha) round)
+  | .trans round rest =>
+      .trans (.default (.identity structural alpha) round)
+        (rest.prependDefaultIdentity structural alpha)
+
+/-- Pad an already-finished alternative tail while a constructor body keeps
+transforming. -/
+def ScopedCodePhaseTrace.withCtorTailIdentity
+    (trace : ScopedCodePhaseTrace validCase index source target)
+    (tail : ScopedAltsPhaseResult validCase index rest rest) :
+    ScopedAltsPhaseTrace validCase index
+      (.ctorAlt info source :: rest) (.ctorAlt info target :: rest) :=
+  match trace with
+  | .single round => .single (.ctor round tail)
+  | .trans round later =>
+      .trans (.ctor round tail)
+        (later.withCtorTailIdentity tail)
+
+/-- Default-alternative counterpart of `withCtorTailIdentity`. -/
+def ScopedCodePhaseTrace.withDefaultTailIdentity
+    (trace : ScopedCodePhaseTrace validCase index source target)
+    (tail : ScopedAltsPhaseResult validCase index rest rest) :
+    ScopedAltsPhaseTrace validCase index
+      (.default source :: rest) (.default target :: rest) :=
+  match trace with
+  | .single round => .single (.default round tail)
+  | .trans round later =>
+      .trans (.default round tail)
+        (later.withDefaultTailIdentity tail)
+
+/-- Synchronize a constructor-body trace with the trace for the remaining
+alternatives, padding whichever side finishes first. -/
+def ScopedCodePhaseTrace.consCtor
+    (body : ScopedCodePhaseTrace validCase index source target)
+    (rest : ScopedAltsPhaseTrace validCase index sourceRest targetRest) :
+    ScopedAltsPhaseTrace validCase index
+      (.ctorAlt info source :: sourceRest)
+      (.ctorAlt info target :: targetRest) :=
+  match body, rest with
+  | .single bodyRound, .single restRound =>
+      .single (.ctor bodyRound restRound)
+  | .single bodyRound, .trans restRound restLater =>
+      .trans (.ctor bodyRound restRound)
+        (restLater.prependCtorIdentity
+          bodyRound.targetRefl bodyRound.targetAlpha)
+  | .trans bodyRound bodyLater, .single restRound =>
+      .trans (.ctor bodyRound restRound)
+        (bodyLater.withCtorTailIdentity restRound.targetIdentity)
+  | .trans bodyRound bodyLater, .trans restRound restLater =>
+      .trans (.ctor bodyRound restRound)
+        (bodyLater.consCtor restLater)
+
+/-- Synchronize a default-body trace with the trace for the remaining
+alternatives. -/
+def ScopedCodePhaseTrace.consDefault
+    (body : ScopedCodePhaseTrace validCase index source target)
+    (rest : ScopedAltsPhaseTrace validCase index sourceRest targetRest) :
+    ScopedAltsPhaseTrace validCase index
+      (.default source :: sourceRest) (.default target :: targetRest) :=
+  match body, rest with
+  | .single bodyRound, .single restRound =>
+      .single (.default bodyRound restRound)
+  | .single bodyRound, .trans restRound restLater =>
+      .trans (.default bodyRound restRound)
+        (restLater.prependDefaultIdentity
+          bodyRound.targetRefl bodyRound.targetAlpha)
+  | .trans bodyRound bodyLater, .single restRound =>
+      .trans (.default bodyRound restRound)
+        (bodyLater.withDefaultTailIdentity restRound.targetIdentity)
+  | .trans bodyRound bodyLater, .trans restRound restLater =>
+      .trans (.default bodyRound restRound)
+        (bodyLater.consDefault restLater)
+
 mutual
 
   /-- Alpha reflexivity plus lexical evidence for every syntactic recursive
@@ -1001,6 +1143,15 @@ theorem ScopedAlphaBireflexiveTree.root
     (evidence : ScopedAlphaBireflexiveTree index code) :
     ScopedAlphaBireflexive index code := by
   cases evidence <;> assumption
+
+/-- Full-tree trace presentation used by the recursive case kernel. The tree
+supplies hygiene for every alternative, including syntactically shadowed
+entries that root alpha selection cannot expose. -/
+def ScopedCodePhaseTracedOnAlphaTree
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedAlphaBireflexiveTree index source →
+      ScopedCodePhaseTraced validCase index source target
 
 theorem ScopedAlphaBireflexiveAlts.forward
     (evidence : ScopedAlphaBireflexiveAlts index alts) :
@@ -1229,6 +1380,217 @@ abbrev StructuralAltsRelated
     (validCase : LCNF.Cases .impure → Nat → Prop) :=
   ListRel (StructuralAltRelated validCase)
 
+theorem structuralFindCtorAlt_related
+    (related : StructuralAltsRelated validCase left right) :
+    SelectionRel validCase (findCtorAlt tag left) (findCtorAlt tag right) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor body =>
+          rename_i leftCode rightCode info
+          by_cases selected : info.cidx == tag
+          · simpa [findCtorAlt, selected] using SelectionRel.some body
+          · simpa [findCtorAlt, selected] using ih
+      | default body => simpa [findCtorAlt] using ih
+
+theorem structuralFindDefaultAlt_related
+    (related : StructuralAltsRelated validCase left right) :
+    SelectionRel validCase (findDefaultAlt left) (findDefaultAlt right) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor body => simpa [findDefaultAlt] using ih
+      | default body =>
+          simpa [findDefaultAlt] using SelectionRel.some body
+
+theorem selectionRel_orElse
+    (primary : SelectionRel validCase left right)
+    (fallback : SelectionRel validCase leftFallback rightFallback) :
+    SelectionRel validCase
+      (left.orElse fun _ => leftFallback)
+      (right.orElse fun _ => rightFallback) := by
+  cases primary with
+  | none => exact fallback
+  | some body => exact .some body
+
+/-- Pointwise structural alternative rounds relate every interpreter
+selection, not merely the entries visible in the list representation. -/
+theorem structuralChooseAlt_related
+    (related : StructuralAltsRelated validCase left right) :
+    SelectionRel validCase (chooseAlt tag left) (chooseAlt tag right) := by
+  unfold chooseAlt
+  exact selectionRel_orElse
+    (structuralFindCtorAlt_related related)
+    (structuralFindDefaultAlt_related related)
+
+/-- Materialized structural/alpha/structural data for one synchronized
+alternative round. -/
+structure ScopedAltsPhaseMaterialized
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : List (LCNF.Alt .impure)) : Type where
+  structuralMiddle : List (LCNF.Alt .impure)
+  alphaMiddle : List (LCNF.Alt .impure)
+  structuralBefore : StructuralAltsRelated validCase source structuralMiddle
+  alphaForward : AltsRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope
+    structuralMiddle alphaMiddle
+  alphaBackward : AltsRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope
+    alphaMiddle structuralMiddle
+  structuralAfter : StructuralAltsRelated validCase alphaMiddle target
+  targetRefl : StructuralAltsRelated validCase target target
+  targetAlphaForward : AltsRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope target target
+  targetAlphaBackward : AltsRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope target target
+
+def ScopedAltsPhaseResult.materialize
+    (result : ScopedAltsPhaseResult validCase index source target) :
+    ScopedAltsPhaseMaterialized validCase index source target :=
+  match result with
+  | .nil => {
+      structuralMiddle := []
+      alphaMiddle := []
+      structuralBefore := .nil
+      alphaForward := .nil
+      alphaBackward := .nil
+      structuralAfter := .nil
+      targetRefl := .nil
+      targetAlphaForward := .nil
+      targetAlphaBackward := .nil
+    }
+  | .ctor body rest =>
+      let bodyFactor := body.trifactor
+      let tail := rest.materialize
+      {
+        structuralMiddle := .ctorAlt _ bodyFactor.structuralMiddle ::
+          tail.structuralMiddle
+        alphaMiddle := .ctorAlt _ bodyFactor.alphaMiddle :: tail.alphaMiddle
+        structuralBefore := .cons (.ctor bodyFactor.structuralBefore)
+          tail.structuralBefore
+        alphaForward := .cons (.ctor bodyFactor.alphaForward)
+          tail.alphaForward
+        alphaBackward := .cons (.ctor bodyFactor.alphaBackward)
+          tail.alphaBackward
+        structuralAfter := .cons (.ctor bodyFactor.structuralAfter)
+          tail.structuralAfter
+        targetRefl := .cons (.ctor body.targetRefl) tail.targetRefl
+        targetAlphaForward := .cons (.ctor body.targetAlpha.forward)
+          tail.targetAlphaForward
+        targetAlphaBackward := .cons (.ctor body.targetAlpha.backward)
+          tail.targetAlphaBackward
+      }
+  | .default body rest =>
+      let bodyFactor := body.trifactor
+      let tail := rest.materialize
+      {
+        structuralMiddle := .default bodyFactor.structuralMiddle ::
+          tail.structuralMiddle
+        alphaMiddle := .default bodyFactor.alphaMiddle :: tail.alphaMiddle
+        structuralBefore := .cons (.default bodyFactor.structuralBefore)
+          tail.structuralBefore
+        alphaForward := .cons (.default bodyFactor.alphaForward)
+          tail.alphaForward
+        alphaBackward := .cons (.default bodyFactor.alphaBackward)
+          tail.alphaBackward
+        structuralAfter := .cons (.default bodyFactor.structuralAfter)
+          tail.structuralAfter
+        targetRefl := .cons (.default body.targetRefl) tail.targetRefl
+        targetAlphaForward := .cons (.default body.targetAlpha.forward)
+          tail.targetAlphaForward
+        targetAlphaBackward := .cons (.default body.targetAlpha.backward)
+          tail.targetAlphaBackward
+      }
+
+/-- Lift one synchronized alternative round to the enclosing case table. -/
+def ScopedAltsPhaseResult.casesResult
+    (result : ScopedAltsPhaseResult validCase index source target)
+    (typeName : Name) (resultType : Expr) (discr : FVarId)
+    (parent : ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr source.toArray))) :
+    ScopedCodePhaseResult validCase index
+      (.cases (.mk typeName resultType discr source.toArray))
+      (.cases (.mk typeName resultType discr target.toArray)) :=
+  let materialized := result.materialize
+  {
+    factor := .threePhase {
+      structuralMiddle := .cases (.mk typeName resultType discr
+        materialized.structuralMiddle.toArray)
+      alphaMiddle := .cases (.mk typeName resultType discr
+        materialized.alphaMiddle.toArray)
+      structuralBefore := .aligned (.cases typeName resultType discr
+        source.toArray materialized.structuralMiddle.toArray
+        (fun _ _ => structuralChooseAlt_related
+          materialized.structuralBefore))
+      alphaForward := .cases
+        (codeRelated_cases_discr
+          (left := .mk typeName resultType discr source.toArray)
+          (right := .mk typeName resultType discr source.toArray)
+          parent.forward)
+        (fun _ => chooseAlt_related materialized.alphaForward)
+      alphaBackward := .cases
+        (codeRelated_cases_discr
+          (left := .mk typeName resultType discr source.toArray)
+          (right := .mk typeName resultType discr source.toArray)
+          parent.backward)
+        (fun _ => chooseAlt_related materialized.alphaBackward)
+      structuralAfter := .aligned (.cases typeName resultType discr
+        materialized.alphaMiddle.toArray target.toArray
+        (fun _ _ => structuralChooseAlt_related
+          materialized.structuralAfter))
+    }
+    targetRefl := .aligned (.cases typeName resultType discr
+      target.toArray target.toArray
+      (fun _ _ => structuralChooseAlt_related materialized.targetRefl))
+    targetAlpha := {
+      forward := .cases (codeRelated_cases_discr
+        (left := .mk typeName resultType discr source.toArray)
+        (right := .mk typeName resultType discr source.toArray)
+        parent.forward)
+        (fun _ => chooseAlt_related materialized.targetAlphaForward)
+      backward := .cases (codeRelated_cases_discr
+        (left := .mk typeName resultType discr source.toArray)
+        (right := .mk typeName resultType discr source.toArray)
+        parent.backward)
+        (fun _ => chooseAlt_related materialized.targetAlphaBackward)
+    }
+  }
+
+/-- Lift every synchronized alternative round to the enclosing case table. -/
+def ScopedAltsPhaseTrace.casesTrace
+    (trace : ScopedAltsPhaseTrace validCase index source target)
+    (typeName : Name) (resultType : Expr) (discr : FVarId)
+    (parent : ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr source.toArray))) :
+    ScopedCodePhaseTrace validCase index
+      (.cases (.mk typeName resultType discr source.toArray))
+      (.cases (.mk typeName resultType discr target.toArray)) :=
+  match trace with
+  | .single round => .single
+      (round.casesResult typeName resultType discr parent)
+  | .trans round rest =>
+      let lifted := round.casesResult typeName resultType discr parent
+      .trans lifted
+        (rest.casesTrace typeName resultType discr lifted.targetAlpha)
+
+@[simp] theorem ScopedAltsPhaseTrace.rounds_casesTrace
+    (trace : ScopedAltsPhaseTrace validCase index source target)
+    (parent : ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr source.toArray))) :
+    (trace.casesTrace typeName resultType discr parent).rounds =
+      trace.rounds := by
+  induction trace with
+  | single round => rfl
+  | trans round rest ih =>
+      simp [ScopedAltsPhaseTrace.casesTrace,
+        ScopedCodePhaseTrace.rounds, ScopedAltsPhaseTrace.rounds, ih]
+
 /-- A materialized pointwise factor for an entire alternative list. The
 structural intermediate list is explicit, while both alpha orientations use
 the exact recursive scope index. -/
@@ -1299,6 +1661,31 @@ theorem scopedAltsFactored_of_tree
           cases tree with
           | default bodyTree rest =>
               exact .cons (.default (body bodyTree)) (ih rest)
+
+/-- Materialize and synchronize every recursively transformed alternative.
+The resulting trace has the maximum child depth; shorter bodies receive
+explicit endpoint-identity rounds. -/
+theorem scopedAltsPhaseTrace_of_tree
+    (related : ScopedAltsRelated
+      (ScopedCodePhaseTracedOnAlphaTree validCase) index source target)
+    (tree : ScopedAlphaBireflexiveAlts index source) :
+    Nonempty (ScopedAltsPhaseTrace validCase index source target) := by
+  induction related with
+  | nil => exact ⟨.single .nil⟩
+  | cons head tail ih =>
+      cases head with
+      | ctor body =>
+          cases tree with
+          | ctor bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨bodyTrace.consCtor restTrace⟩
+      | default body =>
+          cases tree with
+          | default bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨bodyTrace.consDefault restTrace⟩
 
 /-- Selection-local evidence for a simplifier result that remains a case
 table. The structural leg only needs tags accepted by the phase predicate;
@@ -1662,6 +2049,45 @@ theorem scopedCaseKernelLaws_of_admissibility
     | cases root alternativesTree =>
         exact (admissible.simplify altsRun
           (scopedAltsFactored_of_tree related alternativesTree) root).factored
+
+/-- Exact nonrecursive phase contract for `shadowSimplifyCases`. Recursive
+alternative traversal is intentionally absent: the input table is already
+the transformed table, and this law contributes exactly the parent round. -/
+structure ScopedLocalCasePhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  simplify : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {alts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr alts)) →
+    Nonempty (ScopedCodePhaseResult validCase index
+      (.cases (.mk typeName resultType discr alts))
+      (shadowSimplifyCases (.mk typeName resultType discr alts)))
+
+/-- The trace-aware recursive case kernel. It synchronizes all recursive
+alternative traces, lifts them to the source case table, and appends the one
+local round supplied by `ScopedLocalCasePhaseLaws`. -/
+theorem scopedCaseTraceKernelLaws_of_localPhases
+    (phases : ScopedLocalCasePhaseLaws validCase) :
+    ScopedCaseKernelLaws
+      (ScopedCodePhaseTracedOnAlphaTree validCase) where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun related tree
+    cases tree with
+    | cases root alternativesTree =>
+        rcases scopedAltsPhaseTrace_of_tree related alternativesTree with
+          ⟨alternativesTrace⟩
+        have sourceRoot : ScopedAlphaBireflexive index
+            (.cases (.mk typeName resultType discr
+              sourceAlts.toList.toArray)) := by
+          simpa using root
+        have recursiveTrace : ScopedCodePhaseTrace validCase index
+            (.cases (.mk typeName resultType discr sourceAlts))
+            (.cases (.mk typeName resultType discr targetAlts.toArray)) := by
+          simpa using alternativesTrace.casesTrace
+            typeName resultType discr sourceRoot
+        rcases phases.simplify recursiveTrace.targetAlpha with ⟨parentRound⟩
+        exact (recursiveTrace.append parentRound.trace).traced
 
 /-- Peel unchanged parameters to expose the code relation at their final
 scope index. -/
@@ -2674,6 +3100,110 @@ theorem scopedCodePhaseTracedOnAlphaReflexive_traversalLaws :
         scopedCodePhaseResultOnAlphaReflexive_traversalLaws.del
           (fun _ => ⟨round⟩) root)
       parent
+
+/-- Full-tree hygiene is stable through trace lifting at every non-case
+constructor. The root law performs round alignment; the tree supplies the
+original child certificates required to start each trace. -/
+theorem scopedCodePhaseTracedOnAlphaTree_traversalLaws :
+    ScopedTraversalLaws
+      (ScopedCodePhaseTracedOnAlphaTree validCase) where
+  letE := by
+    intro index declaration left right child tree
+    cases tree with
+    | letE root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.letE
+          (fun _ => child childTree)) root
+  jp := by
+    intro index fvarId binderName params type leftBody rightBody
+      leftContinuation rightContinuation body continuation tree
+    cases tree with
+    | jp root bodyTree continuationTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.jp
+          (fun _ => body bodyTree)
+          (fun _ => continuation continuationTree)) root
+  jmp := by
+    intro index fvarId args tree
+    exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.jmp
+      index fvarId args) tree.root
+  ret := by
+    intro index fvarId tree
+    exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.ret
+      index fvarId) tree.root
+  unreach := by
+    intro index type tree
+    exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.unreach
+      index type) tree.root
+  oset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | oset root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.oset
+          (fun _ => child childTree)) root
+  uset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | uset root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.uset
+          (fun _ => child childTree)) root
+  sset := by
+    intro index fvarId width offset value type left right child tree
+    cases tree with
+    | sset root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.sset
+          (fun _ => child childTree)) root
+  setTag := by
+    intro index fvarId tag left right child tree
+    cases tree with
+    | setTag root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.setTag
+          (fun _ => child childTree)) root
+  inc := by
+    intro index fvarId amount check persistent left right child tree
+    cases tree with
+    | inc root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.inc
+          (fun _ => child childTree)) root
+  dec := by
+    intro index fvarId amount check persistent objects left right child tree
+    cases tree with
+    | dec root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.dec
+          (fun _ => child childTree)) root
+  del := by
+    intro index fvarId left right child tree
+    cases tree with
+    | del root childTree =>
+        exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.del
+          (fun _ => child childTree)) root
+
+theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :
+    ScopedCaseBoundarySound
+        (ScopedCodePhaseTracedOnAlphaTree validCase) ↔
+      ScopedCaseKernelLaws
+        (ScopedCodePhaseTracedOnAlphaTree validCase) :=
+  scopedCaseBoundarySound_iff_kernel
+    scopedCodePhaseTracedOnAlphaTree_traversalLaws
+
+/-- Universal trace-producing recursive boundary from the exact local
+`shadowSimplifyCases` phase contract. -/
+theorem scopedCaseBoundarySoundTraceTree_of_localPhases
+    (phases : ScopedLocalCasePhaseLaws validCase) :
+    ScopedCaseBoundarySound
+      (ScopedCodePhaseTracedOnAlphaTree validCase) :=
+  scopedCaseBoundarySound_of_kernel
+    scopedCodePhaseTracedOnAlphaTree_traversalLaws
+    (scopedCaseTraceKernelLaws_of_localPhases phases)
+
+/-- End-to-end arbitrary recursive trace under full lexical hygiene. Every
+nested case contributes a separate local round. -/
+theorem shadowCode_scopedPhaseTracedTree
+    (phases : ScopedLocalCasePhaseLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  (shadowCode_scopedRelated_of_caseKernel
+    scopedCodePhaseTracedOnAlphaTree_traversalLaws
+    (scopedCaseTraceKernelLaws_of_localPhases phases) run) hygiene
 
 /-- Recursive correctness for the trace relation reduces exactly to a local
 case-kernel law, just as it does for the one-round result relation. -/

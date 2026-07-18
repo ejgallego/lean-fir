@@ -842,6 +842,207 @@ theorem alphaSingletonFoldPaddedTrace_endpointAlpha :
     ScopedAlphaBireflexive alphaFoldScopeIndex alphaLeft :=
   alphaSingletonFoldPaddedTrace.targetAlpha
 
+/-!
+The nested-depth regression uses one validity predicate for both the inner
+and outer Boolean tables. This keeps every structural selection obligation
+non-vacuous while the trace records the two local simplifier rounds.
+-/
+
+def nestedPhaseDepthValidCase
+    (_cases : LCNF.Cases .impure) (tag : Nat) : Prop :=
+  tag = 0 ∨ tag = 1
+
+def nestedPhaseDepthRecursiveCases : LCNF.Cases .impure :=
+  .mk `NestedBool objType c #[
+    .ctorAlt falseInfo alphaLeft,
+    .ctorAlt trueInfo alphaRight]
+
+def nestedPhaseDepthStructuralCases : LCNF.Cases .impure :=
+  .mk `NestedBool objType c #[
+    .ctorAlt falseInfo alphaLeft,
+    .default alphaRight]
+
+def nestedPhaseDepthFoldedCases : LCNF.Cases .impure :=
+  .mk `NestedBool objType c #[.default alphaLeft]
+
+#guard shadowSimplifyCases nestedPhaseDepthRecursiveCases == alphaLeft
+
+theorem nestedAlphaLeftStructuralRefl :
+    CodeRel nestedPhaseDepthValidCase alphaLeft alphaLeft :=
+  .aligned (.let (letDecl alphaLeftId objType (.lit (.nat 5)))
+    (.aligned (.return alphaLeftId)))
+
+theorem nestedAlphaRightStructuralRefl :
+    CodeRel nestedPhaseDepthValidCase alphaRight alphaRight :=
+  .aligned (.let (letDecl alphaRightId objType (.lit (.nat 5)))
+    (.aligned (.return alphaRightId)))
+
+theorem nestedInnerStructuralBefore :
+    CodeRel nestedPhaseDepthValidCase alphaSingletonFoldCode
+      (.cases alphaSingletonStructuralCases) := by
+  apply CodeRel.aligned
+  apply HeadRel.cases
+  intro tag valid
+  rcases valid with rfl | rfl
+  · change SelectionRel nestedPhaseDepthValidCase
+      (some alphaLeft) (some alphaLeft)
+    exact .some nestedAlphaLeftStructuralRefl
+  · change SelectionRel nestedPhaseDepthValidCase
+      (some alphaRight) (some alphaRight)
+    exact .some nestedAlphaRightStructuralRefl
+
+theorem nestedInnerStructuralAfter :
+    CodeRel nestedPhaseDepthValidCase
+      (.cases alphaSingletonFoldedCases) alphaLeft := by
+  apply CodeRel.eliminate alphaSingletonFoldedCases alphaLeft
+  intro tag valid
+  change ElimSelectionRel nestedPhaseDepthValidCase alphaLeft
+    (some alphaLeft)
+  exact .some nestedAlphaLeftStructuralRefl
+
+def nestedInnerPhaseResult :
+    ScopedCodePhaseResult nestedPhaseDepthValidCase alphaFoldScopeIndex
+      alphaSingletonFoldCode alphaLeft := {
+  factor := .threePhase {
+    structuralMiddle := .cases alphaSingletonStructuralCases
+    alphaMiddle := .cases alphaSingletonFoldedCases
+    structuralBefore := nestedInnerStructuralBefore
+    alphaForward := alphaSingletonAlphaForward
+    alphaBackward := alphaSingletonAlphaBackward
+    structuralAfter := nestedInnerStructuralAfter
+  }
+  targetRefl := nestedAlphaLeftStructuralRefl
+  targetAlpha := alphaLeftAlphaBireflexiveAtFoldScope
+}
+
+def nestedAlphaRightIdentityResult :
+    ScopedCodePhaseResult nestedPhaseDepthValidCase alphaFoldScopeIndex
+      alphaRight alphaRight :=
+  .identity nestedAlphaRightStructuralRefl
+    alphaRightAlphaBireflexiveAtFoldScope
+
+def nestedPhaseDepthAlternativesTrace :
+    ScopedAltsPhaseTrace nestedPhaseDepthValidCase alphaFoldScopeIndex
+      nestedPhaseDepthCases.alts.toList
+      nestedPhaseDepthRecursiveCases.alts.toList := by
+  exact nestedInnerPhaseResult.trace.consCtor
+    (nestedAlphaRightIdentityResult.trace.consCtor (.single .nil))
+
+#guard nestedPhaseDepthAlternativesTrace.rounds == 1
+
+theorem nestedPhaseDepthAlphaBireflexive :
+    ScopedAlphaBireflexive alphaFoldScopeIndex nestedPhaseDepthCode := by
+  constructor
+  · apply CodeRelated.cases cRelatedAtFoldScope
+    intro tag
+    exact chooseAlt_related (.cons
+      (.ctor alphaSingletonFoldAlphaBireflexive.forward)
+      (.cons (.ctor alphaRightAlphaBireflexiveAtFoldScope.forward) .nil))
+  · apply CodeRelated.cases cRelatedAtFoldScope
+    intro tag
+    exact chooseAlt_related (.cons
+      (.ctor alphaSingletonFoldAlphaBireflexive.backward)
+      (.cons (.ctor alphaRightAlphaBireflexiveAtFoldScope.backward) .nil))
+
+def nestedPhaseDepthRecursiveTrace :
+    ScopedCodePhaseTrace nestedPhaseDepthValidCase alphaFoldScopeIndex
+      nestedPhaseDepthCode (.cases nestedPhaseDepthRecursiveCases) := by
+  simpa [nestedPhaseDepthCode, nestedPhaseDepthCases,
+    nestedPhaseDepthRecursiveCases, LCNF.Cases.alts] using
+    nestedPhaseDepthAlternativesTrace.casesTrace
+      `NestedBool objType c nestedPhaseDepthAlphaBireflexive
+
+theorem nestedParentStructuralBefore :
+    CodeRel nestedPhaseDepthValidCase
+      (.cases nestedPhaseDepthRecursiveCases)
+      (.cases nestedPhaseDepthStructuralCases) := by
+  apply CodeRel.aligned
+  apply HeadRel.cases
+  intro tag valid
+  rcases valid with rfl | rfl
+  · change SelectionRel nestedPhaseDepthValidCase
+      (some alphaLeft) (some alphaLeft)
+    exact .some nestedAlphaLeftStructuralRefl
+  · change SelectionRel nestedPhaseDepthValidCase
+      (some alphaRight) (some alphaRight)
+    exact .some nestedAlphaRightStructuralRefl
+
+theorem nestedParentAlphaForward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (.cases nestedPhaseDepthStructuralCases)
+      (.cases nestedPhaseDepthFoldedCases) := by
+  apply CodeRelated.cases cRelatedAtFoldScope
+  intro tag
+  by_cases zero : tag = 0
+  · subst tag
+    change CaseSelectionRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (some alphaLeft) (some alphaLeft)
+    exact .some alphaLeftAlphaBireflexiveAtFoldScope.forward
+  · have zeroSymm : 0 ≠ tag := Ne.symm zero
+    simpa [nestedPhaseDepthStructuralCases, nestedPhaseDepthFoldedCases,
+      LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+      falseInfo, zeroSymm]
+      using CaseSelectionRelated.some alphaRightLeftCodeRelatedAtFoldScope
+
+theorem nestedParentAlphaBackward :
+    CodeRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (.cases nestedPhaseDepthFoldedCases)
+      (.cases nestedPhaseDepthStructuralCases) := by
+  apply CodeRelated.cases cRelatedAtFoldScope
+  intro tag
+  by_cases zero : tag = 0
+  · subst tag
+    change CaseSelectionRelated (leftJoins := []) (rightJoins := [])
+      alphaFoldParamRho [x, c] [x, c]
+      (some alphaLeft) (some alphaLeft)
+    exact .some alphaLeftAlphaBireflexiveAtFoldScope.backward
+  · have zeroSymm : 0 ≠ tag := Ne.symm zero
+    simpa [nestedPhaseDepthStructuralCases, nestedPhaseDepthFoldedCases,
+      LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+      falseInfo, zeroSymm]
+      using CaseSelectionRelated.some alphaLeftRightCodeRelatedAtFoldScope
+
+theorem nestedParentStructuralAfter :
+    CodeRel nestedPhaseDepthValidCase
+      (.cases nestedPhaseDepthFoldedCases) alphaLeft := by
+  apply CodeRel.eliminate nestedPhaseDepthFoldedCases alphaLeft
+  intro tag valid
+  change ElimSelectionRel nestedPhaseDepthValidCase alphaLeft
+    (some alphaLeft)
+  exact .some nestedAlphaLeftStructuralRefl
+
+def nestedParentPhaseResult :
+    ScopedCodePhaseResult nestedPhaseDepthValidCase alphaFoldScopeIndex
+      (.cases nestedPhaseDepthRecursiveCases) alphaLeft := {
+  factor := .threePhase {
+    structuralMiddle := .cases nestedPhaseDepthStructuralCases
+    alphaMiddle := .cases nestedPhaseDepthFoldedCases
+    structuralBefore := nestedParentStructuralBefore
+    alphaForward := nestedParentAlphaForward
+    alphaBackward := nestedParentAlphaBackward
+    structuralAfter := nestedParentStructuralAfter
+  }
+  targetRefl := nestedAlphaLeftStructuralRefl
+  targetAlpha := alphaLeftAlphaBireflexiveAtFoldScope
+}
+
+/-- The original nested fixture now has an honest two-round trace: one round
+for recursive alternative traversal and one for the parent simplifier. -/
+def nestedPhaseDepthTrace :
+    ScopedCodePhaseTrace nestedPhaseDepthValidCase alphaFoldScopeIndex
+      nestedPhaseDepthCode alphaLeft :=
+  nestedPhaseDepthRecursiveTrace.append nestedParentPhaseResult.trace
+
+#guard nestedPhaseDepthTrace.rounds == 2
+
+theorem nestedPhaseDepthTraced :
+    ScopedCodePhaseTraced nestedPhaseDepthValidCase alphaFoldScopeIndex
+      nestedPhaseDepthCode alphaLeft :=
+  nestedPhaseDepthTrace.traced
+
 /-- Concrete phase-aware case boundary for the compiler's combined
 fold-and-eliminate result. -/
 theorem alphaSingletonFoldPhaseBoundaryAt :
