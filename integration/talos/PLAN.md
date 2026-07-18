@@ -882,6 +882,18 @@ and certifies that the untouched `USize`/scalar suffix remains zero. The next
 step packages the concrete `allocateConstructor` result as a
 `ConstructorObjectRel` and then a `LiveHeapRel` extension.
 
+W6.1e completes the first of those two packaging steps. A successful public
+nonempty `allocateConstructor` now decomposes into the exact checked object
+allocation and object-field writer used by the lower-level preservation
+theorems. Under the constructor metadata bounds and pointwise field
+`ValueRel`, its result preserves the zero frontier and satisfies
+`ConstructorObjectRel`: the decoded header, semantic tag, field arities,
+typed object projections, and zero-initialized `USize` projections all agree.
+The remaining W6.1 preservation step is deliberately global: strengthen the
+live-cell boundary with allocation extents, use fresh-allocation framing to
+retain every old mapped cell, and extend `LiveHeapRel` with the new constructor
+without assuming that unrelated heap bytes are immutable.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -16,7 +16,9 @@ def liftMemory {α : Type} : Except MemoryError α → Except ConcreteError α
   | .ok value => .ok value
   | .error failure => .error (.target failure)
 
-private def uint32Field (field : String) (value : Nat) : Except ConcreteError UInt32 :=
+/-- Checked conversion for object-header metadata.  It is public so operation
+refinement proofs can expose the exact failure/success boundary. -/
+def uint32Field (field : String) (value : Nat) : Except ConcreteError UInt32 :=
   if value < UInt32.size then
     .ok (UInt32.ofNat value)
   else
@@ -103,7 +105,9 @@ def allocateConstructor (state : MemoryState) (info : LCNF.CtorInfo)
       writeObjectFields state.memory address.value 0 fields.toList
     return ({ state with memory }, address)
 
-private def readConstructorHeader (state : MemoryState) (object : Word32) :
+/-- Checked constructor-header decoder shared by projections and their
+refinement proofs. -/
+def readConstructorHeader (state : MemoryState) (object : Word32) :
     Except ConcreteError Header := do
   unless object.classify = .heap do
     throw (.source .expectedConstructor)

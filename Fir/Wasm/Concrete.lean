@@ -7,3 +7,4 @@ import Fir.Wasm.Concrete.FrontierCorrectness
 import Fir.Wasm.Concrete.Runtime
 import Fir.Wasm.Concrete.ObjectFieldsCorrectness
 import Fir.Wasm.Concrete.HeapRefinement
+import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
