@@ -65,6 +65,16 @@ const validationExternalRegistry = {
     const right = naturalValue(host, args[1], "Nat.add right operand");
     return { value: host.natural(left + right), world };
   },
+  "Int.ofNat": ({ args, host, world }) => {
+    assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
+    const value = naturalValue(host, args[0], "Int.ofNat operand");
+    return { value: host.integer(value), world };
+  },
+  "Int.neg": ({ args, host, world }) => {
+    assert.equal(args.length, 1, "Int.neg external arity mismatch");
+    const value = integerValue(host, args[0], "Int.neg operand");
+    return { value: host.integer(-value), world };
+  },
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");

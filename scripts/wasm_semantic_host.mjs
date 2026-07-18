@@ -320,6 +320,13 @@ export class SemanticHost {
       : this.alloc({ kind: "natural", value: payload });
   }
 
+  integer(value) {
+    const integer = BigInt(value);
+    return integer >= -0x80000000n && integer <= 0x7fffffffn
+      ? { kind: "tagged", payload: BigInt.asUintN(32, integer) }
+      : this.alloc({ kind: "integer", value: integer });
+  }
+
   literal(operation) {
     if (operation.kind === "naturalLiteral") {
       const value = this.natural(operation.value);

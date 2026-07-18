@@ -140,6 +140,22 @@ function ctorRuntime() {
 }
 
 {
+  const host = new SemanticHost();
+  assert.deepStrictEqual(host.integer(2147483647n), tagged(2147483647n));
+  assert.deepStrictEqual(host.integer(-2147483648n), tagged(2147483648n));
+  const positive = host.integer(2147483648n);
+  const negative = host.integer(-2147483649n);
+  assert.deepStrictEqual(host.liveCell(positive.location).object, {
+    kind: "integer",
+    value: 2147483648n,
+  });
+  assert.deepStrictEqual(host.liveCell(negative.location).object, {
+    kind: "integer",
+    value: -2147483649n,
+  });
+}
+
+{
   const host = new SemanticHost(ctorRuntime());
   const root = host.encode("object", { kind: "heap", location: 0 });
   const tokenPhysical = host.importFunction({ kind: "reset", objectFields: 1 })(root);

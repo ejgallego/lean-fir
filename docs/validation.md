@@ -793,6 +793,8 @@ or world.  `ByteArray.set!` covers both ownership paths: unique arrays update
 in place, while shared arrays preserve the original and allocate the updated
 copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
+Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
+negative literals at both immediate/heap representation boundaries.
 Large odd naturals remain excluded from this adapter because the version-1
 validation protocol encodes `Nat` as an inexact JSON number; the limitation is
 tracked by `FIR-BUG-wasm-none-json-nat-precision`.
