@@ -789,7 +789,9 @@ negative values represented by heap integer objects.  A heap-backed
 `ByteArray → ByteArray` identity preserves zero, signed-boundary, and maximum
 byte payloads.  Exact `ByteArray.size` and `ByteArray.get!` external handlers
 also cover zero, high-bit, and maximum-byte reads without changing heap state
-or world.  The independent artifact corpus separately compares external
+or world.  `ByteArray.set!` covers both ownership paths: unique arrays update
+in place, while shared arrays preserve the original and allocate the updated
+copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Large odd naturals remain excluded from this adapter because the version-1
 validation protocol encodes `Nat` as an inexact JSON number; the limitation is

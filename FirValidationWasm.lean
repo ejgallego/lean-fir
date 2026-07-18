@@ -20,7 +20,8 @@ def caseIds : Array String :=
     "int-immediate-max", "int-immediate-min",
     "int-heap-positive-boundary", "int-heap-negative-boundary",
     "byte-array-roundtrip", "byte-array-size",
-    "byte-array-get-zero", "byte-array-get-high-bit", "byte-array-get-max"]
+    "byte-array-get-zero", "byte-array-get-high-bit", "byte-array-get-max",
+    "byte-array-set-unique", "byte-array-set-shared"]
 
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]

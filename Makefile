@@ -33,6 +33,7 @@ validate-v8:
 		--case byte-array-roundtrip --case byte-array-size \
 		--case byte-array-get-zero --case byte-array-get-high-bit \
 		--case byte-array-get-max \
+		--case byte-array-set-unique --case byte-array-set-shared \
 		--plan validation-plans/native-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \

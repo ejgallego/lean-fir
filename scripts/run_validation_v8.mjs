@@ -85,6 +85,33 @@ const validationExternalRegistry = {
       world,
     };
   },
+  "ByteArray.set!": ({ args, host, world }) => {
+    assert.equal(args.length, 3, "ByteArray.set! external arity mismatch");
+    const source = args[0];
+    assert.equal(source.kind, "heap", "ByteArray.set! operand must be a heap byte array");
+    const cell = host.liveCell(source.location);
+    assert.equal(cell.object.kind, "byteArray",
+      "ByteArray.set! heap object must be a byte array");
+    const index = naturalValue(host, args[1], "ByteArray.set! index");
+    const byte = args[2];
+    assert.equal(byte.kind, "scalar", "ByteArray.set! byte must be a scalar");
+    assert.equal(byte.scalarKind, "uint8", "ByteArray.set! byte must use UInt8");
+    assert.ok(byte.value >= 0n && byte.value <= 0xffn,
+      "ByteArray.set! byte is out of range");
+    if (index >= BigInt(cell.object.value.length)) {
+      return { value: source, world };
+    }
+    const bytes = [...cell.object.value];
+    bytes[Number(index)] = Number(byte.value);
+    if (!cell.persistent && cell.rc === 1) {
+      cell.object = { kind: "byteArray", value: bytes };
+      return { value: source, world };
+    }
+    if (!cell.persistent) {
+      host.decLocation(source.location);
+    }
+    return { value: host.alloc({ kind: "byteArray", value: bytes }), world };
+  },
 };
 
 function semanticDatum(schema, value, host, context) {
