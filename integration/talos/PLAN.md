@@ -1537,6 +1537,17 @@ under the replacement constructor descriptor. The remaining reuse proof only
 unfolds the public concrete and FIR operations, extracts this transaction,
 and relates their returned references.
 
+W6.3ax closes the public in-place reuse path. `reuseObject_some_refines`
+checks the nonzero heap token, constructor kind, retained-capacity inequality,
+field arity, and all `UInt32` metadata bounds; it then instantiates the
+complete byte transaction from W6.3ah and the whole-heap replacement theorem
+from W6.3aw. The concrete runtime and FIR both return the same existing
+allocation/location, the rebound constructor descriptor satisfies ordinary
+`LiveHeapRel`, and the returned object references are related. Together with
+W6.3at's strict protocol descriptor, this supplies the reset-to-reuse
+composition without weakening `.object` values, resolving
+`FIR-BUG-wasm-none-reset-cleared-object-protocol`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

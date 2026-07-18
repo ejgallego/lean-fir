@@ -1831,4 +1831,202 @@ theorem LiveHeapRel.reuseObject_none_refines_nonempty
     simpa [Fir.LeanIR.Impure.reuse] using
       allocCtor_nonempty_eq runtime info semanticFields semanticArity nonempty⟩
 
+/-- Consuming a nonempty reuse token performs the checked in-place concrete
+transaction and FIR's semantic cell replacement in lockstep. The compiler
+supplies the retained-capacity and metadata-width obligations; the same
+semantic location is returned under the ordinary replacement descriptor. -/
+theorem LiveHeapRel.reuseObject_some_refines
+    (state : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (location : Location) (address : Word32)
+    (cell : HeapCell) (oldInfo : LCNF.CtorInfo)
+    (oldFieldKinds : Array AbiKind) (old : ConstructorObject)
+    (info : LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+    (fields : Array Word32) (semanticFields : Array Value)
+    (updateHeader : Bool) (header : Header)
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor oldInfo oldFieldKinds))
+    (objectEq : cell.object = .ctor old)
+    (objectRelated : ConstructorObjectRel state witness address oldInfo
+      oldFieldKinds old)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (cellLive : cell.live = true)
+    (layoutFits : (ConstructorLayout.ofInfo info).allocationBytes ≤
+      header.allocationBytes.toNat)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size) :
+    ∃ result nextRuntime,
+      reuseObject state address info updateHeader fields = .ok (result, address) ∧
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .ok (nextRuntime, .object (.heap location)) ∧
+      LiveHeapRel result (witness.rebindConstructor address info fieldKinds)
+        nextRuntime ∧
+      ValueRel (witness.rebindConstructor address info fieldKinds) .object
+        (.word32 address) (.object (.heap location)) := by
+  obtain ⟨addressHeap, _, _, headerMinimum, _, headerInBounds⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  obtain ⟨objectHeader, objectHeaderRead, _, _, _, oldTag, _, _, _⟩ :=
+    objectRelated.header
+  rw [headerRead] at objectHeaderRead
+  have objectHeaderEq := Except.ok.inj objectHeaderRead
+  subst objectHeader
+  let tag : UInt32 :=
+    if updateHeader then UInt32.ofNat info.cidx else header.aux0
+  let replacement : Header := {
+    header with
+    kind := .constructor
+    persistent := false
+    live := true
+    aux0 := tag
+    aux1 := UInt32.ofNat info.size
+    aux2 := UInt32.ofNat info.usize
+    aux3 := UInt32.ofNat info.ssize }
+  have tagToNat : tag.toNat = if updateHeader then info.cidx else old.tag := by
+    cases updateHeader <;>
+      simp [tag, oldTag, UInt32.toNat_ofNat_of_lt' tagFits]
+  have objectFieldsToNat : (UInt32.ofNat info.size).toNat = info.size :=
+    UInt32.toNat_ofNat_of_lt' objectFieldsFit
+  have usizeFieldsToNat : (UInt32.ofNat info.usize).toNat = info.usize :=
+    UInt32.toNat_ofNat_of_lt' usizeFieldsFit
+  have scalarBytesToNat : (UInt32.ofNat info.ssize).toNat = info.ssize :=
+    UInt32.toNat_ofNat_of_lt' scalarBytesFit
+  have fieldsInAllocation : objectFieldAddress address.value fields.toList.length ≤
+      address.value + header.allocationBytes.toNat := by
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
+    simp [ConstructorLayout.ofInfo, target] at aligned layoutFits
+    simp [objectFieldAddress, arity, target]
+    omega
+  obtain ⟨scrubbed, fieldMemory, memory, transaction, post⟩ :=
+    state.memory.reuseConstructorMemory_spec address header.allocationBytes.toNat
+      replacement fields.toList headerMinimum headerInBounds fieldsInAllocation
+  have replacementKind : replacement.kind = .constructor := by rfl
+  have replacementLive : replacement.live = true := by rfl
+  have replacementPersistent : replacement.persistent = false := by rfl
+  have replacementRefCount : replacement.refCount = header.refCount := by rfl
+  have replacementAllocation :
+      replacement.allocationBytes = header.allocationBytes := by rfl
+  have replacementTag : replacement.aux0.toNat =
+      if updateHeader then info.cidx else old.tag := by
+    exact tagToNat
+  have replacementObjectFields : replacement.aux1.toNat = info.size := by
+    exact objectFieldsToNat
+  have replacementUSizeFields : replacement.aux2.toNat = info.usize := by
+    exact usizeFieldsToNat
+  have replacementScalarBytes : replacement.aux3.toNat = info.ssize := by
+    exact scalarBytesToNat
+  obtain ⟨nextRuntime, semanticSet, finalHeap⟩ :=
+    related.setCell_ofReuseConstructorMemory state memory scrubbed fieldMemory
+      witness runtime location address cell oldInfo oldFieldKinds old info fieldKinds
+      fields semanticFields updateHeader header replacement mapped found descriptor
+      objectEq objectRelated headerRead headerKind refCount persistent cellLive
+      replacementKind replacementLive replacementPersistent replacementRefCount
+      replacementAllocation replacementTag replacementObjectFields
+      replacementUSizeFields replacementScalarBytes layoutFits arity semanticArity
+      fieldKindsSize fieldKindsValid fieldRelated transaction post
+  have addressNeZero : address ≠ Word32.zero := by
+    intro equal
+    subst address
+    change ObjectWordClass.sentinel = ObjectWordClass.heap at addressHeap
+    contradiction
+  have addressValueNeZero : address.value ≠ 0 := by
+    intro equal
+    have sentinel : address.classify = .sentinel := by
+      simp [Word32.classify, equal]
+    rw [sentinel] at addressHeap
+    contradiction
+  have addressZeroCheck : (address == Word32.zero) = false := by
+    change (address.value == 0) = false
+    simp [addressValueNeZero]
+  have headerKindCheck : (header.kind == ObjectKind.constructor) = true := by
+    rw [headerKind]
+    decide
+  have concreteReuse :
+      reuseObject state address info updateHeader fields =
+        .ok (({ state with memory } : MemoryState), address) := by
+    unfold reuseObject
+    rw [if_neg (by simp [addressZeroCheck])]
+    rw [addressHeap]
+    simp only
+    rw [if_pos arity]
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_pos headerKindCheck]
+    rw [if_pos layoutFits]
+    cases updateHeader with
+    | false =>
+      simp only [Bool.false_eq_true, ↓reduceIte]
+      rw [show (pure header.aux0 : Except ConcreteError UInt32) =
+        .ok header.aux0 by rfl]
+      simp only
+      rw [uint32Field_eq_ok "object-field count" info.size objectFieldsFit]
+      simp only
+      rw [uint32Field_eq_ok "usize-field count" info.usize usizeFieldsFit]
+      simp only
+      rw [uint32Field_eq_ok "scalar byte count" info.ssize scalarBytesFit]
+      simp only
+      have transaction' := transaction
+      simp [tag, replacement] at transaction'
+      rw [transaction']
+      rfl
+    | true =>
+      simp only [↓reduceIte]
+      rw [uint32Field_eq_ok "constructor tag" info.cidx tagFits]
+      simp only
+      rw [uint32Field_eq_ok "object-field count" info.size objectFieldsFit]
+      simp only
+      rw [uint32Field_eq_ok "usize-field count" info.usize usizeFieldsFit]
+      simp only
+      rw [uint32Field_eq_ok "scalar byte count" info.ssize scalarBytesFit]
+      simp only
+      have transaction' := transaction
+      simp [tag, replacement] at transaction'
+      rw [transaction']
+      rfl
+  have semanticReuse :
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .ok (nextRuntime, .object (.heap location)) := by
+    have liveCell : getLiveCell runtime location = .ok cell := by
+      simp [getLiveCell, found, cellLive]
+    have arityCheck : (semanticFields.size != info.size) = false := by
+      simp [semanticArity]
+    unfold Fir.LeanIR.Impure.reuse
+    simp only
+    rw [arityCheck]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    rw [liveCell]
+    simp only [Bind.bind, Except.bind]
+    rw [objectEq]
+    simp only
+    have reusedEq :
+        ({ tag := if updateHeader then info.cidx else old.tag
+           objectFields := semanticFields
+           usizeFields := Array.replicate info.usize 0
+           scalarFields := [] } : ConstructorObject) =
+          reusedConstructorObject old info updateHeader semanticFields := by
+      rfl
+    rw [reusedEq]
+    rw [semanticSet]
+    rfl
+  exact ⟨({ state with memory } : MemoryState), nextRuntime, concreteReuse,
+    semanticReuse, finalHeap, .object (.mapped (by simpa using mapped))⟩
+
 end Fir.Wasm.Concrete

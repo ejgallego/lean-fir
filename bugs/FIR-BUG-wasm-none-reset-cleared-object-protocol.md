@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-reset-cleared-object-protocol
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -95,4 +95,25 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved across W6.3aj--W6.3ax without weakening the normal ABI-indexed value
+relation. `ResetReuseProtocolRel` names the exact checked reset transition;
+`resetProtocolFieldKinds` temporarily rebinds cleared prefix slots to strict
+`.tobject` descriptors, allowing `resetObject_refines_unique` to restore a
+normal `LiveHeapRel` for the cleared heap while retaining the same mapped
+location and a related nonempty reuse token.
+
+`LiveHeapRel.reuseObject_some_refines` then consumes any such related live
+constructor under the protocol descriptor, verifies the retained capacity and
+metadata bounds, performs the complete scrub/write/header transaction, and
+restores ordinary `LiveHeapRel` under the replacement constructor descriptor.
+It also proves that concrete and FIR reuse return the same allocation and
+semantic location. The reset and reuse theorems therefore compose through the
+strict protocol state requested by this card.
+
+Regression:
+
+```text
+lean-beam sync Fir/Wasm/Concrete/ResetReuseCorrectness.lean +full
+make check
+make talos-check
+```
