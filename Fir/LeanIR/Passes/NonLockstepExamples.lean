@@ -596,6 +596,18 @@ theorem closed_singleton_default_recursive_relation_correct
     closedProgramsRelated recursiveInitialInvariant
     (recursiveProgramBisimulation externals)
 
+/-- The closed fixture instantiated directly through the generic recursive
+bisimulation.  Its entry predicate states the reusable hereditary readiness
+condition; the concrete theorem above separately discharges the stronger
+all-arguments claim with the fixture's explicit reachable-state relation. -/
+theorem closed_singleton_default_generic_relation_correct
+    (externals : ExternalSpec) :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      sourceProgram targetProgram #[`main]
+      (ReachablyReadyAdmissible externals closedValidCase
+        sourceProgram targetProgram) :=
+  samePhaseCorrectOn_reachablyReady closedProgramsRelated
+
 /-- Execute Lean's actual recursive pass over the declaration fixture. This
 keeps the compiler/specification bridge executable while the upstream pass
 graph remains private. -/
