@@ -10,6 +10,8 @@ inductive MemoryError where
   | addressSpaceExhausted (requestedEnd : Nat)
   | invalidObjectAddress (word : Word32)
   | unknownObjectKind (code : UInt32)
+  | headerValueOverflow (field : String) (value : Nat)
+  | nonzeroPadding (address value : Nat)
   | invalidAllocationSize (bytes : Nat)
   | malformedHeader (address allocationBytes : Nat)
   | deadObject (address : Word32)
@@ -101,6 +103,17 @@ def growToFit (memory : LinearMemory) (requiredBytes : Nat) : LinearMemory :=
     let missing := requiredBytes - memory.size
     let pages := (missing + wasmPageBytes - 1) / wasmPageBytes
     memory ++ Array.replicate (pages * wasmPageBytes) 0
+
+@[simp] theorem readByte_set_same (memory : LinearMemory) (address : Nat)
+    (value : UInt8) (inBounds : address < memory.size) :
+    readByte (memory.set address value inBounds) address = .ok value := by
+  simp [readByte]
+
+theorem readByte_set_other (memory : LinearMemory) (address other : Nat)
+    (value : UInt8) (inBounds : address < memory.size) (different : address ≠ other) :
+    readByte (memory.set address value inBounds) other = readByte memory other := by
+  by_cases otherInBounds : other < memory.size <;>
+    simp [readByte, otherInBounds, different]
 
 end LinearMemory
 

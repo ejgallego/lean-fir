@@ -816,6 +816,24 @@ regressions cover maximum-width round trips, exact bounds failure, a decoded
 constructor header, and memory growth. Constructor payload operations and
 their semantic refinement are the next W6.1 slice.
 
+W6.1b is complete. The concrete runtime encodes small tags directly and
+allocates persistent natural objects for tags above the 31-bit wasm32 payload
+range. Empty constructors use that same tagged path; allocated constructors
+write exact headers and zero-padded eight-byte object slots, leave `USize` and
+packed scalar storage initialized to zero, and provide checked tag, object,
+and `USize` projections. Large source naturals use little-endian 64-bit limbs
+in ordinary reference-counted allocations. Source arity/type/bounds failures
+remain distinct from concrete memory failures.
+
+The value-refinement witness now has explicit location binding and promoted-tag
+extension lemmas. Immediate encoding has an exact operation equation and
+`ValueRel` theorem; new heap locations and promoted tags have direct result
+relations. Executable differential coverage allocates the same mixed
+constructor in the semantic and concrete runtimes and compares its tag and
+projected field. The remaining W6.1 proof slice must relate the decoded heap
+contents and allocator extension, then lift constructor allocation/projection
+to the W2 host contracts before any semantic import is replaced.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

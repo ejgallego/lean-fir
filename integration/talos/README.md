@@ -128,9 +128,11 @@ lanes are `i32`, source `USize` remains `i64`, constructor/capture slots are
 eight bytes, and large semantic tagged values are promoted to persistent heap
 naturals by the refinement relation. The first concrete runtime slice provides
 checked little-endian linear memory, page growth, aligned allocation, and a
-self-describing live/dead object header. The semantic Talos host remains the
-oracle while concrete operations are added and proved one vertical slice at a
-time.
+self-describing live/dead object header. Immediate and promoted tags, empty
+and allocated constructors, checked object/`USize` projection, and arbitrary
+natural limbs now execute over that memory. The semantic Talos host remains
+the oracle while concrete heap-state and operation refinements are proved one
+vertical slice at a time.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the

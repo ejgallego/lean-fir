@@ -43,6 +43,24 @@ structure RefinementWitness where
   promotedTags : PromotedTags := []
   deriving Inhabited, Repr
 
+def RefinementWitness.bindLocation (witness : RefinementWitness)
+    (location : Location) (address : Word32) : RefinementWitness :=
+  { witness with locations := (location, address) :: witness.locations }
+
+def RefinementWitness.promoteTag (witness : RefinementWitness)
+    (payload : UInt64) (address : Word32) : RefinementWitness :=
+  { witness with promotedTags := (payload, address) :: witness.promotedTags }
+
+@[simp] theorem RefinementWitness.lookup_bindLocation_self
+    (witness : RefinementWitness) (location : Location) (address : Word32) :
+    (witness.bindLocation location address).locations.lookup? location = some address := by
+  simp [RefinementWitness.bindLocation, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_promoteTag_self
+    (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
+    (witness.promoteTag payload address).promotedTags.lookup? payload = some address := by
+  simp [RefinementWitness.promoteTag, PromotedTags.lookup?]
+
 /-- The lookup-visible part of a witness is injective and every related word
 is a concrete heap address. This avoids baking proof-only location identities
 into linear memory. -/
@@ -143,5 +161,17 @@ theorem TaggedReferenceRel.promoted_is_heap {witness : RefinementWitness}
   cases related with
   | immediate _ fits => omega
   | promoted found => exact valid.promotedHeap _ _ found
+
+theorem ValueRel.new_heap_location (witness : RefinementWitness)
+    (location : Location) (address : Word32) :
+    ValueRel (witness.bindLocation location address) .object (.word32 address)
+      (.object (.heap location)) :=
+  .object (.mapped (RefinementWitness.lookup_bindLocation_self witness location address))
+
+theorem ValueRel.new_promoted_tag (witness : RefinementWitness)
+    (payload : UInt64) (address : Word32) :
+    ValueRel (witness.promoteTag payload address) .tagged (.word32 address)
+      (.object (.tagged payload)) :=
+  .tagged (.promoted (RefinementWitness.lookup_promoteTag_self witness payload address))
 
 end Fir.Wasm.Concrete
