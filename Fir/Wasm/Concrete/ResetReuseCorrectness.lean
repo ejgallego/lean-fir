@@ -387,6 +387,352 @@ theorem PromotedTagRel.rebindConstructor_other
   header := related.header
   decoded := related.decoded }
 
+/-- Assemble a semantic `setCell` step while the target's proof descriptor is
+rebound. Location identities do not change; callers provide the rebuilt
+target and framed non-target relations under the new witness. -/
+theorem LiveHeapRel.setCell_rebindConstructor_of_frames
+    {state result : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell replacement : HeapCell} (reboundInfo : LCNF.CtorInfo)
+    (reboundFieldKinds : Array AbiKind)
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (cursor : result.heapCursor = state.heapCursor)
+    (frontier : result.FrontierInvariant)
+    (targetRelated : CellRel result
+      (witness.rebindConstructor address reboundInfo reboundFieldKinds)
+      address replacement)
+    (descriptorRegion : ∀ other descriptor,
+      (witness.rebindConstructor address reboundInfo reboundFieldKinds).descriptors.lookup?
+          other = some descriptor →
+      ∃ header,
+        Header.read result.memory other = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        other.value + header.allocationBytes.toNat ≤ result.heapCursor)
+    (descriptorDisjoint : ∀ left right leftDescriptor rightDescriptor,
+      (witness.rebindConstructor address reboundInfo reboundFieldKinds).descriptors.lookup?
+          left = some leftDescriptor →
+      (witness.rebindConstructor address reboundInfo reboundFieldKinds).descriptors.lookup?
+          right = some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read result.memory left = .ok leftHeader →
+        Header.read result.memory right = .ok rightHeader →
+        left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value)
+    (cellFrame : ∀ other otherAddress otherCell,
+      other ≠ location →
+      findCell? runtime.heap other = some otherCell →
+      witness.locations.lookup? other = some otherAddress →
+      CellRel state witness otherAddress otherCell →
+      CellRel result
+        (witness.rebindConstructor address reboundInfo reboundFieldKinds)
+        otherAddress otherCell)
+    (promotedFrame : ∀ payload other,
+      witness.promotedTags.Contains payload other →
+      PromotedTagRel result
+        (witness.rebindConstructor address reboundInfo reboundFieldKinds)
+        payload other) :
+    ∃ nextRuntime,
+      setCell runtime location replacement = .ok nextRuntime ∧
+      LiveHeapRel result
+        (witness.rebindConstructor address reboundInfo reboundFieldKinds)
+        nextRuntime := by
+  obtain ⟨nextRuntime, updated, targetFound, otherFound, heapLength,
+      nextLocation⟩ :=
+    setCell_spec_of_find runtime location cell replacement found
+  refine ⟨nextRuntime, updated, ?_⟩
+  refine {
+    frontier
+    witnessWellFormed :=
+      related.witnessWellFormed.rebindConstructor address reboundInfo
+        reboundFieldKinds
+    locationsBeforeNext := ?_
+    releaseFuelBound := by
+      rw [heapLength, cursor]
+      exact related.releaseFuelBound
+    descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
+    semanticToConcrete := ?_
+    concreteToSemantic := ?_
+    promoted := ?_ }
+  · intro other otherCell foundAfter
+    by_cases isTarget : other = location
+    · subst other
+      rw [targetFound] at foundAfter
+      have cellEq := Option.some.inj foundAfter
+      subst otherCell
+      rw [nextLocation]
+      exact related.locationsBeforeNext location cell found
+    · have foundBefore : findCell? runtime.heap other = some otherCell := by
+        rw [← otherFound other isTarget]
+        exact foundAfter
+      rw [nextLocation]
+      exact related.locationsBeforeNext other otherCell foundBefore
+  · intro other descriptor descriptorFound
+    obtain ⟨header, _, minimum, _, extent⟩ :=
+      descriptorRegion other descriptor descriptorFound
+    omega
+  · intro other otherCell foundAfter
+    by_cases isTarget : other = location
+    · subst other
+      rw [targetFound] at foundAfter
+      have cellEq := Option.some.inj foundAfter
+      subst otherCell
+      exact ⟨address, by simpa using mapped, targetRelated⟩
+    · have foundBefore : findCell? runtime.heap other = some otherCell := by
+        rw [← otherFound other isTarget]
+        exact foundAfter
+      obtain ⟨otherAddress, otherMapped, otherRelated⟩ :=
+        related.semanticToConcrete other otherCell foundBefore
+      exact ⟨otherAddress, by simpa using otherMapped,
+        cellFrame other otherAddress otherCell isTarget foundBefore otherMapped
+          otherRelated⟩
+  · intro other otherAddress reboundMapped
+    have oldMapped : witness.locations.lookup? other = some otherAddress := by
+      simpa using reboundMapped
+    by_cases isTarget : other = location
+    · subst other
+      have addressEq := Option.some.inj (mapped.symm.trans oldMapped)
+      subst otherAddress
+      exact ⟨replacement, targetFound, targetRelated⟩
+    · obtain ⟨otherCell, foundBefore, otherRelated⟩ :=
+        related.concreteToSemantic other otherAddress oldMapped
+      exact ⟨otherCell, by
+          rw [otherFound other isTarget]
+          exact foundBefore,
+        cellFrame other otherAddress otherCell isTarget foundBefore oldMapped
+          otherRelated⟩
+  · intro payload other reboundMapped
+    apply promotedFrame payload other
+    simpa using reboundMapped
+
+/-- A successful unique-reset prefix clear and matching semantic `setCell`
+produce a complete whole-heap relation under the protocol witness. -/
+theorem LiveHeapRel.writeObjectFields_resetPrefix
+    (state : MemoryState) (memory : LinearMemory) (witness : RefinementWitness)
+    (runtime : RuntimeState) (location : Location) (address : Word32)
+    (cell : HeapCell) (header : Header) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (semantic : ConstructorObject) (count : Nat)
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (objectEq : cell.object = .ctor semantic)
+    (objectRelated : ConstructorObjectRel state witness address info fieldKinds
+      semantic)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .constructor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (live : cell.live = true)
+    (countFits : count ≤ semantic.objectFields.size)
+    (written : writeObjectFields state.memory address.value 0
+      (List.replicate count taggedZero) = .ok memory) :
+    ∃ nextRuntime,
+      setCell runtime location
+          { cell with object := .ctor (resetProtocolObject semantic count) } =
+        .ok nextRuntime ∧
+      LiveHeapRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count))
+        nextRuntime := by
+  have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
+    intro left right equal
+    cases left
+    cases right
+    simp_all
+  have targetBefore : LiveCellRel state witness address cell :=
+    .constructor descriptor objectEq objectRelated headerRead headerKind refCount
+      persistent live
+  obtain ⟨relationHeader, relationRead, _, activeFits, _, _, _, _, _⟩ :=
+    objectRelated.header
+  rw [headerRead] at relationRead
+  have relationHeaderEq := Except.ok.inj relationRead
+  subst relationHeader
+  obtain ⟨_, rawRead, _, headerMinimum, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have countFitsInfo : count ≤ info.size := by
+    rw [← objectRelated.semanticObjectFields]
+    exact countFits
+  have fieldsInTarget : objectFieldAddress address.value
+      (List.replicate count taggedZero).length ≤
+        address.value + header.allocationBytes.toNat := by
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+        info.ssize)
+    simp only [List.length_replicate]
+    simp [objectFieldAddress, ConstructorLayout.ofInfo, target] at activeFits aligned ⊢
+    omega
+  have fieldsBeforeFrontier : objectFieldAddress address.value
+      (List.replicate count taggedZero).length ≤ state.heapCursor := by
+    have fieldsInActive : objectFieldAddress address.value
+        (List.replicate count taggedZero).length ≤
+          address.value + (ConstructorLayout.ofInfo info).allocationBytes := by
+      have aligned := align8_ge
+        (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+          info.ssize)
+      simp [objectFieldAddress, ConstructorLayout.ofInfo, target] at aligned ⊢
+      omega
+    have activeExtent := objectRelated.extent
+    have headerOwned := targetBefore.headerOwned
+    omega
+  have fieldsInBounds : objectFieldAddress address.value
+      (0 + (List.replicate count taggedZero).length) ≤ state.memory.size := by
+    simp only [Nat.zero_add]
+    exact Nat.le_trans fieldsBeforeFrontier related.frontier.cursorInBounds
+  have post := writeObjectFields_post state.memory memory address.value 0
+    (List.replicate count taggedZero) fieldsInBounds written
+  have finalFrontier : ({ state with memory } : MemoryState).FrontierInvariant :=
+    related.frontier.writeObjectFields (by simpa using fieldsBeforeFrontier) written
+  have objectAfter := objectRelated.resetPrefix state memory witness address info
+    fieldKinds semantic count countFits post
+  have headerAfter :
+      ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
+    rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
+      (List.replicate count taggedZero) post]
+    exact headerRead
+  have targetAfter : CellRel ({ state with memory } : MemoryState)
+      (witness.rebindConstructor address info
+      (resetProtocolFieldKinds fieldKinds count)) address
+      { cell with object := .ctor (resetProtocolObject semantic count) } := by
+    apply CellRel.live
+    apply LiveCellRel.constructor
+      (witness.lookup_rebindConstructor_descriptor address info
+        (resetProtocolFieldKinds fieldKinds count))
+      rfl objectAfter headerAfter headerKind
+    · simpa using refCount
+    · simpa using persistent
+    · simpa using live
+  obtain ⟨oldDescriptorRegion, oldDescriptorDisjoint⟩ :=
+    related.descriptorSpatial_of_writeObjectFields descriptor rawRead rfl
+      fieldsInTarget written
+  have rawReadAfter : Header.read memory address = .ok header := by
+    rw [Header.read_of_writeObjectFields state.memory memory address 0
+      (List.replicate count taggedZero) post]
+    exact rawRead
+  have protocolDescriptorRegion : ∀ other otherDescriptor,
+      (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)).descriptors.lookup? other =
+        some otherDescriptor →
+      ∃ otherHeader,
+        Header.read memory other = .ok otherHeader ∧
+        headerBytes ≤ otherHeader.allocationBytes.toNat ∧
+        otherHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        other.value + otherHeader.allocationBytes.toNat ≤ state.heapCursor := by
+    intro other otherDescriptor otherFound
+    by_cases different : address.value ≠ other.value
+    · rw [witness.lookup_rebindConstructor_descriptor_other address other info
+        (resetProtocolFieldKinds fieldKinds count) different] at otherFound
+      simpa using oldDescriptorRegion other otherDescriptor otherFound
+    · have sameValue : address.value = other.value := by omega
+      have otherEq : other = address := wordEq other address sameValue.symm
+      subst other
+      simpa using oldDescriptorRegion address (.constructor info fieldKinds) descriptor
+  have protocolDescriptorDisjoint : ∀ left right leftDescriptor rightDescriptor,
+      (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)).descriptors.lookup? left =
+        some leftDescriptor →
+      (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)).descriptors.lookup? right =
+        some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read memory left = .ok leftHeader →
+        Header.read memory right = .ok rightHeader →
+        left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value := by
+    intro left right leftDescriptor rightDescriptor leftFound rightFound different
+      leftHeader rightHeader leftRead rightRead
+    by_cases leftTarget : address.value = left.value
+    · have rightTarget : address.value ≠ right.value := by
+        intro rightEq
+        exact different (leftTarget.symm.trans rightEq)
+      have leftEq : left = address := wordEq left address leftTarget.symm
+      subst left
+      rw [rawReadAfter] at leftRead
+      have leftHeaderEq := Except.ok.inj leftRead
+      subst leftHeader
+      rw [witness.lookup_rebindConstructor_descriptor_other address right info
+        (resetProtocolFieldKinds fieldKinds count) rightTarget] at rightFound
+      exact oldDescriptorDisjoint address right (.constructor info fieldKinds)
+        rightDescriptor descriptor rightFound rightTarget header rightHeader rawReadAfter
+          rightRead
+    · by_cases rightTarget : address.value = right.value
+      · have rightEq : right = address := wordEq right address rightTarget.symm
+        subst right
+        rw [rawReadAfter] at rightRead
+        have rightHeaderEq := Except.ok.inj rightRead
+        subst rightHeader
+        rw [witness.lookup_rebindConstructor_descriptor_other address left info
+          (resetProtocolFieldKinds fieldKinds count) leftTarget] at leftFound
+        exact oldDescriptorDisjoint left address leftDescriptor
+          (.constructor info fieldKinds) leftFound descriptor (Ne.symm leftTarget)
+            leftHeader header leftRead rawReadAfter
+      · rw [witness.lookup_rebindConstructor_descriptor_other address left info
+          (resetProtocolFieldKinds fieldKinds count) leftTarget] at leftFound
+        rw [witness.lookup_rebindConstructor_descriptor_other address right info
+          (resetProtocolFieldKinds fieldKinds count) rightTarget] at rightFound
+        exact oldDescriptorDisjoint left right leftDescriptor rightDescriptor
+          leftFound rightFound different leftHeader rightHeader leftRead rightRead
+  have cellFrame : ∀ other otherAddress otherCell,
+      other ≠ location →
+      findCell? runtime.heap other = some otherCell →
+      witness.locations.lookup? other = some otherAddress →
+      CellRel state witness otherAddress otherCell →
+      CellRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)) otherAddress otherCell := by
+    intro other otherAddress otherCell otherNe _ mappedOther otherRelated
+    obtain ⟨otherDescriptor, otherDescriptorFound⟩ := otherRelated.descriptor
+    obtain ⟨otherHeader, otherHeaderRead, _, _, _⟩ :=
+      related.descriptorRegion otherAddress otherDescriptor otherDescriptorFound
+    have differentWord : address ≠ otherAddress := by
+      intro equal
+      subst otherAddress
+      have locationEq := related.witnessWellFormed.locationInjective location other
+        address mapped mappedOther
+      exact otherNe locationEq.symm
+    have differentValue : address.value ≠ otherAddress.value := by
+      intro equal
+      exact differentWord (wordEq address otherAddress equal)
+    have frame := related.allocationFrame_of_writeObjectFields_other descriptor
+      otherDescriptorFound differentValue rawRead otherHeaderRead rfl fieldsInTarget
+        written
+    exact (otherRelated.allocationFrame otherHeaderRead frame)
+      |>.rebindConstructor_other differentValue
+  have promotedFrame : ∀ payload other,
+      witness.promotedTags.Contains payload other →
+      PromotedTagRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)) payload other := by
+    intro payload other promotedMapped
+    have promoted := related.promoted payload other promotedMapped
+    obtain ⟨promotedHeader, promotedHeaderRead, _, _, _, _, _, _⟩ :=
+      promoted.header
+    obtain ⟨_, promotedRawRead, _, _, _, _⟩ :=
+      MemoryState.PrefixExtension.readLiveHeader_facts state other promotedHeader
+        promotedHeaderRead
+    have differentWord : address ≠ other :=
+      related.witnessWellFormed.locationPromotionDisjoint location payload address
+        other mapped promotedMapped
+    have differentValue : address.value ≠ other.value := by
+      intro equal
+      exact differentWord (wordEq address other equal)
+    have frame := related.allocationFrame_of_writeObjectFields_other descriptor
+      promoted.descriptor differentValue rawRead promotedRawRead rfl fieldsInTarget
+        written
+    exact (promoted.allocationFrame promotedHeaderRead frame)
+      |>.rebindConstructor_other differentValue
+  exact related.setCell_rebindConstructor_of_frames info
+    (resetProtocolFieldKinds fieldKinds count) mapped found rfl finalFrontier
+      targetAfter protocolDescriptorRegion protocolDescriptorDisjoint cellFrame
+        promotedFrame
+
 /-- The protocol transition returns the same already-mapped location/address
 pair in both reuse-token representations. -/
 theorem ResetReuseProtocolRel.tokenRelated

@@ -1479,6 +1479,15 @@ and natural cells; promoted tagged representations transport as well. This is
 an explicit descriptor-shadowing law, not a monotone witness extension, and
 therefore preserves the strict lookup semantics needed by in-place reuse.
 
+W6.3ar lifts the cleared reset target to the complete heap relation.
+`setCell_rebindConstructor_of_frames` assembles a semantic cell replacement
+while changing only the target descriptor, and
+`writeObjectFields_resetPrefix` instantiates it with the concrete bulk clear.
+The resulting concrete and semantic intermediate states satisfy strict
+`LiveHeapRel` under the protocol witness, with the frontier, all descriptor
+regions, disjointness, non-target cells, and promoted tags preserved. Existing
+verified decrement refinement can now drive the released-child fold.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
