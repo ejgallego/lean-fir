@@ -855,6 +855,17 @@ next proof step is preservation: prove the checked allocator and payload
 writes extend `LiveHeapRel`, then package those results as concrete refinements
 of the W2 allocation/projection contracts.
 
+W6.1d has started with the verified word-access layer. Checked `UInt32`
+writes now have a proved byte-level postcondition: memory size is preserved,
+the four little-endian bytes decode to the original lane, and every other byte
+is framed. Successful same-address reads and disjoint 32-bit reads follow from
+that postcondition. `UInt64` accesses are implemented and proved as two
+adjacent verified 32-bit lanes, including exact round trips and a disjoint
+32-bit frame rule; concrete `Word32` object lanes inherit the same round-trip
+guarantee. The next preservation step is to compose these word rules across a
+common-header write/read, then through object allocation and payload writes to
+establish `LiveHeapRel` extension.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
