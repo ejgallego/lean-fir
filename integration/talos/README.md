@@ -123,6 +123,15 @@ the supported gate rejects oversaturation and unknown closure provenance.
 Differential coverage includes direct, captured, underapplied, and recursive
 programs, completing the planned W5 semantic-backend slices.
 
+W6 now has a frozen `wasm32-lean64` concrete data model. Object addresses and
+lanes are `i32`, source `USize` remains `i64`, constructor/capture slots are
+eight bytes, and large semantic tagged values are promoted to persistent heap
+naturals by the refinement relation. The first concrete runtime slice provides
+checked little-endian linear memory, page growth, aligned allocation, and a
+self-describing live/dead object header. The semantic Talos host remains the
+oracle while concrete operations are added and proved one vertical slice at a
+time.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 W4. A0 owns new emitter and external-engine runner paths and produces the
 first standards-consumable, host-backed Wasm artifact for the W3 corpus. It

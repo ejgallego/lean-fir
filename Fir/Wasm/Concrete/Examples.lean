@@ -1,4 +1,4 @@
-import Fir.Wasm.Concrete.Refinement
+import Fir.Wasm.Concrete.Memory
 
 namespace Fir.Wasm.Concrete
 
@@ -53,5 +53,46 @@ example : ValueRel (witness := {}) .tobject
 example : ValueRel (witness := {}) .usize
     (.word64 (18446744073709551615 : UInt64))
     (.usize (18446744073709551615 : UInt64)) := .usize
+
+def uint32RoundTrip : Except MemoryError UInt32 := do
+  let memory ← (LinearMemory.withPages 1).writeUInt32 17 4294967295
+  memory.readUInt32 17
+
+#guard match uint32RoundTrip with
+  | .ok value => value == 4294967295
+  | .error _ => false
+
+def uint64RoundTrip : Except MemoryError UInt64 := do
+  let memory ← (LinearMemory.withPages 1).writeUInt64 23 18446744073709551615
+  memory.readUInt64 23
+
+#guard match uint64RoundTrip with
+  | .ok value => value == 18446744073709551615
+  | .error _ => false
+
+#guard match (LinearMemory.withPages 1).readUInt32 wasmPageBytes with
+  | .error (.outOfBounds address bytes memoryBytes) =>
+      address == wasmPageBytes && bytes == 1 && memoryBytes == wasmPageBytes
+  | _ => false
+
+def allocatedConstructor : Except MemoryError (MemoryState × Word32) :=
+  MemoryState.initial.allocateObject .constructor 24
+    (aux0 := 3) (aux1 := 1) (aux2 := 1) (aux3 := 8)
+
+#guard match allocatedConstructor with
+  | .error _ => false
+  | .ok (state, address) =>
+      address.value == heapBase && state.heapCursor == heapBase + 56 &&
+        match state.readLiveHeader address with
+        | .error _ => false
+        | .ok header =>
+            header.kind == .constructor && header.live && !header.persistent &&
+              header.refCount == 1 && header.allocationBytes == 56 &&
+              header.aux0 == 3 && header.aux1 == 1 && header.aux2 == 1 &&
+              header.aux3 == 8
+
+#guard match MemoryState.initial.allocateObject .natural wasmPageBytes with
+  | .error _ => false
+  | .ok (state, _) => state.memory.size == 2 * wasmPageBytes
 
 end Fir.Wasm.Concrete

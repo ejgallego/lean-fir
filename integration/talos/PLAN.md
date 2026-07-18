@@ -802,6 +802,20 @@ Each slice keeps the semantic Talos runtime as the executable oracle. A
 semantic discrepancy receives a Wasm bug card before the concrete runtime is
 weakened or the source contract is changed.
 
+W6.0 is complete. The target/data-model decision, tagged-word split, promoted
+tag policy, common header, constructor/capture offsets, and ABI-indexed value
+refinement are executable Lean definitions with boundary guards and basic
+representation theorems. No W0/W2 shared contract changed.
+
+W6.1a is complete. `Fir/Wasm/Concrete/Memory.lean` adds checked little-endian
+`UInt32`, `UInt64`, and object-word loads/stores; page-sized zero growth; a
+monotone eight-byte-aligned allocator; exact common-header encoding/decoding;
+and live-header validation that distinguishes bounds, address-space,
+alignment, kind, malformed-header, and dead-object target failures. Executable
+regressions cover maximum-width round trips, exact bounds failure, a decoded
+constructor header, and memory growth. Constructor payload operations and
+their semantic refinement are the next W6.1 slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
