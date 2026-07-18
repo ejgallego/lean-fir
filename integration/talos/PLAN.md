@@ -1257,6 +1257,16 @@ cursor. The derived theorem proves `heap.length + 1` is no greater than the
 concrete cursor-derived fuel. Same-fuel recursive simulation can therefore be
 lifted to the actual public runtime entry points.
 
+W6.3s proves the operational fuel lift on the concrete side. Any successful
+`decrementReferenceOnceFuel` execution produces the identical memory state
+when rerun with a larger fuel budget. The proof covers every object-class and
+header branch and, in the count-one constructor case, lifts the induction
+hypothesis through the full left-to-right child fold while threading each
+updated memory state. Together with W6.3r's capacity theorem, this isolates
+fuel policy from the remaining same-fuel recursive simulation: that proof can
+use semantic heap fuel first and lift the concrete execution to the public
+cursor-derived budget afterward.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

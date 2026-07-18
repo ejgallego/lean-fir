@@ -17,6 +17,94 @@ theorem decrementReferenceOnceFuel_sentinel
       if check then .ok state else .error (.source .expectedObject) := by
   cases check <;> simp [decrementReferenceOnceFuel, sentinel] <;> rfl
 
+/-- Successful concrete recursive release is monotone in fuel: additional
+depth never changes the resulting memory state. -/
+theorem decrementReferenceOnceFuel_ok_mono
+    {fuel more : Nat} {state result : MemoryState} {object : Word32}
+    {check : Bool} (fuelLe : fuel ≤ more)
+    (operation : decrementReferenceOnceFuel fuel state object check = .ok result) :
+    decrementReferenceOnceFuel more state object check = .ok result := by
+  induction fuel generalizing more state result object check with
+  | zero =>
+      simp [decrementReferenceOnceFuel] at operation
+  | succ fuel ih =>
+      cases more with
+      | zero => omega
+      | succ more =>
+          have smaller : fuel ≤ more := by omega
+          cases classEq : object.classify with
+          | sentinel | immediate | invalid =>
+              simpa [decrementReferenceOnceFuel, classEq] using operation
+          | heap =>
+              cases headerEq : state.readLiveHeader object with
+              | error failure =>
+                  simp [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                    Bind.bind, Except.bind] at operation
+              | ok header =>
+                  by_cases promoted : header.isPromotedTag = true
+                  · simpa [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                      Bind.bind, Except.bind, promoted] using operation
+                  · by_cases persistent : header.persistent = true
+                    · simpa [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                        Bind.bind, Except.bind, promoted, persistent] using operation
+                    · by_cases zero : (header.refCount == 0) = true
+                      · simp [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                          Bind.bind, Except.bind, promoted, persistent, zero] at operation
+                      · by_cases above : 1 < header.refCount.toNat
+                        · simpa [decrementReferenceOnceFuel, classEq, headerEq, liftMemory,
+                            Bind.bind, Except.bind, promoted, persistent, zero, above]
+                            using operation
+                        · cases ownedEq : readOwnedReferences state object header with
+                          | error failure =>
+                              simp [decrementReferenceOnceFuel, classEq, headerEq,
+                                liftMemory, Bind.bind, Except.bind, promoted, persistent, zero,
+                                above, ownedEq] at operation
+                          | ok owned =>
+                              cases releasedEq : writeLiveHeader state object
+                                  header.forRelease with
+                              | error failure =>
+                                  simp [decrementReferenceOnceFuel, classEq, headerEq,
+                                    liftMemory, Bind.bind, Except.bind, promoted, persistent,
+                                    zero, above, ownedEq, releasedEq] at operation
+                              | ok released =>
+                                  have foldMono : ∀ (children : List Word32)
+                                      (before after : MemoryState),
+                                      children.foldlM (init := before) (fun next child =>
+                                        decrementReferenceOnceFuel fuel next child true) =
+                                          .ok after →
+                                      children.foldlM (init := before) (fun next child =>
+                                        decrementReferenceOnceFuel more next child true) =
+                                          .ok after := by
+                                    intro children
+                                    induction children with
+                                    | nil =>
+                                        intro before after folded
+                                        simpa using folded
+                                    | cons child children tailIH =>
+                                        intro before after folded
+                                        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                                          at folded ⊢
+                                        cases childEq : decrementReferenceOnceFuel fuel
+                                            before child true with
+                                        | error failure =>
+                                            rw [childEq] at folded
+                                            contradiction
+                                        | ok middle =>
+                                            rw [childEq] at folded
+                                            have childMore := ih smaller childEq
+                                            rw [childMore]
+                                            exact tailIH middle after folded
+                                  have folded : owned.foldlM (init := released) (fun next child =>
+                                      decrementReferenceOnceFuel fuel next child true) =
+                                      .ok result := by
+                                    simpa [decrementReferenceOnceFuel, classEq, headerEq,
+                                      liftMemory, Bind.bind, Except.bind, promoted, persistent,
+                                      zero, above, ownedEq, releasedEq] using operation
+                                  have foldedMore := foldMono owned released result folded
+                                  simpa [decrementReferenceOnceFuel, classEq, headerEq,
+                                    liftMemory, Bind.bind, Except.bind, promoted, persistent,
+                                    zero, above, ownedEq, releasedEq] using foldedMore
+
 /-- Type-erased ownership relation for one concrete constructor word. The ABI
 kind remains available to rule out scalar representations during recursive
 release. -/
