@@ -1527,6 +1527,16 @@ disjointness survive. The remaining step is to assemble these spatial facts,
 the W6.3au target decoder, and framed non-target cell relations around FIR's
 semantic `setCell`.
 
+W6.3aw completes that relation-level assembly.
+`setCell_ofReuseConstructorMemory` combines the W6.3au target decoder and
+W6.3av descriptor frame with the verified frontier transaction, rebuilds the
+target live cell with its retained reference count, and transports every
+other live/dead cell and promoted tag through a complete allocation frame.
+FIR's semantic cell replacement therefore restores ordinary `LiveHeapRel`
+under the replacement constructor descriptor. The remaining reuse proof only
+unfolds the public concrete and FIR operations, extracts this transaction,
+and relates their returned references.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

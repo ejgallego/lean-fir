@@ -899,6 +899,183 @@ theorem LiveHeapRel.setCell_rebindConstructor_of_frames
     apply promotedFrame payload other
     simpa using reboundMapped
 
+/-- A complete in-place transaction and matching semantic cell replacement
+restore the normal whole-heap relation under the replacement constructor
+descriptor. -/
+theorem LiveHeapRel.setCell_ofReuseConstructorMemory
+    (state : MemoryState) (memory scrubbed fieldMemory : LinearMemory)
+    (witness : RefinementWitness) (runtime : RuntimeState)
+    (location : Location) (address : Word32) (cell : HeapCell)
+    (oldInfo : LCNF.CtorInfo) (oldFieldKinds : Array AbiKind)
+    (old : ConstructorObject) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (fields : Array Word32)
+    (semanticFields : Array Value) (updateHeader : Bool)
+    (header replacement : Header)
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor oldInfo oldFieldKinds))
+    (_objectEq : cell.object = .ctor old)
+    (objectRelated : ConstructorObjectRel state witness address oldInfo
+      oldFieldKinds old)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (_headerKind : header.kind = .constructor)
+    (refCount : header.refCount.toNat = cell.rc)
+    (persistent : header.persistent = cell.persistent)
+    (cellLive : cell.live = true)
+    (replacementKind : replacement.kind = .constructor)
+    (replacementLive : replacement.live = true)
+    (replacementPersistent : replacement.persistent = false)
+    (replacementRefCount : replacement.refCount = header.refCount)
+    (replacementAllocation : replacement.allocationBytes = header.allocationBytes)
+    (replacementTag : replacement.aux0.toNat =
+      if updateHeader then info.cidx else old.tag)
+    (replacementObjectFields : replacement.aux1.toNat = info.size)
+    (replacementUSizeFields : replacement.aux2.toNat = info.usize)
+    (replacementScalarBytes : replacement.aux3.toNat = info.ssize)
+    (layoutFits : (ConstructorLayout.ofInfo info).allocationBytes ≤
+      header.allocationBytes.toNat)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (written : state.memory.reuseConstructorMemory address
+      header.allocationBytes.toNat replacement fields.toList = .ok memory)
+    (post : ReuseConstructorMemoryPost state.memory scrubbed fieldMemory memory
+      address header.allocationBytes.toNat replacement fields.toList) :
+    let semanticObject :=
+      reusedConstructorObject old info updateHeader semanticFields
+    let semanticCell : HeapCell := { cell with object := .ctor semanticObject }
+    ∃ nextRuntime,
+      setCell runtime location semanticCell = .ok nextRuntime ∧
+      LiveHeapRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info fieldKinds) nextRuntime := by
+  dsimp only
+  obtain ⟨addressHeap, rawHeaderRead, _, headerMinimum, headerAligned,
+      headerInBounds⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  obtain ⟨regionHeader, regionRead, _, _, retainedExtent⟩ :=
+    related.descriptorRegion address (.constructor oldInfo oldFieldKinds) descriptor
+  rw [rawHeaderRead] at regionRead
+  have regionHeaderEq := Except.ok.inj regionRead
+  subst regionHeader
+  have fieldsInAllocation : objectFieldAddress address.value fields.toList.length ≤
+      address.value + header.allocationBytes.toNat := by
+    have aligned := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
+    simp [ConstructorLayout.ofInfo, target] at aligned layoutFits
+    simp [objectFieldAddress, arity, target]
+    omega
+  have finalFrontier :
+      ({ state with memory } : MemoryState).FrontierInvariant :=
+    related.frontier.reuseConstructorMemory headerMinimum retainedExtent
+      fieldsInAllocation written
+  have targetObjectRelated := objectRelated.ofReuseConstructorMemory state memory
+    scrubbed fieldMemory witness address oldInfo oldFieldKinds old info fieldKinds
+      fields semanticFields updateHeader header replacement headerRead retainedExtent
+      replacementKind replacementLive replacementPersistent replacementAllocation
+      replacementTag replacementObjectFields replacementUSizeFields
+      replacementScalarBytes layoutFits arity semanticArity fieldKindsSize
+      fieldKindsValid fieldRelated post
+  have finalHeader :
+      ({ state with memory } : MemoryState).readLiveHeader address =
+        .ok replacement := by
+    unfold MemoryState.readLiveHeader
+    rw [addressHeap, post.headerRead]
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos replacementLive]
+    have checks :
+        (decide (headerBytes ≤ replacement.allocationBytes.toNat) &&
+          decide (replacement.allocationBytes.toNat % target.heapAlignment = 0) &&
+          decide (address.value + replacement.allocationBytes.toNat ≤ memory.size)) =
+            true := by
+      rw [replacementAllocation, post.size]
+      simp [headerMinimum, headerAligned, headerInBounds]
+    rw [if_pos checks]
+    rfl
+  obtain ⟨objectHeader, objectHeaderRead, _, _, objectHeaderPersistent,
+      _, _, _, _⟩ := objectRelated.header
+  rw [headerRead] at objectHeaderRead
+  have objectHeaderEq := Except.ok.inj objectHeaderRead
+  subst objectHeader
+  have cellOrdinary : cell.persistent = false :=
+    persistent.symm.trans objectHeaderPersistent
+  have targetAfter : CellRel ({ state with memory } : MemoryState)
+      (witness.rebindConstructor address info fieldKinds) address
+      { cell with object := HeapObject.ctor (reusedConstructorObject old info
+          updateHeader semanticFields) } := by
+    apply CellRel.live
+    apply LiveCellRel.constructor
+      (witness.lookup_rebindConstructor_descriptor address info fieldKinds)
+      rfl targetObjectRelated finalHeader replacementKind
+    · rw [replacementRefCount]
+      exact refCount
+    · exact replacementPersistent.trans cellOrdinary.symm
+    · simpa using cellLive
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.descriptorSpatial_of_reuseConstructorMemory info fieldKinds descriptor
+      rawHeaderRead rfl post replacementAllocation
+  have cellFrame : ∀ other otherAddress otherCell,
+      other ≠ location →
+      findCell? runtime.heap other = some otherCell →
+      witness.locations.lookup? other = some otherAddress →
+      CellRel state witness otherAddress otherCell →
+      CellRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info fieldKinds) otherAddress otherCell := by
+    intro other otherAddress otherCell otherNe _ mappedOther otherRelated
+    obtain ⟨otherDescriptor, otherDescriptorFound⟩ := otherRelated.descriptor
+    obtain ⟨otherHeader, otherHeaderRead, _, _, _⟩ :=
+      related.descriptorRegion otherAddress otherDescriptor otherDescriptorFound
+    have differentWord : address ≠ otherAddress := by
+      intro equal
+      subst otherAddress
+      have locationEq := related.witnessWellFormed.locationInjective location other
+        address mapped mappedOther
+      exact otherNe locationEq.symm
+    have differentValue : address.value ≠ otherAddress.value := by
+      intro equal
+      apply differentWord
+      cases address
+      cases otherAddress
+      simp_all
+    have frame := related.allocationFrame_of_reuseConstructorMemory_other descriptor
+      otherDescriptorFound differentValue rawHeaderRead otherHeaderRead rfl post
+    exact (otherRelated.allocationFrame otherHeaderRead frame)
+      |>.rebindConstructor_other differentValue
+  have promotedFrame : ∀ payload other,
+      witness.promotedTags.Contains payload other →
+      PromotedTagRel ({ state with memory } : MemoryState)
+        (witness.rebindConstructor address info fieldKinds) payload other := by
+    intro payload other promotedMapped
+    have promoted := related.promoted payload other promotedMapped
+    obtain ⟨promotedHeader, promotedHeaderRead, _, _, _, _, _, _⟩ :=
+      promoted.header
+    obtain ⟨_, promotedRawRead, _, _, _, _⟩ :=
+      MemoryState.PrefixExtension.readLiveHeader_facts state other promotedHeader
+        promotedHeaderRead
+    have differentWord : address ≠ other :=
+      related.witnessWellFormed.locationPromotionDisjoint location payload address
+        other mapped promotedMapped
+    have differentValue : address.value ≠ other.value := by
+      intro equal
+      apply differentWord
+      cases address
+      cases other
+      simp_all
+    have frame := related.allocationFrame_of_reuseConstructorMemory_other descriptor
+      promoted.descriptor differentValue rawHeaderRead promotedRawRead rfl post
+    exact (promoted.allocationFrame promotedHeaderRead frame)
+      |>.rebindConstructor_other differentValue
+  exact related.setCell_rebindConstructor_of_frames info fieldKinds mapped found rfl
+    finalFrontier targetAfter descriptorRegion descriptorDisjoint cellFrame
+      promotedFrame
+
 /-- A successful unique-reset prefix clear and matching semantic `setCell`
 produce a complete whole-heap relation under the protocol witness. -/
 theorem LiveHeapRel.writeObjectFields_resetPrefix
