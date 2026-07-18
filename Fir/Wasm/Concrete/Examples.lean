@@ -53,6 +53,19 @@ def incrementWorldExternal : ConcreteExternalImpl where
         | none => false
   | .ok _ => false
 
+def rejectConcreteExternal : ConcreteExternalImpl where
+  call request _ :=
+    .error (.source (.externalFailure request.name "rejected"))
+
+#guard match rejectConcreteExternal.invoke exampleExternalRequest { world := 4 } with
+  | .error failure =>
+      failure.toTrap ==
+        .source (.runtime (.externalFailure `record "rejected"))
+  | .ok _ => false
+
+#guard (ConcreteError.targetGlobal (.unknownGlobal `missing)).toTrap ==
+  .target (.global (.unknownGlobal `missing))
+
 #guard (Word32.encodeImmediate? 0).map (·.value) == some 1
 #guard (Word32.encodeImmediate? maxImmediatePayload).map (·.value) ==
   some 4294967295

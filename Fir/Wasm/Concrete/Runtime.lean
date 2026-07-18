@@ -26,6 +26,33 @@ inductive ConcreteError where
   | targetGlobal (failure : ConcreteGlobalError)
   deriving BEq, Repr
 
+/-- Source-origin failures before address representations are translated back
+through the refinement witness. -/
+inductive ConcreteSourceFailure where
+  | runtime (fault : RuntimeFault)
+  | address (fault : ConcreteAddressFault)
+  deriving BEq, Repr
+
+/-- Backend-only failures have no corresponding successful source step. -/
+inductive ConcreteTargetFailure where
+  | memory (failure : MemoryError)
+  | global (failure : ConcreteGlobalError)
+  deriving BEq, Repr
+
+/-- Lossless structured trap boundary for the concrete runtime. The outer
+constructor records whether the source program or target machinery failed;
+the payload retains the complete checked failure. -/
+inductive ConcreteTrap where
+  | source (failure : ConcreteSourceFailure)
+  | target (failure : ConcreteTargetFailure)
+  deriving BEq, Repr
+
+def ConcreteError.toTrap : ConcreteError → ConcreteTrap
+  | .source fault => .source (.runtime fault)
+  | .sourceAddress fault => .source (.address fault)
+  | .target failure => .target (.memory failure)
+  | .targetGlobal failure => .target (.global failure)
+
 def liftMemory {α : Type} : Except MemoryError α → Except ConcreteError α
   | .ok value => .ok value
   | .error failure => .error (.target failure)

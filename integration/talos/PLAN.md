@@ -1714,6 +1714,17 @@ the result lane refines the semantic value. The next W6.5 slice freezes the
 source/target fault encoding and proves failing host calls cannot masquerade
 as successful effects.
 
+W6.5b freezes that fault boundary. `ConcreteError.toTrap` is a lossless,
+injective classification into source-origin failures and backend-only target
+failures; memory and generated-global faults remain distinct target payloads.
+Address-indexed source failures are related back to exact FIR runtime faults
+through `HeapReferenceRel`, so a physical reference-count underflow denotes
+the corresponding semantic location rather than leaking a Wasm address into
+source observations. A failed concrete external invocation returns no
+post-state at all, and the exact source-failure theorem agrees with the
+semantic `ExternalImpl` error. The next slice audits the remaining successful
+operation/fault matrix before W6.6 composition.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
