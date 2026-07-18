@@ -1589,6 +1589,13 @@ extends the fresh closure witness, and establishes `ClosureObjectRel` for the
 semantic capture array. The next slice adds closures to `LiveCellRel` and
 transports every old mapped cell through this fresh prefix extension.
 
+W6.4d supplies the frame machinery needed for that whole-heap lift. A public
+closure allocation is now a proved `PrefixExtension`, checked metadata and
+typed capture reads transport through any such extension, and
+`ClosureObjectRel` is monotone in both concrete prefix growth and proof-witness
+growth. This isolates the byte-level framing from the next slice's structural
+addition of closures to `LiveCellRel` and its ownership/refcount cases.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

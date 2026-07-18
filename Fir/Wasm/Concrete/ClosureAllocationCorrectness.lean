@@ -671,4 +671,182 @@ theorem allocateClosure_objectRel
       (captureRelated index kind lane value kindAt laneAt valueAt).witnessExtension
         extension⟩
 
+/-- A public closure allocation preserves every byte below the old frontier,
+so all previously decoded objects can be transported uniformly. -/
+theorem allocateClosure_prefixExtension
+    (state result : MemoryState) (dispatch : ClosureDispatchTable)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (captures : Array LaneValue) (address : Word32) (targetId : UInt32)
+    (valid : state.FrontierInvariant)
+    (count : captureKinds.size = captures.size)
+    (capturesLtArity : captures.size < arity)
+    (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (allocated : allocateClosure state dispatch function arity captureKinds captures =
+      .ok (result, address)) :
+    state.PrefixExtension result := by
+  let layout := ClosureLayout.ofCaptures captureKinds
+  let captureList := captureKinds.toList.zip captures.toList
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    simp only [ClosureLayout.ofCaptures]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    have aligned := ClosureLayout.ofCaptures_aligned captureKinds
+    simpa only [layout, target] using aligned
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  obtain ⟨middle, objectAllocation, captureWrite, cursorEq⟩ :=
+    allocateClosure_decompose state result dispatch function arity captureKinds
+      captures address targetId count capturesLtArity targetIdEq arityFits fixedFits
+      allocated
+  have objectExtension := valid.allocateObject_prefixExtension objectAllocation
+  have middleValid := valid.allocateObject objectAllocation
+  have captureListLength : captureList.length = captures.size := by
+    simp [captureList, count]
+  have listTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      captureList[index]? = some (kind, lane) →
+      lane.valueType = kind.valueType := by
+    intro index kind lane atIndex
+    obtain ⟨kindAt, laneAt⟩ := Array.lookup_zip_toList atIndex
+    exact captureTyped index kind lane kindAt laneAt
+  have objectExtent := MemoryState.allocateObject_extent objectAllocation
+  have captureEnd : closureCaptureAddress address.value
+      (0 + captureList.length) ≤ middle.memory.size := by
+    have endAtCursor : closureCaptureAddress address.value captures.size ≤
+        middle.heapCursor := by
+      unfold closureCaptureAddress
+      rw [objectExtent, allocationEq]
+      dsimp only [layout, ClosureLayout.ofCaptures]
+      rw [count]
+      simpa only [Nat.add_assoc] using Nat.add_le_add_left
+        (align8_ge (headerBytes + target.semanticSlotBytes * captures.size))
+        address.value
+    rw [Nat.zero_add, captureListLength]
+    exact Nat.le_trans endAtCursor middleValid.cursorInBounds
+  have capturePost := LinearMemory.writeClosureCaptures_post middle.memory
+    result.memory address.value 0 captureList listTyped captureEnd captureWrite
+  have freshAddress := valid.allocateObject_address objectAllocation
+  refine {
+    cursor := by simpa [cursorEq] using objectExtension.cursor
+    memorySize := by
+      calc
+        state.memory.size ≤ middle.memory.size := objectExtension.memorySize
+        _ = result.memory.size := capturePost.size.symm
+    readByte := ?_ }
+  intro byte beforeCursor
+  calc
+    result.memory.readByte byte = middle.memory.readByte byte :=
+      capturePost.byteFrame byte (.inl (by
+        simp [closureCaptureAddress, target, freshAddress]
+        omega))
+    _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
+
+/-- A typed closure slot wholly below the old frontier reads identically
+through a fresh prefix extension. -/
+theorem MemoryState.PrefixExtension.readClosureCapture
+    {before after : MemoryState} (extension : before.PrefixExtension after)
+    (address : Nat) (kind : AbiKind)
+    (owned : address + 8 ≤ before.heapCursor) :
+    after.memory.readClosureCapture address kind =
+      before.memory.readClosureCapture address kind := by
+  apply LinearMemory.readClosureCapture_of_byteFrame
+  intro offset offsetLt
+  exact extension.readByte (address + offset) (by omega)
+
+/-- Checked closure metadata is stable when its common header lies in the
+preserved prefix. -/
+theorem MemoryState.PrefixExtension.readClosureMetadata
+    {before after : MemoryState} (extension : before.PrefixExtension after)
+    (dispatch : ClosureDispatchTable) (address : Word32)
+    (headerOwned : address.value + headerBytes ≤ before.heapCursor)
+    (metadata : ClosureMetadata)
+    (read : Fir.Wasm.Concrete.readClosureMetadata before dispatch address =
+      .ok metadata) :
+    Fir.Wasm.Concrete.readClosureMetadata after dispatch address = .ok metadata := by
+  by_cases heap : address.classify = .heap
+  · cases headerResult : before.readLiveHeader address with
+    | error failure =>
+        unfold Fir.Wasm.Concrete.readClosureMetadata readClosureHeader at read
+        simp only [heap, if_true] at read
+        rw [headerResult] at read
+        change Except.error (ConcreteError.target failure) = .ok metadata at read
+        contradiction
+    | ok header =>
+        have headerAfter := extension.readLiveHeader_eq_ok address header
+          headerOwned headerResult
+        unfold Fir.Wasm.Concrete.readClosureMetadata readClosureHeader at read ⊢
+        simpa [heap, headerResult, headerAfter, liftMemory] using read
+  · unfold Fir.Wasm.Concrete.readClosureMetadata readClosureHeader at read
+    simp only [heap, if_false] at read
+    change Except.error (ConcreteError.source RuntimeFault.expectedClosure) =
+      .ok metadata at read
+    contradiction
+
+/-- Local closure decoding is stable through fresh allocation once the
+header and complete capture extent are owned by the old state. -/
+theorem ClosureObjectRel.prefixExtension
+    {before after : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {address : Word32}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {semantic : Array Value}
+    (related : ClosureObjectRel before witness dispatch address function arity
+      captureKinds semantic)
+    (extension : before.PrefixExtension after)
+    (headerOwned : address.value + headerBytes ≤ before.heapCursor)
+    (capturesOwned : closureCaptureAddress address.value semantic.size ≤
+      before.heapCursor) :
+    ClosureObjectRel after witness dispatch address function arity captureKinds
+      semantic := by
+  refine {
+    descriptor := related.descriptor
+    metadata := ?_
+    captureKindsSize := related.captureKindsSize
+    captures := ?_ }
+  · obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
+        metadataFixed⟩ := related.metadata
+    refine ⟨metadata, ?_, metadataFunction, metadataArity, metadataFixed⟩
+    exact extension.readClosureMetadata dispatch address headerOwned metadata
+      metadataRead
+  · intro index kind value kindAt valueAt
+    obtain ⟨lane, readBefore, laneRelated⟩ :=
+      related.captures index kind value kindAt valueAt
+    obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+    have slotOwned : closureCaptureAddress address.value index + 8 ≤
+        before.heapCursor := by
+      simp [closureCaptureAddress, target] at capturesOwned ⊢
+      omega
+    refine ⟨lane, ?_, laneRelated⟩
+    rw [extension.readClosureCapture _ kind slotOwned]
+    exact readBefore
+
+/-- Local closure decoding is monotone in proof-only witness metadata. -/
+theorem ClosureObjectRel.witnessExtension
+    {state : MemoryState} {before after : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {address : Word32}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {semantic : Array Value}
+    (related : ClosureObjectRel state before dispatch address function arity
+      captureKinds semantic)
+    (extension : before.Extends after) :
+    ClosureObjectRel state after dispatch address function arity captureKinds
+      semantic := by
+  refine {
+    descriptor := extension.descriptors _ _ related.descriptor
+    metadata := related.metadata
+    captureKindsSize := related.captureKindsSize
+    captures := ?_ }
+  intro index kind value kindAt valueAt
+  obtain ⟨lane, read, laneRelated⟩ :=
+    related.captures index kind value kindAt valueAt
+  exact ⟨lane, read, laneRelated.witnessExtension extension⟩
+
 end Fir.Wasm.Concrete
