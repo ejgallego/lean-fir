@@ -562,6 +562,34 @@ theorem alphaFoldScopedCaseBoundary :
   intro run
   exact alphaFoldScopedCodeFactor.factored
 
+/-- The concrete case factor, exposed through the hygiene-indexed relation
+consumed by generic recursive traversal. -/
+theorem alphaFoldFactoredOnAlphaReflexive :
+    ScopedCodeFactoredOnAlphaReflexive alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldCode alphaFoldExpected := by
+  intro reflexive
+  exact alphaFoldScopedCodeFactor.factored
+
+def nestedAlphaFoldCode : LCNF.Code .impure :=
+  .setTag x 0 alphaFoldCode
+
+def nestedAlphaFoldExpected : LCNF.Code .impure :=
+  .setTag x 0 alphaFoldExpected
+
+def nestedAlphaFoldIntermediate : LCNF.Code .impure :=
+  .setTag x 0 alphaFoldIntermediate
+
+#guard shadowCode? 3 nestedAlphaFoldCode == some nestedAlphaFoldExpected
+
+/-- A non-case parent lifts the alpha-changing case factor through the proved
+generic closure laws. Alpha reflexivity supplies the scoped `setTag` operand
+when this relation is consumed. -/
+theorem nestedAlphaFoldScopedTraversal :
+    ScopedCodeFactoredOnAlphaReflexive alphaFoldValidCase alphaFoldScopeIndex
+      nestedAlphaFoldCode nestedAlphaFoldExpected := by
+  exact scopedCodeFactoredOnAlphaReflexive_traversalLaws.setTag
+    alphaFoldFactoredOnAlphaReflexive
+
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] []

@@ -91,6 +91,12 @@ no `LawfulBEq` instance with which to turn that Boolean result into a kernel
 syntax equality. This is additional evidence for retaining the explicit
 compiler-correspondence boundary rather than adding an axiom.
 
+The downstream non-case traversal gap is also closed:
+`ScopedCodeFactoredOnAlphaReflexive` consumes explicit hygiene evidence and
+lifts the structural/alpha factor through every recursive non-case
+constructor. The only generic shadow obligation left is therefore the
+universal scoped case-node contract itself.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -123,9 +129,9 @@ none
 ## Resolution and regression
 
 Unresolved, but narrowed to compiler correspondence and the universal scoped
-case contract. Downstream structural-then-alpha composition and the recursive
-scope-indexed boundary are reusable. Once the kernels or graph theorems are
-public, prove `filterUnreachable` equal to `removeUnreachable`, connect
-`addDefaultAlt` to `ScopedCodeBifactor`, discharge the universal
-`ScopedCaseBoundarySound`, and replace executable actual-vs-shadow checks with
-a kernel correspondence theorem.
+case contract. Downstream structural-then-alpha composition, scope-indexed
+non-case traversal, and its hygiene discipline are reusable. Once the kernels
+or graph theorems are public, prove `filterUnreachable` equal to
+`removeUnreachable`, connect `addDefaultAlt` to `ScopedCodeBifactor`, discharge
+the universal `ScopedCaseBoundarySound`, and replace executable
+actual-vs-shadow checks with a kernel correspondence theorem.

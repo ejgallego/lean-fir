@@ -79,14 +79,22 @@ a structural intermediate followed by `CodeRelated` in both orientations.
 this case contract directly, and the declaration-level alpha proof consumes
 the factor's two scoped alpha fields.
 
+`ScopedCodeFactoredOnAlphaReflexive` now makes declaration hygiene an explicit
+premise instead of asserting that arbitrary indices are scoped. From that
+evidence, `scopedCodeFactoredOnAlphaReflexive_traversalLaws` proves closure
+through every non-case constructor, including ordinary binders, parameter
+lists, join bodies and continuations, and all impure ownership instructions.
+`nestedAlphaFoldScopedTraversal` is the regression that lifts the
+alpha-changing case factor through a non-case parent using those generic laws.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
 of a compiler miscompilation. The concrete alpha-default-folding fixture is
 covered both by the composed whole-program theorem and by the new scoped
-case-node contract. Arbitrary alpha-folding shadow results still require
-closure laws for `ScopedCodeFactored` under declaration-wide hygiene, plus a
-universal scoped case-boundary proof.
+case-node contract. Closure through surrounding recursive syntax is now
+generic under explicit alpha-reflexivity evidence. Arbitrary alpha-folding
+shadow results still require a universal scoped case-boundary proof.
 
 ## Classification and triage
 
@@ -116,9 +124,8 @@ equivalence. `SimpCaseAlphaBridge` makes structural-then-alpha composition
 generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
 The scope-indexed case-boundary interface and concrete alpha-fold regression
-are now implemented. The card stays confirmed for arbitrary recursive
-compiler traversal until declaration hygiene yields
-`ScopedTraversalLaws (ScopedCodeFactored validCase)` and every shadow case
-result satisfies the universal `ScopedCaseBoundarySound` contract. Connecting
-that shadow theorem to the actual private pass remains the separate upstream
-proof-interface issue.
+are now implemented, and explicit hygiene supplies the full non-case
+traversal-closure laws. The card stays confirmed for arbitrary recursive
+compiler traversal until every shadow case result satisfies the universal
+`ScopedCaseBoundarySound` contract. Connecting that shadow theorem to the
+actual private pass remains the separate upstream proof-interface issue.
