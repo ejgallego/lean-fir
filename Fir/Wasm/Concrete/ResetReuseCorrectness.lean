@@ -318,6 +318,189 @@ theorem ConstructorObjectRel.ofReuseConstructorMemory
     simp [replacementObjectFields, replacementUSizeFields, indexLt, offset,
       usizeRead, liftMemory]
 
+/-- The complete in-place transaction frames every byte of a disjoint
+allocation. Unlike the unpublished scrub and field-write steps, this theorem
+uses the final transaction postcondition directly. -/
+theorem MemoryState.AllocationFrame.ofReuseConstructorMemoryPost
+    {before after : MemoryState} {targetAddress otherAddress : Word32}
+    {targetBytes otherBytes : Nat} {scrubbed fieldMemory memory : LinearMemory}
+    {replacement : Header} {fields : List Word32}
+    (resultEq : after = { before with memory })
+    (post : ReuseConstructorMemoryPost before.memory scrubbed fieldMemory memory
+      targetAddress targetBytes replacement fields)
+    (disjoint : targetAddress.value + targetBytes ≤ otherAddress.value ∨
+      otherAddress.value + otherBytes ≤ targetAddress.value) :
+    before.AllocationFrame after otherAddress otherBytes := by
+  subst after
+  refine ⟨rfl, post.size, ?_⟩
+  intro offset offsetLt
+  apply post.frame
+  cases disjoint with
+  | inl targetBefore => right; omega
+  | inr otherBefore => left; omega
+
+/-- The global descriptor invariant supplies the disjointness needed to frame
+one non-target allocation through the complete in-place reuse transaction. -/
+theorem LiveHeapRel.allocationFrame_of_reuseConstructorMemory_other
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress otherAddress : Word32}
+    {targetDescriptor otherDescriptor : AllocationDescriptor}
+    {targetHeader otherHeader replacement : Header}
+    {scrubbed fieldMemory memory : LinearMemory} {fields : List Word32}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound : witness.descriptors.lookup? targetAddress =
+      some targetDescriptor)
+    (otherFound : witness.descriptors.lookup? otherAddress =
+      some otherDescriptor)
+    (different : targetAddress.value ≠ otherAddress.value)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (otherRead : Header.read before.memory otherAddress = .ok otherHeader)
+    (resultEq : after = { before with memory })
+    (post : ReuseConstructorMemoryPost before.memory scrubbed fieldMemory memory
+      targetAddress targetHeader.allocationBytes.toNat replacement fields) :
+    before.AllocationFrame after otherAddress
+      otherHeader.allocationBytes.toNat := by
+  obtain ⟨regionHeader, regionRead, _, _, _⟩ :=
+    related.descriptorRegion targetAddress targetDescriptor targetFound
+  rw [targetRead] at regionRead
+  have headerEq := Except.ok.inj regionRead
+  subst regionHeader
+  have disjoint := related.descriptorDisjoint targetAddress otherAddress
+    targetDescriptor otherDescriptor targetFound otherFound different targetHeader
+      otherHeader targetRead otherRead
+  exact .ofReuseConstructorMemoryPost resultEq post disjoint
+
+/-- Publishing a replacement header with the same retained extent preserves
+all descriptor regions and pairwise disjointness while rebinding the target's
+active constructor descriptor. -/
+theorem LiveHeapRel.descriptorSpatial_of_reuseConstructorMemory
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor} {targetHeader replacement : Header}
+    {scrubbed fieldMemory memory : LinearMemory} {fields : List Word32}
+    (newInfo : LCNF.CtorInfo) (newFieldKinds : Array AbiKind)
+    (related : LiveHeapRel before witness runtime)
+    (targetFound : witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (resultEq : after = { before with memory })
+    (post : ReuseConstructorMemoryPost before.memory scrubbed fieldMemory memory
+      targetAddress targetHeader.allocationBytes.toNat replacement fields)
+    (sameExtent : replacement.allocationBytes = targetHeader.allocationBytes) :
+    (∀ address descriptor,
+      (witness.rebindConstructor targetAddress newInfo newFieldKinds).descriptors.lookup?
+          address = some descriptor →
+      ∃ header,
+        Header.read after.memory address = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        address.value + header.allocationBytes.toNat ≤ after.heapCursor) ∧
+    (∀ left right leftDescriptor rightDescriptor,
+      (witness.rebindConstructor targetAddress newInfo newFieldKinds).descriptors.lookup?
+          left = some leftDescriptor →
+      (witness.rebindConstructor targetAddress newInfo newFieldKinds).descriptors.lookup?
+          right = some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read after.memory left = .ok leftHeader →
+        Header.read after.memory right = .ok rightHeader →
+        left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value) := by
+  have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
+    intro left right equal
+    cases left
+    cases right
+    simp_all
+  obtain ⟨regionHeader, regionRead, targetMinimum, targetAligned, targetExtent⟩ :=
+    related.descriptorRegion targetAddress targetDescriptor targetFound
+  rw [targetRead] at regionRead
+  have regionHeaderEq := Except.ok.inj regionRead
+  subst regionHeader
+  have targetReadAfter : Header.read after.memory targetAddress = .ok replacement := by
+    rw [resultEq]
+    exact post.headerRead
+  have replacementMinimum : headerBytes ≤ replacement.allocationBytes.toNat := by
+    rw [sameExtent]
+    exact targetMinimum
+  have replacementAligned :
+      replacement.allocationBytes.toNat % target.heapAlignment = 0 := by
+    rw [sameExtent]
+    exact targetAligned
+  have replacementExtent :
+      targetAddress.value + replacement.allocationBytes.toNat ≤ after.heapCursor := by
+    rw [sameExtent, resultEq]
+    exact targetExtent
+  refine ⟨?_, ?_⟩
+  · intro address descriptor found
+    by_cases different : targetAddress.value ≠ address.value
+    · rw [witness.lookup_rebindConstructor_descriptor_other targetAddress address
+        newInfo newFieldKinds different] at found
+      obtain ⟨header, headerRead, minimum, aligned, extent⟩ :=
+        related.descriptorRegion address descriptor found
+      have frame := related.allocationFrame_of_reuseConstructorMemory_other
+        targetFound found different targetRead headerRead resultEq post
+      exact ⟨header, by rw [frame.readHeader minimum]; exact headerRead,
+        minimum, aligned, by rw [frame.cursor]; exact extent⟩
+    · have sameValue : targetAddress.value = address.value := by omega
+      have addressEq : address = targetAddress :=
+        wordEq address targetAddress sameValue.symm
+      subst address
+      exact ⟨replacement, targetReadAfter, replacementMinimum,
+        replacementAligned, replacementExtent⟩
+  · intro left right leftDescriptor rightDescriptor leftFound rightFound different
+      leftHeader rightHeader leftRead rightRead
+    by_cases leftTarget : targetAddress.value = left.value
+    · have rightTarget : targetAddress.value ≠ right.value := by
+        intro rightEq
+        exact different (leftTarget.symm.trans rightEq)
+      have leftEq : left = targetAddress := wordEq left targetAddress leftTarget.symm
+      subst left
+      rw [targetReadAfter] at leftRead
+      have leftHeaderEq := Except.ok.inj leftRead
+      subst leftHeader
+      rw [witness.lookup_rebindConstructor_descriptor_other targetAddress right
+        newInfo newFieldKinds rightTarget] at rightFound
+      obtain ⟨oldRightHeader, oldRightRead, rightMinimum, _, _⟩ :=
+        related.descriptorRegion right rightDescriptor rightFound
+      have frame := related.allocationFrame_of_reuseConstructorMemory_other
+        targetFound rightFound rightTarget targetRead oldRightRead resultEq post
+      rw [frame.readHeader rightMinimum] at rightRead
+      simpa [sameExtent] using related.descriptorDisjoint targetAddress right
+        targetDescriptor rightDescriptor targetFound rightFound rightTarget targetHeader
+          rightHeader targetRead rightRead
+    · by_cases rightTarget : targetAddress.value = right.value
+      · have rightEq : right = targetAddress :=
+          wordEq right targetAddress rightTarget.symm
+        subst right
+        rw [targetReadAfter] at rightRead
+        have rightHeaderEq := Except.ok.inj rightRead
+        subst rightHeader
+        rw [witness.lookup_rebindConstructor_descriptor_other targetAddress left
+          newInfo newFieldKinds leftTarget] at leftFound
+        obtain ⟨oldLeftHeader, oldLeftRead, leftMinimum, _, _⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        have frame := related.allocationFrame_of_reuseConstructorMemory_other
+          targetFound leftFound leftTarget targetRead oldLeftRead resultEq post
+        rw [frame.readHeader leftMinimum] at leftRead
+        simpa [sameExtent] using related.descriptorDisjoint left targetAddress
+          leftDescriptor targetDescriptor leftFound targetFound (Ne.symm leftTarget)
+            leftHeader targetHeader leftRead targetRead
+      · rw [witness.lookup_rebindConstructor_descriptor_other targetAddress left
+          newInfo newFieldKinds leftTarget] at leftFound
+        rw [witness.lookup_rebindConstructor_descriptor_other targetAddress right
+          newInfo newFieldKinds rightTarget] at rightFound
+        obtain ⟨oldLeftHeader, oldLeftRead, leftMinimum, _, _⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        obtain ⟨oldRightHeader, oldRightRead, rightMinimum, _, _⟩ :=
+          related.descriptorRegion right rightDescriptor rightFound
+        have leftFrame := related.allocationFrame_of_reuseConstructorMemory_other
+          targetFound leftFound leftTarget targetRead oldLeftRead resultEq post
+        have rightFrame := related.allocationFrame_of_reuseConstructorMemory_other
+          targetFound rightFound rightTarget targetRead oldRightRead resultEq post
+        rw [leftFrame.readHeader leftMinimum] at leftRead
+        rw [rightFrame.readHeader rightMinimum] at rightRead
+        exact related.descriptorDisjoint left right leftDescriptor rightDescriptor
+          leftFound rightFound different leftHeader rightHeader leftRead rightRead
+
 /-- Clearing a bounded concrete prefix establishes the normal constructor
 relation under reset's protocol-only descriptor. All non-object observations
 are framed; object slots split into canonical tagged-zero prefix values and

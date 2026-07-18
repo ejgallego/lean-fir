@@ -1516,6 +1516,17 @@ active layout bounded by the retained capacity under the ordinary rebound
 descriptor. The next slice frames this local result across the complete heap
 and semantic `setCell` step.
 
+W6.3av proves the spatial half of that complete-heap lift.
+`ofReuseConstructorMemoryPost` frames every byte of a disjoint retained
+allocation through the final transaction, and the `LiveHeapRel` wrappers use
+descriptor disjointness to preserve all non-target headers.
+`descriptorSpatial_of_reuseConstructorMemory` then publishes the replacement
+header at the target with exactly the old physical extent while rebinding only
+its active constructor descriptor; complete descriptor regions and pairwise
+disjointness survive. The remaining step is to assemble these spatial facts,
+the W6.3au target decoder, and framed non-target cell relations around FIR's
+semantic `setCell`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
