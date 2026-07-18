@@ -573,6 +573,41 @@ def deleteObject (state : MemoryState) (object : Word32) :
     throw (.source .expectedHeapReference)
   writeLiveHeader state object header.forRelease
 
+/-- Canonical concrete word for semantic tagged zero. Reset writes this into
+cleared object slots; word zero remains reserved for erased values and empty
+reuse tokens. -/
+def taggedZero : Word32 :=
+  Word32.encodeImmediate 0 (by decide)
+
+/-- Reset one object for possible constructor reuse. Tagged values and shared
+heap cells return the empty token. A unique constructor preserves its
+allocation, snapshots and clears the requested object-field prefix, releases
+the old references in order, and returns its address as the reuse token. -/
+def resetObject (state : MemoryState) (count : Nat) (object : Word32) :
+    Except ConcreteError (MemoryState × Word32) := do
+  match object.classify with
+  | .immediate => return (state, Word32.zero)
+  | .heap =>
+      let header ← liftMemory <| state.readLiveHeader object
+      if header.isPromotedTag || header.persistent || header.refCount != 1 then
+        let state ← decrementReferenceOnce state object true
+        return (state, Word32.zero)
+      unless header.kind == .constructor do
+        throw (.source .expectedConstructor)
+      let size := header.aux1.toNat
+      if count > size then
+        throw (.source (.objectFieldOutOfBounds count size))
+      let owned ← (List.range count).mapM fun index =>
+        readObjectField state object index
+      let memory ← liftMemory <|
+        writeObjectFields state.memory object.value 0
+          (List.replicate count taggedZero)
+      let state := { state with memory }
+      let state ← owned.foldlM (init := state) fun state child =>
+        decrementReferenceOnce state child true
+      return (state, object)
+  | .sentinel | .invalid => throw (.source .expectedObject)
+
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
     (fits : payload.toNat ≤ maxImmediatePayload) :
     encodeTagged state payload =

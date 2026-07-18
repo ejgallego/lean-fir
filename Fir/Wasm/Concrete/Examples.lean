@@ -315,6 +315,28 @@ checked increments are no-ops and unchecked increments reject them. -/
       | _, _, _, _ => false
   | _, _ => false
 
+/- Reset distinguishes its empty token from semantic tagged zero: immediate,
+promoted, and shared objects return word zero, while cleared constructor slots
+contain the encoded tagged-zero word one. -/
+#guard match smallTagged, promotedTagged, incrementedBoxedUInt64Max with
+  | .ok (immediateState, immediate), .ok (promotedState, promoted),
+      .ok (sharedState, shared) =>
+      match resetObject immediateState 0 immediate,
+          resetObject promotedState 0 promoted,
+          resetObject sharedState 0 shared with
+      | .ok (immediateResult, immediateToken),
+          .ok (promotedResult, promotedToken),
+          .ok (sharedResult, sharedToken) =>
+          immediateToken == Word32.zero && promotedToken == Word32.zero &&
+            sharedToken == Word32.zero &&
+            immediateResult.heapCursor == immediateState.heapCursor &&
+            promotedResult.heapCursor == promotedState.heapCursor &&
+            match sharedResult.readLiveHeader shared with
+            | .ok header => header.refCount == 2
+            | .error _ => false
+      | _, _, _ => false
+  | _, _, _ => false
+
 #guard match smallTagged, promotedTagged with
   | .ok (immediateState, immediate), .ok (promotedState, promoted) =>
       match decrementReferenceOnce immediateState immediate true,
@@ -387,6 +409,21 @@ def emptyConcreteInfo : LCNF.CtorInfo := {
 def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
   allocateConstructor MemoryState.initial mixedConstructorInfo
     #[Word32.encodeImmediate 11 (by decide)]
+
+def resetMixedConstructor : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← concreteMixedConstructor
+  let (state, token) ← resetObject state 1 object
+  return (state, token)
+
+#guard match resetMixedConstructor with
+  | .error _ => false
+  | .ok (state, token) =>
+      token.value == heapBase &&
+        match state.readLiveHeader token, readObjectField state token 0 with
+        | .ok header, .ok field =>
+            header.kind == .constructor && header.refCount == 1 &&
+              field == taggedZero && taggedZero.value == 1
+        | _, _ => false
 
 /- Actual heap recursion still consumes fuel and faults at depth zero. -/
 #guard match concreteMixedConstructor with

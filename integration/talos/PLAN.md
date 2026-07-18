@@ -1341,6 +1341,16 @@ allocation and relates it to FIR `deleteValue`'s zero-count/dead update.
 Executable guards cover the successful box deletion and both tagged rejection
 paths. Reset and reuse are now the remaining W6.3 runtime operations.
 
+W6.3ab adds the checked concrete reset engine and closes its empty-token
+paths. Immediate and promoted tags leave memory unchanged; non-unique ordinary
+heap cells run the already-verified public decrement and return word zero,
+which is related to FIR's `reuseToken none`. The unique constructor path now
+snapshots the requested ownership prefix, writes encoded tagged zero (word
+one, deliberately distinct from the empty-token/erased sentinel), releases
+the old references in order, and returns the allocation address. Executable
+guards cover all three empty-token cases and the unique transition. The next
+slice proves that prefix write and child fold preserve `LiveHeapRel`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
