@@ -41,6 +41,19 @@ def writeByte (memory : LinearMemory) (address : Nat) (value : UInt8) :
   else
     .error (.outOfBounds address 1 memory.size)
 
+private def byte16 (value : UInt16) (shift : Nat) : UInt8 :=
+  (value >>> UInt16.ofNat shift).toUInt8
+
+def readUInt16 (memory : LinearMemory) (address : Nat) : Except MemoryError UInt16 := do
+  let b0 ← memory.readByte address
+  let b1 ← memory.readByte (address + 1)
+  return b0.toUInt16 + b1.toUInt16 * 256
+
+def writeUInt16 (memory : LinearMemory) (address : Nat) (value : UInt16) :
+    Except MemoryError LinearMemory := do
+  let memory ← memory.writeByte address (byte16 value 0)
+  memory.writeByte (address + 1) (byte16 value 8)
+
 private def byte32 (value : UInt32) (shift : Nat) : UInt8 :=
   (value >>> UInt32.ofNat shift).toUInt8
 
@@ -107,6 +120,62 @@ theorem readByte_set_other (memory : LinearMemory) (address other : Nat)
     readByte (memory.set address value inBounds) other = readByte memory other := by
   by_cases otherInBounds : other < memory.size <;>
     simp [readByte, otherInBounds, different]
+
+private theorem assembleByte16 (value : UInt16) :
+    (byte16 value 0).toUInt16 + (byte16 value 8).toUInt16 * 256 = value := by
+  simp [byte16]
+  bv_decide
+
+/-- A successful 16-bit write installs both little-endian bytes, preserves
+memory size, and frames every other byte. -/
+theorem writeUInt16_spec (memory : LinearMemory) (address : Nat) (value : UInt16)
+    (inBounds : address + 1 < memory.size) :
+    ∃ result,
+      writeUInt16 memory address value = .ok result ∧
+      result.size = memory.size ∧
+      readByte result address = .ok (byte16 value 0) ∧
+      readByte result (address + 1) = .ok (byte16 value 8) ∧
+      ∀ other, address ≠ other → address + 1 ≠ other →
+        readByte result other = readByte memory other := by
+  have h0 : address < memory.size := by omega
+  let m0 := memory.set address (byte16 value 0) h0
+  have h1 : address + 1 < m0.size := by simp [m0]; omega
+  let result := m0.set (address + 1) (byte16 value 8) h1
+  refine ⟨result, ?_, ?_, ?_, ?_, ?_⟩
+  · unfold writeUInt16
+    rw [show writeByte memory address (byte16 value 0) = .ok m0 by
+      simp [writeByte, h0, m0]]
+    exact show writeByte m0 (address + 1) (byte16 value 8) = .ok result by
+      simp [writeByte, h1, result]
+  · simp [result, m0]
+  · simp [result, m0, readByte]
+  · simp [result, m0, readByte]
+  · intro other ne0 ne1
+    rw [readByte_set_other m0 (address + 1) other _ h1 ne1]
+    exact readByte_set_other memory address other _ h0 ne0
+
+theorem readByte_of_writeUInt16_eq_ok_other (memory result : LinearMemory)
+    (address : Nat) (value : UInt16) (inBounds : address + 1 < memory.size)
+    (written : writeUInt16 memory address value = .ok result) (other : Nat)
+    (ne0 : address ≠ other) (ne1 : address + 1 ≠ other) :
+    readByte result other = readByte memory other := by
+  obtain ⟨actual, actualWrite, _, _, _, frame⟩ :=
+    writeUInt16_spec memory address value inBounds
+  rw [actualWrite] at written
+  cases written
+  exact frame other ne0 ne1
+
+theorem readUInt16_of_writeUInt16_eq_ok (memory result : LinearMemory)
+    (address : Nat) (value : UInt16) (inBounds : address + 1 < memory.size)
+    (written : writeUInt16 memory address value = .ok result) :
+    readUInt16 result address = .ok value := by
+  obtain ⟨actual, actualWrite, _, b0, b1, _⟩ :=
+    writeUInt16_spec memory address value inBounds
+  rw [actualWrite] at written
+  cases written
+  unfold readUInt16
+  rw [b0, b1]
+  exact congrArg Except.ok (assembleByte16 value)
 
 private theorem assembleByte32 (value : UInt32) :
     (byte32 value 0).toUInt32 + (byte32 value 8).toUInt32 * 256 +

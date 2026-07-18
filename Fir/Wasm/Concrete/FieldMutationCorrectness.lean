@@ -80,6 +80,11 @@ theorem ConstructorObjectRel.writeUSizeField
     rw [LinearMemory.readByte_of_writeUInt32_eq_ok state.memory middle offset
       value.toUInt32 (by omega) lowWrite other
       (by omega) (by omega) (by omega) (by omega)]
+  have readUInt16Frame (other : Nat) (afterField : offset + 7 < other) :
+      memory.readUInt16 other = state.memory.readUInt16 other := by
+    unfold LinearMemory.readUInt16
+    rw [readByteFrame other afterField]
+    rw [readByteFrame (other + 1) (by omega)]
   have decodedAfter : Header.read memory address = .ok header := by
     unfold Header.read at decodedBefore ⊢
     dsimp only at decodedBefore ⊢
@@ -199,7 +204,29 @@ theorem ConstructorObjectRel.writeUSizeField
           simp [target]
           omega)]
         exact readBefore
-    | uint16 scalar => simp [valueEq] at beforeField
+    | uint16 scalar =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 2 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt16Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        rw [scalarAddress]
+        change liftMemory (memory.readUInt16 _) = .ok scalar
+        rw [readUInt16Frame _ (by
+          rw [offsetEq, widthEq]
+          simp [target]
+          omega)]
+        exact readBefore
     | uint32 scalar =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField

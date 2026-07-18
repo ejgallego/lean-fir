@@ -1002,6 +1002,15 @@ writes `UInt8.max` into a nonzero packed offset and checks all framed regions.
 The two-byte `UInt16` lane is the remaining integer scalar representation
 before W6.2 moves to boxing and unboxing.
 
+W6.2h completes the integer packed-scalar representation with a verified
+little-endian `UInt16` memory lane, checked constructor projection and
+mutation, prefix transport, and preservation through tag and `USize` writes.
+The scalar mutation theorem installs the exact semantic `UInt16`
+head-and-filter update while framing fixed constructor slots. Executable
+regressions cover unaligned `UInt16.max` memory round-trip and packed-field
+mutation. All four scalar integer kinds now have concrete read/write and local
+semantic refinement boundaries; boxing and unboxing are next.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

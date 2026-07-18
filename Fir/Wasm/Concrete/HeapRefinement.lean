@@ -36,6 +36,10 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
         field.width = info.size + info.usize ∧
         field.offset + 1 ≤ info.ssize ∧
         readScalarUInt8Field state address field.width field.offset = .ok value
+    | .uint16 value =>
+        field.width = info.size + info.usize ∧
+        field.offset + 2 ≤ info.ssize ∧
+        readScalarUInt16Field state address field.width field.offset = .ok value
     | .uint32 value =>
         field.width = info.size + info.usize ∧
         field.offset + 4 ≤ info.ssize ∧
@@ -44,7 +48,6 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
         field.width = info.size + info.usize ∧
         field.offset + 8 ≤ info.ssize ∧
         readScalarUInt64Field state address field.width field.offset = .ok value
-    | _ => False
   fieldKindsSize : fieldKinds.size = info.size
   objectFields : ∀ index kind value,
     fieldKinds[index]? = some kind →
@@ -89,6 +92,10 @@ theorem ConstructorObjectRel.prefixExtension
           field.width = info.size + info.usize ∧
           field.offset + 1 ≤ info.ssize ∧
           readScalarUInt8Field after address field.width field.offset = .ok value
+      | .uint16 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 2 ≤ info.ssize ∧
+          readScalarUInt16Field after address field.width field.offset = .ok value
       | .uint32 value =>
           field.width = info.size + info.usize ∧
           field.offset + 4 ≤ info.ssize ∧
@@ -97,7 +104,7 @@ theorem ConstructorObjectRel.prefixExtension
           field.width = info.size + info.usize ∧
           field.offset + 8 ≤ info.ssize ∧
           readScalarUInt64Field after address field.width field.offset = .ok value
-      | _ => False := by
+      := by
     intro field member
     have beforeField := related.semanticScalarFields field member
     cases valueEq : field.value with
@@ -134,7 +141,39 @@ theorem ConstructorObjectRel.prefixExtension
           rw [extension.readByte _ fieldOwned]
         rw [operationEq]
         exact readBefore
-    | uint16 value => simp [valueEq] at beforeField
+    | uint16 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset + 2 ≤
+              before.heapCursor := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          have extent := related.extent
+          simp [ConstructorLayout.ofInfo, target] at extent layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt16Field after address field.width field.offset =
+              readScalarUInt16Field before address field.width field.offset := by
+          unfold readScalarUInt16Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 2 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          change liftMemory (after.memory.readUInt16 _) =
+            liftMemory (before.memory.readUInt16 _)
+          rw [extension.readUInt16 _ fieldOwned]
+        rw [operationEq]
+        exact readBefore
     | uint32 value =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField

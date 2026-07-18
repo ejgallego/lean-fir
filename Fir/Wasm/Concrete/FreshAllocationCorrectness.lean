@@ -134,6 +134,15 @@ theorem MemoryState.FrontierInvariant.allocateObject_prefixExtension
 
 namespace MemoryState.PrefixExtension
 
+/-- Any owned 16-bit lane reads identically through a prefix extension. -/
+theorem readUInt16 {before after : MemoryState}
+    (extension : before.PrefixExtension after) (address : Nat)
+    (owned : address + 2 ≤ before.heapCursor) :
+    after.memory.readUInt16 address = before.memory.readUInt16 address := by
+  unfold LinearMemory.readUInt16
+  rw [extension.readByte address (by omega)]
+  rw [extension.readByte (address + 1) (by omega)]
+
 /-- Any owned 32-bit lane reads identically through a prefix extension. -/
 theorem readUInt32 {before after : MemoryState}
     (extension : before.PrefixExtension after) (address : Nat)

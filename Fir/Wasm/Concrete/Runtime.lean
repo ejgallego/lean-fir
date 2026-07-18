@@ -188,6 +188,19 @@ def writeScalarUInt8Field (state : MemoryState) (object : Word32)
   let memory ← liftMemory <| state.memory.writeByte address value
   return { state with memory }
 
+def readScalarUInt16Field (state : MemoryState) (object : Word32)
+    (slotIndex byteOffset : Nat) : Except ConcreteError UInt16 := do
+  let header ← readConstructorHeader state object
+  let address ← scalarFieldAddress object header slotIndex byteOffset 2
+  liftMemory <| state.memory.readUInt16 address
+
+def writeScalarUInt16Field (state : MemoryState) (object : Word32)
+    (slotIndex byteOffset : Nat) (value : UInt16) : Except ConcreteError MemoryState := do
+  let header ← readConstructorHeader state object
+  let address ← scalarFieldAddress object header slotIndex byteOffset 2
+  let memory ← liftMemory <| state.memory.writeUInt16 address value
+  return { state with memory }
+
 def readScalarUInt32Field (state : MemoryState) (object : Word32)
     (slotIndex byteOffset : Nat) : Except ConcreteError UInt32 := do
   let header ← readConstructorHeader state object

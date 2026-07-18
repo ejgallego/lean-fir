@@ -62,6 +62,14 @@ def uint32RoundTrip : Except MemoryError UInt32 := do
   | .ok value => value == 4294967295
   | .error _ => false
 
+def uint16RoundTrip : Except MemoryError UInt16 := do
+  let memory ← (LinearMemory.withPages 1).writeUInt16 19 65535
+  memory.readUInt16 19
+
+#guard match uint16RoundTrip with
+  | .ok value => value == 65535
+  | .error _ => false
+
 def uint64RoundTrip : Except MemoryError UInt64 := do
   let memory ← (LinearMemory.withPages 1).writeUInt64 23 18446744073709551615
   memory.readUInt64 23
@@ -220,6 +228,19 @@ def concreteMixedConstructor : Except ConcreteError (MemoryState × Word32) :=
               readUSizeField result object 0 with
           | .ok scalar, .ok tag, .ok field, .ok usize =>
               scalar == 255 && tag == 3 && field.value == 23 && usize == 0
+          | _, _, _, _ => false
+
+#guard match concreteMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
+      match writeScalarUInt16Field state object 2 1 65535 with
+      | .error _ => false
+      | .ok result =>
+          match readScalarUInt16Field result object 2 1,
+              readTag result object, readObjectField result object 0,
+              readUSizeField result object 0 with
+          | .ok scalar, .ok tag, .ok field, .ok usize =>
+              scalar == 65535 && tag == 3 && field.value == 23 && usize == 0
           | _, _, _, _ => false
 
 #guard match allocateNatural MemoryState.initial
