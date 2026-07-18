@@ -172,6 +172,6 @@ The older `closureApply` host callback remains rejected deliberately: W5 uses
 generated metadata trampolines and direct dispatch instead. Join-point-bearing
 source declarations and additional initial-runtime heap-object encodings are
 corpus/adapter expansion work, not missing W5 runtime operations. The default
-native--V8 matrix contains 21 compiler-produced cases, while the independent
+native--V8 matrix contains 22 compiler-produced cases, while the independent
 Talos--V8 artifact lane compares 34 fixtures. Large odd `Nat` values are kept
 out of the JSON adapter until `FIR-BUG-wasm-none-json-nat-precision` is fixed.

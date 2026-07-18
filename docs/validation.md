@@ -781,7 +781,9 @@ and a packed constructor initialized through `uset`/`sset`, projected through
 captured helpers internally while exporting only the selected entry.
 Compiler-generated direct calls, captured and underapplied closures, recursive
 empty and traversal paths, and an exact `Nat.add` external now run in V8 as
-well.  The independent artifact corpus separately compares external
+well.  A heap-backed Unicode `String → String` round trip retains the
+compiler-produced ownership increment and returns the reconstructed string
+through the semantic host.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Large odd naturals remain excluded from this adapter because the version-1
 validation protocol encodes `Nat` as an inexact JSON number; the limitation is
