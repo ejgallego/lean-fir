@@ -475,29 +475,115 @@ theorem OwnershipValueRel.releaseStep
     {word : Word32} {value : Value}
     (heap : LiveHeapRel state witness runtime)
     (ownership : OwnershipValueRel witness word value) (fuel : Nat) :
-    match value with
-    | .object (.heap location) =>
-        witness.locations.lookup? location = some word
-    | _ => decrementReferenceOnceFuel fuel state word true = .ok state := by
+    (∃ location,
+      value = .object (.heap location) ∧
+      witness.locations.lookup? location = some word) ∨
+    ((∀ location, value ≠ .object (.heap location)) ∧
+      decrementReferenceOnceFuel fuel state word true = .ok state) := by
   cases ownership with
   | intro kind admissible valueRelated =>
       cases valueRelated with
       | object heapRelated =>
           cases heapRelated with
-          | mapped found => exact found
+          | mapped found => exact .inl ⟨_, rfl, found⟩
       | tagged taggedRelated =>
-          simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+          exact .inr ⟨by intro location; simp,
+            by simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true⟩
       | tobject objectRelated =>
           cases objectRelated with
           | heap heapRelated =>
               cases heapRelated with
-              | mapped found => exact found
+              | mapped found => exact .inl ⟨_, rfl, found⟩
           | tagged taggedRelated =>
-              simpa using heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true
+              exact .inr ⟨by intro location; simp,
+                by simpa using
+                  heap.decrementReferenceOnceFuel_tagged taggedRelated fuel true⟩
       | erased =>
-          exact decrementReferenceOnceFuel_sentinel fuel state Word32.zero (by rfl) true
+          exact .inr ⟨by intro location; simp,
+            decrementReferenceOnceFuel_sentinel fuel state Word32.zero (by rfl) true⟩
       | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
           simp [AbiKind.isObjectField] at admissible
+
+/-- Ordered ownership-slot correspondence lifts any correct recursive heap
+step through the complete concrete/semantic child folds. -/
+theorem OwnershipValuesRel.foldlM_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime finalRuntime : RuntimeState}
+    {words : List Word32} {values : List Value} {fuel : Nat}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (recurse : ∀ {before : MemoryState} {semantic nextSemantic : RuntimeState}
+        {location : Location} {address : Word32},
+      LiveHeapRel before witness semantic →
+      witness.locations.lookup? location = some address →
+      Fir.LeanIR.Impure.decLocationFuel fuel semantic location = .ok nextSemantic →
+      ∃ after,
+        decrementReferenceOnceFuel fuel before address true = .ok after ∧
+        LiveHeapRel after witness nextSemantic)
+    (semanticOperation :
+      values.foldlM (init := runtime) (fun next value =>
+        match value with
+        | .object (.heap child) =>
+            Fir.LeanIR.Impure.decLocationFuel fuel next child
+        | _ => .ok next) = .ok finalRuntime) :
+    ∃ finalState,
+      words.foldlM (init := state) (fun next child =>
+        decrementReferenceOnceFuel fuel next child true) = .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime := by
+  induction related generalizing state runtime finalRuntime with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation ⊢
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst finalRuntime
+      exact ⟨state, rfl, heap⟩
+  | @cons word value words values head tail ih =>
+      have noOpCase
+          (concreteHead : decrementReferenceOnceFuel fuel state word true = .ok state)
+          (semanticHead :
+            (match value with
+            | .object (.heap child) =>
+                Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+            | _ => .ok runtime) = .ok runtime) :
+          ∃ finalState,
+            (word :: words).foldlM (init := state) (fun next child =>
+              decrementReferenceOnceFuel fuel next child true) = .ok finalState ∧
+            LiveHeapRel finalState witness finalRuntime := by
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
+        rw [semanticHead] at semanticOperation
+        obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+          ih heap semanticOperation
+        refine ⟨finalState, ?_, finalHeap⟩
+        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+        rw [concreteHead]
+        exact concreteTail
+      rcases head.releaseStep heap fuel with heapStep | noOpStep
+      · obtain ⟨location, valueEq, mapped⟩ := heapStep
+        subst value
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
+        cases childEq : Fir.LeanIR.Impure.decLocationFuel fuel runtime location with
+        | error fault =>
+            rw [childEq] at semanticOperation
+            contradiction
+        | ok nextRuntime =>
+            rw [childEq] at semanticOperation
+            obtain ⟨nextState, concreteHead, nextHeap⟩ :=
+              recurse heap mapped childEq
+            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+              ih nextHeap semanticOperation
+            refine ⟨finalState, ?_, finalHeap⟩
+            simp only [List.foldlM_cons, Bind.bind, Except.bind]
+            rw [concreteHead]
+            exact concreteTail
+      · obtain ⟨notHeap, concreteHead⟩ := noOpStep
+        apply noOpCase concreteHead
+        cases value with
+        | object reference =>
+            cases reference with
+            | heap location => exact False.elim (notHeap location rfl)
+            | tagged payload => rfl
+        | usize usize => rfl
+        | scalar scalar => rfl
+        | erased => rfl
+        | reuseToken location => rfl
 
 /-- Shared header-level postcondition for ordinary successful increments. It
 separates the common-header write from object-kind-specific payload framing. -/

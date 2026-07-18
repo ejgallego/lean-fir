@@ -1287,6 +1287,16 @@ reuse-token cases are ruled out by `AbiKind.isObjectField`. This is the local
 per-field correspondence needed by the paired-fold simulation without
 weakening the heap recursion bound.
 
+W6.3v lifts that per-field split across the complete ownership lists.
+`OwnershipValuesRel.foldlM_refines` is parametric in the recursive theorem for
+one mapped heap child. Given a successful semantic child fold, it peels each
+semantic step in order, invokes that hypothesis only for heap locations, uses
+W6.3u's all-fuel no-op equation for every non-owning slot, and threads the
+resulting concrete memory and `LiveHeapRel` through the tail. The remaining
+W6.3 proof can now focus exclusively on the fuel-indexed transition for one
+heap location; constructor child enumeration and fold ordering no longer
+appear in that induction.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
