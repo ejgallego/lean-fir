@@ -194,6 +194,131 @@ theorem LiveHeapRel.allocationFrame_of_writeObjectFields_other
       targetHeader otherHeader targetRead otherRead
   exact .ofWriteObjectFields resultEq targetInBounds fieldsInTarget written disjoint
 
+/-- A bounded bulk object-field write preserves every descriptor's complete
+physical region and the pairwise allocation-disjointness invariant. -/
+theorem LiveHeapRel.descriptorSpatial_of_writeObjectFields
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor} {targetHeader : Header}
+    {fields : List Word32} {memory : LinearMemory}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound : witness.descriptors.lookup? targetAddress =
+      some targetDescriptor)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (resultEq : after = { before with memory })
+    (fieldsInTarget : objectFieldAddress targetAddress.value fields.length ≤
+      targetAddress.value + targetHeader.allocationBytes.toNat)
+    (written : writeObjectFields before.memory targetAddress.value 0 fields =
+      .ok memory) :
+    (∀ address descriptor,
+      witness.descriptors.lookup? address = some descriptor →
+      ∃ header,
+        Header.read after.memory address = .ok header ∧
+        headerBytes ≤ header.allocationBytes.toNat ∧
+        header.allocationBytes.toNat % target.heapAlignment = 0 ∧
+        address.value + header.allocationBytes.toNat ≤ after.heapCursor) ∧
+    (∀ left right leftDescriptor rightDescriptor,
+      witness.descriptors.lookup? left = some leftDescriptor →
+      witness.descriptors.lookup? right = some rightDescriptor →
+      left.value ≠ right.value →
+      ∀ leftHeader rightHeader,
+        Header.read after.memory left = .ok leftHeader →
+        Header.read after.memory right = .ok rightHeader →
+        left.value + leftHeader.allocationBytes.toNat ≤ right.value ∨
+          right.value + rightHeader.allocationBytes.toNat ≤ left.value) := by
+  have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
+    intro left right equal
+    cases left
+    cases right
+    simp_all
+  obtain ⟨regionHeader, regionRead, targetMinimum, targetAligned, targetExtent⟩ :=
+    related.descriptorRegion targetAddress targetDescriptor targetFound
+  rw [targetRead] at regionRead
+  have regionHeaderEq := Except.ok.inj regionRead
+  subst regionHeader
+  have targetInBounds :
+      targetAddress.value + targetHeader.allocationBytes.toNat ≤
+        before.memory.size :=
+    Nat.le_trans targetExtent related.frontier.cursorInBounds
+  have fieldsInBounds : objectFieldAddress targetAddress.value
+      (0 + fields.length) ≤ before.memory.size := by
+    simp only [Nat.zero_add]
+    exact Nat.le_trans fieldsInTarget targetInBounds
+  have post := writeObjectFields_post before.memory memory targetAddress.value 0
+    fields fieldsInBounds written
+  have targetReadAfter :
+      Header.read after.memory targetAddress = .ok targetHeader := by
+    rw [resultEq]
+    dsimp only
+    rw [Header.read_of_writeObjectFields before.memory memory targetAddress 0
+      fields post]
+    exact targetRead
+  refine ⟨?_, ?_⟩
+  · intro address descriptor found
+    by_cases isTarget : targetAddress.value = address.value
+    · have addressEq : address = targetAddress :=
+        wordEq address targetAddress isTarget.symm
+      subst address
+      exact ⟨targetHeader, targetReadAfter, targetMinimum, targetAligned, by
+        rw [resultEq]
+        exact targetExtent⟩
+    · obtain ⟨header, headerRead, minimum, aligned, extent⟩ :=
+        related.descriptorRegion address descriptor found
+      have frame := related.allocationFrame_of_writeObjectFields_other targetFound
+        found isTarget targetRead headerRead resultEq fieldsInTarget written
+      exact ⟨header, by rw [frame.readHeaderRaw minimum]; exact headerRead,
+        minimum, aligned, by rw [frame.cursor]; exact extent⟩
+  · intro left right leftDescriptor rightDescriptor leftFound rightFound different
+      leftHeader rightHeader leftRead rightRead
+    by_cases leftTarget : targetAddress.value = left.value
+    · by_cases rightTarget : targetAddress.value = right.value
+      · exact False.elim (different (leftTarget.symm.trans rightTarget))
+      · have leftEq : left = targetAddress :=
+          wordEq left targetAddress leftTarget.symm
+        subst left
+        rw [targetReadAfter] at leftRead
+        have leftHeaderEq := Except.ok.inj leftRead
+        subst leftHeader
+        obtain ⟨oldRightHeader, oldRightRead, rightMinimum, _, _⟩ :=
+          related.descriptorRegion right rightDescriptor rightFound
+        have frame := related.allocationFrame_of_writeObjectFields_other
+          targetFound rightFound rightTarget targetRead oldRightRead resultEq
+            fieldsInTarget written
+        rw [frame.readHeaderRaw rightMinimum] at rightRead
+        exact related.descriptorDisjoint targetAddress right targetDescriptor
+          rightDescriptor targetFound rightFound rightTarget targetHeader rightHeader
+            targetRead rightRead
+    · by_cases rightTarget : targetAddress.value = right.value
+      · have rightEq : right = targetAddress :=
+          wordEq right targetAddress rightTarget.symm
+        subst right
+        rw [targetReadAfter] at rightRead
+        have rightHeaderEq := Except.ok.inj rightRead
+        subst rightHeader
+        obtain ⟨oldLeftHeader, oldLeftRead, leftMinimum, _, _⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        have frame := related.allocationFrame_of_writeObjectFields_other
+          targetFound leftFound leftTarget targetRead oldLeftRead resultEq
+            fieldsInTarget written
+        rw [frame.readHeaderRaw leftMinimum] at leftRead
+        exact related.descriptorDisjoint left targetAddress leftDescriptor
+          targetDescriptor leftFound targetFound (Ne.symm leftTarget) leftHeader
+            targetHeader leftRead targetRead
+      · obtain ⟨oldLeftHeader, oldLeftRead, leftMinimum, _, _⟩ :=
+          related.descriptorRegion left leftDescriptor leftFound
+        obtain ⟨oldRightHeader, oldRightRead, rightMinimum, _, _⟩ :=
+          related.descriptorRegion right rightDescriptor rightFound
+        have leftFrame := related.allocationFrame_of_writeObjectFields_other
+          targetFound leftFound leftTarget targetRead oldLeftRead resultEq
+            fieldsInTarget written
+        have rightFrame := related.allocationFrame_of_writeObjectFields_other
+          targetFound rightFound rightTarget targetRead oldRightRead resultEq
+            fieldsInTarget written
+        rw [leftFrame.readHeaderRaw leftMinimum] at leftRead
+        rw [rightFrame.readHeaderRaw rightMinimum] at rightRead
+        exact related.descriptorDisjoint left right leftDescriptor rightDescriptor
+          leftFound rightFound different leftHeader rightHeader leftRead rightRead
+
 /-- Replacing one descriptor header without changing its allocation extent
 preserves the global descriptor-region and disjointness invariants. -/
 theorem LiveHeapRel.descriptorSpatial_of_headerWrite

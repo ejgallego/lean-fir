@@ -1465,6 +1465,13 @@ tagged zero at `.tobject`; retained slots preserve their original ABI kind,
 semantic value, concrete word, and value relation. The protocol state now has
 a complete strict constructor relation suitable for the child-release fold.
 
+W6.3ap carries the global spatial invariant through that same bulk clear.
+`LiveHeapRel.descriptorSpatial_of_writeObjectFields` proves the target keeps
+its original readable physical header and extent, transports every other
+descriptor header through its allocation frame, and preserves all pairwise
+allocation disjointness. This supplies the descriptor-region and disjointness
+premises needed to lift W6.3ao from one target constructor to the whole heap.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
