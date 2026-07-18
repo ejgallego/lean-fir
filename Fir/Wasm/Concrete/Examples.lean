@@ -475,6 +475,10 @@ complete old physical allocation capacity for spatial decoding. -/
         | .error _ => false
   | .error _ => false
 
+#guard match reuseObject MemoryState.initial Word32.zero emptyConcreteInfo false #[] with
+  | .ok (state, word) => state.heapCursor == heapBase && word.value == 7
+  | .error _ => false
+
 def oversizedReuseInfo : LCNF.CtorInfo := {
   name := `Concrete.oversizedReuse
   cidx := 10

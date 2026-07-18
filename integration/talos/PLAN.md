@@ -1548,6 +1548,16 @@ W6.3at's strict protocol descriptor, this supplies the reset-to-reuse
 composition without weakening `.object` values, resolving
 `FIR-BUG-wasm-none-reset-cleared-object-protocol`.
 
+W6.3ay closes the final fresh-reuse corner case. For an empty constructor
+layout, `reuseObject_none_refines_empty` reduces token-zero reuse to the
+verified tagged encoder, so a small tag remains an immediate while a large
+tag may extend the witness with a persistent promoted representation; both
+refine FIR's unchanged runtime and tagged constructor result under `.tobject`.
+An executable guard covers the direct-immediate path. With tagged reset,
+ordinary non-unique reset, unique protocol reset, fresh empty/nonempty reuse,
+and in-place reuse all covered, W6.3's successful-operation matrix is
+complete; structured failure correspondence remains the explicit W6.5 task.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

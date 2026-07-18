@@ -1783,6 +1783,52 @@ theorem LiveHeapRel.resetObject_refines_unique
       rw [constructor] at objectEq
       contradiction
 
+/-- Consuming an empty reuse token for an empty-layout constructor preserves
+the semantic tagged-constructor representation. The concrete word may be a
+direct immediate or a fresh promoted tag; `encodeTagged_liveHeapRel` supplies
+the exact witness in either case. -/
+theorem LiveHeapRel.reuseObject_none_refines_empty
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (info : LCNF.CtorInfo)
+    (fields : Array Word32) (semanticFields : Array Value)
+    (word : Word32) (updateHeader : Bool)
+    (related : LiveHeapRel state witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (reused : reuseObject state Word32.zero info updateHeader fields =
+      .ok (result, word)) :
+    ∃ nextWitness,
+      LiveHeapRel result nextWitness runtime ∧
+      ValueRel nextWitness .tobject (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken none) info updateHeader
+          semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  have allocated : allocateConstructor state info fields = .ok (result, word) := by
+    unfold reuseObject at reused
+    rw [if_pos (by decide)] at reused
+    exact reused
+  have encoded : encodeTagged state (UInt64.ofNat info.cidx) =
+      .ok (result, word) := by
+    unfold allocateConstructor at allocated
+    rw [if_pos arity] at allocated
+    rw [uint32Field_eq_ok "constructor tag" info.cidx tagFits] at allocated
+    simp only [Bind.bind, Except.bind] at allocated
+    rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])] at allocated
+    simpa [UInt32.toNat_ofNat_of_lt' tagFits] using allocated
+  obtain ⟨nextWitness, heapRelated, valueRelated⟩ :=
+    encodeTagged_liveHeapRel state result witness runtime
+      (UInt64.ofNat info.cidx) word related encoded
+  have semanticAllocation :
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+    simp [allocCtor, semanticArity, empty.1.1, empty.1.2, empty.2]
+    rfl
+  exact ⟨nextWitness, heapRelated, valueRelated, by
+    simpa [Fir.LeanIR.Impure.reuse] using semanticAllocation⟩
+
 /-- Consuming an empty reuse token is exactly fresh constructor allocation.
 For a nonempty layout, the existing allocation theorem supplies the extended
 witness, complete heap relation, and returned heap reference. -/
