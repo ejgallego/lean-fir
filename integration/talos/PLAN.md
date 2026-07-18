@@ -724,6 +724,84 @@ Once the semantic backend is stable, introduce a separate concrete target:
 
 Binary encoding and production ABI compatibility begin here, not in W0.
 
+#### W6.0: frozen concrete representation contract
+
+The selected target is `wasm32-lean64`. Linear-memory addresses and all
+object-like function lanes are `i32`, retaining compatibility with the W5
+lowerer and the standards-conforming Node/V8 artifact lane. Source `USize`
+remains `i64`: the final-impure LCNF in this repository is captured from the
+64-bit Lean 4.32 toolchain, and changing `USize` to `i32` would change source
+semantics rather than merely concretize the existing ABI.
+
+LCNF scalar operations compute byte addresses from a count of pre-scalar
+slots. To preserve that 64-bit data model with wasm32 addresses, every object
+or `USize` constructor slot occupies eight bytes. An object word is stored in
+the low four bytes of its slot and the high four bytes are zero; a `USize`
+occupies the full slot. Packed scalar bytes begin at
+`headerBytes + 8 * (objectFields + usizeFields)`, and the LCNF scalar byte
+offset is added unchanged.
+
+Object words use their low bit as the immediate tag. Zero is the erased/empty
+reuse-token sentinel, odd words contain an unsigned 31-bit payload, and
+nonzero eight-byte-aligned words are heap addresses. Semantic tagged naturals
+above `2^31 - 1` are represented as persistent heap naturals. This is a
+representation refinement: the source value remains tagged and ownership
+operations must retain tagged-value behavior for the promoted object.
+
+Every heap allocation begins with a self-describing 32-byte header:
+
+| Byte | Field |
+|---:|---|
+| 0 | object-kind code |
+| 4 | persistent/live flags |
+| 8 | reference count |
+| 12 | aligned allocation size |
+| 16, 20, 24, 28 | four kind-specific auxiliary words |
+
+Constructor auxiliaries record tag, object-field count, `USize`-field count,
+and packed scalar bytes. Closure auxiliaries record function-table index,
+arity, fixed count, and the static capture-descriptor index. Closure captures
+use one eight-byte slot apiece; their `AbiKind` descriptor fixes which four or
+eight bytes are live. Freed allocations retain a dedicated header kind so
+invalid/dead-object accesses can produce structured faults rather than depend
+on host traps.
+
+`Fir/Wasm/Concrete/Layout.lean` is the executable source of truth for these
+constants and offset calculations. `Fir/Wasm/Concrete/Refinement.lean`
+introduces the proof-only bijection from semantic locations to concrete
+addresses, the disjoint mapping for promoted tags, and an ABI-indexed
+`ValueRel`. `ValueRel` fixes the concrete lane and semantic value together and
+proves agreement with the W0 physical ABI. Executable guards cover boundary
+immediates, mixed object/`USize`/scalar constructor offsets, and heterogeneous
+closure captures.
+
+This is deliberately not the native Lean wasm32 C layout: native wasm32 would
+make `USize` and LCNF pre-scalar slots 32-bit. Supporting that ABI requires
+capturing LCNF under a genuine wasm32 data-layout configuration and is a
+separate target, not an unchecked reinterpretation of the current program.
+
+#### W6 implementation slices
+
+1. W6.1 adds checked little-endian linear memory, allocation, header
+   encoding/decoding, immediate or promoted natural literals, constructors,
+   projections, and cases. Each operation proves refinement to its W2
+   semantic contract before its host import is replaced.
+2. W6.2 adds packed scalar and `USize` fields, boxing/unboxing, mutation, and
+   tag updates.
+3. W6.3 adds reference counts, deletion, reset, and reuse, including recursive
+   release and both reuse paths.
+4. W6.4 adds concrete closure allocation, capture projection, dispatch
+   metadata, direct/recursive calls, and globals.
+5. W6.5 adds externals, world/trace behavior, and structured source/target
+   fault encoding.
+6. W6.6 composes every operation refinement with the W5 lowering theorem,
+   switches the generated artifact lane to the concrete runtime, and extends
+   native/LCNF/Talos/V8 differential validation across the supported corpus.
+
+Each slice keeps the semantic Talos runtime as the executable oracle. A
+semantic discrepancy receives a Wasm bug card before the concrete runtime is
+weakened or the source contract is changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
