@@ -1609,6 +1609,15 @@ checkpoint: it leaves the proved contracts unchanged while allowing the next
 slice to import `ClosureObjectRel` into the exhaustive live-cell relation
 without creating a cycle through allocation correctness.
 
+W6.4g packages the pending whole-heap closure case behind `ClosureCellRel`.
+The relation fixes every cell to the module-wide dispatch witness, exact
+semantic closure object, checked capture decoder, live closure header, owned
+capture extent, reference count, persistence bit, and liveness bit. Prefix
+and witness transport are proved at this boundary before changing the
+exhaustive `LiveCellRel` consumers; the next slice can therefore add one
+structural constructor and reuse these facts throughout ownership and
+reference-count proofs.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
