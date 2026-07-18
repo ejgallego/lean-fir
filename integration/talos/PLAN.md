@@ -1394,6 +1394,16 @@ facts, the in-place reuse proof can transport all other live/dead/promoted
 relations through the scrub and focus its decoder reconstruction only on the
 target allocation.
 
+W6.3ah names the complete in-place byte transaction as
+`LinearMemory.reuseConstructorMemory` without changing its operational order:
+erase the retained payload, install replacement object fields, then publish
+the replacement header. `ReuseConstructorMemoryPost` exposes both unpublished
+intermediate memories and proves the final header/field reads, zero padding,
+memory-size preservation, and a byte frame outside the retained allocation.
+The composed frontier theorem carries `FrontierInvariant` through all three
+writes. The next slice lifts this exact transaction through the descriptor
+and reset-token protocol relations.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

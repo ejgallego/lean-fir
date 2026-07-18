@@ -618,6 +618,19 @@ def LinearMemory.zeroBytes (memory : LinearMemory) (address : Nat) : Nat →
       let memory ← memory.writeByte address 0
       memory.zeroBytes (address + 1) count
 
+/-- The byte-level transaction used by successful in-place constructor reuse:
+erase the complete retained payload, install the replacement object fields,
+then publish the replacement header. Keeping this boundary explicit lets the
+correctness layer reason about the unpublished intermediate memories without
+weakening the public heap relation. -/
+def LinearMemory.reuseConstructorMemory (memory : LinearMemory)
+    (address : Word32) (allocationBytes : Nat) (replacement : Header)
+    (fields : List Word32) : Except MemoryError LinearMemory := do
+  let memory ← memory.zeroBytes
+    (address.value + headerBytes) (allocationBytes - headerBytes)
+  let memory ← writeObjectFields memory address.value 0 fields
+  replacement.write memory address
+
 /-- Consume a concrete reuse token. Word zero selects fresh allocation. A
 nonzero token must name a live constructor allocation large enough for the
 replacement layout; its physical extent is retained while payload and header
@@ -647,10 +660,6 @@ def reuseObject (state : MemoryState) (token : Word32) (info : LCNF.CtorInfo)
     let objectFields ← uint32Field "object-field count" info.size
     let usizeFields ← uint32Field "usize-field count" info.usize
     let scalarBytes ← uint32Field "scalar byte count" info.ssize
-    let memory ← liftMemory <| state.memory.zeroBytes
-      (token.value + headerBytes) (header.allocationBytes.toNat - headerBytes)
-    let memory ← liftMemory <|
-      writeObjectFields memory token.value 0 fields.toList
     let replacement : Header := {
       header with
       kind := .constructor
@@ -660,7 +669,8 @@ def reuseObject (state : MemoryState) (token : Word32) (info : LCNF.CtorInfo)
       aux1 := objectFields
       aux2 := usizeFields
       aux3 := scalarBytes }
-    let memory ← liftMemory <| replacement.write memory token
+    let memory ← liftMemory <| state.memory.reuseConstructorMemory token
+      header.allocationBytes.toNat replacement fields.toList
     return ({ state with memory }, token)
 
 @[simp] theorem encodeTagged_immediate (state : MemoryState) (payload : UInt64)
