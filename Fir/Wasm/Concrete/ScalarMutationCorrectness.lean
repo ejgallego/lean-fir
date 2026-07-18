@@ -12,6 +12,7 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt64)
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 8 ≤ info.ssize) :
@@ -23,9 +24,16 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
       (∀ index, readObjectField result address index =
         readObjectField state address index) ∧
       (∀ index, readUSizeField result address index =
-        readUSizeField state address index) := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, _, _, _, objectCount,
-      usizeCount, scalarCount⟩ := related.header
+        readUSizeField state address index) ∧
+      ConstructorObjectRel result witness address info fieldKinds
+        { semantic with
+          scalarFields := {
+            width := slotIndex
+            offset := byteOffset
+            value := .uint64 value } :: semantic.scalarFields.filter fun old =>
+              old.width != slotIndex || old.offset != byteOffset } := by
+  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeaderBefore : readConstructorHeader state address = .ok header := by
@@ -177,6 +185,38 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
             simp [offset, slotIndexEq, objectCount, target]
             omega)]
     · rfl
-  exact ⟨result, operation, readBack, tagFrame, objectFieldFrame, usizeFieldFrame⟩
+  have relationAfter : ConstructorObjectRel result witness address info fieldKinds
+      { semantic with
+        scalarFields := {
+          width := slotIndex
+          offset := byteOffset
+          value := .uint64 value } :: semantic.scalarFields.filter fun old =>
+            old.width != slotIndex || old.offset != byteOffset } := by
+    refine {
+      header := ⟨header, headerReadAfter, headerKind, allocationBytes, refCount,
+        persistent, tag, objectCount, usizeCount, scalarCount⟩
+      headerOwned := related.headerOwned
+      extent := related.extent
+      semanticObjectFields := related.semanticObjectFields
+      semanticUSizeFields := related.semanticUSizeFields
+      semanticScalarFields := ?_
+      fieldKindsSize := related.fieldKindsSize
+      objectFields := ?_
+      usizeFields := ?_ }
+    · intro field member
+      simp [empty] at member
+      subst field
+      exact ⟨slotIndexEq, fieldFits, readBack⟩
+    · intro index kind semanticValue kindAt valueAt
+      change semantic.objectFields[index]? = some semanticValue at valueAt
+      obtain ⟨word, readBefore, valueRelated⟩ :=
+        related.objectFields index kind semanticValue kindAt valueAt
+      exact ⟨word, by rw [objectFieldFrame]; exact readBefore, valueRelated⟩
+    · intro index semanticValue valueAt
+      change semantic.usizeFields[index]? = some semanticValue at valueAt
+      rw [usizeFieldFrame]
+      exact related.usizeFields index semanticValue valueAt
+  exact ⟨result, operation, readBack, tagFrame, objectFieldFrame, usizeFieldFrame,
+    relationAfter⟩
 
 end Fir.Wasm.Concrete

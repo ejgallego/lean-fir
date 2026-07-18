@@ -297,7 +297,7 @@ theorem allocateConstructor_nonempty_objectRel
     extent := resultExtent
     semanticObjectFields := semanticArity
     semanticUSizeFields := by simp
-    semanticScalarFields := rfl
+    semanticScalarFields := by simp
     fieldKindsSize
     objectFields := ?_
     usizeFields := ?_ }

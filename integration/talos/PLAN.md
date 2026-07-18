@@ -967,6 +967,17 @@ uses operand `2`, retaining the discrepancy above as a visible guard against
 the handwritten operand `1`. Packaging packed bytes as typed semantic scalar
 fields, then boxing and unboxing those fields, is the next W6.2 slice.
 
+W6.2d packages the first typed packed-field case in the decoded constructor
+relation. A related semantic `UInt64` scalar field must use the emitted
+`size + usize` base, fit within `ssize`, and read back exactly from linear
+memory. Fresh allocation still establishes the relation vacuously; prefix
+extension transports populated fields; and tag and `USize` mutation now prove
+that the packed observations are framed. The checked scalar-write theorem
+installs the same head-and-filter list shape as semantic `setScalarField` for
+the first field, yielding a new `ConstructorObjectRel` rather than only a
+byte-local readback fact. Generalizing this typed predicate to `UInt8`,
+`UInt16`, and `UInt32` precedes boxing and unboxing.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

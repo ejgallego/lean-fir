@@ -27,7 +27,16 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
     state.heapCursor
   semanticObjectFields : semantic.objectFields.size = info.size
   semanticUSizeFields : semantic.usizeFields.size = info.usize
-  semanticScalarFields : semantic.scalarFields = []
+  /-- W6.2 initially packages the compiler's `UInt64` packed-field case.
+  Every represented field carries the compiler-shaped scalar base, stays
+  within the declared packed region, and reads back from concrete memory. -/
+  semanticScalarFields : ∀ field, field ∈ semantic.scalarFields →
+    match field.value with
+    | .uint64 value =>
+        field.width = info.size + info.usize ∧
+        field.offset + 8 ≤ info.ssize ∧
+        readScalarUInt64Field state address field.width field.offset = .ok value
+    | _ => False
   fieldKindsSize : fieldKinds.size = info.size
   objectFields : ∀ index kind value,
     fieldKinds[index]? = some kind →
@@ -66,6 +75,52 @@ theorem ConstructorObjectRel.prefixExtension
     simp only [Bind.bind, Except.bind]
     simp [liftMemory, headerKind]
     rfl
+  have scalarFieldsAfter : ∀ field, field ∈ semantic.scalarFields →
+      match field.value with
+      | .uint64 value =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field after address field.width field.offset = .ok value
+      | _ => False := by
+    intro field member
+    have beforeField := related.semanticScalarFields field member
+    cases valueEq : field.value with
+    | uint8 value => simp [valueEq] at beforeField
+    | uint16 value => simp [valueEq] at beforeField
+    | uint32 value => simp [valueEq] at beforeField
+    | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset + 8 ≤
+              before.heapCursor := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          have extent := related.extent
+          simp [ConstructorLayout.ofInfo, target] at extent layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt64Field after address field.width field.offset =
+              readScalarUInt64Field before address field.width field.offset := by
+          unfold readScalarUInt64Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          change liftMemory (after.memory.readUInt64 _) =
+            liftMemory (before.memory.readUInt64 _)
+          rw [extension.readUInt64 _ fieldOwned]
+        rw [operationEq]
+        exact readBefore
   refine {
     header := ⟨header, headerAfter, headerKind, allocationBytes, refCount,
       persistent, tag, objectCount, usizeCount, scalarCount⟩
@@ -73,7 +128,7 @@ theorem ConstructorObjectRel.prefixExtension
     extent := Nat.le_trans related.extent extension.cursor
     semanticObjectFields := related.semanticObjectFields
     semanticUSizeFields := related.semanticUSizeFields
-    semanticScalarFields := related.semanticScalarFields
+    semanticScalarFields := scalarFieldsAfter
     fieldKindsSize := related.fieldKindsSize
     objectFields := ?_
     usizeFields := ?_ }

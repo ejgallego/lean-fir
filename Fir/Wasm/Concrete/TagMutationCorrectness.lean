@@ -117,10 +117,40 @@ theorem ConstructorObjectRel.writeTag
     extent := related.extent
     semanticObjectFields := related.semanticObjectFields
     semanticUSizeFields := related.semanticUSizeFields
-    semanticScalarFields := related.semanticScalarFields
+    semanticScalarFields := ?_
     fieldKindsSize := related.fieldKindsSize
     objectFields := ?_
     usizeFields := ?_ }
+  · intro field member
+    have beforeField := related.semanticScalarFields field member
+    cases valueEq : field.value with
+    | uint8 value => simp [valueEq] at beforeField
+    | uint16 value => simp [valueEq] at beforeField
+    | uint32 value => simp [valueEq] at beforeField
+    | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 8 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt64Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        change (do
+          let fieldAddress ← scalarFieldAddress address header field.width
+            field.offset 8
+          liftMemory (memory.readUInt64 fieldAddress)) = .ok value
+        rw [scalarAddress]
+        change liftMemory (memory.readUInt64 _) = .ok value
+        rw [readUInt64Frame _ (by omega)]
+        exact readBefore
   · intro index kind value kindAt valueAt
     obtain ⟨word, readBefore, valueRelated⟩ :=
       related.objectFields index kind value kindAt valueAt
