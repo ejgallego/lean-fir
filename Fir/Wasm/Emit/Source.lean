@@ -33,6 +33,7 @@ def compileModule (entry : Name) (dependencies : Array Name := #[]) :
     match Fir.Wasm.lowerSupported source.program with
     | .ok module => pure module
     | .error error => return .error (.lowering error)
+  let module := { module with exports := #[entry] }
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes

@@ -43,6 +43,19 @@ run_cmd do
 
 run_cmd do
   let result ← liftCoreM <|
+    compileModule ``Fir.Validation.Corpus.Source.boxedUInt32
+      #[``Fir.Validation.Corpus.Source.polyId]
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "source dependency export regression did not compile: {repr error}"
+  unless artifact.module.exports == #[``Fir.Validation.Corpus.Source.boxedUInt32] do
+    throwError "source dependency escaped the artifact export surface: {repr artifact.module.exports}"
+  unless artifact.module.functions.any
+      (fun function => function.name == ``Fir.Validation.Corpus.Source.polyId) do
+    throwError "source dependency was not retained as an internal function"
+
+run_cmd do
+  let result ← liftCoreM <|
     compileModule ``Fir.Validation.Corpus.Source.idUSize
   let moduleArtifact ← match result with
     | .ok artifact => pure artifact
