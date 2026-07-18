@@ -75,6 +75,18 @@ def shadowAddDefaultAlt (alts : Array (LCNF.Alt .impure)) :
           result := result.push alt
       return result.push (.default max.getCode)
 
+theorem shadowAddDefaultAlt_eq_of_small
+    (small : alts.size ≤ 1) :
+    shadowAddDefaultAlt alts = alts := by
+  simp [shadowAddDefaultAlt, small]
+
+theorem shadowAddDefaultAlt_eq_of_hasDefault
+    (hasDefault : alts.any (· matches .default ..) = true) :
+    shadowAddDefaultAlt alts = alts := by
+  by_cases small : alts.size ≤ 1
+  · exact shadowAddDefaultAlt_eq_of_small small
+  · simp [shadowAddDefaultAlt, small, hasDefault]
+
 /-- Pure output projection of Lean's private unreachable-arm filter. -/
 def shadowFilterUnreachable (alts : Array (LCNF.Alt .impure)) :
     Array (LCNF.Alt .impure) :=
@@ -122,6 +134,16 @@ theorem shadowFilterUnreachable_toList
   apply List.filter_congr
   intro alt member
   exact shadowReachablePredicate_eq alt.getCode
+
+/-- Filtering preserves a concrete selected branch as soon as the phase
+evidence rules out that branch being syntactically unreachable. -/
+theorem chooseAlt_shadowFilterUnreachable_of_selected
+    (selected : chooseAlt tag alts.toList = some branch)
+    (reachable : Fir.LeanIR.Passes.SimpCase.isUnreachable branch = false) :
+    chooseAlt tag (shadowFilterUnreachable alts).toList = some branch := by
+  rw [shadowFilterUnreachable_toList]
+  exact Fir.LeanIR.Passes.SimpCase.chooseAlt_removeUnreachable_of_selected
+    selected reachable
 
 theorem shadowSimplifyCases_eq_unreach
     (empty : (shadowPrepareAlts cases).size = 0) :

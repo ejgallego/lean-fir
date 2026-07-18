@@ -106,6 +106,16 @@ nonrecursive simplifier boundary, and
 recursive boundary. `shadowCode_scopedFactoredTree` then factors any
 successful recursive shadow run under those explicit premises.
 
+`ScopedCaseShapeLaws` now decomposes the phase premise along the compiler's
+empty, singleton, and retained outputs and assembles it back into
+`ScopedCaseAdmissibilityLaws`. For retained tables,
+`ScopedRetainedPhaseEvidence` reduces the proof to phase-valid structural
+selection plus `ScopedAddDefaultSelectionEvidence`, the exact bidirectional
+alpha relation between a structural middle and the prepared compiler table.
+Unreachable filtering preserves both concrete reachable selections and
+pointwise alpha relations. No-fold `addDefaultAlt` paths discharge the fold
+witness automatically.
+
 ## Semantic impact
 
 This was a limitation of FIR's generic compiler-bridge relation, not evidence
@@ -146,8 +156,10 @@ generic, and `alphaFoldComposedCorrect` is now only a witness instantiation.
 
 The scope-indexed case-boundary interface and concrete alpha-fold regression
 are now implemented. Full-tree hygiene supplies every recursive branch
-certificate, `ScopedCaseAdmissibilityLaws` supplies the phase-local selection
-facts, and the generic theorem lifts them through arbitrary recursive shadow
-traversal. The remaining proof work is to derive the admissibility law from a
-concrete compiler phase invariant. Connecting that shadow theorem to the
-actual private pass remains the separate upstream proof-interface issue.
+certificate, `ScopedCaseShapeLaws` supplies the phase-local selection facts by
+compiler output shape, and the generic theorem lifts them through arbitrary
+recursive shadow traversal. `nestedEmptyCaseFactored_of_shapes` exercises the
+complete assembly through a non-case parent. Concrete folded tables still
+need the private `addDefaultAlt` output equation; connecting that fact and the
+shadow theorem to the actual private pass remains the separate upstream
+proof-interface issue.

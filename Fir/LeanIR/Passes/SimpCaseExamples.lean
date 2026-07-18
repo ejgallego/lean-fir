@@ -537,6 +537,27 @@ def alphaFoldScopeIndex : ScopeIndex := {
   targetJoins := []
 }
 
+theorem selectedBranchAlphaBireflexiveAtFoldScope :
+    ScopedAlphaBireflexive alphaFoldScopeIndex selectedBranch := {
+  forward := .terminal (.ret ⟨by native_decide, by native_decide,
+    fVarRelated_insert_self
+      (({} : FVarIdMap FVarId).insert c c) x x⟩)
+  backward := .terminal (.ret ⟨by native_decide, by native_decide,
+    fVarRelated_insert_self
+      (({} : FVarIdMap FVarId).insert c c) x x⟩)
+}
+
+theorem singletonDefaultAddDefaultSelectionEvidence :
+    ScopedAddDefaultSelectionEvidence alphaFoldScopeIndex
+      singletonDefaultCases.alts singletonDefaultCases.alts := by
+  apply scopedAddDefaultSelectionEvidence_of_eq
+    (shadowAddDefaultAlt_eq_of_small (by
+      simp [singletonDefaultCases, LCNF.Cases.alts]))
+  · exact .cons
+      (.default selectedBranchAlphaBireflexiveAtFoldScope.forward) .nil
+  · exact .cons
+      (.default selectedBranchAlphaBireflexiveAtFoldScope.backward) .nil
+
 /-- The traversal index reconstructs the declaration-body scope from its
 parameters in the same order as `ParamBodyRelated`. -/
 theorem alphaFoldScopeIndex_fromParams :
@@ -575,6 +596,39 @@ def alphaFoldAlignedEvidence :
       alphaFoldCasesAlphaBackward
   alphaBackwardSelected :=
     codeRelated_cases_selected alphaFoldCasesAlphaBackward
+}
+
+/-- Once the private/default-fold output equation is supplied, the new phase
+interface reconstructs every selected-branch alpha obligation from the
+existing declarative case proofs. -/
+theorem alphaFoldAddDefaultSelectionEvidence_of_output
+    (output : shadowAddDefaultAlt
+      (shadowFilterUnreachable alphaFoldBeforeCases.alts) =
+        alphaFoldAfterCases.alts) :
+    ScopedAddDefaultSelectionEvidence alphaFoldScopeIndex
+      alphaFoldIntermediateCases.alts
+      (shadowFilterUnreachable alphaFoldBeforeCases.alts) := {
+  forward := by
+    intro tag
+    rw [output]
+    exact codeRelated_cases_selected alphaFoldCasesAlphaForward tag
+  backward := by
+    intro tag
+    rw [output]
+    exact codeRelated_cases_selected alphaFoldCasesAlphaBackward tag
+}
+
+/-- The complete retained-table phase witness for the alpha-fold fixture. Its
+sole premise is the private output equation isolated above. -/
+def alphaFoldRetainedPhaseEvidence_of_output
+    (output : shadowAddDefaultAlt
+      (shadowFilterUnreachable alphaFoldBeforeCases.alts) =
+        alphaFoldAfterCases.alts) :
+    ScopedRetainedPhaseEvidence alphaFoldValidCase alphaFoldScopeIndex
+      alphaFoldBeforeCases alphaFoldBeforeCases.alts := {
+  middleAlts := alphaFoldIntermediateCases.alts
+  structuralSelected := alphaFoldAlignedEvidence.structuralSelected
+  folded := alphaFoldAddDefaultSelectionEvidence_of_output output
 }
 
 theorem alphaFoldCaseFactorEvidence :
@@ -664,6 +718,13 @@ theorem emptyCaseAlphaTree :
       (.cases emptyCaseTable) :=
   .cases emptyCaseAlphaBireflexive .nil
 
+theorem emptyCaseAddDefaultSelectionEvidence :
+    ScopedAddDefaultSelectionEvidence emptyCaseScopeIndex
+      emptyCaseTable.alts emptyCaseTable.alts :=
+  scopedAddDefaultSelectionEvidence_of_eq
+    (shadowAddDefaultAlt_eq_of_small (by
+      simp [emptyCaseTable, LCNF.Cases.alts])) .nil .nil
+
 theorem emptyCaseShadowRun :
     shadowCode? 1 (.cases emptyCaseTable) = some (.unreach objType) := by
   rfl
@@ -727,6 +788,34 @@ theorem emptyCaseFactoredWithPhaseEvidence :
     ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
       (.cases emptyCaseTable) (.unreach objType) :=
   emptyCaseEliminationEvidence.factored
+
+def nestedEmptyCaseCode : LCNF.Code .impure :=
+  .setTag c 0 (.cases emptyCaseTable)
+
+def nestedEmptyCaseExpected : LCNF.Code .impure :=
+  .setTag c 0 (.unreach objType)
+
+theorem nestedEmptyCaseAlphaTree :
+    ScopedAlphaBireflexiveTree emptyCaseScopeIndex nestedEmptyCaseCode :=
+  .setTag {
+    forward := .setTag ⟨by rfl, by rfl, by rfl⟩
+      emptyCaseAlphaBireflexive.forward
+    backward := .setTag ⟨by rfl, by rfl, by rfl⟩
+      emptyCaseAlphaBireflexive.backward
+  } emptyCaseAlphaTree
+
+theorem nestedEmptyCaseShadowRun :
+    shadowCode? 2 nestedEmptyCaseCode = some nestedEmptyCaseExpected := by
+  rfl
+
+/-- Regression for the full assembly path: independently supplied case-shape
+laws cross a non-case parent and discharge a recursive shadow run. -/
+theorem nestedEmptyCaseFactored_of_shapes
+    (shapes : ScopedCaseShapeLaws noCaseTagValid) :
+    ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedFactoredTree_of_shapes shapes nestedEmptyCaseAlphaTree
+    nestedEmptyCaseShadowRun
 
 theorem alphaFoldParamBodyForward :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])

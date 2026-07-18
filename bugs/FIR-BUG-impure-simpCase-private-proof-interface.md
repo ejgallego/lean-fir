@@ -111,6 +111,17 @@ exports equations for the empty, singleton, and retained-case output shapes.
 These lemmas reduce the next phase proof to selection and default-fold facts;
 they do not widen the trusted compiler-correspondence boundary.
 
+The shape split is now formalized by `ScopedCaseShapeLaws`, which derives the
+universal admissibility law and arbitrary recursive factoring theorem.
+Filtering is kernel-proved to preserve reachable selections and alpha-related
+alternative lists. `ScopedAddDefaultSelectionEvidence` names the exact
+remaining fold relation; small tables and tables with an existing default are
+proved unchanged and obtain this relation without trust. For the alpha-fold
+fixture, `alphaFoldRetainedPhaseEvidence_of_output` closes every structural
+and alpha obligation from one explicit equation identifying the private fold
+output. The executable guard confirms that equation, but opacity prevents it
+from becoming a kernel theorem.
+
 ## Semantic impact
 
 This is a proof-interface gap, not evidence that the pass miscompiles a valid
@@ -142,10 +153,11 @@ none
 
 ## Resolution and regression
 
-Unresolved, but narrowed to compiler correspondence and construction of the
-phase-specific scoped admissibility law. Downstream structural-then-alpha
-composition, full-tree traversal, pointwise alternative factoring, and the
-kernel-to-boundary lift are reusable. The unreachable-filter correspondence
-is now kernel-proved. Once the private kernels or graph theorems are public,
-connect the actual `addDefaultAlt` result to the same phase law and replace
-executable actual-vs-shadow checks with a kernel correspondence theorem.
+Unresolved, but narrowed to compiler correspondence and the folded-table
+output equation consumed by the phase-specific shape law. Downstream
+structural-then-alpha composition, full-tree traversal, pointwise alternative
+factoring, shape-law assembly, and the kernel-to-boundary lift are reusable.
+The unreachable-filter and no-fold `addDefaultAlt` paths are kernel-proved.
+Once the private kernels or graph theorems are public, prove the genuine fold
+equation and replace executable actual-vs-shadow checks with a kernel
+correspondence theorem.

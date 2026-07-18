@@ -743,6 +743,110 @@ theorem codeRelated_cases_selected
   | terminal related => cases related
   | cases _ selected => exact selected
 
+/-- Alpha-related code agrees on whether its outer constructor is
+syntactically unreachable. -/
+theorem codeRelated_isUnreachable_eq
+    (related : CodeRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+    SimpCase.isUnreachable left = SimpCase.isUnreachable right := by
+  cases related <;> try rfl
+  rename_i terminal
+  cases terminal <;> rfl
+
+/-- Unreachable filtering preserves pointwise alpha relations; related bodies
+are filtered in lockstep because alpha equivalence preserves the outer code
+constructor. -/
+theorem altsRelated_removeUnreachable
+    (related : AltsRelated
+      (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope left right) :
+    AltsRelated (leftJoins := leftJoins) (rightJoins := rightJoins)
+      rho leftScope rightScope
+      (SimpCase.removeUnreachable left) (SimpCase.removeUnreachable right) := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      cases head with
+      | ctor code =>
+          rename_i leftCode rightCode info
+          have same := codeRelated_isUnreachable_eq code
+          cases reachable : SimpCase.isUnreachable leftCode with
+          | false =>
+              have rightReachable :
+                  SimpCase.isUnreachable rightCode = false := by
+                rw [← same]
+                exact reachable
+              simpa [SimpCase.removeUnreachable, LCNF.Alt.getCode,
+                reachable, rightReachable]
+                using ListRel.cons (.ctor code) ih
+          | true =>
+              have rightUnreachable :
+                  SimpCase.isUnreachable rightCode = true := by
+                rw [← same]
+                exact reachable
+              simpa [SimpCase.removeUnreachable, LCNF.Alt.getCode,
+                reachable, rightUnreachable]
+                using ih
+      | default code =>
+          rename_i leftCode rightCode
+          have same := codeRelated_isUnreachable_eq code
+          cases reachable : SimpCase.isUnreachable leftCode with
+          | false =>
+              have rightReachable :
+                  SimpCase.isUnreachable rightCode = false := by
+                rw [← same]
+                exact reachable
+              simpa [SimpCase.removeUnreachable, LCNF.Alt.getCode,
+                reachable, rightReachable]
+                using ListRel.cons (.default code) ih
+          | true =>
+              have rightUnreachable :
+                  SimpCase.isUnreachable rightCode = true := by
+                rw [← same]
+                exact reachable
+              simpa [SimpCase.removeUnreachable, LCNF.Alt.getCode,
+                reachable, rightUnreachable]
+                using ih
+
+/-- Exact scoped contract for the private default-folding calculation. It is
+automatic when the table is unchanged; a genuine fold supplies the
+bidirectional selected-branch alpha witnesses justified by the checker and
+the phase's hygiene invariant. -/
+structure ScopedAddDefaultSelectionEvidence
+    (index : ScopeIndex) (middleAlts targetAlts :
+      Array (LCNF.Alt .impure)) : Prop where
+  forward : ∀ tag, CaseSelectionRelated
+    (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+    index.forwardRho index.sourceScope index.targetScope
+    (chooseAlt tag middleAlts.toList)
+    (chooseAlt tag (shadowAddDefaultAlt targetAlts).toList)
+  backward : ∀ tag, CaseSelectionRelated
+    (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+    index.backwardRho index.targetScope index.sourceScope
+    (chooseAlt tag (shadowAddDefaultAlt targetAlts).toList)
+    (chooseAlt tag middleAlts.toList)
+
+theorem scopedAddDefaultSelectionEvidence_of_eq
+    (unchanged : shadowAddDefaultAlt alts = alts)
+    (forward : AltsRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope
+      alts.toList alts.toList)
+    (backward : AltsRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope
+      alts.toList alts.toList) :
+    ScopedAddDefaultSelectionEvidence index alts alts where
+  forward := by
+    intro tag
+    rw [unchanged]
+    exact chooseAlt_related forward
+  backward := by
+    intro tag
+    rw [unchanged]
+    exact chooseAlt_related backward
+
 /-- A universally well-scoped presentation of the factor relation. Ill-scoped
 indices are not asserted to relate anything; callers provide alpha reflexivity
 at the source position they actually traverse. -/
@@ -869,6 +973,44 @@ theorem ScopedEliminatedCaseEvidence.factored
     alphaBackward := evidence.alphaBackward
   }⟩
 
+/-- Minimal retained-table phase witness. The structural middle may differ
+from the recursively transformed table; its selected branches are connected
+to the prepared compiler table by the explicit default-fold contract. -/
+structure ScopedRetainedPhaseEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure)
+    (targetAlts : Array (LCNF.Alt .impure)) : Type where
+  middleAlts : Array (LCNF.Alt .impure)
+  structuralSelected : ∀ tag, validCase source tag →
+    SelectionRel validCase (chooseAlt tag source.alts.toList)
+      (chooseAlt tag middleAlts.toList)
+  folded : ScopedAddDefaultSelectionEvidence index middleAlts
+    (shadowFilterUnreachable targetAlts)
+
+def ScopedRetainedPhaseEvidence.aligned
+    (evidence : ScopedRetainedPhaseEvidence
+      validCase index source targetAlts)
+    (root : ScopedAlphaBireflexive index (.cases source)) :
+    ScopedAlignedCaseEvidence validCase index source
+      (source.updateAlts
+        (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts))) := by
+  cases source with
+  | mk typeName resultType discr sourceAlts =>
+      exact {
+        middleAlts := evidence.middleAlts
+        structuralSelected := evidence.structuralSelected
+        alphaForwardDiscr :=
+          codeRelated_cases_discr
+            (left := .mk typeName resultType discr sourceAlts)
+            (right := .mk typeName resultType discr sourceAlts) root.forward
+        alphaForwardSelected := evidence.folded.forward
+        alphaBackwardDiscr :=
+          codeRelated_cases_discr
+            (left := .mk typeName resultType discr sourceAlts)
+            (right := .mk typeName resultType discr sourceAlts) root.backward
+        alphaBackwardSelected := evidence.folded.backward
+      }
+
 /-- Output-shape classification for one admissible nonrecursive case-kernel
 step. -/
 inductive ScopedCaseFactorEvidence
@@ -907,6 +1049,66 @@ structure ScopedCaseAdmissibilityLaws
       (.mk typeName resultType discr sourceAlts)
       (shadowSimplifyCases
         (.mk typeName resultType discr targetAlts.toArray))
+
+/-- Phase-facing decomposition of the local simplifier law along its three
+actual output shapes. The recursive branch factors and source hygiene are
+shared inputs; a concrete phase can establish empty, singleton, and retained
+case tables independently. -/
+structure ScopedCaseShapeLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Type where
+  empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsFactored validCase index sourceAlts.toList targetAlts →
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size = 0 →
+    ScopedEliminatedCaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) (.unreach resultType)
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsFactored validCase index sourceAlts.toList targetAlts →
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (singleton : (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size = 1) →
+    ScopedEliminatedCaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr targetAlts.toArray))[0]!.getCode
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)}
+      {targetAlts : List (LCNF.Alt .impure)},
+    ScopedAltsFactored validCase index sourceAlts.toList targetAlts →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr targetAlts.toArray)).size ≠ 1 →
+    ScopedRetainedPhaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      targetAlts.toArray
+
+/-- Assemble the exact local admissibility law by following
+`shadowSimplifyCases`' empty/singleton/retained decision tree. -/
+theorem scopedCaseAdmissibilityLaws_of_shapes
+    (shapes : ScopedCaseShapeLaws validCase) :
+    ScopedCaseAdmissibilityLaws validCase where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun factors root
+    let targetCases : LCNF.Cases .impure :=
+      .mk typeName resultType discr targetAlts.toArray
+    by_cases empty : (shadowPrepareAlts targetCases).size = 0
+    · rw [shadowSimplifyCases_eq_unreach empty]
+      exact .eliminated (shapes.empty factors root empty)
+    · by_cases singleton : (shadowPrepareAlts targetCases).size = 1
+      · rw [shadowSimplifyCases_eq_singleton singleton]
+        exact .eliminated (shapes.singleton factors root singleton)
+      · rw [shadowSimplifyCases_eq_cases empty singleton]
+        exact .aligned
+          ((shapes.retained factors empty singleton).aligned root)
 
 theorem scopedCaseKernelLaws_of_admissibility
     (admissible : ScopedCaseAdmissibilityLaws validCase) :
@@ -1336,6 +1538,13 @@ theorem scopedCaseBoundarySoundTree_of_admissibility
     scopedCodeFactoredOnAlphaTree_traversalLaws
     (scopedCaseKernelLaws_of_admissibility admissible)
 
+/-- Universal recursive boundary from the compiler-shaped phase interface. -/
+theorem scopedCaseBoundarySoundTree_of_shapes
+    (shapes : ScopedCaseShapeLaws validCase) :
+    ScopedCaseBoundarySound (ScopedCodeFactoredOnAlphaTree validCase) :=
+  scopedCaseBoundarySoundTree_of_admissibility
+    (scopedCaseAdmissibilityLaws_of_shapes shapes)
+
 /-- Arbitrary recursive shadow traversal once the local case kernel consumes
 full-tree scope/hygiene evidence. -/
 theorem shadowCode_scopedFactoredTree_of_caseKernel
@@ -1356,6 +1565,16 @@ theorem shadowCode_scopedFactoredTree
     ScopedCodeFactored validCase index source target :=
   shadowCode_scopedFactoredTree_of_caseKernel
     (scopedCaseKernelLaws_of_admissibility admissible) hygiene run
+
+/-- End-to-end recursive shadow result from independently proved empty,
+singleton, and retained case-shape laws. -/
+theorem shadowCode_scopedFactoredTree_of_shapes
+    (shapes : ScopedCaseShapeLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodeFactored validCase index source target :=
+  shadowCode_scopedFactoredTree
+    (scopedCaseAdmissibilityLaws_of_shapes shapes) hygiene run
 
 /-- The remaining proof input is now strictly local to
 `shadowSimplifyCases`: recursive alternative bodies and every surrounding
