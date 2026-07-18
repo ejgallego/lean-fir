@@ -1570,6 +1570,16 @@ Executable guards cover allocation, metadata recovery, a successful typed
 capture projection, and a nonmatching trampoline target. The next W6.4 slice
 adds the proof-only closure descriptor and local decoder refinement.
 
+W6.4b establishes that local decoder boundary. The refinement witness now
+records a closure's function name, total arity, and ordered capture kinds;
+fresh closure bindings extend old witness facts and preserve witness
+well-formedness. `ClosureObjectRel` ties that descriptor to validated concrete
+metadata and every occupied capture slot. Its `matches` and `project` theorems
+show that the exact checked trampoline operations recover the declared target
+and a typed `ValueRel` capture. The next W6.4 slice proves that successful
+concrete allocation establishes this relation before lifting closure
+allocation across the complete live heap.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

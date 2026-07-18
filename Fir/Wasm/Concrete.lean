@@ -6,6 +6,7 @@ import Fir.Wasm.Concrete.AllocationCorrectness
 import Fir.Wasm.Concrete.FrontierCorrectness
 import Fir.Wasm.Concrete.Runtime
 import Fir.Wasm.Concrete.ClosureRuntime
+import Fir.Wasm.Concrete.ClosureCorrectness
 import Fir.Wasm.Concrete.ObjectFieldsCorrectness
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import Fir.Wasm.Concrete.HeapRefinement

@@ -29,6 +29,7 @@ operation that allocated the object and is not stored as a semantic value in
 linear memory. -/
 inductive AllocationDescriptor where
   | constructor (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind)
+  | closure (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
   | boxed (kind : BoxedScalarKind)
   | promotedTag (payload : UInt64)
   | natural (value : Nat)
@@ -78,6 +79,14 @@ def RefinementWitness.bindConstructor (witness : RefinementWitness)
   { witness with
       locations := (location, address) :: witness.locations
       descriptors := (address, .constructor info fieldKinds) :: witness.descriptors }
+
+def RefinementWitness.bindClosure (witness : RefinementWitness)
+    (location : Location) (address : Word32) (function : Lean.Name)
+    (arity : Nat) (captureKinds : Array AbiKind) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .closure function arity captureKinds) ::
+        witness.descriptors }
 
 /-- Replace the proof-only active constructor descriptor at an existing
 address. Location and promoted-tag identities are unchanged; the new head
@@ -183,6 +192,36 @@ theorem RefinementWitness.lookup_bindConstructor_descriptor_other
       witness.descriptors.lookup? other := by
   simp [RefinementWitness.bindConstructor, DescriptorMap.lookup?, different]
 
+@[simp] theorem RefinementWitness.lookup_bindClosure_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind) :
+    (witness.bindClosure location address function arity captureKinds).locations.lookup?
+        location = some address := by
+  simp [RefinementWitness.bindClosure, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindClosure_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind) :
+    (witness.bindClosure location address function arity captureKinds).descriptors.lookup?
+        address = some (.closure function arity captureKinds) := by
+  simp [RefinementWitness.bindClosure, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_bindClosure_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (different : other ≠ location) :
+    (witness.bindClosure location address function arity captureKinds).locations.lookup?
+        other = witness.locations.lookup? other := by
+  simp [RefinementWitness.bindClosure, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindClosure_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (different : address.value ≠ other.value) :
+    (witness.bindClosure location address function arity captureKinds).descriptors.lookup?
+        other = witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindClosure, DescriptorMap.lookup?, different]
+
 @[simp] theorem RefinementWitness.lookup_bindNatural_location
     (witness : RefinementWitness) (location : Location) (address : Word32) (value : Nat) :
     (witness.bindNatural location address value).locations.lookup? location = some address := by
@@ -278,6 +317,36 @@ theorem RefinementWitness.bindConstructor_extends
   · intro old descriptor found
     rw [witness.lookup_bindConstructor_descriptor_other location address old info
       fieldKinds (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding a fresh closure extends every previously visible location,
+promoted tag, and allocation descriptor. -/
+theorem RefinementWitness.bindClosure_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends
+      (witness.bindClosure location address function arity captureKinds) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_ }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindClosure_location_other location old address function
+      arity captureKinds different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindClosure_descriptor_other location address old function
+      arity captureKinds (descriptorFresh old descriptor found)]
     exact found
 
 /-- Binding one fresh heap box extends all previously visible proof metadata. -/
@@ -419,6 +488,66 @@ theorem RefinementWitness.WellFormed.bindConstructor
       exact promotedAddressFresh payload right promotedFound
     · rw [witness.lookup_bindConstructor_location_other location old address info
         fieldKinds isNew] at locationFound
+      exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
+
+/-- A fresh closure uses the same location identity extension as every other
+ordinary heap allocation; its descriptor does not affect witness injectivity. -/
+theorem RefinementWitness.WellFormed.bindClosure
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (function : Lean.Name)
+    (arity : Nat) (captureKinds : Array AbiKind)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
+    (witness.bindClosure location address function arity captureKinds).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := ?_ }
+  · intro old oldAddress found
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindClosure, LocationMap.lookup?] at found
+      cases found
+      exact addressHeap
+    · rw [witness.lookup_bindClosure_location_other location old address function
+        arity captureKinds isNew] at found
+      exact valid.locationHeap old oldAddress found
+  · intro left right common leftFound rightFound
+    by_cases leftNew : left = location
+    · subst left
+      simp [RefinementWitness.bindClosure, LocationMap.lookup?] at leftFound
+      have commonEq : common = address := leftFound.symm
+      subst common
+      by_cases rightNew : right = location
+      · exact rightNew.symm
+      · rw [witness.lookup_bindClosure_location_other location right address function
+          arity captureKinds rightNew] at rightFound
+        exact False.elim ((locationAddressFresh right address rightFound) rfl)
+    · rw [witness.lookup_bindClosure_location_other location left address function
+        arity captureKinds leftNew] at leftFound
+      by_cases rightNew : right = location
+      · subst right
+        simp [RefinementWitness.bindClosure, LocationMap.lookup?] at rightFound
+        have commonEq : common = address := rightFound.symm
+        subst common
+        exact False.elim ((locationAddressFresh left address leftFound) rfl)
+      · rw [witness.lookup_bindClosure_location_other location right address function
+          arity captureKinds rightNew] at rightFound
+        exact valid.locationInjective left right common leftFound rightFound
+  · intro old payload left right locationFound promotedFound
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindClosure, LocationMap.lookup?] at locationFound
+      have leftEq : left = address := locationFound.symm
+      subst left
+      exact promotedAddressFresh payload right promotedFound
+    · rw [witness.lookup_bindClosure_location_other location old address function
+        arity captureKinds isNew] at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
 
 /-- A fresh boxed location preserves the same heap-address injectivity and
