@@ -18,8 +18,8 @@ theorem ConstructorObjectRel.writeTag
       Fir.Wasm.Concrete.writeTag state address tag = .ok result ∧
       ConstructorObjectRel result witness address info fieldKinds
         { semantic with tag := tag } := by
-  obtain ⟨header, headerRead, headerKind, refCount, persistent, oldTag,
-      objectCount, usizeCount, scalarCount⟩ := related.header
+  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+      oldTag, objectCount, usizeCount, scalarCount⟩ := related.header
   obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size := by
@@ -106,6 +106,7 @@ theorem ConstructorObjectRel.writeTag
   refine ⟨result, operation, ?_⟩
   refine {
     header := ⟨updatedHeader, headerReadAfter, by simp [updatedHeader, headerKind],
+      by simpa [updatedHeader] using allocationBytes,
       by simpa [updatedHeader] using refCount,
       by simpa [updatedHeader] using persistent,
       by simpa [updatedHeader] using tagToNat,

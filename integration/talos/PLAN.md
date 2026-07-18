@@ -941,6 +941,19 @@ the new tag together with both preserved payload regions. The next slice lifts
 this local object theorem through a non-overlapping-allocation invariant to
 the complete semantic heap, then reuses that frame for field mutation.
 
+W6.2b adds exact checked `USize` mutation at the decoded-object boundary.
+`ConstructorObjectRel` now records that the common header allocation size is
+the declared `ConstructorLayout` extent, so slot-write bounds follow from the
+layout invariant rather than from a previous successful read. The public
+`writeUSizeField` operation validates the constructor and index, performs one
+checked little-endian `UInt64` write, and preserves the header, tag, every
+object projection, and every other `USize` slot. Its theorem relates the result
+to the semantic array update at precisely the selected index. The executable
+mixed-constructor regression checks the same frame. During this slice,
+`FIR-BUG-wasm-none-handwritten-scalar-layout` recorded that the shared
+hand-written scalar fixture uses operand `size` where Lean 4.32 emits
+`size + usize`; concrete scalar work follows the compiler-shaped contract.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -113,7 +113,7 @@ theorem allocateConstructor_nonempty_liveHeapRel
     simp [headerBytes] at payloadFits extent
     have addressEq := freshAddress
     omega
-  obtain ⟨header, headerRead, headerKind, headerRefCount, headerPersistent,
+  obtain ⟨header, headerRead, headerKind, _, headerRefCount, headerPersistent,
       _, _, _, _⟩ := objectRelated.header
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts result address header headerRead).1

@@ -150,6 +150,21 @@ def writeTag (state : MemoryState) (object : Word32) (tag : Nat) :
   let memory ← liftMemory <| { header with aux0 := encoded }.write state.memory object
   return { state with memory }
 
+/-- Replace one checked `USize` constructor slot. The slot address is derived
+from the decoded object-field count, matching the Lean64 semantic layout
+captured by the concrete target policy. -/
+def writeUSizeField (state : MemoryState) (object : Word32) (index : Nat)
+    (value : UInt64) : Except ConcreteError MemoryState := do
+  let header ← readConstructorHeader state object
+  let objectFields := header.aux1.toNat
+  let size := header.aux2.toNat
+  unless index < size do
+    throw (.source (.usizeFieldOutOfBounds index size))
+  let offset := object.value + headerBytes +
+    target.semanticSlotBytes * (objectFields + index)
+  let memory ← liftMemory <| state.memory.writeUInt64 offset value
+  return { state with memory }
+
 partial def naturalLimbs (value : Nat) : List UInt64 :=
   if value < UInt64.size then
     [UInt64.ofNat value]

@@ -12,3 +12,4 @@ import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
 import Fir.Wasm.Concrete.ConstructorHeapCorrectness
 import Fir.Wasm.Concrete.ProjectionCorrectness
 import Fir.Wasm.Concrete.TagMutationCorrectness
+import Fir.Wasm.Concrete.FieldMutationCorrectness

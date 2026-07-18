@@ -239,6 +239,33 @@ theorem allocateConstructor_nonempty_objectRel
     UInt32.toNat_ofNat_of_lt' usizeFieldsFit
   have scalarBytesToNat : (UInt32.ofNat info.ssize).toNat = info.ssize :=
     UInt32.toNat_ofNat_of_lt' scalarBytesFit
+  obtain ⟨rawState, rawAllocation, _, _, _⟩ :=
+    MemoryState.allocateObject_header state middle .constructor
+      (layout.allocationBytes - headerBytes) false
+      (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+      (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize) address objectAllocation
+  have allocationPost := MemoryState.allocate_spec state rawState
+    (align8 (headerBytes + (layout.allocationBytes - headerBytes))) address
+      rawAllocation
+  have layoutLt : layout.allocationBytes < UInt32.size := by
+    have endWithin := allocationPost.endWithinAddressSpace
+    have allocatedBytesEq :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) =
+          layout.allocationBytes := by
+      rw [align8_align8, allocationEq]
+    have nonzero : address.value ≠ 0 := by
+      intro zero
+      have addressClass := allocationPost.addressClass
+      simp [Word32.classify, zero] at addressClass
+    have allocatedLt :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) <
+          wordModulus := by
+      omega
+    rw [allocatedBytesEq] at allocatedLt
+    simpa [wordModulus] using allocatedLt
+  have allocationBytesToNat :
+      (UInt32.ofNat layout.allocationBytes).toNat = layout.allocationBytes :=
+    UInt32.toNat_ofNat_of_lt' layoutLt
   have exactHeader : result.readLiveHeader address = .ok
       (Header.forAllocation .constructor layout.allocationBytes false
         (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
@@ -277,7 +304,8 @@ theorem allocateConstructor_nonempty_objectRel
   · exact ⟨Header.forAllocation .constructor layout.allocationBytes false
       (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize), exactHeader,
-      rfl, rfl, rfl, tagToNat, objectFieldsToNat, usizeFieldsToNat,
+      rfl, allocationBytesToNat, rfl, rfl, tagToNat, objectFieldsToNat,
+      usizeFieldsToNat,
       scalarBytesToNat⟩
   · intro index kind value kindAt valueAt
     obtain ⟨word, wordAt, related⟩ := fieldRelated index kind value kindAt valueAt

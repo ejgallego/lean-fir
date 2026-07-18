@@ -15,6 +15,7 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
   header : ∃ header,
     state.readLiveHeader address = .ok header ∧
     header.kind = .constructor ∧
+    header.allocationBytes.toNat = (ConstructorLayout.ofInfo info).allocationBytes ∧
     header.refCount.toNat = 1 ∧
     header.persistent = false ∧
     header.aux0.toNat = semantic.tag ∧
@@ -47,8 +48,8 @@ theorem ConstructorObjectRel.prefixExtension
     (related : ConstructorObjectRel before witness address info fieldKinds semantic)
     (extension : before.PrefixExtension after) :
     ConstructorObjectRel after witness address info fieldKinds semantic := by
-  obtain ⟨header, headerRead, headerKind, refCount, persistent, tag, objectCount,
-      usizeCount, scalarCount⟩ := related.header
+  obtain ⟨header, headerRead, headerKind, allocationBytes, refCount, persistent,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header
   have headerAfter := extension.readLiveHeader_eq_ok address header
     related.headerOwned headerRead
   have heap := (MemoryState.PrefixExtension.readLiveHeader_facts
@@ -66,8 +67,8 @@ theorem ConstructorObjectRel.prefixExtension
     simp [liftMemory, headerKind]
     rfl
   refine {
-    header := ⟨header, headerAfter, headerKind, refCount, persistent, tag,
-      objectCount, usizeCount, scalarCount⟩
+    header := ⟨header, headerAfter, headerKind, allocationBytes, refCount,
+      persistent, tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := Nat.le_trans related.headerOwned extension.cursor
     extent := Nat.le_trans related.extent extension.cursor
     semanticObjectFields := related.semanticObjectFields
