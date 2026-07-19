@@ -1227,6 +1227,27 @@ theorem singletonDefaultPrepared_eq :
     shadowPrepareAlts singletonDefaultCases = singletonDefaultCases.alts := by
   rfl
 
+/-- Pointwise endpoint identities available after recursive traversal of the
+singleton default table, instantiated at canonical reachable validity. -/
+def singletonDefaultReachableAltsIdentity :
+    ScopedAltsPhaseResult ReachableCaseTag alphaFoldScopeIndex
+      singletonDefaultCases.alts.toList
+      singletonDefaultCases.alts.toList :=
+  .default
+    (.identity (.aligned (.return x))
+      selectedBranchAlphaBireflexiveAtFoldScope)
+    .nil
+
+/-- The generic direct-singleton theorem reconstructs convergence without a
+fixture-specific convergence assumption. -/
+theorem singletonDefaultDirectConvergenceDerived :
+    Nonempty (ScopedSingletonSelectionConvergence ReachableCaseTag
+      alphaFoldScopeIndex singletonDefaultCases
+      (shadowFilterUnreachable singletonDefaultCases.alts)[0]!.getCode) :=
+  scopedDirectSingletonSelectionConvergence
+    reachableCaseTag_selectionLaws singletonDefaultReachableAltsIdentity
+    (by rfl)
+
 def singletonDefaultSelectionConvergence :
     ScopedSingletonSelectionConvergence singletonDefaultValidCase
       alphaFoldScopeIndex singletonDefaultCases selectedBranch := {
@@ -1727,6 +1748,20 @@ theorem nestedEmptyCaseTraced_of_reachableSelection
       nestedEmptyCaseCode nestedEmptyCaseExpected :=
   shadowCode_scopedPhaseTracedTree_of_reachableSelection
     noCaseReachableSelectionLaws singletonPhases retainedPhases
+    targetIdentities nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
+
+/-- Reduced recursive endpoint after the ordinary direct-singleton path has
+also been derived. Only genuine folded singletons remain as singleton input. -/
+theorem nestedEmptyCaseTraced_of_foldedSingletons
+    (foldedSingletons :
+      ScopedCaseFoldedSingletonPhaseLaws noCaseTagValid)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws noCaseTagValid)
+    (targetIdentities :
+      ScopedCasePhaseTargetIdentityLaws noCaseTagValid) :
+    ScopedCodePhaseTraced noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedPhaseTracedTree_of_foldedSingletons
+    noCaseReachableSelectionLaws foldedSingletons retainedPhases
     targetIdentities nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
 
 /-- The same recursive empty-table regression through the reduced two-phase

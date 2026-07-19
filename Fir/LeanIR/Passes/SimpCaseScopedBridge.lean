@@ -969,6 +969,27 @@ inductive ScopedAltsPhaseResult
       ScopedAltsPhaseResult validCase index
         (.default left :: leftRest) (.default right :: rightRest)
 
+/-- Pointwise endpoint identity for any target alternative in a synchronized
+round. Unlike selector-based case-root alpha evidence, this also exposes
+shadowed array entries. -/
+theorem ScopedAltsPhaseResult.targetBodyIdentity_of_mem
+    (result : ScopedAltsPhaseResult validCase index source target)
+    (member : alt ∈ target) :
+    Nonempty (ScopedCodePhaseResult validCase index
+      alt.getCode alt.getCode) := by
+  induction result with
+  | nil => simp at member
+  | ctor body rest ih =>
+      simp at member
+      rcases member with rfl | member
+      · exact ⟨.identity body.targetRefl body.targetAlpha⟩
+      · exact ih member
+  | default body rest ih =>
+      simp at member
+      rcases member with rfl | member
+      · exact ⟨.identity body.targetRefl body.targetAlpha⟩
+      · exact ih member
+
 /-- Endpoint identity round for a synchronized alternative result. -/
 def ScopedAltsPhaseResult.targetIdentity
     (result : ScopedAltsPhaseResult validCase index source target) :
@@ -990,6 +1011,14 @@ inductive ScopedAltsPhaseTrace
   | trans (round : ScopedAltsPhaseResult validCase index source middle)
       (rest : ScopedAltsPhaseTrace validCase index middle target) :
       ScopedAltsPhaseTrace validCase index source target
+
+/-- The pointwise identity round at the final synchronized endpoint. -/
+def ScopedAltsPhaseTrace.targetIdentity
+    (trace : ScopedAltsPhaseTrace validCase index source target) :
+    ScopedAltsPhaseResult validCase index target target :=
+  match trace with
+  | .single round => round.targetIdentity
+  | .trans _ rest => rest.targetIdentity
 
 def ScopedAltsPhaseTrace.rounds
     (trace : ScopedAltsPhaseTrace validCase index source target) : Nat :=
@@ -2145,12 +2174,96 @@ structure ScopedCaseSingletonPhaseLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     Nonempty (ScopedSingletonPhaseEvidence validCase index
       (.mk typeName resultType discr sourceAlts)
       (shadowPrepareAlts
         (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+
+/-- Direct-singleton convergence when unreachable filtering itself leaves one
+arm. Pointwise alternative identities supply structural and alpha reflexivity
+for that exact array entry, including entries hidden from case selectors. -/
+theorem scopedDirectSingletonSelectionConvergence
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (alternatives : ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList)
+    (singleton : (shadowFilterUnreachable sourceAlts).size = 1) :
+    Nonempty (ScopedSingletonSelectionConvergence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowFilterUnreachable sourceAlts)[0]!.getCode) := by
+  rcases Array.size_eq_one_iff.mp singleton with ⟨alt, filteredEq⟩
+  have altFiltered : alt ∈ shadowFilterUnreachable sourceAlts := by
+    rw [filteredEq]
+    simp
+  have altSource : alt ∈ sourceAlts.toList := by
+    have altSourceArray : alt ∈ sourceAlts := by
+      exact Array.mem_of_mem_filter altFiltered
+    exact Array.mem_def.mp altSourceArray
+  rcases alternatives.targetBodyIdentity_of_mem altSource with
+    ⟨bodyIdentity⟩
+  have convergence : ScopedSingletonSelectionConvergence validCase index
+      (.mk typeName resultType discr sourceAlts) alt.getCode := {
+    middle := alt.getCode
+    structuralSelected := by
+      intro tag valid
+      rcases selection.selected valid with ⟨branch, selected, reachable⟩
+      have selectedFiltered :=
+        chooseAlt_shadowFilterUnreachable_of_selected selected reachable
+      change chooseAlt tag (shadowFilterUnreachable sourceAlts).toList =
+        some branch at selectedFiltered
+      rw [filteredEq] at selectedFiltered
+      have branchEq :=
+        chooseAlt_singleton_eq_some_getCode selectedFiltered
+      rw [selected, branchEq]
+      exact .some bodyIdentity.targetRefl
+    alphaForward := bodyIdentity.targetAlpha.forward
+    alphaBackward := bodyIdentity.targetAlpha.backward
+  }
+  simpa [filteredEq] using Nonempty.intro convergence
+
+/-- The genuinely folded half of singleton classification. It is consulted
+only when filtering did not already produce the final singleton. -/
+structure ScopedCaseFoldedSingletonPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedCodeTrifactor validCase index
+      (.cases (.mk typeName resultType discr sourceAlts))
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+
+/-- Assemble singleton phase classification from the generic direct path and
+the remaining fold-created singleton contract. -/
+theorem scopedCaseSingletonPhaseLaws_of_reachableSelection
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (folded : ScopedCaseFoldedSingletonPhaseLaws validCase) :
+    ScopedCaseSingletonPhaseLaws validCase where
+  singleton := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      preparedSingleton
+    by_cases filteredSingleton :
+        (shadowFilterUnreachable sourceAlts).size = 1
+    · have preparedEq : shadowPrepareAlts
+          (.mk typeName resultType discr sourceAlts) =
+          shadowFilterUnreachable sourceAlts :=
+        shadowPrepareAlts_eq_filter_of_small (by
+          simp [LCNF.Cases.alts, filteredSingleton])
+      rcases scopedDirectSingletonSelectionConvergence selection alternatives
+          filteredSingleton with ⟨convergence⟩
+      exact ⟨.direct (by simpa [preparedEq] using convergence)⟩
+    · rcases folded.folded root alternatives filteredSingleton
+          preparedSingleton with ⟨factor⟩
+      exact ⟨.folded factor⟩
 
 /-- Retained-table folding evidence, kept separate from the target identities
 needed only when the local result is appended to a recursive trace. -/
@@ -2160,6 +2273,8 @@ structure ScopedCaseRetainedPhaseLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
     (shadowPrepareAlts
@@ -2177,6 +2292,8 @@ structure ScopedCasePhaseTargetIdentityLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     ScopedCodeTargetIdentities validCase index
@@ -2186,6 +2303,8 @@ structure ScopedCasePhaseTargetIdentityLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
     (shadowPrepareAlts
@@ -2197,7 +2316,8 @@ structure ScopedCasePhaseTargetIdentityLaws
 /-- Phase-aware local output-shape contract. Empty tables retain the ordinary
 elimination evidence; singleton tables explicitly classify direct versus
 fold-created results; retained tables carry target identities for subsequent
-recursive rounds. -/
+recursive rounds. Nonempty shapes receive the pointwise endpoint identity
+round produced while recursively transforming their alternatives. -/
 structure ScopedCasePhaseShapeLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
@@ -2212,6 +2332,8 @@ structure ScopedCasePhaseShapeLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (singleton : (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size = 1) →
     Nonempty (ScopedSingletonPhaseResultEvidence validCase index
@@ -2222,6 +2344,8 @@ structure ScopedCasePhaseShapeLaws
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
     (shadowPrepareAlts
@@ -2242,18 +2366,21 @@ theorem scopedCasePhaseShapeLaws_of_components
     exact scopedEmptyCaseEvidence_of_noValid
       (emptySelection.empty empty)
   singleton := by
-    intro index typeName resultType discr sourceAlts root singleton
-    rcases singletonPhases.singleton root singleton with ⟨phase⟩
+    intro index typeName resultType discr sourceAlts root alternatives singleton
+    rcases singletonPhases.singleton root alternatives singleton with ⟨phase⟩
     exact ⟨{
       phase := phase
-      identities := targetIdentities.singleton root singleton
+      identities := targetIdentities.singleton root alternatives singleton
     }⟩
   retained := by
-    intro index typeName resultType discr sourceAlts root nonempty nonsingleton
-    rcases retainedPhases.retained root nonempty nonsingleton with ⟨phase⟩
+    intro index typeName resultType discr sourceAlts root alternatives
+      nonempty nonsingleton
+    rcases retainedPhases.retained root alternatives nonempty nonsingleton with
+      ⟨phase⟩
     exact ⟨{
       phase := phase
-      identities := targetIdentities.retained root nonempty nonsingleton
+      identities := targetIdentities.retained root alternatives nonempty
+        nonsingleton
     }⟩
 
 /-- Three remaining phase components plus reachable-selection refinement are
@@ -2267,6 +2394,19 @@ theorem scopedCasePhaseShapeLaws_of_reachableSelection
   scopedCasePhaseShapeLaws_of_components
     (scopedCaseEmptySelectionLaws_of_reachableSelection selection)
     singletonPhases retainedPhases targetIdentities
+
+/-- Reachable selection discharges empty and direct-singleton shapes. The
+only remaining singleton premise is the genuine default-fold path. -/
+theorem scopedCasePhaseShapeLaws_of_reachableSelectionAndFolded
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldedSingletons : ScopedCaseFoldedSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCasePhaseShapeLaws validCase :=
+  scopedCasePhaseShapeLaws_of_reachableSelection selection
+    (scopedCaseSingletonPhaseLaws_of_reachableSelection selection
+      foldedSingletons)
+    retainedPhases targetIdentities
 
 /-- The retained-table half of the phase contract. Genuine default folding
 remains isolated here; empty and singleton tables are derived generically
@@ -2350,15 +2490,17 @@ theorem scopedCaseKernelLaws_of_admissibility
         exact (admissible.simplify altsRun
           (scopedAltsFactored_of_tree related alternativesTree) root).factored
 
-/-- Exact nonrecursive phase contract for `shadowSimplifyCases`. Recursive
-alternative traversal is intentionally absent: the input table is already
-the transformed table, and this law contributes exactly the parent round. -/
+/-- Exact nonrecursive phase contract for `shadowSimplifyCases`. The input
+table is already recursively transformed; its pointwise endpoint identity
+round is retained so the parent simplifier can inspect even selector-shadowed
+entries. This law contributes exactly the parent round. -/
 structure ScopedLocalCasePhaseLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   simplify : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {alts : Array (LCNF.Alt .impure)},
     ScopedAlphaBireflexive index
       (.cases (.mk typeName resultType discr alts)) →
+    ScopedAltsPhaseResult validCase index alts.toList alts.toList →
     Nonempty (ScopedCodePhaseResult validCase index
       (.cases (.mk typeName resultType discr alts))
       (shadowSimplifyCases (.mk typeName resultType discr alts)))
@@ -2370,7 +2512,7 @@ theorem scopedLocalCasePhaseLaws_of_shapes
     (shapes : ScopedCasePhaseShapeLaws validCase) :
     ScopedLocalCasePhaseLaws validCase where
   simplify := by
-    intro index typeName resultType discr alts root
+    intro index typeName resultType discr alts root alternatives
     let cases : LCNF.Cases .impure :=
       .mk typeName resultType discr alts
     by_cases empty : (shadowPrepareAlts cases).size = 0
@@ -2380,10 +2522,10 @@ theorem scopedLocalCasePhaseLaws_of_shapes
         (scopedUnreachTargetIdentities validCase index resultType)⟩
     · by_cases singleton : (shadowPrepareAlts cases).size = 1
       · rw [shadowSimplifyCases_eq_singleton singleton]
-        rcases shapes.singleton root singleton with ⟨evidence⟩
+        rcases shapes.singleton root alternatives singleton with ⟨evidence⟩
         exact ⟨evidence.result⟩
       · rw [shadowSimplifyCases_eq_cases empty singleton]
-        rcases shapes.retained root empty singleton with ⟨evidence⟩
+        rcases shapes.retained root alternatives empty singleton with ⟨evidence⟩
         exact ⟨by
           simpa [cases, shadowPrepareAlts, LCNF.Cases.alts] using
             evidence.result root⟩
@@ -2422,7 +2564,8 @@ theorem scopedCaseTraceKernelLaws_of_localPhases
             (.cases (.mk typeName resultType discr targetAlts.toArray)) := by
           simpa using alternativesTrace.casesTrace
             typeName resultType discr sourceRoot
-        rcases phases.simplify recursiveTrace.targetAlpha with ⟨parentRound⟩
+        rcases phases.simplify recursiveTrace.targetAlpha (by
+          simpa using alternativesTrace.targetIdentity) with ⟨parentRound⟩
         exact (recursiveTrace.append parentRound.trace).traced
 
 /-- Peel unchanged parameters to expose the code relation at their final
@@ -3599,6 +3742,20 @@ theorem shadowCode_scopedPhaseTracedTree_of_reachableSelection
   shadowCode_scopedPhaseTracedTree_of_phaseShapes
     (scopedCasePhaseShapeLaws_of_reachableSelection selection singletonPhases
       retainedPhases targetIdentities) hygiene run
+
+/-- Recursive trace after deriving both empty-table safety and the ordinary
+direct-singleton path. Fold-created singleton evidence remains explicit. -/
+theorem shadowCode_scopedPhaseTracedTree_of_foldedSingletons
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldedSingletons : ScopedCaseFoldedSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  shadowCode_scopedPhaseTracedTree_of_phaseShapes
+    (scopedCasePhaseShapeLaws_of_reachableSelectionAndFolded selection
+      foldedSingletons retainedPhases targetIdentities) hygiene run
 
 /-- Recursive correctness for the trace relation reduces exactly to a local
 case-kernel law, just as it does for the one-round result relation. -/

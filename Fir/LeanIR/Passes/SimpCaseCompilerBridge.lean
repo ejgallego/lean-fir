@@ -108,6 +108,13 @@ def shadowPrepareAlts (cases : LCNF.Cases .impure) :
     Array (LCNF.Alt .impure) :=
   shadowAddDefaultAlt (shadowFilterUnreachable cases.alts)
 
+/-- Preparation is exactly unreachable filtering when at most one arm
+survives; default folding is inert on that shape. -/
+theorem shadowPrepareAlts_eq_filter_of_small
+    (small : (shadowFilterUnreachable cases.alts).size ≤ 1) :
+    shadowPrepareAlts cases = shadowFilterUnreachable cases.alts := by
+  exact shadowAddDefaultAlt_eq_of_small small
+
 /-- Pure output projection of Lean's private `simplifyCases`. -/
 def shadowSimplifyCases (cases : LCNF.Cases .impure) : LCNF.Code .impure :=
   let alts := shadowPrepareAlts cases
@@ -155,6 +162,24 @@ theorem chooseAlt_shadowFilterUnreachable_of_selected
   rw [shadowFilterUnreachable_toList]
   exact Fir.LeanIR.Passes.SimpCase.chooseAlt_removeUnreachable_of_selected
     selected reachable
+
+/-- Any successful selection from a singleton alternative list returns that
+alternative's body, regardless of whether it is a matching constructor or a
+default. -/
+theorem chooseAlt_singleton_eq_some_getCode
+    (selected : chooseAlt tag [alt] = some branch) :
+    branch = alt.getCode := by
+  cases alt with
+  | alt ctorName params code impossible =>
+      cases impossible
+  | ctorAlt info code _ =>
+      simp [chooseAlt, findCtorAlt, findDefaultAlt] at selected
+      change branch = code
+      exact selected.2.symm
+  | default code =>
+      simp [chooseAlt, findCtorAlt, findDefaultAlt] at selected
+      change branch = code
+      exact selected.symm
 
 /-- A reachable selected arm prevents the complete preparation pipeline from
 producing an empty table. Filtering preserves that arm and default folding

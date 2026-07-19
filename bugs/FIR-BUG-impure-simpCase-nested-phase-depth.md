@@ -139,3 +139,17 @@ shape assumption, while
 recursive theorem with only singleton, retained-table, and target-identity
 components left. Regressions include a non-vacuous reachable default arm, an
 empty table rejected by canonical validity, and the reduced recursive API.
+
+The ordinary singleton path is now discharged as well. The recursive
+alternative trace exposes a pointwise endpoint identity round, preserving
+hygiene and structural reflexivity for every array entry rather than only the
+entries observable through `chooseAlt`. This matters for shadowed alternatives
+that root-level `CodeRelated.cases` intentionally hides. When unreachable
+filtering has size one, `shadowAddDefaultAlt` is inert, reachable validity
+forces every valid selection to that sole body, and the pointwise identity
+supplies its two alpha directions. `ScopedCaseFoldedSingletonPhaseLaws`
+therefore contains only prepared singletons created by genuine default
+folding, and `shadowCode_scopedPhaseTracedTree_of_foldedSingletons` exposes
+that reduced contract at the universal recursive endpoint. The remaining
+proof frontier is fold-created singleton evidence, retained-table folding,
+and the corresponding target identities.
