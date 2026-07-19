@@ -1956,6 +1956,19 @@ theorem LiveHeapRel.decrementReference_refines
           rw [firstConcrete]
           exact restConcrete
 
+/-- The erased failed-reset sentinel is a delete-specific no-op in both the
+source and concrete runtimes. This does not introduce an ordinary object
+relation for physical zero. -/
+theorem LiveHeapRel.deleteObject_erased_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    (related : LiveHeapRel state witness runtime) :
+    ∃ result,
+      deleteObject state Word32.zero = .ok result ∧
+      Fir.LeanIR.Impure.deleteValue runtime .erased = .ok runtime ∧
+      LiveHeapRel result witness runtime := by
+  exact ⟨state, deleteObject_zero state,
+    Fir.LeanIR.Impure.deleteValue_erased runtime, related⟩
+
 /-- Explicit deletion installs the canonical concrete freed header and the
 matching semantic zero-count/dead cell without releasing owned children. -/
 theorem LiveHeapRel.deleteObject_refines
@@ -2002,8 +2015,23 @@ theorem LiveHeapRel.deleteObject_refines
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead).1
+  have addressNeZero : address ≠ Word32.zero := by
+    intro equal
+    subst address
+    change ObjectWordClass.sentinel = ObjectWordClass.heap at addressHeap
+    contradiction
+  have addressValueNeZero : address.value ≠ 0 := by
+    intro equal
+    have sentinel : address.classify = .sentinel := by
+      simp [Word32.classify, equal]
+    rw [sentinel] at addressHeap
+    contradiction
+  have addressZeroCheck : (address == Word32.zero) = false := by
+    change (address.value == 0) = false
+    simp [addressValueNeZero]
   have concreteDelete : deleteObject state address = .ok released := by
     unfold deleteObject
+    rw [if_neg (by simp [addressZeroCheck])]
     rw [addressHeap]
     simp only [↓reduceIte, Bind.bind, Except.bind]
     rw [headerRead]

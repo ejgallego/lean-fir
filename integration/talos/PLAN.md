@@ -1757,6 +1757,16 @@ promoted tags while replacing exactly one source cell. A successful checked
 `setUSizeField`, and yields a complete `LiveHeapRel`. Packed scalar widths can
 reuse the same boundary by supplying their width-specific byte transaction.
 
+W6.5e consumes the shared erased-delete correction from `fc6d3e4`. Concrete
+`deleteObject` now recognizes physical word zero as the operation-specific
+failed-reset sentinel and returns the complete memory state unchanged;
+`LiveHeapRel.deleteObject_erased_refines` pairs that equation with semantic
+`deleteValue_erased`. The ordinary heap deletion proof explicitly establishes
+that its decoded address is nonzero before entering the header path, and the
+existing immediate/promoted rejection regression remains intact. Thus this
+slice does not widen `ValueRel`, heap-only ABI decoding, or ordinary object
+classification.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

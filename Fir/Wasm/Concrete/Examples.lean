@@ -434,6 +434,14 @@ def deletedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
             header.refCount == 0
       | _, _ => false
 
+/- The erased failed-reset sentinel is the sole non-heap delete no-op and
+preserves the complete concrete state. -/
+#guard match deleteObject MemoryState.initial Word32.zero with
+  | .error _ => false
+  | .ok result =>
+      result.heapCursor == MemoryState.initial.heapCursor &&
+        result.memory == MemoryState.initial.memory
+
 #guard match smallTagged, promotedTagged with
   | .ok (immediateState, immediate), .ok (promotedState, promoted) =>
       match deleteObject immediateState immediate,

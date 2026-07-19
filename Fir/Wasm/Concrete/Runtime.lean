@@ -625,17 +625,25 @@ def decrementReference (state : MemoryState) (object : Word32)
     decrementReferenceOnce state object check descriptors
 
 /-- Mark one ordinary heap allocation dead without recursively releasing its
-owned fields. This is FIR's explicit `delete` operation, distinct from a
-reference-count decrement. Promoted tags retain tagged-value behavior and are
-therefore rejected as heap references. -/
+owned fields. Physical zero is the erased failed-reset sentinel and is a
+delete-specific no-op, matching FIR and Lean's native runtime. Other sentinels,
+immediates, and promoted tags remain invalid heap references. -/
 def deleteObject (state : MemoryState) (object : Word32) :
     Except ConcreteError MemoryState := do
+  if object == Word32.zero then
+    return state
   unless object.classify = .heap do
     throw (.source .expectedHeapReference)
   let header ← liftMemory <| state.readLiveHeader object
   if header.isPromotedTag then
     throw (.source .expectedHeapReference)
   writeLiveHeader state object header.forRelease
+
+@[simp] theorem deleteObject_zero (state : MemoryState) :
+    deleteObject state Word32.zero = .ok state := by
+  unfold deleteObject
+  rw [if_pos (by decide)]
+  simp only [pure, Except.pure]
 
 /-- Canonical concrete word for semantic tagged zero. Reset writes this into
 cleared object slots; word zero remains reserved for erased values and empty

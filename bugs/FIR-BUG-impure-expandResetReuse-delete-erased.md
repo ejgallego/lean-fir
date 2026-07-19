@@ -104,3 +104,10 @@ Generation must now admit `del` as a safe use of the guarded erased join
 parameter before the case can reach V8. W6 must mirror the new source contract
 by treating concrete word zero as a no-op in `deleteObject`. Both are consumer
 adaptations to this fixed shared contract, not local semantic workarounds.
+
+The W6 consumer adaptation is complete: concrete `deleteObject` returns its
+input state for physical zero, `LiveHeapRel.deleteObject_erased_refines`
+matches that equation to `deleteValue_erased`, and the concrete executable
+regression checks byte-for-byte state preservation. The existing heap-object
+refinement and immediate/promoted rejection tests remain unchanged, so this
+does not weaken ordinary object decoding.
