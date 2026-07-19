@@ -36,6 +36,12 @@ validate-v8:
 		--case byte-array-set-unique --case byte-array-set-shared \
 		--case int-literal-immediate-positive --case int-literal-heap-positive \
 		--case int-literal-immediate-negative --case int-literal-heap-negative \
+		--case branch-nat --case branch-nat-false --case scalar-enum-cases \
+		--case int-classify-immediate-positive --case int-classify-immediate-negative \
+		--case int-classify-heap-positive --case int-classify-heap-negative \
+		--case packed-preserve --case reuse-assoc \
+		--case reuse-change-tag --case reuse-grow-delete \
+		--case reuse-grow-delete-shared \
 		--plan validation-plans/native-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \

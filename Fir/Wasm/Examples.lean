@@ -436,6 +436,26 @@ def guardedResetJoinProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl c u8Type (.isShared x)) <|
       .jp guardedResetJoinDecl guardedResetJoinContinuation)] }
 
+/-- A guarded optional object may be deleted before inspecting its sharing guard. -/
+def guardedDeleteJoinDecl : LCNF.FunDecl .impure :=
+  .mk j `guardedDeleteJoin #[param p tobjectType, param u u8Type]
+    objType (.del p (.return x))
+
+def guardedDeleteJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType] objType (.code <|
+      .let (letDecl c u8Type (.isShared x)) <|
+      .jp guardedDeleteJoinDecl guardedResetJoinContinuation)] }
+
+/-- `del` does not make a later unguarded object use of the sentinel safe. -/
+def guardedDeleteThenReturnJoinDecl : LCNF.FunDecl .impure :=
+  .mk j `guardedDeleteThenReturnJoin #[param p tobjectType, param u u8Type]
+    objType (.del p (.return p))
+
+def guardedDeleteThenReturnJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x objType] objType (.code <|
+      .let (letDecl c u8Type (.isShared x)) <|
+      .jp guardedDeleteThenReturnJoinDecl guardedResetJoinContinuation)] }
+
 def unknownJoinProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] objType (.code (.jmp j #[]))] }
 
@@ -571,6 +591,8 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram scalarUInt8CaseProgram
 #guard supportedProgram abiJoinProgram
 #guard supportedProgram guardedResetJoinProgram
+#guard supportedProgram guardedDeleteJoinProgram
+#guard !supportedProgram guardedDeleteThenReturnJoinProgram
 #guard !supportedProgram unknownJoinProgram
 #guard !supportedProgram joinArityMismatchProgram
 #guard !supportedProgram joinKindMismatchProgram
@@ -663,6 +685,7 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   abiCtorProjectionProgram,
   abiCaseProgram,
   guardedResetJoinProgram,
+  guardedDeleteJoinProgram,
   abiDefaultCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
 
 #guard !validates? erasedProgram

@@ -179,6 +179,8 @@ def letValueReferencesFVar (target : FVarId) : LCNF.LetValue .impure → Bool
 Check the source-level control invariant emitted by Lean 4.32's
 `ExpandResetReuse`: an optional object parameter may be consumed only below
 the constructor-zero arm of its companion `UInt8` sharing discriminator.
+The explicit `del` operation is the sole exception because the shared runtime
+contract treats its erased failed-reset sentinel as a no-op.
 -/
 mutual
 
@@ -209,10 +211,11 @@ partial def fvarUsesOnlyInFalseGuard (target guard : FVarId) (guarded : Bool) :
         fvarUsesOnlyInFalseGuard target guard guarded continuation
   | .setTag objectId _ continuation
   | .inc objectId _ _ _ continuation
-  | .dec objectId _ _ _ _ continuation
-  | .del objectId continuation =>
+  | .dec objectId _ _ _ _ continuation =>
       (!sameFVar target objectId || guarded) &&
         fvarUsesOnlyInFalseGuard target guard guarded continuation
+  | .del _ continuation =>
+      fvarUsesOnlyInFalseGuard target guard guarded continuation
 
 partial def fvarUsesOnlyInFalseGuardAlt (target guard : FVarId) (guarded : Bool)
     (discr : FVarId) : LCNF.Alt .impure → Bool
