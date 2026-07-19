@@ -1196,6 +1196,12 @@ def singletonDefaultValidCase
     (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
   True
 
+/-- Non-vacuous canonical-validity regression: the default arm is a reachable
+selection for every runtime tag. -/
+theorem singletonDefaultReachableCaseTag (tag : Nat) :
+    ReachableCaseTag singletonDefaultCases tag := by
+  exact ⟨selectedBranch, by rfl, by rfl⟩
+
 def singletonDefaultScopedCodeFactor :
     ScopedCodeBifactor singletonDefaultValidCase alphaFoldScopeIndex
       selectedBranch selectedBranch := {
@@ -1506,6 +1512,12 @@ tag valid makes its simplification to `unreach` impossible to justify through
 def emptyCaseTable : LCNF.Cases .impure :=
   .mk `Empty objType c #[]
 
+/-- Canonical validity rejects every tag for a genuinely empty source table. -/
+theorem emptyCaseNotReachableCaseTag (tag : Nat) :
+    ¬ ReachableCaseTag emptyCaseTable tag := by
+  simp [ReachableCaseTag, emptyCaseTable, LCNF.Cases.alts, chooseAlt,
+    findCtorAlt, findDefaultAlt]
+
 def emptyCaseScopeIndex : ScopeIndex := {
   forwardRho := {}
   backwardRho := {}
@@ -1588,13 +1600,19 @@ theorem scopedCaseBoundaryTreeNotUnconditional :
 def noCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
   False
 
-/-- Concrete empty-selection component: no tag is phase-valid, independently
-of root hygiene or endpoint reflexivity. -/
-def noCaseEmptySelectionLaws :
-    ScopedCaseEmptySelectionLaws noCaseTagValid where
-  empty := by
-    intro _ _ _ _ _ _ impossible
-    exact impossible
+/-- The deliberately empty phase predicate refines canonical selection. -/
+theorem noCaseReachableSelectionLaws :
+    ScopedCaseReachableSelectionLaws noCaseTagValid where
+  selected := by
+    intro _ _ impossible
+    exact False.elim impossible
+
+/-- Concrete empty-selection component derived through the generic reachable
+selection theorem, rather than supplied directly. -/
+theorem noCaseEmptySelectionLaws :
+    ScopedCaseEmptySelectionLaws noCaseTagValid :=
+  scopedCaseEmptySelectionLaws_of_reachableSelection
+    noCaseReachableSelectionLaws
 
 theorem emptyCaseAltsFactored :
     ScopedAltsFactored noCaseTagValid emptyCaseScopeIndex
@@ -1696,6 +1714,20 @@ theorem nestedEmptyCaseTraced_of_phaseComponents
   shadowCode_scopedPhaseTracedTree_of_phaseComponents emptySelection
     singletonPhases retainedPhases targetIdentities nestedEmptyCaseAlphaTree
     nestedEmptyCaseShadowRun
+
+/-- The same recursive regression after discharging the empty component from
+reachable-selection refinement. Only the three nonempty-output components
+remain as premises. -/
+theorem nestedEmptyCaseTraced_of_reachableSelection
+    (singletonPhases : ScopedCaseSingletonPhaseLaws noCaseTagValid)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws noCaseTagValid)
+    (targetIdentities :
+      ScopedCasePhaseTargetIdentityLaws noCaseTagValid) :
+    ScopedCodePhaseTraced noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedPhaseTracedTree_of_reachableSelection
+    noCaseReachableSelectionLaws singletonPhases retainedPhases
+    targetIdentities nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
 
 /-- The same recursive empty-table regression through the reduced two-phase
 interface. This path consults neither singleton nor retained folding evidence. -/

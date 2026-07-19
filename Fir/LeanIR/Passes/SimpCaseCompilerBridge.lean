@@ -87,6 +87,17 @@ theorem shadowAddDefaultAlt_eq_of_hasDefault
   · exact shadowAddDefaultAlt_eq_of_small small
   · simp [shadowAddDefaultAlt, small, hasDefault]
 
+/-- Default folding never erases the last surviving alternative. In the fold
+branch the chosen representative is reintroduced as a default alternative. -/
+theorem shadowAddDefaultAlt_size_ne_zero
+    (nonempty : alts.size ≠ 0) :
+    (shadowAddDefaultAlt alts).size ≠ 0 := by
+  unfold shadowAddDefaultAlt
+  split
+  · simp_all
+  · split
+    split <;> simp_all
+
 /-- Pure output projection of Lean's private unreachable-arm filter. -/
 def shadowFilterUnreachable (alts : Array (LCNF.Alt .impure)) :
     Array (LCNF.Alt .impure) :=
@@ -144,6 +155,23 @@ theorem chooseAlt_shadowFilterUnreachable_of_selected
   rw [shadowFilterUnreachable_toList]
   exact Fir.LeanIR.Passes.SimpCase.chooseAlt_removeUnreachable_of_selected
     selected reachable
+
+/-- A reachable selected arm prevents the complete preparation pipeline from
+producing an empty table. Filtering preserves that arm and default folding
+cannot erase the last survivor. -/
+theorem shadowPrepareAlts_size_ne_zero_of_selected
+    (selected : chooseAlt tag cases.alts.toList = some branch)
+    (reachable : Fir.LeanIR.Passes.SimpCase.isUnreachable branch = false) :
+    (shadowPrepareAlts cases).size ≠ 0 := by
+  have selectedFiltered :=
+    chooseAlt_shadowFilterUnreachable_of_selected selected reachable
+  have filterNonempty : (shadowFilterUnreachable cases.alts).size ≠ 0 := by
+    intro empty
+    have filterEq : shadowFilterUnreachable cases.alts = #[] :=
+      Array.size_eq_zero_iff.mp empty
+    rw [filterEq] at selectedFiltered
+    simp [chooseAlt, findCtorAlt, findDefaultAlt] at selectedFiltered
+  exact shadowAddDefaultAlt_size_ne_zero filterNonempty
 
 theorem shadowSimplifyCases_eq_unreach
     (empty : (shadowPrepareAlts cases).size = 0) :

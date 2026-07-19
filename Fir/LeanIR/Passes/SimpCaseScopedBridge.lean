@@ -2087,6 +2087,21 @@ structure ScopedCaseShapeLaws
       (.mk typeName resultType discr sourceAlts)
       targetAlts.toArray)
 
+/-- Canonical semantic validity predicate for case tags: the selected source
+arm exists and is not syntactically unreachable. -/
+def ReachableCaseTag (cases : LCNF.Cases .impure) (tag : Nat) : Prop :=
+  ∃ branch,
+    chooseAlt tag cases.alts.toList = some branch ∧
+    Fir.LeanIR.Passes.SimpCase.isUnreachable branch = false
+
+/-- A caller-selected phase predicate refines canonical reachable selection.
+This is the minimal bridge missing from plain `CodeReadyAt`: runtime readiness
+supplies a valid tag, while this law supplies its executable source arm. -/
+structure ScopedCaseReachableSelectionLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  selected : ∀ {cases : LCNF.Cases .impure} {tag : Nat},
+    validCase cases tag → ReachableCaseTag cases tag
+
 /-- Empty-table selection survival, isolated from alpha and endpoint facts.
 This is the only semantic input needed to construct the fixed `unreach`
 intermediate. -/
@@ -2097,6 +2112,29 @@ structure ScopedCaseEmptySelectionLaws
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size = 0 →
     ∀ tag, validCase (.mk typeName resultType discr sourceAlts) tag → False
+
+/-- Reachable source selection discharges the empty-table component: the
+concrete preparation pipeline cannot erase the selected arm. -/
+theorem scopedCaseEmptySelectionLaws_of_reachableSelection
+    (selection : ScopedCaseReachableSelectionLaws validCase) :
+    ScopedCaseEmptySelectionLaws validCase where
+  empty := by
+    intro typeName resultType discr sourceAlts empty tag valid
+    rcases selection.selected valid with ⟨branch, selected, reachable⟩
+    exact shadowPrepareAlts_size_ne_zero_of_selected selected reachable empty
+
+/-- Canonical reachable validity satisfies the selection bridge by
+construction. -/
+theorem reachableCaseTag_selectionLaws :
+    ScopedCaseReachableSelectionLaws ReachableCaseTag where
+  selected := fun valid => valid
+
+/-- Consequently, canonical reachable validity needs no additional premise
+for its empty-table component. -/
+theorem reachableCaseTag_emptySelectionLaws :
+    ScopedCaseEmptySelectionLaws ReachableCaseTag :=
+  scopedCaseEmptySelectionLaws_of_reachableSelection
+    reachableCaseTag_selectionLaws
 
 /-- Singleton phase classification without endpoint identities. Direct
 selection survival and fold-created singleton elimination remain distinct
@@ -2217,6 +2255,18 @@ theorem scopedCasePhaseShapeLaws_of_components
       phase := phase
       identities := targetIdentities.retained root nonempty nonsingleton
     }⟩
+
+/-- Three remaining phase components plus reachable-selection refinement are
+enough for the full shape law; empty selection is now derived, not assumed. -/
+theorem scopedCasePhaseShapeLaws_of_reachableSelection
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCasePhaseShapeLaws validCase :=
+  scopedCasePhaseShapeLaws_of_components
+    (scopedCaseEmptySelectionLaws_of_reachableSelection selection)
+    singletonPhases retainedPhases targetIdentities
 
 /-- The retained-table half of the phase contract. Genuine default folding
 remains isolated here; empty and singleton tables are derived generically
@@ -3533,6 +3583,21 @@ theorem shadowCode_scopedPhaseTracedTree_of_phaseComponents
     ScopedCodePhaseTraced validCase index source target :=
   shadowCode_scopedPhaseTracedTree
     (scopedLocalCasePhaseLaws_of_components emptySelection singletonPhases
+      retainedPhases targetIdentities) hygiene run
+
+/-- End-to-end recursive trace with the empty component discharged from
+reachable source selection. Only singleton, retained, and endpoint contracts
+remain as explicit local phase obligations. -/
+theorem shadowCode_scopedPhaseTracedTree_of_reachableSelection
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  shadowCode_scopedPhaseTracedTree_of_phaseShapes
+    (scopedCasePhaseShapeLaws_of_reachableSelection selection singletonPhases
       retainedPhases targetIdentities) hygiene run
 
 /-- Recursive correctness for the trace relation reduces exactly to a local

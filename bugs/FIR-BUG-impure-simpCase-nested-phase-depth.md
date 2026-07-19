@@ -126,3 +126,16 @@ assembly theorem, while
 `shadowCode_scopedPhaseTracedTree_of_phaseComponents` exposes those four
 independent obligations at the universal recursive endpoint. The empty-table
 and nested recursive examples exercise the unbundled path directly.
+
+The empty-table component is now discharged from a lower semantic invariant.
+`ReachableCaseTag` says that a phase-valid runtime tag selects an existing,
+non-`unreach` source arm, and `ScopedCaseReachableSelectionLaws` lets custom
+validity predicates refine that canonical predicate. The transparent
+preparation lemmas prove that unreachable filtering preserves the selected
+arm and that default folding never erases its final survivor. Consequently,
+`scopedCaseEmptySelectionLaws_of_reachableSelection` derives the former empty
+shape assumption, while
+`shadowCode_scopedPhaseTracedTree_of_reachableSelection` reaches the universal
+recursive theorem with only singleton, retained-table, and target-identity
+components left. Regressions include a non-vacuous reachable default arm, an
+empty table rejected by canonical validity, and the reduced recursive API.
