@@ -787,6 +787,76 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
     witness.promotedTags.Contains payload address →
     PromotedTagRel state witness payload address
 
+/-- Initial proof witness for one generated module. Runtime identity maps are
+empty, while the immutable closure dispatch and capture-descriptor tables are
+installed before execution begins. -/
+def initialWitness (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable) : RefinementWitness :=
+  ({} : RefinementWitness).withClosureTables dispatch descriptors
+
+theorem initialWitness_wellFormed (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable) :
+    (initialWitness dispatch descriptors).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := ?_
+    promotedInjective := ?_
+    locationPromotionDisjoint := ?_ }
+  · intro location address found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      LocationMap.lookup?] at found
+  · intro left right address leftFound
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      LocationMap.lookup?] at leftFound
+  · intro payload address found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      PromotedTags.Contains] at found
+  · intro left right address leftFound
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      PromotedTags.Contains] at leftFound
+  · intro location payload left right locationFound
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      LocationMap.lookup?] at locationFound
+
+/-- Empty semantic and concrete heaps satisfy the complete relation with the
+module's closure tables already frozen. This is the W6 execution entry point. -/
+theorem LiveHeapRel.initial (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable) :
+    LiveHeapRel MemoryState.initial (initialWitness dispatch descriptors)
+      ({} : RuntimeState) := by
+  refine {
+    frontier := MemoryState.initial_frontierInvariant
+    witnessWellFormed := initialWitness_wellFormed dispatch descriptors
+    locationsBeforeNext := ?_
+    releaseFuelBound := ?_
+    descriptorsOwned := ?_
+    descriptorRegion := ?_
+    descriptorDisjoint := ?_
+    semanticToConcrete := ?_
+    concreteToSemantic := ?_
+    promoted := ?_ }
+  · intro location cell found
+    simp [findCell?] at found
+  · simp [MemoryState.initial, headerBytes]
+  · intro address descriptor found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      DescriptorMap.lookup?] at found
+  · intro address descriptor found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      DescriptorMap.lookup?] at found
+  · intro left right leftDescriptor rightDescriptor leftFound
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      DescriptorMap.lookup?] at leftFound
+  · intro location cell found
+    simp [findCell?] at found
+  · intro location address found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      LocationMap.lookup?] at found
+  · intro payload address found
+    simp [initialWitness, RefinementWitness.withClosureTables,
+      PromotedTags.Contains] at found
+
 /-- The public semantic recursive-release fuel always fits within the public
 concrete cursor-derived fuel for related heaps. -/
 theorem LiveHeapRel.semanticFuel_le_concreteFuel

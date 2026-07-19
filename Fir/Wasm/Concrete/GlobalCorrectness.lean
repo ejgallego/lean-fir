@@ -425,6 +425,18 @@ theorem ConcreteRuntimeRel.initial
       rw [traceEmpty]
       exact ConcreteTraceRel.empty witness }
 
+/-- Complete generated-module entry state: empty concrete memory and semantic
+runtime, frozen closure tables, and declared-but-uninitialized globals. -/
+theorem ConcreteRuntimeRel.moduleInitial
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (declarations : List (Lean.Name × AbiKind)) :
+    ConcreteRuntimeRel {
+      heap := MemoryState.initial
+      globals := ConcreteGlobals.declare declarations }
+      (initialWitness dispatch descriptors) ({} : RuntimeState) := by
+  exact ConcreteRuntimeRel.initial (LiveHeapRel.initial dispatch descriptors)
+    rfl rfl rfl declarations
+
 /-- A successful concrete cache write and FIR `setGlobal` remain related at
 the full runtime-state boundary. -/
 theorem ConcreteRuntimeRel.writeGlobal

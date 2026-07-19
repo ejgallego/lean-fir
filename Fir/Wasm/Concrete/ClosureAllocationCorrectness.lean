@@ -841,4 +841,263 @@ theorem allocateClosure_prefixExtension
         omega))
     _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
 
+def semanticClosureCell (function : Lean.Name) (arity : Nat)
+    (captures : Array Value) : HeapCell := {
+  object := .closure function arity captures }
+
+def semanticClosureResult (runtime : RuntimeState) (function : Lean.Name)
+    (arity : Nat) (captures : Array Value) : RuntimeState := {
+  runtime with
+  heap := (runtime.nextLocation, semanticClosureCell function arity captures) ::
+    runtime.heap
+  nextLocation := runtime.nextLocation + 1 }
+
+@[simp] theorem alloc_closure_eq (runtime : RuntimeState) (function : Lean.Name)
+    (arity : Nat) (captures : Array Value) :
+    alloc runtime (.closure function arity captures) =
+      (semanticClosureResult runtime function arity captures,
+        .heap runtime.nextLocation) := rfl
+
+/-- A successful concrete closure allocation extends the complete live heap,
+installs the fresh closure cell under the immutable module tables, and relates
+the returned address at both closure-compatible object ABI kinds. -/
+theorem allocateClosure_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (function : Lean.Name) (arity : Nat)
+    (captureKinds : Array AbiKind) (captures : Array LaneValue)
+    (semantic : Array Value) (address : Word32)
+    (targetId descriptorId : UInt32)
+    (related : LiveHeapRel state witness runtime)
+    (count : captureKinds.size = captures.size)
+    (semanticCount : semantic.size = captures.size)
+    (capturesLtArity : captures.size < arity)
+    (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (targetLookup : dispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds = .ok descriptorId)
+    (descriptorLookup : descriptors.lookup? descriptorId = some captureKinds)
+    (dispatchEq : witness.closureDispatch = dispatch)
+    (descriptorsEq : witness.closureDescriptors = descriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
+    let nextWitness := witness.bindClosure runtime.nextLocation address function arity
+      captureKinds
+    LiveHeapRel result nextWitness
+        (semanticClosureResult runtime function arity semantic) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      ValueRel nextWitness .tobject (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨middle, objectAllocation, _, cursorEq⟩ :=
+    allocateClosure_decompose state result dispatch descriptors function arity
+      captureKinds captures address targetId descriptorId count capturesLtArity
+      targetIdEq descriptorIdEq arityFits fixedFits allocated
+  have freshAddress := related.frontier.allocateObject_address objectAllocation
+  have heapExtension := allocateClosure_prefixExtension state result dispatch descriptors
+    function arity captureKinds captures address targetId descriptorId
+    related.frontier count capturesLtArity targetIdEq descriptorIdEq arityFits
+    fixedFits captureTyped allocated
+  have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
+    cases found : witness.locations.lookup? runtime.nextLocation with
+    | none => rfl
+    | some oldAddress =>
+        exfalso
+        obtain ⟨cell, semanticFound, _⟩ :=
+          related.concreteToSemantic runtime.nextLocation oldAddress found
+        exact (Nat.lt_irrefl runtime.nextLocation)
+          (related.locationsBeforeNext runtime.nextLocation cell semanticFound)
+  have descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value := by
+    intro old descriptor found equal
+    have owned := related.descriptorsOwned old descriptor found
+    simp [headerBytes] at owned
+    omega
+  have witnessExtension := witness.bindClosure_extends runtime.nextLocation address
+    function arity captureKinds locationFresh descriptorFresh
+  obtain ⟨finalFrontier, objectRelated, exactHeader, closureExtent⟩ :=
+    allocateClosure_objectRel state result witness dispatch descriptors function
+      arity captureKinds captures semantic runtime.nextLocation address targetId
+      descriptorId related.frontier count semanticCount capturesLtArity targetIdEq
+      targetLookup descriptorIdEq descriptorLookup arityFits fixedFits captureRelated
+      locationFresh descriptorFresh allocated
+  have closureRelated := objectRelated.freshCellRel dispatchEq descriptorsEq
+    descriptorLookup fixedFits semanticCount exactHeader closureExtent
+  have locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address := by
+    intro old oldAddress found equal
+    obtain ⟨cell, _, cellRelated⟩ :=
+      related.concreteToSemantic old oldAddress found
+    have owned := cellRelated.headerOwned
+    subst oldAddress
+    simp [headerBytes] at owned
+    omega
+  have promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress := by
+    intro payload oldAddress found equal
+    have promoted := related.promoted payload oldAddress found
+    obtain ⟨oldHeader, _, _, _, _, _, extent, payloadFits⟩ := promoted.header
+    subst oldAddress
+    simp [headerBytes] at payloadFits extent
+    omega
+  let header := Header.forAllocation .closure
+    (ClosureLayout.ofCaptures captureKinds).allocationBytes false targetId
+      (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId
+  have headerRead : result.readLiveHeader address = .ok header := by
+    simpa [header] using exactHeader
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts result address header
+      headerRead).1
+  have witnessWellFormed := related.witnessWellFormed.bindClosure
+    runtime.nextLocation address function arity captureKinds addressHeap
+      locationAddressFresh promotedAddressFresh
+  obtain ⟨_, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address header headerRead
+  let layout := ClosureLayout.ofCaptures captureKinds
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    simp only [ClosureLayout.ofCaptures]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa only [layout, target] using ClosureLayout.ofCaptures_aligned captureKinds
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  obtain ⟨rawState, rawAllocation, _, _, _⟩ :=
+    MemoryState.allocateObject_header state middle .closure
+      (layout.allocationBytes - headerBytes) false targetId
+      (UInt32.ofNat arity) (UInt32.ofNat captures.size) descriptorId address (by
+        simpa [layout] using objectAllocation)
+  have allocationPost := MemoryState.allocate_spec state rawState
+    (align8 (headerBytes + (layout.allocationBytes - headerBytes))) address
+      rawAllocation
+  have layoutLt : layout.allocationBytes < UInt32.size := by
+    have endWithin := allocationPost.endWithinAddressSpace
+    have allocatedBytesEq :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) =
+          layout.allocationBytes := by
+      rw [align8_align8, allocationEq]
+    have nonzero : address.value ≠ 0 := by
+      intro zero
+      have addressClass := allocationPost.addressClass
+      simp [Word32.classify, zero] at addressClass
+    have allocatedLt :
+        align8 (align8 (headerBytes + (layout.allocationBytes - headerBytes))) <
+          wordModulus := by omega
+    rw [allocatedBytesEq] at allocatedLt
+    simpa [wordModulus] using allocatedLt
+  have headerCapacity : header.allocationBytes.toNat = layout.allocationBytes := by
+    simpa [header, layout, Header.forAllocation] using
+      UInt32.toNat_ofNat_of_lt' layoutLt
+  have objectExtent := MemoryState.allocateObject_extent objectAllocation
+  have newExtent :
+      address.value + header.allocationBytes.toNat ≤ result.heapCursor := by
+    rw [headerCapacity, cursorEq, objectExtent, allocationEq]
+    exact Nat.le_refl _
+  have newRegion : ∃ newHeader,
+      Header.read result.memory address = .ok newHeader ∧
+      headerBytes ≤ newHeader.allocationBytes.toNat ∧
+      newHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + newHeader.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨header, rawHeaderRead, headerMinimum, headerAligned, newExtent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial heapExtension address freshAddress
+      (fun other different =>
+        witness.lookup_bindClosure_descriptor_other runtime.nextLocation address
+          other function arity captureKinds different)
+      newRegion
+  have newCellRelated : LiveCellRel result
+      (witness.bindClosure runtime.nextLocation address function arity captureKinds)
+      address (semanticClosureCell function arity semantic) :=
+    .closure (by simpa [semanticClosureCell] using closureRelated)
+  refine ⟨?_, ?_, ?_⟩
+  · refine {
+      frontier := finalFrontier
+      witnessWellFormed
+      locationsBeforeNext := ?_
+      releaseFuelBound := ?_
+      descriptorsOwned := ?_
+      descriptorRegion
+      descriptorDisjoint
+      semanticToConcrete := ?_
+      concreteToSemantic := ?_
+      promoted := ?_ }
+    · intro location cell found
+      by_cases isNew : location = runtime.nextLocation
+      · subst location
+        exact Nat.lt_succ_self runtime.nextLocation
+      · have oldFound : findCell? runtime.heap location = some cell := by
+          simpa [semanticClosureResult, findCell?, isNew, Ne.symm isNew] using found
+        exact Nat.lt_trans (related.locationsBeforeNext location cell oldFound)
+          (Nat.lt_succ_self runtime.nextLocation)
+    · have cursorGrowth : state.heapCursor + headerBytes ≤ result.heapCursor := by
+        rw [← freshAddress]
+        exact closureRelated.headerOwned
+      have oldFuel := related.releaseFuelBound
+      simp [semanticClosureResult, headerBytes] at oldFuel cursorGrowth ⊢
+      omega
+    · intro other descriptor found
+      by_cases isNew : address.value = other.value
+      · rw [← isNew]
+        exact closureRelated.headerOwned
+      · rw [witness.lookup_bindClosure_descriptor_other runtime.nextLocation
+          address other function arity captureKinds isNew] at found
+        exact Nat.le_trans (related.descriptorsOwned other descriptor found)
+          heapExtension.cursor
+    · intro location cell found
+      by_cases isNew : location = runtime.nextLocation
+      · subst location
+        have cellEq : cell = semanticClosureCell function arity semantic := by
+          simpa [semanticClosureResult, findCell?] using found.symm
+        subst cell
+        exact ⟨address,
+          RefinementWitness.lookup_bindClosure_location witness runtime.nextLocation
+            address function arity captureKinds,
+          .live newCellRelated⟩
+      · have oldFound : findCell? runtime.heap location = some cell := by
+          simpa [semanticClosureResult, findCell?, isNew, Ne.symm isNew] using found
+        obtain ⟨oldAddress, mapped, cellRelated⟩ :=
+          related.semanticToConcrete location cell oldFound
+        exact ⟨oldAddress, witnessExtension.locations _ _ mapped,
+          (cellRelated.prefixExtension heapExtension).witnessExtension witnessExtension⟩
+    · intro location concreteAddress mapped
+      by_cases isNew : location = runtime.nextLocation
+      · subst location
+        simp [RefinementWitness.bindClosure, LocationMap.lookup?] at mapped
+        subst concreteAddress
+        exact ⟨semanticClosureCell function arity semantic,
+          by simp [semanticClosureResult, findCell?], .live newCellRelated⟩
+      · rw [witness.lookup_bindClosure_location_other runtime.nextLocation location
+          address function arity captureKinds isNew] at mapped
+        obtain ⟨cell, oldFound, cellRelated⟩ :=
+          related.concreteToSemantic location concreteAddress mapped
+        exact ⟨cell, by
+            simpa [semanticClosureResult, findCell?, isNew, Ne.symm isNew],
+          (cellRelated.prefixExtension heapExtension).witnessExtension witnessExtension⟩
+    · intro payload concreteAddress mapped
+      exact ((related.promoted payload concreteAddress mapped).prefixExtension heapExtension)
+        |>.witnessExtension witnessExtension
+  · exact .object (.mapped
+      (RefinementWitness.lookup_bindClosure_location witness runtime.nextLocation
+        address function arity captureKinds))
+  · exact .tobject (.heap (.mapped
+      (RefinementWitness.lookup_bindClosure_location witness runtime.nextLocation
+        address function arity captureKinds)))
+
 end Fir.Wasm.Concrete

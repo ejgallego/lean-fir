@@ -14,6 +14,12 @@ open Fir.LeanIR.Impure
 def exampleGlobals : ConcreteGlobals :=
   ConcreteGlobals.declare [(`cachedValue, .uint32)]
 
+example : ConcreteRuntimeRel {
+    heap := MemoryState.initial
+    globals := ConcreteGlobals.declare [(`cachedValue, .uint32)] }
+    (initialWitness #[] #[]) ({} : RuntimeState) :=
+  ConcreteRuntimeRel.moduleInitial #[] #[] [(`cachedValue, .uint32)]
+
 #guard match exampleGlobals.read `cachedValue .uint32 with
   | .error (.targetGlobal (.uninitializedGlobal `cachedValue)) => true
   | _ => false

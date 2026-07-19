@@ -1725,6 +1725,18 @@ post-state at all, and the exact source-failure theorem agrees with the
 semantic `ExternalImpl` error. The next slice audits the remaining successful
 operation/fault matrix before W6.6 composition.
 
+That audit found and closed a latent W6.4 whole-heap gap as W6.4o. Closure
+allocation previously established exact bytes, metadata, captures, a fresh
+`ClosureCellRel`, and a prefix frame, but stopped short of assembling the new
+cell into `LiveHeapRel`. `allocateClosure_liveHeapRel` now extends the semantic
+heap and proof witness together, preserves every old cell and promoted tag,
+adds the descriptor region, and relates the returned closure as both `object`
+and `tobject`. `LiveHeapRel.initial` and `ConcreteRuntimeRel.moduleInitial`
+also provide the missing generated-module entry state with frozen closure
+tables and declared-but-uninitialized globals. The next audit slice lifts the
+remaining successful single-cell mutations from local decoder relations to
+the complete heap/runtime boundary required by W6.6.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
