@@ -61,6 +61,35 @@ theorem MemoryState.TargetMutationFrame.ofWriteUInt64
   · left
     omega
 
+/-- A checked 32-bit payload write wholly inside the target allocation
+provides the generic target-mutation frame. -/
+theorem MemoryState.TargetMutationFrame.ofWriteUInt32
+    {before after : MemoryState} {targetAddress : Word32} {targetBytes : Nat}
+    {offset : Nat} {value : UInt32} {memory : LinearMemory}
+    (resultEq : after = { before with memory })
+    (writeInBounds : offset + 3 < before.memory.size)
+    (written : before.memory.writeUInt32 offset value = .ok memory)
+    (afterHeader : targetAddress.value + headerBytes ≤ offset)
+    (insideTarget : offset + 4 ≤ targetAddress.value + targetBytes) :
+    before.TargetMutationFrame after targetAddress targetBytes := by
+  subst after
+  obtain ⟨actual, actualWrite, memorySize, _, _, _, _, byteFrame⟩ :=
+    LinearMemory.writeUInt32_spec before.memory offset value writeInBounds
+  rw [actualWrite] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  have headerFrame : before.AllocationFrame ({ before with memory := actual } : MemoryState)
+      targetAddress headerBytes := by
+    refine ⟨rfl, memorySize, ?_⟩
+    intro byte byteWithin
+    exact byteFrame (targetAddress.value + byte) (by omega) (by omega) (by omega)
+      (by omega)
+  refine ⟨rfl, memorySize, headerFrame.readHeader (by omega), ?_⟩
+  intro otherAddress otherBytes disjoint
+  refine ⟨rfl, memorySize, ?_⟩
+  intro byte byteWithin
+  apply byteFrame (otherAddress.value + byte) <;> omega
+
 /-- A successful 64-bit payload write below the allocation frontier preserves
 the zero suffix and therefore the complete frontier invariant. -/
 theorem MemoryState.FrontierInvariant.writeUInt64
@@ -91,6 +120,40 @@ theorem MemoryState.FrontierInvariant.writeUInt64
   | some actual =>
       simp [LinearMemory.readByte, memoryByte, oldZero] at framed
       subst actual
+      rfl
+
+/-- A successful 32-bit payload write below the allocation frontier preserves
+the zero suffix and therefore the complete frontier invariant. -/
+theorem MemoryState.FrontierInvariant.writeUInt32
+    {state : MemoryState} {memory : LinearMemory} {offset : Nat} {value : UInt32}
+    (valid : state.FrontierInvariant)
+    (beforeFrontier : offset + 4 ≤ state.heapCursor)
+    (written : state.memory.writeUInt32 offset value = .ok memory) :
+    ({ state with memory } : MemoryState).FrontierInvariant := by
+  have writeInBounds : offset + 3 < state.memory.size :=
+    Nat.lt_of_lt_of_le (by omega) valid.cursorInBounds
+  obtain ⟨actual, actualWrite, memorySize, _, _, _, _, byteFrame⟩ :=
+    LinearMemory.writeUInt32_spec state.memory offset value writeInBounds
+  rw [actualWrite] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  refine {
+    cursorAligned := valid.cursorAligned
+    cursorInBounds := by simpa [memorySize] using valid.cursorInBounds
+    unusedZero := ?_ }
+  intro byte afterCursor finalInBounds
+  change state.heapCursor ≤ byte at afterCursor
+  change byte < actual.size at finalInBounds
+  have oldInBounds : byte < state.memory.size := by
+    rw [← memorySize]
+    exact finalInBounds
+  have oldZero := valid.unusedZero byte afterCursor oldInBounds
+  have framed := byteFrame byte (by omega) (by omega) (by omega) (by omega)
+  cases actualByte : actual[byte]? with
+  | none => simp [LinearMemory.readByte, actualByte, oldZero] at framed
+  | some value =>
+      simp [LinearMemory.readByte, actualByte, oldZero] at framed
+      subst value
       rfl
 
 /-- A target-mutation frame preserves the descriptor-region and pairwise

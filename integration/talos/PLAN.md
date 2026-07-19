@@ -1776,6 +1776,13 @@ rather than being duplicated in semantic `ConstructorObject`; the remaining
 32-, 16-, and 8-bit lanes can use the same assembly with their width-specific
 checked writes.
 
+W6.5g extends that complete-heap result to packed `UInt32`. The checked
+four-byte writer now supplies the same target-header, disjoint-allocation, and
+frontier frame as the 64-bit lane; semantic `setScalarField` and the concrete
+decoder relation are rebuilt at the unchanged static descriptor. The
+remaining mutation audit is reduced to the two narrow byte writers (`UInt16`
+and `UInt8`).
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
