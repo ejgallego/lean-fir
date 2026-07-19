@@ -83,6 +83,83 @@ theorem ConstructorObjectRel.writeUSizeField_targetFrame
   exact ⟨result, header, operation, rawRead, targetFrame,
     valid.writeUInt64 beforeFrontier fieldWrite⟩
 
+/-- Exact 64-bit payload transaction behind a successful packed scalar
+update, packaged with the reusable whole-allocation frame. -/
+theorem ConstructorObjectRel.writeScalarUInt64Field_targetFrame
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (valid : state.FrontierInvariant)
+    (slotIndex byteOffset : Nat) (value : UInt64)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize) :
+    ∃ result header,
+      Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex byteOffset
+        value = .ok result ∧
+      Header.read state.memory address = .ok header ∧
+      state.TargetMutationFrame result address header.allocationBytes.toNat ∧
+      result.FrontierInvariant := by
+  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
+  have constructorHeader : readConstructorHeader state address = .ok header := by
+    unfold readConstructorHeader
+    simp [heap, headerRead]
+    simp only [Bind.bind, Except.bind]
+    simp [liftMemory, headerKind]
+    rfl
+  let offset := address.value + headerBytes +
+    target.semanticSlotBytes * slotIndex + byteOffset
+  have insideLayout :
+      offset + 8 ≤ address.value + (ConstructorLayout.ofInfo info).allocationBytes := by
+    have layoutBound := align8_ge
+      (headerBytes + target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
+    simp [offset, slotIndexEq, ConstructorLayout.ofInfo, target] at layoutBound ⊢
+    omega
+  have insideAllocation :
+      offset + 8 ≤ address.value + header.allocationBytes.toNat :=
+    Nat.le_trans insideLayout (Nat.add_le_add_left allocationBytes address.value)
+  have writeInBounds : offset + 7 < state.memory.size := by
+    omega
+  obtain ⟨middle, lowWrite, middleSize, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec state.memory offset value.toUInt32 (by omega)
+  obtain ⟨memory, highWrite, memorySize, _, _, _, _, _⟩ :=
+    LinearMemory.writeUInt32_spec middle (offset + 4)
+      (value >>> (32 : UInt64)).toUInt32 (by omega)
+  have fieldWrite : state.memory.writeUInt64 offset value = .ok memory := by
+    unfold LinearMemory.writeUInt64
+    rw [lowWrite]
+    change middle.writeUInt32 (offset + 4)
+      (value >>> (32 : UInt64)).toUInt32 = .ok memory
+    exact highWrite
+  let result : MemoryState := { state with memory }
+  have scalarAddress : scalarFieldAddress address header slotIndex byteOffset 8 =
+      .ok offset := by
+    unfold scalarFieldAddress
+    simp [slotIndexEq, objectCount, usizeCount, fieldFits, scalarCount, offset]
+    rfl
+  have operation : Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex
+      byteOffset value = .ok result := by
+    unfold Fir.Wasm.Concrete.writeScalarUInt64Field
+    rw [constructorHeader]
+    simp only [Bind.bind, Except.bind]
+    rw [scalarAddress]
+    change (do
+      let memory ← liftMemory (state.memory.writeUInt64 offset value)
+      return ({ state with memory } : MemoryState)) = .ok result
+    rw [fieldWrite]
+    rfl
+  have targetFrame : state.TargetMutationFrame result address
+      header.allocationBytes.toNat :=
+    MemoryState.TargetMutationFrame.ofWriteUInt64 (by rfl) writeInBounds
+      fieldWrite (by simp [offset]; omega) insideAllocation
+  have beforeFrontier : offset + 8 ≤ state.heapCursor :=
+    Nat.le_trans insideLayout related.extent
+  exact ⟨result, header, operation, rawRead, targetFrame,
+    valid.writeUInt64 beforeFrontier fieldWrite⟩
+
 /-- Exact common-header transaction behind a successful concrete constructor
 tag update. Exposing the write lets the generic whole-heap frame theorem carry
 every non-target allocation. -/
@@ -273,6 +350,96 @@ theorem LiveHeapRel.writeUSizeField_refines
           getLiveCell, Bind.bind, Except.bind, found, live, objectEq]
         simp only [pure, Except.pure]
         rw [dif_pos indexValid]
+        change setCell runtime location replacement = .ok nextRuntime
+        exact semanticSet
+      exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated⟩
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+/-- Whole-heap refinement for a successful packed `UInt64` mutation. The
+static descriptor premise keeps scalar-capacity facts at the ABI boundary
+rather than adding them to semantic constructor values. -/
+theorem LiveHeapRel.writeScalarUInt64Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (empty : semantic.scalarFields = [])
+    (slotIndex byteOffset : Nat) (value : UInt64)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeScalarUInt64Field state address slotIndex byteOffset
+        value = .ok result ∧
+      Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+        slotIndex byteOffset (.scalar (.uint64 value)) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  let updatedSemantic : ConstructorObject := {
+    semantic with
+      scalarFields := {
+        width := slotIndex
+        offset := byteOffset
+        value := .uint64 value } :: semantic.scalarFields.filter fun old =>
+          old.width != slotIndex || old.offset != byteOffset }
+  let replacement : HeapCell := { cell with object := .ctor updatedSemantic }
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind
+      refCount persistent cellLive =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst semantic
+      obtain ⟨result, targetHeader, operation, targetRawRead, targetFrame,
+          finalValid⟩ :=
+        objectRelated.writeScalarUInt64Field_targetFrame related.frontier
+          slotIndex byteOffset value slotIndexEq fieldFits
+      obtain ⟨localResult, localOperation, _, _, _, _, objectAfter⟩ :=
+        objectRelated.writeScalarUInt64Field empty slotIndex byteOffset value
+          slotIndexEq fieldFits
+      rw [operation] at localOperation
+      have resultMatch := Except.ok.inj localOperation
+      subst localResult
+      have targetAfter : CellRel result witness address replacement := by
+        apply CellRel.live
+        apply LiveCellRel.constructor descriptor (by rfl)
+          (by simpa [updatedSemantic] using objectAfter)
+          (by rw [targetFrame.targetLiveHeader]; exact headerRead) headerKind
+        · simpa [replacement] using refCount
+        · simpa [replacement] using persistent
+        · simpa [replacement] using cellLive
+      obtain ⟨nextRuntime, semanticSet, heapRelated⟩ :=
+        related.setCell_of_targetMutation mapped found descriptor targetRawRead
+          targetFrame finalValid targetAfter
+      have sourceOperation :
+          Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
+            slotIndex byteOffset (.scalar (.uint64 value)) = .ok nextRuntime := by
+        simp [Fir.LeanIR.Impure.setScalarField, modifyConstructor, getConstructor,
+          getLiveCell, Bind.bind, Except.bind, found, live, objectEq]
+        simp only [pure, Except.pure]
         change setCell runtime location replacement = .ok nextRuntime
         exact semanticSet
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated⟩

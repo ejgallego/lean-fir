@@ -1767,6 +1767,15 @@ existing immediate/promoted rejection regression remains intact. Thus this
 slice does not widen `ValueRel`, heap-only ABI decoding, or ordinary object
 classification.
 
+W6.5f applies the generic payload frame to the first packed scalar lane.
+Successful checked `UInt64` mutation is now bounded by the constructor's
+static descriptor, preserves the frontier and every disjoint allocation,
+performs semantic `setScalarField`, and reconstructs the complete
+`LiveHeapRel`. Scalar-capacity premises remain at the ABI descriptor boundary
+rather than being duplicated in semantic `ConstructorObject`; the remaining
+32-, 16-, and 8-bit lanes can use the same assembly with their width-specific
+checked writes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
