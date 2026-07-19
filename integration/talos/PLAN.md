@@ -1737,6 +1737,16 @@ tables and declared-but-uninitialized globals. The next audit slice lifts the
 remaining successful single-cell mutations from local decoder relations to
 the complete heap/runtime boundary required by W6.6.
 
+W6.5c begins that complete-heap mutation lift with constructor tags.
+`writeTag_header` exposes the exact extent-preserving common-header
+transaction behind a successful checked update. `LiveHeapRel.writeTag_refines`
+then combines the existing local constructor decoder theorem with the generic
+descriptor-disjoint header frame, performs the matching semantic `setTag`,
+and reconstructs every target and non-target cell without changing the ghost
+witness. Payload-backed `USize` and packed-scalar writes are the next audit
+slice; they need the analogous write-region frame rather than the common
+header frame used here.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
