@@ -115,3 +115,14 @@ following `shadowSimplifyCases`' decision tree, and
 shape proofs directly into arbitrary recursive traversal. Examples cover
 empty, direct-singleton, fold-created-singleton, and retained-table result
 packaging.
+
+The bundled shape premise has since been decomposed one level further.
+`ScopedCaseEmptySelectionLaws` states only empty-table selection survival;
+`ScopedCaseSingletonPhaseLaws` preserves the direct/folded classification;
+`ScopedCaseRetainedPhaseLaws` contains only retained-table folding evidence;
+and `ScopedCasePhaseTargetIdentityLaws` isolates the endpoint identities used
+for trace padding. `scopedCasePhaseShapeLaws_of_components` is the lossless
+assembly theorem, while
+`shadowCode_scopedPhaseTracedTree_of_phaseComponents` exposes those four
+independent obligations at the universal recursive endpoint. The empty-table
+and nested recursive examples exercise the unbundled path directly.

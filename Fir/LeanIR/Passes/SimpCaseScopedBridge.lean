@@ -2087,6 +2087,75 @@ structure ScopedCaseShapeLaws
       (.mk typeName resultType discr sourceAlts)
       targetAlts.toArray)
 
+/-- Empty-table selection survival, isolated from alpha and endpoint facts.
+This is the only semantic input needed to construct the fixed `unreach`
+intermediate. -/
+structure ScopedCaseEmptySelectionLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  empty : ∀ {typeName : Name} {resultType : Expr} {discr : FVarId}
+      {sourceAlts : Array (LCNF.Alt .impure)},
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 0 →
+    ∀ tag, validCase (.mk typeName resultType discr sourceAlts) tag → False
+
+/-- Singleton phase classification without endpoint identities. Direct
+selection survival and fold-created singleton elimination remain distinct
+constructors of `ScopedSingletonPhaseEvidence`. -/
+structure ScopedCaseSingletonPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedSingletonPhaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+
+/-- Retained-table folding evidence, kept separate from the target identities
+needed only when the local result is appended to a recursive trace. -/
+structure ScopedCaseRetainedPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
+    Nonempty (ScopedRetainedPhaseEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) sourceAlts)
+
+/-- Endpoint identities for the two nonterminal output shapes. Empty-table
+identities are generic because `unreach` is structurally and alpha reflexive.
+Keeping these facts independent avoids baking traversal padding into the
+selection and folding contracts. -/
+structure ScopedCasePhaseTargetIdentityLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    ScopedCodeTargetIdentities validCase index
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
+    ScopedCodeTargetIdentities validCase index
+      (.cases ((LCNF.Cases.mk typeName resultType discr sourceAlts).updateAlts
+        (shadowAddDefaultAlt (shadowFilterUnreachable sourceAlts))))
+
 /-- Phase-aware local output-shape contract. Empty tables retain the ordinary
 elimination evidence; singleton tables explicitly classify direct versus
 fold-created results; retained tables carry target identities for subsequent
@@ -2121,6 +2190,33 @@ structure ScopedCasePhaseShapeLaws
       (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
     Nonempty (ScopedRetainedPhaseResultEvidence validCase index
       (.mk typeName resultType discr sourceAlts) sourceAlts)
+
+/-- Assemble the phase-aware shape contract from independently dischargeable
+selection, phase-classification, folding, and endpoint-identity laws. -/
+theorem scopedCasePhaseShapeLaws_of_components
+    (emptySelection : ScopedCaseEmptySelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCasePhaseShapeLaws validCase where
+  empty := by
+    intro index typeName resultType discr sourceAlts root empty
+    exact scopedEmptyCaseEvidence_of_noValid
+      (emptySelection.empty empty)
+  singleton := by
+    intro index typeName resultType discr sourceAlts root singleton
+    rcases singletonPhases.singleton root singleton with ⟨phase⟩
+    exact ⟨{
+      phase := phase
+      identities := targetIdentities.singleton root singleton
+    }⟩
+  retained := by
+    intro index typeName resultType discr sourceAlts root nonempty nonsingleton
+    rcases retainedPhases.retained root nonempty nonsingleton with ⟨phase⟩
+    exact ⟨{
+      phase := phase
+      identities := targetIdentities.retained root nonempty nonsingleton
+    }⟩
 
 /-- The retained-table half of the phase contract. Genuine default folding
 remains isolated here; empty and singleton tables are derived generically
@@ -2241,6 +2337,17 @@ theorem scopedLocalCasePhaseLaws_of_shapes
         exact ⟨by
           simpa [cases, shadowPrepareAlts, LCNF.Cases.alts] using
             evidence.result root⟩
+
+/-- Direct local-phase constructor from the four lower-level contracts. -/
+theorem scopedLocalCasePhaseLaws_of_components
+    (emptySelection : ScopedCaseEmptySelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedLocalCasePhaseLaws validCase :=
+  scopedLocalCasePhaseLaws_of_shapes
+    (scopedCasePhaseShapeLaws_of_components emptySelection singletonPhases
+      retainedPhases targetIdentities)
 
 /-- The trace-aware recursive case kernel. It synchronizes all recursive
 alternative traces, lifts them to the source case table, and appends the one
@@ -3380,6 +3487,19 @@ theorem scopedCaseBoundarySoundTraceTree_of_phaseShapes
   scopedCaseBoundarySoundTraceTree_of_localPhases
     (scopedLocalCasePhaseLaws_of_shapes shapes)
 
+/-- Universal recursive boundary from the independently dischargeable local
+selection, phase, folding, and endpoint-identity contracts. -/
+theorem scopedCaseBoundarySoundTraceTree_of_phaseComponents
+    (emptySelection : ScopedCaseEmptySelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCaseBoundarySound
+      (ScopedCodePhaseTracedOnAlphaTree validCase) :=
+  scopedCaseBoundarySoundTraceTree_of_localPhases
+    (scopedLocalCasePhaseLaws_of_components emptySelection singletonPhases
+      retainedPhases targetIdentities)
+
 /-- End-to-end arbitrary recursive trace under full lexical hygiene. Every
 nested case contributes a separate local round. -/
 theorem shadowCode_scopedPhaseTracedTree
@@ -3400,6 +3520,20 @@ theorem shadowCode_scopedPhaseTracedTree_of_phaseShapes
     ScopedCodePhaseTraced validCase index source target :=
   shadowCode_scopedPhaseTracedTree
     (scopedLocalCasePhaseLaws_of_shapes shapes) hygiene run
+
+/-- End-to-end recursive trace assembled directly from the four local
+component contracts, without a bundled phase-shape premise. -/
+theorem shadowCode_scopedPhaseTracedTree_of_phaseComponents
+    (emptySelection : ScopedCaseEmptySelectionLaws validCase)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  shadowCode_scopedPhaseTracedTree
+    (scopedLocalCasePhaseLaws_of_components emptySelection singletonPhases
+      retainedPhases targetIdentities) hygiene run
 
 /-- Recursive correctness for the trace relation reduces exactly to a local
 case-kernel law, just as it does for the one-round result relation. -/

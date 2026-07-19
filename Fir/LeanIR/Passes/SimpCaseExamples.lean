@@ -1588,6 +1588,14 @@ theorem scopedCaseBoundaryTreeNotUnconditional :
 def noCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=
   False
 
+/-- Concrete empty-selection component: no tag is phase-valid, independently
+of root hygiene or endpoint reflexivity. -/
+def noCaseEmptySelectionLaws :
+    ScopedCaseEmptySelectionLaws noCaseTagValid where
+  empty := by
+    intro _ _ _ _ _ _ impossible
+    exact impossible
+
 theorem emptyCaseAltsFactored :
     ScopedAltsFactored noCaseTagValid emptyCaseScopeIndex
       emptyCaseTable.alts.toList emptyCaseTable.alts.toList :=
@@ -1603,7 +1611,8 @@ the generic constructor supplies the fixed `unreach` intermediate. -/
 theorem emptyCaseDerivedEliminationEvidence :
     Nonempty (ScopedEliminatedCaseEvidence noCaseTagValid
       emptyCaseScopeIndex emptyCaseTable (.unreach objType)) :=
-  scopedEmptyCaseEvidence_of_noValid (fun _ impossible => impossible)
+  scopedEmptyCaseEvidence_of_noValid
+    (noCaseEmptySelectionLaws.empty (by rfl))
 
 theorem emptyCaseFactoredFromNoValid :
     ScopedCodeFactored noCaseTagValid emptyCaseScopeIndex
@@ -1673,6 +1682,20 @@ theorem nestedEmptyCaseTraced_of_phaseShapes
       nestedEmptyCaseCode nestedEmptyCaseExpected :=
   shadowCode_scopedPhaseTracedTree_of_phaseShapes shapes
     nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
+
+/-- Regression for the unbundled assembly API. The four local obligations
+remain separate all the way to the recursive trace theorem. -/
+theorem nestedEmptyCaseTraced_of_phaseComponents
+    (emptySelection : ScopedCaseEmptySelectionLaws noCaseTagValid)
+    (singletonPhases : ScopedCaseSingletonPhaseLaws noCaseTagValid)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws noCaseTagValid)
+    (targetIdentities :
+      ScopedCasePhaseTargetIdentityLaws noCaseTagValid) :
+    ScopedCodePhaseTraced noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedPhaseTracedTree_of_phaseComponents emptySelection
+    singletonPhases retainedPhases targetIdentities nestedEmptyCaseAlphaTree
+    nestedEmptyCaseShadowRun
 
 /-- The same recursive empty-table regression through the reduced two-phase
 interface. This path consults neither singleton nor retained folding evidence. -/
