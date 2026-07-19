@@ -1747,6 +1747,16 @@ witness. Payload-backed `USize` and packed-scalar writes are the next audit
 slice; they need the analogous write-region frame rather than the common
 header frame used here.
 
+W6.5d establishes that payload-write boundary and applies it to `USize`
+mutation. `TargetMutationFrame` records an unchanged target header, stable
+memory size/frontier, and complete byte frames for every allocation disjoint
+from the target's retained extent. Its generic whole-heap theorem preserves
+descriptor regions, pairwise disjointness, non-target semantic cells, and
+promoted tags while replacing exactly one source cell. A successful checked
+64-bit `USize` store now supplies that frame, performs the matching semantic
+`setUSizeField`, and yields a complete `LiveHeapRel`. Packed scalar widths can
+reuse the same boundary by supplying their width-specific byte transaction.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
