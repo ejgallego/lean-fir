@@ -90,6 +90,66 @@ theorem MemoryState.TargetMutationFrame.ofWriteUInt32
   intro byte byteWithin
   apply byteFrame (otherAddress.value + byte) <;> omega
 
+/-- A checked 16-bit payload write wholly inside the target allocation
+provides the generic target-mutation frame. -/
+theorem MemoryState.TargetMutationFrame.ofWriteUInt16
+    {before after : MemoryState} {targetAddress : Word32} {targetBytes : Nat}
+    {offset : Nat} {value : UInt16} {memory : LinearMemory}
+    (resultEq : after = { before with memory })
+    (writeInBounds : offset + 1 < before.memory.size)
+    (written : before.memory.writeUInt16 offset value = .ok memory)
+    (afterHeader : targetAddress.value + headerBytes ≤ offset)
+    (insideTarget : offset + 2 ≤ targetAddress.value + targetBytes) :
+    before.TargetMutationFrame after targetAddress targetBytes := by
+  subst after
+  obtain ⟨actual, actualWrite, memorySize, _, _, byteFrame⟩ :=
+    LinearMemory.writeUInt16_spec before.memory offset value writeInBounds
+  rw [actualWrite] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  have headerFrame : before.AllocationFrame ({ before with memory := actual } : MemoryState)
+      targetAddress headerBytes := by
+    refine ⟨rfl, memorySize, ?_⟩
+    intro byte byteWithin
+    exact byteFrame (targetAddress.value + byte) (by omega) (by omega)
+  refine ⟨rfl, memorySize, headerFrame.readHeader (by omega), ?_⟩
+  intro otherAddress otherBytes disjoint
+  refine ⟨rfl, memorySize, ?_⟩
+  intro byte byteWithin
+  apply byteFrame (otherAddress.value + byte) <;> omega
+
+/-- A checked byte payload write wholly inside the target allocation provides
+the generic target-mutation frame. -/
+theorem MemoryState.TargetMutationFrame.ofWriteByte
+    {before after : MemoryState} {targetAddress : Word32} {targetBytes : Nat}
+    {offset : Nat} {value : UInt8} {memory : LinearMemory}
+    (resultEq : after = { before with memory })
+    (writeInBounds : offset < before.memory.size)
+    (written : before.memory.writeByte offset value = .ok memory)
+    (afterHeader : targetAddress.value + headerBytes ≤ offset)
+    (insideTarget : offset + 1 ≤ targetAddress.value + targetBytes) :
+    before.TargetMutationFrame after targetAddress targetBytes := by
+  subst after
+  unfold LinearMemory.writeByte at written
+  rw [dif_pos writeInBounds] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  have memorySize : (before.memory.set offset value writeInBounds).size =
+      before.memory.size := by simp
+  have headerFrame : before.AllocationFrame
+      ({ before with memory := before.memory.set offset value writeInBounds } : MemoryState)
+      targetAddress headerBytes := by
+    refine ⟨rfl, memorySize, ?_⟩
+    intro byte byteWithin
+    exact LinearMemory.readByte_set_other before.memory offset
+      (targetAddress.value + byte) value writeInBounds (by omega)
+  refine ⟨rfl, memorySize, headerFrame.readHeader (by omega), ?_⟩
+  intro otherAddress otherBytes disjoint
+  refine ⟨rfl, memorySize, ?_⟩
+  intro byte byteWithin
+  exact LinearMemory.readByte_set_other before.memory offset
+    (otherAddress.value + byte) value writeInBounds (by omega)
+
 /-- A successful 64-bit payload write below the allocation frontier preserves
 the zero suffix and therefore the complete frontier invariant. -/
 theorem MemoryState.FrontierInvariant.writeUInt64
@@ -154,6 +214,72 @@ theorem MemoryState.FrontierInvariant.writeUInt32
   | some value =>
       simp [LinearMemory.readByte, actualByte, oldZero] at framed
       subst value
+      rfl
+
+/-- A successful 16-bit payload write below the allocation frontier preserves
+the zero suffix and therefore the complete frontier invariant. -/
+theorem MemoryState.FrontierInvariant.writeUInt16
+    {state : MemoryState} {memory : LinearMemory} {offset : Nat} {value : UInt16}
+    (valid : state.FrontierInvariant)
+    (beforeFrontier : offset + 2 ≤ state.heapCursor)
+    (written : state.memory.writeUInt16 offset value = .ok memory) :
+    ({ state with memory } : MemoryState).FrontierInvariant := by
+  have writeInBounds : offset + 1 < state.memory.size :=
+    Nat.lt_of_lt_of_le (by omega) valid.cursorInBounds
+  obtain ⟨actual, actualWrite, memorySize, _, _, byteFrame⟩ :=
+    LinearMemory.writeUInt16_spec state.memory offset value writeInBounds
+  rw [actualWrite] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  refine {
+    cursorAligned := valid.cursorAligned
+    cursorInBounds := by simpa [memorySize] using valid.cursorInBounds
+    unusedZero := ?_ }
+  intro byte afterCursor finalInBounds
+  change state.heapCursor ≤ byte at afterCursor
+  change byte < actual.size at finalInBounds
+  have oldInBounds : byte < state.memory.size := by
+    rw [← memorySize]
+    exact finalInBounds
+  have oldZero := valid.unusedZero byte afterCursor oldInBounds
+  have framed := byteFrame byte (by omega) (by omega)
+  cases actualByte : actual[byte]? with
+  | none => simp [LinearMemory.readByte, actualByte, oldZero] at framed
+  | some value =>
+      simp [LinearMemory.readByte, actualByte, oldZero] at framed
+      subst value
+      rfl
+
+/-- A successful byte payload write below the allocation frontier preserves
+the zero suffix and therefore the complete frontier invariant. -/
+theorem MemoryState.FrontierInvariant.writeByte
+    {state : MemoryState} {memory : LinearMemory} {offset : Nat} {value : UInt8}
+    (valid : state.FrontierInvariant)
+    (beforeFrontier : offset + 1 ≤ state.heapCursor)
+    (written : state.memory.writeByte offset value = .ok memory) :
+    ({ state with memory } : MemoryState).FrontierInvariant := by
+  have writeInBounds : offset < state.memory.size :=
+    Nat.lt_of_lt_of_le (by omega) valid.cursorInBounds
+  unfold LinearMemory.writeByte at written
+  rw [dif_pos writeInBounds] at written
+  have memoryEq := Except.ok.inj written
+  subst memory
+  refine {
+    cursorAligned := valid.cursorAligned
+    cursorInBounds := by simpa using valid.cursorInBounds
+    unusedZero := ?_ }
+  intro byte afterCursor finalInBounds
+  change state.heapCursor ≤ byte at afterCursor
+  change byte < (state.memory.set offset value writeInBounds).size at finalInBounds
+  have oldInBounds : byte < state.memory.size := by simpa using finalInBounds
+  have oldZero := valid.unusedZero byte afterCursor oldInBounds
+  have framed := LinearMemory.readByte_set_other state.memory offset byte value
+    writeInBounds (by omega)
+  cases actualByte : (state.memory.set offset value writeInBounds)[byte]? with
+  | none => simp [LinearMemory.readByte, actualByte, oldZero] at framed
+  | some actual =>
+      simp [LinearMemory.readByte, actualByte, oldZero] at framed
+      subst actual
       rfl
 
 /-- A target-mutation frame preserves the descriptor-region and pairwise

@@ -1783,6 +1783,15 @@ decoder relation are rebuilt at the unchanged static descriptor. The
 remaining mutation audit is reduced to the two narrow byte writers (`UInt16`
 and `UInt8`).
 
+W6.5h closes that narrow mutation matrix. Checked `UInt16` and `UInt8`
+transactions now preserve the target header, zero frontier, and every
+descriptor-disjoint allocation through the same `TargetMutationFrame` used by
+the wider lanes. Their whole-heap theorems perform the corresponding semantic
+`setScalarField` and rebuild `LiveHeapRel`. Constructor tag, `USize`, and all
+four packed scalar widths therefore have complete successful-operation
+refinements; the next audit checks the remaining runtime operation and fault
+coverage before W6.6 composition.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
