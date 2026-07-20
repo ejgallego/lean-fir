@@ -2257,6 +2257,41 @@ structure ScopedFoldedAlphaEvidence
   folded : ScopedAddDefaultSelectionEvidence index middleAlts
     (shadowFilterUnreachable sourceAlts)
 
+/-- The canonical proof intermediate discharges its source-selection field
+from reachable filtering and the generic append-default selection theorem.
+After this constructor, only the selected-branch alpha relation between the
+canonical middle and the actual folded table remains. -/
+def scopedFoldedAlphaEvidence_of_addDefault
+    (folded : ScopedAddDefaultSelectionEvidence index
+      (shadowAddDefaultMiddle (shadowFilterUnreachable sourceAlts))
+      (shadowFilterUnreachable sourceAlts)) :
+    ScopedFoldedAlphaEvidence index sourceAlts := {
+  middleAlts := shadowAddDefaultMiddle
+    (shadowFilterUnreachable sourceAlts)
+  sourceSelection := by
+    intro tag branch selected reachable
+    exact chooseAlt_shadowAddDefaultMiddle_of_selected
+      (chooseAlt_shadowFilterUnreachable_of_selected selected reachable)
+  folded := folded
+}
+
+/-- Pure alpha boundary for genuine default folding. The canonical proof
+intermediate and its structural selection behavior are fixed transparently;
+implementations provide only the two selected-branch alpha orientations used
+by `shadowAddDefaultAlt`. -/
+structure ScopedCaseAddDefaultAlphaLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    ScopedAddDefaultSelectionEvidence index
+      (shadowAddDefaultMiddle (shadowFilterUnreachable sourceAlts))
+      (shadowFilterUnreachable sourceAlts)
+
 /-- The irreducible semantic input for a genuine default fold. Filtering and
 the final singleton elimination are structural; this contract exposes a
 selection-preserving middle table and supplies only the bidirectional alpha
@@ -2273,6 +2308,17 @@ structure ScopedCaseFoldedAlphaLaws
     (shadowPrepareAlts
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
+
+/-- Lift the pure alpha boundary to the fold presentation consumed by the
+three-phase constructor. No additional semantic premise is introduced. -/
+theorem scopedCaseFoldedAlphaLaws_of_addDefaultAlpha
+    (alpha : ScopedCaseAddDefaultAlphaLaws validCase) :
+    ScopedCaseFoldedAlphaLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts alternatives
+      filteredNotSingleton preparedSingleton
+    exact ⟨scopedFoldedAlphaEvidence_of_addDefault
+      (alpha.folded alternatives filteredNotSingleton preparedSingleton)⟩
 
 /-- Assemble singleton phase classification from the generic direct path and
 the remaining fold-created singleton contract. -/

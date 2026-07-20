@@ -54,6 +54,67 @@ where
         count := count + 1
     return count
 
+/-- Appending a default cannot change constructor lookup. -/
+theorem findCtorAlt_append_default
+    (alts : List (LCNF.Alt .impure)) :
+    findCtorAlt tag (alts ++ [.default body]) = findCtorAlt tag alts := by
+  induction alts with
+  | nil => rfl
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [List.cons_append, findCtorAlt]
+          split <;> simp_all
+      | default code =>
+          simpa only [List.cons_append, findCtorAlt] using ih
+
+/-- Once a source default has been found, appending another default leaves the
+selected source default unchanged. -/
+theorem findDefaultAlt_append_default_of_selected
+    (selected : findDefaultAlt alts = some branch) :
+    findDefaultAlt (alts ++ [.default body]) = some branch := by
+  induction alts with
+  | nil => simp [findDefaultAlt] at selected
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findDefaultAlt] at selected
+          simpa only [List.cons_append, findDefaultAlt] using ih selected
+      | default code =>
+          simpa only [List.cons_append, findDefaultAlt] using selected
+
+/-- Appending a fallback default preserves every already-successful source
+selection. This is the structural fact needed by the proof-only fold
+intermediate. -/
+theorem chooseAlt_append_default_of_selected
+    (selected : chooseAlt tag alts = some branch) :
+    chooseAlt tag (alts ++ [.default body]) = some branch := by
+  unfold chooseAlt at selected ⊢
+  rw [findCtorAlt_append_default]
+  cases ctor : findCtorAlt tag alts with
+  | none =>
+      simp only [ctor, Option.orElse_none] at selected ⊢
+      exact findDefaultAlt_append_default_of_selected selected
+  | some code =>
+      simpa only [ctor, Option.orElse_some] using selected
+
+/-- Proof-only alpha-fold intermediate. It retains the whole filtered table
+and appends the occurrence-count representative as a fallback default. The
+compiler output may then remove every constructor alpha-equivalent to that
+representative in one isolated alpha step. -/
+def shadowAddDefaultMiddle (alts : Array (LCNF.Alt .impure)) :
+    Array (LCNF.Alt .impure) :=
+  alts.push (.default (shadowGetMaxOccs alts).1.getCode)
+
+theorem chooseAlt_shadowAddDefaultMiddle_of_selected
+    (selected : chooseAlt tag alts.toList = some branch) :
+    chooseAlt tag (shadowAddDefaultMiddle alts).toList = some branch := by
+  simpa [shadowAddDefaultMiddle] using
+    chooseAlt_append_default_of_selected
+      (body := (shadowGetMaxOccs alts).1.getCode) selected
+
 /-- Pure output projection of Lean's private `addDefaultAlt`. -/
 def shadowAddDefaultAlt (alts : Array (LCNF.Alt .impure)) :
     Array (LCNF.Alt .impure) := Id.run do
@@ -64,16 +125,9 @@ def shadowAddDefaultAlt (alts : Array (LCNF.Alt .impure)) :
     if occurrences == 1 then
       return alts
     else
-      let mut result := #[]
-      let mut first := true
-      for alt in alts do
-        if LCNF.Code.alphaEqv alt.getCode max.getCode then
-          let .ctorAlt _ _ := alt | unreachable!
-          if first then
-            first := false
-        else
-          result := result.push alt
-      return result.push (.default max.getCode)
+      return (alts.filter fun alt =>
+        !LCNF.Code.alphaEqv alt.getCode max.getCode).push
+          (.default max.getCode)
 
 theorem shadowAddDefaultAlt_eq_of_small
     (small : alts.size ≤ 1) :
@@ -111,17 +165,35 @@ theorem one_lt_size_of_shadowAddDefaultAlt_singleton
     omega
   · omega
 
-/-- More precisely, a singleton created from a non-singleton input is the
-default arm appended by the genuine folding branch. -/
-theorem shadowAddDefaultAlt_eq_singleton_default_of_created
+/-- A singleton created from a non-singleton input is exactly the occurrence
+counter's representative reintroduced by the genuine folding branch. -/
+theorem shadowAddDefaultAlt_eq_singleton_default_max_of_created
     (notSingleton : alts.size ≠ 1)
     (singleton : (shadowAddDefaultAlt alts).size = 1) :
-    ∃ body, shadowAddDefaultAlt alts = #[.default body] := by
+    shadowAddDefaultAlt alts =
+      #[.default (shadowGetMaxOccs alts).1.getCode] := by
   unfold shadowAddDefaultAlt at singleton ⊢
   split
   · simp_all
   · split
     split <;> simp_all
+    rename_i pair max occurrences noDefault maxEq occurrencesNe
+    have filteredEmpty :
+        alts.filter (fun alt =>
+          !alt.getCode.alphaEqv max.getCode) = #[] := by
+      rw [Array.filter_eq_empty_iff]
+      intro alt member
+      simp [singleton alt member]
+    simp [filteredEmpty]
+
+/-- Existential presentation of the exact representative theorem. -/
+theorem shadowAddDefaultAlt_eq_singleton_default_of_created
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1) :
+    ∃ body, shadowAddDefaultAlt alts = #[.default body] :=
+  ⟨(shadowGetMaxOccs alts).1.getCode,
+    shadowAddDefaultAlt_eq_singleton_default_max_of_created
+      notSingleton singleton⟩
 
 /-- A fold-created singleton selects its sole default body at every tag. -/
 theorem chooseAlt_shadowAddDefaultAlt_of_created_singleton
