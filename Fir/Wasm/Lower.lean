@@ -324,6 +324,7 @@ def compileFixedClosureFields (closureId : FVarId) (target : LCNF.Decl .impure)
     (arity fixed : Nat) (kinds : Array AbiKind) : List Instruction :=
   (List.range fixed).flatMap fun index =>
     match kinds[index]? with
+    | some AbiKind.erased => [.i32Const .erased 0]
     | some kind => [
         .localGet closureId,
         .call (.runtime (.closureProj target.name arity fixed index kind))]

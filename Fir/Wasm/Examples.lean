@@ -224,6 +224,36 @@ def abiClosureCallProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiDirectCallProgram
 #guard supportedProgram abiClosureCallProgram
 
+def erasedCapture : FVarId := ⟨`erasedCapture⟩
+def erasedClosure : FVarId := ⟨`erasedClosure⟩
+def erasedArgument : FVarId := ⟨`erasedArgument⟩
+def erasedResult : FVarId := ⟨`erasedResult⟩
+
+def abiClosureErasedFirstDecl : LCNF.Decl .impure :=
+  decl `abiClosureErasedFirst #[param erasedCapture LCNF.ImpureType.erased,
+    param erasedArgument LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return erasedArgument))
+
+def abiClosureErasedCaptureProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiClosureErasedFirstDecl,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl erasedCapture LCNF.ImpureType.erased .erased) <|
+        .let (letDecl erasedClosure LCNF.ImpureType.tobject
+          (.pap `abiClosureErasedFirst #[.fvar erasedCapture])) <|
+        .let (letDecl erasedArgument LCNF.ImpureType.tobject (.lit (.nat 23))) <|
+        .let (letDecl erasedResult LCNF.ImpureType.tobject
+          (.fvar erasedClosure #[.fvar erasedArgument])) <|
+        .return erasedResult)] }
+
+#guard supportedProgram abiClosureErasedCaptureProgram
+
+#guard match lowerSupported abiClosureErasedCaptureProgram with
+  | .ok module =>
+      module.runtimeOperations.all fun
+        | .closureProj _ _ _ _ .erased => false
+        | _ => true
+  | .error _ => false
+
 def underClosure : FVarId := ⟨`underClosure⟩
 def underClosure2 : FVarId := ⟨`underClosure2⟩
 def underThird : FVarId := ⟨`underThird⟩
