@@ -1381,6 +1381,52 @@ theorem LiveCellRel.ordinaryHeader
           exact ⟨_, headerRead, rawRead, by
             simp [Header.isPromotedTag, headerKind, different], ordinary, refCount⟩
 
+/-- Whole-heap source/concrete refinement for an ordinary live-cell
+increment. The concrete operation rewrites only the target common header;
+the generic header-frame assembler preserves every other allocation and
+performs the matching semantic `setCell` update. -/
+theorem LiveHeapRel.incrementReference_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result nextRuntime,
+      incrementReference state address amount check = .ok result ∧
+      Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, rawRead, notPromoted, ordinary, refCount⟩ :=
+    targetRelated.ordinaryHeader
+  obtain ⟨targetDescriptor, targetDescriptorFound⟩ := targetRelated.descriptor
+  obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+      headerWrite, finalValid, headerAfter⟩ :=
+    incrementReference_header related.frontier headerRead targetRelated.headerOwned
+      notPromoted ordinary cell.rc amount refCount fits check
+  obtain ⟨localResult, localOperation, _, targetAfter⟩ :=
+    targetRelated.incrementReference related.frontier amount fits check
+  rw [operation] at localOperation
+  have localEq := Except.ok.inj localOperation
+  subst localResult
+  have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+    Nat.le_trans targetRelated.headerOwned related.frontier.cursorInBounds
+  have sameExtent : updatedHeader.allocationBytes = header.allocationBytes := by
+    simp [updatedEq]
+  obtain ⟨nextRuntime, semanticUpdate, finalRelated⟩ :=
+    related.setCell_of_headerWrite mapped found targetDescriptorFound rawRead
+      resultEq headerInBounds headerWrite sameExtent finalValid (.live targetAfter)
+  have semanticEq := targetRelated.incValue_eq runtime location found amount check
+  exact ⟨result, nextRuntime, operation, by rw [semanticEq, semanticUpdate],
+    finalRelated⟩
+
 /-- Whole-heap source/concrete refinement for the nonrecursive decrement
 branch. The target count changes, every other allocation is framed by the
 descriptor disjointness invariant, and the semantic `setCell` update is

@@ -1793,6 +1793,22 @@ four packed scalar widths therefore have complete successful-operation
 refinements; the next audit checks the remaining runtime operation and fault
 coverage before W6.6 composition.
 
+The W6.5 operation audit found four remaining successful-operation packaging
+gaps before composition: ordinary heap increment stopped at `LiveCellRel`,
+one-field object mutation has no concrete operation yet, packed-scalar reads
+stop at the constructor decoder, and closure match/capture projection stop at
+the local closure relation. Structured failure correspondence is currently
+complete for external calls and selected ownership paths, but not yet for the
+full `RuntimeOp` matrix.
+
+W6.5i closes the first audit gap. A successful ordinary heap increment now
+exposes its exact extent-preserving header write, performs FIR's matching
+`incValue`/`setCell` transition, and uses the shared header-frame assembler to
+preserve every other live, dead, and promoted allocation under `LiveHeapRel`.
+The existing tagged-value equation retains both checked no-op and unchecked
+source-fault behavior. One-field object mutation is the next successful
+operation slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
