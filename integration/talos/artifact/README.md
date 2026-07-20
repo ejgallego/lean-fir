@@ -91,3 +91,31 @@ above the tagged-immediate range, then execute the list classifier through the
 semantic `getTag` import. The natural-literal regression emits the captured
 `tagged` binding without rewriting its final-impure types and returns `42` in
 Node/V8.
+
+The `source-pretty-format` fixture is the first standard-library algorithm in
+this lane. It expands a monomorphic `Std.Format.prettyM` facade beside the
+source entry, recursively internalizes compiler-visible helper declarations,
+and exports the raw semantic ABI
+
+```text
+Format(tobject) × Nat(tobject) × Nat(tobject) × Nat(tobject) → String(object)
+```
+
+JavaScript therefore supplies ordinary Lean runtime handles for the format,
+page width, indentation, and starting column; there is no second format AST or
+high-level adapter. The fixture builds the normal `Format.text`,
+`Format.nest`, `Format.line`, and `Format.append` heap graph and compares V8's
+`"hello\n  world"` result with native `Std.Format.pretty` at width 12.
+A companion invocation of the same Wasm module exercises all eight `Format`
+constructors, both flattened and real line breaks, Unicode text, and a newline
+embedded inside `Format.text`; V8 again compares with a native Lean oracle.
+
+Lean 4.32 initially exposes 23 helper declarations outside the raw local
+closure because primitives and compiler-generated specializations are emitted
+as external LCNF declarations. Recursive source internalization leaves 20
+actual declaration-level runtime primitives. The manifest contains more
+imports because semantic heap, closure, and call operations receive distinct
+metadata-bearing import identities; those are instances of the frozen
+semantic runtime ABI, not additional source helpers. The unreachable panic
+fallback remains a trapping import and is asserted absent from the successful
+execution trace.

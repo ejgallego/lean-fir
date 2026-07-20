@@ -22,24 +22,66 @@ structure ModuleArtifact where
 structure Artifact extends ModuleArtifact where
   manifest : Json
 
+private partial def environmentDeclarationAncestor? (env : Environment) (name : Name) :
+    Option Name :=
+  if env.contains name then
+    some name
+  else if name.isAnonymous then
+    none
+  else
+    environmentDeclarationAncestor? env name.getPrefix
+
+private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
+  if names.contains name then names else names.push name
+
 /--
-Compile one Lean declaration through final impure LCNF into a reusable Wasm
-module. Invocation data is attached separately with `withInvocation`.
+Recursively ask Lean to compile imported source helpers whose declarations are
+available in the environment. Generated helper suffixes are rooted at their
+nearest source declaration; retaining a name leaves that helper as an explicit
+semantic Wasm import.
 -/
-def compileModule (entry : Name) (dependencies : Array Name := #[]) :
+partial def compileEntryInternalized (entry : Name) (dependencies : Array Name := #[])
+    (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let artifact ← withoutModifyingEnv <|
+    Fir.Validation.Lcnf.compileEntry entry dependencies
+  let env ← getEnv
+  let additions := artifact.externalNames.foldl (init := #[]) fun additions name =>
+    if retainedExternalNames.contains name.toString then
+      additions
+    else
+      match environmentDeclarationAncestor? env name with
+      | some ancestor =>
+          if ancestor == entry || dependencies.contains ancestor then additions
+          else addUniqueName additions ancestor
+      | none => additions
+  if additions.isEmpty then
+    return artifact
+  compileEntryInternalized entry (dependencies ++ additions) retainedExternalNames
+
+/-- Lower and encode an already captured compiler artifact. -/
+def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
     CoreM (Except CompileError ModuleArtifact) := do
-  let source ← Fir.Validation.Lcnf.compileEntry entry dependencies
   let module ←
     match Fir.Wasm.lowerSupported source.program with
     | .ok module => pure module
     | .error error => return .error (.lowering error)
-  let module := { module with exports := #[entry] }
+  let module := { module with exports := #[source.entry] }
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => return .error (.encoding error)
   let formattedLcnf ← source.format
   return .ok { source, module, bytes, formattedLcnf }
+
+/--
+Compile one Lean declaration through final impure LCNF into a reusable Wasm
+module. Invocation data is attached separately with `withInvocation`.
+-/
+def compileModule (entry : Name) (dependencies : Array Name := #[]) :
+    CoreM (Except CompileError ModuleArtifact) := do
+  let source ← withoutModifyingEnv <|
+    Fir.Validation.Lcnf.compileEntry entry dependencies
+  compileModuleArtifact source
 
 /-- Attach one checked semantic invocation to an already compiled module. -/
 def ModuleArtifact.withInvocation (artifact : ModuleArtifact) (artifactName : String)

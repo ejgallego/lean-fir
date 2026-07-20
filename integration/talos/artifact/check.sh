@@ -21,6 +21,8 @@ source_artifacts=(
   source-uint64-id
   source-string-input
   source-nat-list-case
+  source-pretty-format
+  source-pretty-format-coverage
 )
 for source in "${source_artifacts[@]}"; do
   test -s "_build/$source.wasm"
@@ -40,6 +42,7 @@ node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
   import { SemanticHost, manifestValue } from "../../../scripts/wasm_semantic_host.mjs";
+  import { formatExternalRegistry } from "../../../scripts/wasm_format_externals.mjs";
   const cases = [
     [process.argv[1], "uint64", [], 0xffffffffffffffffn],
     [process.argv[2], "tobject", [], 42n],
@@ -99,6 +102,28 @@ node --input-type=module -e '
     assert.equal(actual, expected);
     console.log(`PASS source ${manifest.entry}`);
   }
+  const formatCases = [
+    [process.argv[10], "hello\n  world"],
+    [process.argv[11], "α β\n. γ\n  δ\n  ε"],
+  ];
+  for (const [path, expected] of formatCases) {
+    const bytes = fs.readFileSync(path);
+    const manifest = JSON.parse(fs.readFileSync(path + ".json", "utf8"));
+    assert.ok(WebAssembly.validate(bytes), `${path} failed WebAssembly validation`);
+    assert.equal(manifest.result, "object");
+    assert.deepStrictEqual(manifest.params, ["tobject", "tobject", "tobject", "tobject"]);
+    const host = new SemanticHost(manifest.initialRuntime, formatExternalRegistry);
+    const args = manifest.params.map((kind, index) =>
+      host.encode(kind, manifestValue(manifest.arguments[index])));
+    const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    const result = host.decode(manifest.result, instance.exports[manifest.entry](...args));
+    assert.equal(result.kind, "heap");
+    assert.deepStrictEqual(host.liveCell(result.location).object,
+      { kind: "string", value: expected });
+    assert.ok(!host.trace.some((event) => event.name === "panicCore" ||
+      event.name === "instInhabitedOfMonad._redArg"));
+    console.log(`PASS source ${manifest.entry}`);
+  }
 ' \
   _build/source-uint64.wasm \
   _build/source-nat.wasm \
@@ -108,7 +133,9 @@ node --input-type=module -e '
   _build/source-uint32-id.wasm \
   _build/source-uint64-id.wasm \
   _build/source-string-input.wasm \
-  _build/source-nat-list-case.wasm
+  _build/source-nat-list-case.wasm \
+  _build/source-pretty-format.wasm \
+  _build/source-pretty-format-coverage.wasm
 node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"

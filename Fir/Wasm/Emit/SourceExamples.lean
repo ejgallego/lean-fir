@@ -1,11 +1,88 @@
 import Fir.Validation.Corpus
+import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.Source
+import Fir.Wasm.PrettyFormat
 import Lean.Elab.Command
 
 namespace Fir.Wasm.Emit.SourceExamples
 
 open Lean Elab Command
 open Fir.Wasm.Emit.Source
+
+#fir_wasm_pretty_facade prettyRawFixture
+
+private def prettyRuntimeImports : Array String := #[
+  "Int.ofNat",
+  "Int.decLt",
+  "Int.natAbs",
+  "String.Internal.pushn",
+  "String.Internal.append",
+  "Int.sub",
+  "String.Internal.length",
+  "Nat.add",
+  "Nat.decEq",
+  "Nat.sub",
+  "Int.add",
+  "String.Internal.posOf",
+  "String.Internal.offsetOfPos",
+  "String.utf8ByteSize",
+  "Nat.decLt",
+  "Nat.decLe",
+  "panicCore",
+  "String.Internal.extract",
+  "String.Internal.next",
+  Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName]
+
+run_cmd do
+  let artifact ← liftCoreM <| withoutModifyingEnv <|
+    Fir.Validation.Lcnf.compileEntry ``prettyRawFixture
+  let program := artifact.program
+  let some entry := program.findDecl? ``prettyRawFixture
+    | throwError "raw Format facade was absent from its compiler dependency closure"
+  let paramKinds := entry.params.mapM fun param => Fir.Wasm.abiValueKind? param.type
+  unless paramKinds ==
+      some #[.tobject, .tobject, .tobject, .tobject] do
+    throwError "raw Format facade parameter ABI changed: {repr paramKinds}"
+  unless Fir.Wasm.abiValueKind? entry.type == some .object do
+    throwError "raw Format facade result ABI changed: {repr entry.type}"
+  unless artifact.externalNames.size == 23 do
+    throwError "raw Format helper inventory changed size:\n{repr artifact.externalNames}"
+  for required in #["String.Internal.append", "Nat.add", "panicCore",
+      Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName] do
+    unless artifact.externalNames.any fun name => name.toString == required do
+      throwError "raw Format helper inventory lost {required}"
+  let unsupported := program.decls.filter fun decl => !Fir.Wasm.supportedDecl program decl
+  unless unsupported.size == 1 do
+    throwError "raw Format facade has {unsupported.size} unsupported declarations, expected one"
+  unless unsupported.any fun decl => decl.name.toString.contains "panic" do
+    throwError "raw Format facade no longer records the unreachable panic specialization"
+  match Fir.Wasm.validateSupported program with
+  | .error (.unsupportedCode name) =>
+      unless name.toString.contains "panic" do
+        throwError "raw Format facade failed first at an unexpected declaration: {name}"
+  | .error error => throwError "raw Format facade failed with an unexpected error: {repr error}"
+  | .ok _ => throwError "raw Format facade unexpectedly passed before its refinement fix"
+
+run_cmd do
+  let impureDeclsBefore ← liftCoreM Lean.Compiler.LCNF.getLocalImpureDecls
+  let result ← liftCoreM <|
+    Fir.Wasm.Emit.PrettyFormat.compileModule ``prettyRawFixture
+  let impureDeclsAfter ← liftCoreM Lean.Compiler.LCNF.getLocalImpureDecls
+  unless impureDeclsAfter == impureDeclsBefore do
+    throwError "internalized Format capture polluted Lean's local final-LCNF environment"
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "internalized Format facade did not compile: {repr error}"
+  unless artifact.source.externalNames.map (fun name => name.toString) ==
+      #[Fir.Wasm.Emit.PrettyFormat.weakMonadInhabitedName] do
+    throwError "internalized Format facade retained unexpected declarations:\n{repr artifact.source.externalNames}"
+  let declarationImports := artifact.module.imports.filterMap (·.declaration?)
+  unless declarationImports.map (fun name => name.toString) == prettyRuntimeImports do
+    throwError "internalized Format facade retained declaration imports: {repr declarationImports}"
+  unless artifact.module.exports == #[``prettyRawFixture] do
+    throwError "internalized Format facade export changed: {repr artifact.module.exports}"
+  unless artifact.bytes.size > Fir.Wasm.Emit.header.size do
+    throwError "internalized Format facade did not encode a complete Wasm module"
 
 run_cmd do
   unless validationSchemaAcceptsAbiKind .bool .uint8 do
