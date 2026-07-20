@@ -106,6 +106,15 @@ def Word32.ofUInt32 (value : UInt32) : Word32 :=
 @[simp] theorem Word32.ofUInt32_value (value : UInt32) :
     (Word32.ofUInt32 value).value = value.toNat := rfl
 
+/-- Crossing the Talos `i32` boundary and rebuilding the mathematical wasm32
+word preserves the exact concrete address/tag bits. -/
+@[simp] theorem Word32.ofUInt32_ofNat_value (word : Word32) :
+    Word32.ofUInt32 (UInt32.ofNat word.value) = word := by
+  cases word with
+  | mk value isLt =>
+      simp [Word32.ofUInt32, wordModulus] at isLt ⊢
+      omega
+
 inductive ObjectWordClass where
   | sentinel
   | immediate

@@ -1867,6 +1867,17 @@ tagged references; the latter decodes identically for immediate words and
 promoted-tag allocations. In both cases the concrete `UInt64` result is the
 exact image of FIR's semantic `Nat` tag.
 
+W6.6a establishes the first lowering-to-concrete-runtime composition slice.
+`PhysicalValueRel` lifts W6's ABI-indexed concrete lanes into Talos values, and
+the new concrete Talos host owns only `ConcreteRuntimeState` plus a structured
+failure channel: it has no semantic handle table or source runtime to consult.
+Its executable `getTag` import distinguishes arity, lane, and checked heap
+failures. An exact host contract and host-polymorphic stack rules then compose
+the actual generated `local.get; getTag; const; i32.eq; if` constructor-case
+sequence with `ConcreteRuntimeRel` and the W5 compiler/adapter theorem. The
+semantic-host artifact remains unchanged until the remaining supported
+operations acquire the same boundary.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

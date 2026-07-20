@@ -20,3 +20,5 @@ import FirTalos.Correctness.FunctionExamples
 import FirTalos.Correctness.FunctionCtorProjectionExample
 import FirTalos.Correctness.FunctionCaseExample
 import FirTalos.Correctness.FunctionDefaultCaseExample
+import FirTalos.ConcreteRuntime
+import FirTalos.ConcreteRuntimeExamples

@@ -14,7 +14,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Missing; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals | Runtime theorem | Partial | Missing |
 | `partialApply` | Closure allocation | Heap theorem | Partial | Missing |
-| `closureApply` | Metadata exists; no concrete dispatch step | Missing | Missing | Missing |
+| `closureApply` | Excluded legacy callback; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Explicit supported-fragment exclusion |
 | `closureMatches` | Yes | Exact match/nonmatch heap theorem | Partial | Missing |
 | `closureProj` | Yes | Typed heap theorem | Partial | Missing |
 | `reset` | Yes | Tagged, nonunique, and unique protocol theorems | Partial | Missing |
@@ -29,7 +29,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Missing |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Missing |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
-| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Missing |
+| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP; artifact pending |
 
 Cross-cutting W6.5 state:
 
@@ -38,8 +38,10 @@ Cross-cutting W6.5 state:
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
-- no concrete operation is yet composed with the W5/W2 lowering theorem, and
-  the generated V8 artifact lane still uses the semantic host runtime.
+- `getTag` is composed with the W5/W2 generated constructor-case theorem using
+  representation-aware concrete locals and host-owned memory; and
+- every other operation still needs that composition, while the generated V8
+  artifact lane continues to use the semantic host runtime.
 
 Update this table in the same commit whenever an operation crosses one of
 these boundaries. A broad W6 completion claim requires every supported row to
