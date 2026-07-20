@@ -49,6 +49,29 @@ theorem ClosureObjectRel.matches
   simp [metadataFunction, metadataArity, metadataFixed]
   rfl
 
+/-- The checked concrete match operation agrees exactly with the semantic
+function/arity/fixed-count predicate, including the nonmatching result. -/
+theorem ClosureObjectRel.matches_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {semantic : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds semantic)
+    (expectedFunction : Lean.Name) (expectedArity expectedFixed : Nat) :
+    closureMatches state dispatch descriptors address expectedFunction expectedArity
+        expectedFixed =
+      .ok (if function == expectedFunction && arity == expectedArity &&
+          semantic.size == expectedFixed then 1 else 0) := by
+  obtain ⟨metadata, metadataRead, metadataFunction, metadataArity,
+      metadataFixed, metadataKinds⟩ := related.metadata
+  unfold closureMatches
+  rw [metadataRead]
+  simp only [Bind.bind, Except.bind]
+  simp [metadataFunction, metadataArity, metadataFixed]
+  rfl
+
 /-- Typed projection from a locally related closure returns the concrete lane
 related to the matching semantic capture. -/
 theorem ClosureObjectRel.project

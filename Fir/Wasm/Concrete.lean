@@ -9,6 +9,7 @@ import Fir.Wasm.Concrete.ClosureRuntime
 import Fir.Wasm.Concrete.ClosureCorrectness
 import Fir.Wasm.Concrete.ClosureHeapCorrectness
 import Fir.Wasm.Concrete.ClosureAllocationCorrectness
+import Fir.Wasm.Concrete.ClosureProjectionCorrectness
 import Fir.Wasm.Concrete.ObjectFieldsCorrectness
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import Fir.Wasm.Concrete.HeapRefinement

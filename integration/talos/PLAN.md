@@ -1828,6 +1828,15 @@ the claim under `FIR-BUG-wasm-none-float-runtime-gap`, because the shared FIR
 runtime still has no semantic float scalar values. Closure match and capture
 projection are the remaining successful read-operation audit gap.
 
+W6.5l closes that closure read boundary. `ClosureObjectRel.matches_eq` now
+proves the exact match/nonmatch `UInt32` result rather than only the positive
+case. Mapped live closures lift that equation through `LiveHeapRel`, while a
+descriptor-aligned capture projection returns the checked concrete lane and
+its ABI-indexed `ValueRel`. These theorems intentionally stop at the W2
+`closureData` boundary owned by the Talos integration layer; W6.6 composition
+will connect them without duplicating the semantic host contract in
+`Fir/Wasm/Concrete`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
