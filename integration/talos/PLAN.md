@@ -1795,13 +1795,16 @@ four packed scalar widths therefore have complete successful-operation
 refinements; the next audit checks the remaining runtime operation and fault
 coverage before W6.6 composition.
 
-The W6.5 operation audit found four remaining successful-operation packaging
-gaps before composition: ordinary heap increment stopped at `LiveCellRel`,
-one-field object mutation has no concrete operation yet, packed-scalar reads
-stop at the constructor decoder, and closure match/capture projection stop at
-the local closure relation. Structured failure correspondence is currently
-complete for external calls and selected ownership paths, but not yet for the
-full `RuntimeOp` matrix.
+The first W6.5 audit pass found four immediately actionable gaps in the
+already-implemented object-operation subset: ordinary heap increment stopped
+at `LiveCellRel`, one-field object mutation had no concrete operation, packed-
+scalar reads stopped at the constructor decoder, and closure match/capture
+projection stopped at the local closure relation. The subsequent full
+`RuntimeOp` audit is maintained in `integration/talos/W6-COVERAGE.md`; it also
+tracks literals, closure application, tagged operation wrappers, failures,
+W6.6 composition, and artifact switching. Structured failure correspondence
+is currently complete for external calls and selected ownership paths, but
+not yet for the full matrix.
 
 W6.5i closes the first audit gap. A successful ordinary heap increment now
 exposes its exact extent-preserving header write, performs FIR's matching
@@ -1838,6 +1841,16 @@ its ABI-indexed `ValueRel`. These theorems intentionally stop at the W2
 `closureData` boundary owned by the Talos integration layer; W6.6 composition
 will connect them without duplicating the semantic host contract in
 `Fir/Wasm/Concrete`.
+
+W6.5m closes natural literals across the immediate/heap representation
+boundary. The formerly opaque recursive limb splitter is now total and
+well-founded; its canonical base-`2^64` value equation, bounded payload
+writer, header/frontier frame, and decoder round trip are proved. Successful
+large-natural allocation now extends `LiveHeapRel`, binds the fresh semantic
+location and natural descriptor, and returns the corresponding `.tobject`
+`ValueRel`; tagged naturals continue to use the existing immediate encoder.
+An executable two-limb guard covers the nontrivial codec path. String
+literals remain the unsupported literal case in the W6 coverage matrix.
 
 ## Parallel agent packages
 

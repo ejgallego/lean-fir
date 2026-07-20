@@ -483,11 +483,19 @@ def writeScalarUInt64Field (state : MemoryState) (object : Word32)
   let memory ← liftMemory <| state.memory.writeUInt64 address value
   return { state with memory }
 
-partial def naturalLimbs (value : Nat) : List UInt64 :=
-  if value < UInt64.size then
+/-- Canonical little-endian base-`2^64` limbs. This is well-founded rather
+than `partial` so allocation correctness can use its equation theorem. -/
+def naturalLimbs (value : Nat) : List UInt64 :=
+  if _h : value < UInt64.size then
     [UInt64.ofNat value]
   else
     UInt64.ofNat (value % UInt64.size) :: naturalLimbs (value / UInt64.size)
+termination_by value
+decreasing_by
+  apply Nat.div_lt_self
+  · have sizePositive : 0 < UInt64.size := by decide
+    omega
+  · decide
 
 /-- Install little-endian natural limbs.  It is public so allocation
 refinement can state and prove exact payload postconditions. -/

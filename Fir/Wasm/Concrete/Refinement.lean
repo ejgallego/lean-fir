@@ -266,6 +266,20 @@ theorem RefinementWitness.lookup_bindClosure_descriptor_other
       some (.natural value) := by
   simp [RefinementWitness.bindNatural, DescriptorMap.lookup?]
 
+theorem RefinementWitness.lookup_bindNatural_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (value : Nat) (different : other ≠ location) :
+    (witness.bindNatural location address value).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindNatural, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindNatural_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (value : Nat) (different : address.value ≠ other.value) :
+    (witness.bindNatural location address value).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindNatural, DescriptorMap.lookup?, different]
+
 @[simp] theorem RefinementWitness.lookup_bindBoxed_location
     (witness : RefinementWitness) (location : Location) (address : Word32)
     (kind : BoxedScalarKind) :
@@ -417,6 +431,36 @@ theorem RefinementWitness.bindBoxed_extends
     exact found
   · intro old descriptor found
     rw [witness.lookup_bindBoxed_descriptor_other location address old kind
+      (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding one fresh heap natural extends all previously visible proof
+metadata. -/
+theorem RefinementWitness.bindNatural_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Nat)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindNatural location address value) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_
+    closureDispatch := rfl
+    closureDescriptors := rfl }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindNatural_location_other location old address value different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindNatural_descriptor_other location address old value
       (descriptorFresh old descriptor found)]
     exact found
 
@@ -653,6 +697,66 @@ theorem RefinementWitness.WellFormed.bindBoxed
     · rw [witness.lookup_bindBoxed_location_other location old address kind isNew]
         at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound promotedFound
+
+/-- Naturals and boxes add the same fresh location shape; descriptors do not
+participate in witness well-formedness. -/
+theorem RefinementWitness.WellFormed.bindNatural
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (value : Nat)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
+    (witness.bindNatural location address value).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := ?_ }
+  · intro old oldAddress found
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindNatural, LocationMap.lookup?] at found
+      cases found
+      exact addressHeap
+    · rw [witness.lookup_bindNatural_location_other location old address value
+        isNew] at found
+      exact valid.locationHeap old oldAddress found
+  · intro left right common leftFound rightFound
+    by_cases leftNew : left = location
+    · subst left
+      simp [RefinementWitness.bindNatural, LocationMap.lookup?] at leftFound
+      have commonEq : common = address := leftFound.symm
+      subst common
+      by_cases rightNew : right = location
+      · exact rightNew.symm
+      · rw [witness.lookup_bindNatural_location_other location right address value
+          rightNew] at rightFound
+        exact False.elim ((locationAddressFresh right address rightFound) rfl)
+    · rw [witness.lookup_bindNatural_location_other location left address value
+        leftNew] at leftFound
+      by_cases rightNew : right = location
+      · subst right
+        simp [RefinementWitness.bindNatural, LocationMap.lookup?] at rightFound
+        have commonEq : common = address := rightFound.symm
+        subst common
+        exact False.elim ((locationAddressFresh left address leftFound) rfl)
+      · rw [witness.lookup_bindNatural_location_other location right address value
+          rightNew] at rightFound
+        exact valid.locationInjective left right common leftFound rightFound
+  · intro old payload left right locationFound promotedFound
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindNatural, LocationMap.lookup?] at locationFound
+      have leftEq : left = address := locationFound.symm
+      subst left
+      exact promotedAddressFresh payload right promotedFound
+    · rw [witness.lookup_bindNatural_location_other location old address value
+        isNew] at locationFound
+      exact valid.locationPromotionDisjoint old payload left right locationFound
+        promotedFound
 
 /-- Adding a fresh concrete address for a promoted tag preserves witness
 well-formedness even when the same payload already has another address. -/

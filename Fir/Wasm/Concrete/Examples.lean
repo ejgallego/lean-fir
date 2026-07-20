@@ -866,6 +866,17 @@ def decrementedLargeNatural : Except ConcreteError (MemoryState × Word32) := do
 
 #guard naturalLimbs (UInt64.size + 5) == [5, 1]
 
+/- Multi-limb allocation exercises the same canonical writer/decoder path
+covered by `allocateNatural_heap_liveHeapRel`. -/
+#guard match allocateNatural MemoryState.initial (UInt64.size + 5) with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readNatural state object with
+      | .ok header, .ok value =>
+          header.kind == .natural && header.aux1 == 2 &&
+            value == UInt64.size + 5
+      | _, _ => false
+
 def semanticMixedConstructor :=
   Fir.LeanIR.Impure.allocCtor (runtime := {}) mixedConstructorInfo
     #[.object (.tagged 11)]
