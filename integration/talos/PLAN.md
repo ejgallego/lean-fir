@@ -1938,6 +1938,18 @@ guard checks the wide lane. The remaining cache work is the interprocedural
 lazy declaration call and surrounding hit/miss conditional; the artifact is
 still pending.
 
+W6.6h establishes the concrete partial-application allocation boundary. The
+Talos host now carries immutable closure dispatch/descriptor tables, decodes
+mixed-width captures without semantic handles, allocates the closure directly
+in linear memory, and returns its heap address. The complete closure-heap
+theorem exposes monotone witness growth, lifts the whole runtime relation, and
+composes the arbitrary-arity host call plus destination-local write. A maximum
+`UInt64` capture guard checks typed readback. Proof inspection also found that
+`RuntimeOp.abiWellFormed` admits an impossible `.tagged` closure result; this is
+recorded as `FIR-BUG-wasm-none-partial-apply-tagged-result`, and the refinement
+claim remains restricted to exact `.object` or widened `.tobject`. The source
+`pap`/compiler theorem and artifact switch remain follow-ups.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

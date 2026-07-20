@@ -13,7 +13,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals and Talos host | Runtime theorem | Partial | Concrete host-call and generated cache-write suffix WP; interprocedural lazy-`let` and artifact pending |
-| `partialApply` | Closure allocation | Heap theorem | Partial | Missing |
+| `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Generated arbitrary-arity host-call/local-write WP; source/compiler `pap` composition and artifact pending; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Excluded legacy callback; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Explicit supported-fragment exclusion |
 | `closureMatches` | Yes | Exact match/nonmatch heap theorem | Partial | Missing |
 | `closureProj` | Yes | Typed heap theorem | Partial | Missing |

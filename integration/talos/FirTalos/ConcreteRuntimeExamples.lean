@@ -186,4 +186,26 @@ private def cacheStore : Wasm.Store Host := {
       | _ => false
   | _ => false
 
+private def closureTarget : Lean.Name := `FirTalos.Concrete.closureTarget
+
+private def closureStore : Wasm.Store Host := {
+  emptyHostStore with
+  host := { emptyHostStore.host with
+    closureDispatch := #[closureTarget]
+    closureDescriptors := #[#[.uint64]] } }
+
+-- Partial application stores the exact typed capture and returns a concrete
+-- heap address; no semantic closure or handle table participates at runtime.
+#guard match partialApplyStep closureTarget 2 1 #[.uint64] .object closureStore
+    [.i64 18446744073709551615] with
+  | .Return [.i32 bits] store =>
+      let object := Word32.ofUInt32 bits
+      match projectClosureCapture store.host.runtime.heap
+          store.host.closureDispatch store.host.closureDescriptors object
+          closureTarget 2 1 0 .uint64 with
+      | .ok (.word64 captured) =>
+          captured == 18446744073709551615 && store.host.failure?.isNone
+      | _ => false
+  | _ => false
+
 end FirTalos.Concrete

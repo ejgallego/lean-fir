@@ -280,6 +280,8 @@ semantic runtime is deliberately absent: it occurs only in the refinement
 relation and cannot be consulted by executable concrete host functions. -/
 structure Host where
   runtime : ConcreteRuntimeState := {}
+  closureDispatch : ClosureDispatchTable := #[]
+  closureDescriptors : ClosureDescriptorTable := #[]
   failure? : Option HostFailure := none
   deriving Inhabited
 
@@ -531,6 +533,55 @@ def cacheSetContract (declaration : Lean.Name) (kind : AbiKind) :
 theorem cacheSetFn_satisfies_contract (declaration kind initial args) :
     cacheSetContract declaration kind initial args
       ((cacheSetFn declaration kind).invoke initial args) := by
+  rfl
+
+def decodePhysicalLanes : Nat → List AbiKind → List Wasm.Value →
+    Except HostFailure (List LaneValue)
+  | _, [], [] => .ok []
+  | index, kind :: kinds, physical :: physicals => do
+      let lane ← match decodePhysicalLane kind physical with
+        | .ok lane => .ok lane
+        | .error (.laneMismatch _ expected) =>
+            .error (.laneMismatch index expected)
+        | .error failure => .error failure
+      let tail ← decodePhysicalLanes (index + 1) kinds physicals
+      return lane :: tail
+  | _, kinds, physicals => .error (.arityMismatch kinds.length physicals.length)
+
+def partialApplyStep (function : Lean.Name) (arity fixed : Nat)
+    (fieldKinds : Array AbiKind) (_resultKind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  if args.length = fixed then
+    match decodePhysicalLanes 0 fieldKinds.toList args with
+    | .ok captures =>
+        match allocateClosure store.host.runtime.heap store.host.closureDispatch
+            store.host.closureDescriptors function arity fieldKinds
+            captures.toArray with
+        | .ok (heap, word) =>
+            .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap store heap)
+        | .error failure => trap store (.runtime failure.toTrap)
+    | .error failure => trap store failure
+  else
+    trap store (.arityMismatch fixed args.length)
+
+def partialApplyFn (function : Lean.Name) (arity fixed : Nat)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind) : Wasm.HostFn Host := {
+  params := fieldKinds.toList.map FirTalos.abiKind
+  results := [FirTalos.abiKind resultKind]
+  invoke := partialApplyStep function arity fixed fieldKinds resultKind }
+
+def partialApplyContract (function : Lean.Name) (arity fixed : Nat)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result => result =
+    partialApplyStep function arity fixed fieldKinds resultKind initial args
+
+theorem partialApplyFn_satisfies_contract
+    (function arity fixed fieldKinds resultKind initial args) :
+    partialApplyContract function arity fixed fieldKinds resultKind initial args
+      ((partialApplyFn function arity fixed fieldKinds resultKind).invoke
+        initial args) := by
   rfl
 
 /-- Successful semantic projection identifies a mapped constructor and the
@@ -944,6 +995,94 @@ theorem cacheSetStep_of_refines
   · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
   · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated
 
+/-- Executable/refinement boundary for partial-application closure allocation.
+The `.tagged` result admitted by the current validator is deliberately absent;
+see `FIR-BUG-wasm-none-partial-apply-tagged-result`. -/
+theorem partialApplyStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {captures : List LaneValue}
+    {semantic : Array Value} {heap : MemoryState} {address : Word32}
+    {targetId descriptorId : UInt32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (resultKindSupported : resultKind = .object ∨ resultKind = .tobject)
+    (fixedArgs : physicalArgs.length = fixed)
+    (decoded : decodePhysicalLanes 0 fieldKinds.toList physicalArgs =
+      .ok captures)
+    (count : fieldKinds.size = captures.toArray.size)
+    (semanticCount : semantic.size = captures.toArray.size)
+    (capturesLtArity : captures.toArray.size < arity)
+    (targetIdEq : closureTargetId initial.host.closureDispatch function =
+      .ok targetId)
+    (targetLookup : initial.host.closureDispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId initial.host.closureDescriptors
+      fieldKinds = .ok descriptorId)
+    (descriptorLookup : initial.host.closureDescriptors.lookup? descriptorId =
+      some fieldKinds)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq : witness.closureDescriptors =
+      initial.host.closureDescriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.toArray.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (allocated : allocateClosure initial.host.runtime.heap
+      initial.host.closureDispatch initial.host.closureDescriptors function arity
+      fieldKinds captures.toArray = .ok (heap, address)) :
+    let nextWitness := witness.bindClosure runtime.nextLocation address function
+      arity fieldKinds
+    witness.Extends nextWitness ∧
+      partialApplyStep function arity fixed fieldKinds resultKind initial
+          physicalArgs =
+        .Return [.i32 (UInt32.ofNat address.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (semanticClosureResult runtime function arity semantic) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat address.value))
+        (.object (.heap runtime.nextLocation)) ∧
+      alloc runtime (.closure function arity semantic) =
+        (semanticClosureResult runtime function arity semantic,
+          .heap runtime.nextLocation) := by
+  dsimp only
+  obtain ⟨extension, heapRelated, objectRelated, tobjectRelated⟩ :=
+    allocateClosure_liveHeapRel_extends initial.host.runtime.heap heap witness
+      runtime initial.host.closureDispatch initial.host.closureDescriptors
+      function arity fieldKinds captures.toArray semantic address targetId
+      descriptorId runtimeRelated.heap count semanticCount capturesLtArity
+      targetIdEq targetLookup descriptorIdEq descriptorLookup dispatchEq
+      descriptorsEq arityFits fixedFits captureTyped captureRelated allocated
+  have valueRelated : ValueRel
+      (witness.bindClosure runtime.nextLocation address function arity fieldKinds)
+      resultKind (.word32 address) (.object (.heap runtime.nextLocation)) := by
+    rcases resultKindSupported with rfl | rfl
+    · exact objectRelated
+    · exact tobjectRelated
+  refine ⟨extension, ?_, ?_, .word32 valueRelated,
+    alloc_closure_eq runtime function arity semantic⟩
+  · simp [partialApplyStep, fixedArgs, decoded, allocated, replaceHeap,
+      clearFailure]
+  · exact {
+      heap := by simpa [replaceHeap, clearFailure] using heapRelated
+      globals := by
+        simpa [replaceHeap, clearFailure, semanticClosureResult] using
+          runtimeRelated.globals.witnessExtension extension
+      world := by
+        simpa [replaceHeap, clearFailure, semanticClosureResult] using
+          runtimeRelated.world
+      trace := by
+        simpa [replaceHeap, clearFailure, semanticClosureResult] using
+          runtimeRelated.trace.witnessExtension extension }
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -966,7 +1105,7 @@ theorem StateRelated.clearFailure
   rcases targetStore with
     ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
       gcHeap, host⟩
-  rcases host with ⟨runtime, failure⟩
+  rcases host with ⟨runtime, closureDispatch, closureDescriptors, failure⟩
   have failureEq : failure = none := related.2.1
   subst failure
   rfl
@@ -1517,6 +1656,47 @@ theorem wp_cacheSet_miss_suffix
     { locals with values := tail } env
   rw [Wasm.wp_const_cons, Wasm.wp_globalSet_cons, hFlag]
   exact continued
+
+/-- Concrete-host WP for the arbitrary-arity partial-application allocation
+and destination-local write emitted by the lowerer. -/
+theorem wp_partialApply_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind} {word : Word32}
+    {tail : List Wasm.Value}
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (partialApplyContract function arity fixed fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : partialApplyStep function arity fixed fieldKinds resultKind
+      initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (hSet : locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+      some updated)
+    (continued : Wasm.wp module rest Q nextStore
+      { updated with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_exact_host_call_of_return
+    (step := partialApplyStep function arity fixed fieldKinds resultKind)
+    (physicalArgs := physicalArgs)
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
 
 /-- Object-projection instance of the concrete direct-`let` boundary. It
 proves the source interpreter step, the result-local refinement, and a Talos

@@ -1100,4 +1100,79 @@ theorem allocateClosure_liveHeapRel
       (RefinementWitness.lookup_bindClosure_location witness runtime.nextLocation
         address function arity captureKinds)))
 
+/-- Allocation-producing Talos clients need the explicit witness-extension
+fact in addition to the complete closure heap relation. -/
+theorem allocateClosure_liveHeapRel_extends
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (function : Lean.Name) (arity : Nat)
+    (captureKinds : Array AbiKind) (captures : Array LaneValue)
+    (semantic : Array Value) (address : Word32)
+    (targetId descriptorId : UInt32)
+    (related : LiveHeapRel state witness runtime)
+    (count : captureKinds.size = captures.size)
+    (semanticCount : semantic.size = captures.size)
+    (capturesLtArity : captures.size < arity)
+    (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (targetLookup : dispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId descriptors captureKinds =
+      .ok descriptorId)
+    (descriptorLookup : descriptors.lookup? descriptorId = some captureKinds)
+    (dispatchEq : witness.closureDispatch = dispatch)
+    (descriptorsEq : witness.closureDescriptors = descriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (allocated : allocateClosure state dispatch descriptors function arity
+      captureKinds captures = .ok (result, address)) :
+    let nextWitness := witness.bindClosure runtime.nextLocation address function
+      arity captureKinds
+    witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness
+        (semanticClosureResult runtime function arity semantic) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      ValueRel nextWitness .tobject (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨_, objectAllocation, _, _⟩ :=
+    allocateClosure_decompose state result dispatch descriptors function arity
+      captureKinds captures address targetId descriptorId count capturesLtArity
+      targetIdEq descriptorIdEq arityFits fixedFits allocated
+  have freshAddress := related.frontier.allocateObject_address objectAllocation
+  have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
+    cases found : witness.locations.lookup? runtime.nextLocation with
+    | none => rfl
+    | some oldAddress =>
+        exfalso
+        obtain ⟨cell, semanticFound, _⟩ :=
+          related.concreteToSemantic runtime.nextLocation oldAddress found
+        exact (Nat.lt_irrefl runtime.nextLocation)
+          (related.locationsBeforeNext runtime.nextLocation cell semanticFound)
+  have descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value := by
+    intro old descriptor found equal
+    have owned := related.descriptorsOwned old descriptor found
+    simp [headerBytes] at owned
+    omega
+  have extension := witness.bindClosure_extends runtime.nextLocation address
+    function arity captureKinds locationFresh descriptorFresh
+  have refined := allocateClosure_liveHeapRel state result witness runtime dispatch
+    descriptors function arity captureKinds captures semantic address targetId
+    descriptorId related count semanticCount capturesLtArity targetIdEq
+    targetLookup descriptorIdEq descriptorLookup dispatchEq descriptorsEq arityFits
+    fixedFits captureTyped captureRelated allocated
+  exact ⟨extension, refined.1, refined.2.1, refined.2.2⟩
+
 end Fir.Wasm.Concrete
