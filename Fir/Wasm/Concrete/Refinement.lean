@@ -859,6 +859,28 @@ inductive ValueRel (witness : RefinementWitness) :
   | usize :
       ValueRel witness .usize (.word64 value) (.usize value)
 
+/-- A representation-polymorphic object relation can be specialized back to
+the precise tagged ABI when its semantic reference is known to be tagged. -/
+theorem ValueRel.tobject_tagged_to_tagged
+    {witness : RefinementWitness} {word : Word32} {payload : UInt64}
+    (related : ValueRel witness .tobject (.word32 word)
+      (.object (.tagged payload))) :
+    ValueRel witness .tagged (.word32 word) (.object (.tagged payload)) := by
+  cases related with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | tagged taggedRelated => exact .tagged taggedRelated
+
+/-- Exact tagged results may flow through a representation-polymorphic
+`tobject` ABI boundary without changing their physical word. -/
+theorem ValueRel.tagged_to_tobject
+    {witness : RefinementWitness} {word : Word32} {payload : UInt64}
+    (related : ValueRel witness .tagged (.word32 word)
+      (.object (.tagged payload))) :
+    ValueRel witness .tobject (.word32 word) (.object (.tagged payload)) := by
+  cases related with
+  | tagged taggedRelated => exact .tobject (.tagged taggedRelated)
+
 theorem HeapReferenceRel.witnessExtension
     {before after : RefinementWitness} (extension : before.Extends after)
     {word : Word32} {location : Location}

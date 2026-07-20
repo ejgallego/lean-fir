@@ -8,7 +8,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
 | `literal` | Naturals only | Tagged encoder and large-natural heap theorem | Partial | Missing; strings missing |
-| `allocCtor` | Yes | Nonempty heap theorem; tagged empty wrapper missing | Partial | Missing |
+| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Missing |
 | `objectProj` | Yes | Heap theorem | Partial | Missing |
 | `usizeProj` | Yes | Heap theorem | Partial | Missing |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Missing; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |

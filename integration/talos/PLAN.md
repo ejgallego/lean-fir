@@ -1853,6 +1853,14 @@ location and natural descriptor, and returns the corresponding `.tobject`
 An executable two-limb guard covers the nontrivial codec path. String
 literals remain the unsupported literal case in the W6 coverage matrix.
 
+W6.5n closes the empty-constructor representation branch. A successful
+zero-field constructor allocation now exposes the exact semantic `allocCtor`
+equation, preserves `LiveHeapRel`, and returns a precise `.tagged` `ValueRel`
+whether the concrete encoder chooses an immediate word or a promoted-tag
+allocation. Explicit conversions between exact tagged relations and the
+representation-polymorphic `.tobject` boundary make that ABI refinement
+visible rather than burying it in an existential witness.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
