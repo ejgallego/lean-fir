@@ -244,6 +244,29 @@ def guardedErasedJoinArgumentSafe (facts : SupportedCaseFacts)
             fvarUsesOnlyInFalseGuard targetParam.fvarId pair.fst.fvarId false decl.value
       | _ => false
 
+/--
+The false result of `isShared actualObject` refines that exact `tobject` value
+to a heap object: tagged values always report shared. The join-body check keeps
+the refined parameter out of every path where that fact is unavailable.
+-/
+def guardedObjectJoinArgumentSafe (facts : SupportedCaseFacts)
+    (sharing : SupportedSharingFacts) (decl : LCNF.FunDecl .impure)
+    (args : Array (LCNF.Arg .impure)) (targetParam : LCNF.Param .impure)
+    (targetArg : LCNF.Arg .impure) : Bool :=
+  match targetArg with
+  | .fvar actualObject =>
+      (decl.params.zip args).any fun pair =>
+        abiValueKind? pair.fst.type == some .uint8 &&
+          match pair.snd with
+          | .fvar actualGuard =>
+              findSupportedCaseFact? facts actualGuard == some 0 &&
+                (match findSupportedSharingObject? sharing actualGuard with
+                | some sharingObject => sameFVar sharingObject actualObject
+                | none => false) &&
+                fvarUsesOnlyInFalseGuard targetParam.fvarId pair.fst.fvarId false decl.value
+          | _ => false
+  | _ => false
+
 def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
     (sharing : SupportedSharingFacts) (decl : LCNF.FunDecl .impure)
     (args : Array (LCNF.Arg .impure)) : Bool :=
@@ -253,7 +276,9 @@ def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
       | some expected, some actual =>
           actual.refines expected ||
             (actual == .erased && expected == .object &&
-              guardedErasedJoinArgumentSafe facts sharing decl args pair.fst)
+              guardedErasedJoinArgumentSafe facts sharing decl args pair.fst) ||
+            (actual == .tobject && expected == .object &&
+              guardedObjectJoinArgumentSafe facts sharing decl args pair.fst pair.snd)
       | _, _ => false
 
 mutual

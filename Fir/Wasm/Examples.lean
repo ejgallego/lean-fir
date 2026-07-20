@@ -436,6 +436,30 @@ def guardedResetJoinProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl c u8Type (.isShared x)) <|
       .jp guardedResetJoinDecl guardedResetJoinContinuation)] }
 
+/-- The false sharing path refines the exact `tobject` candidate to a heap object. -/
+def guardedTObjectResetJoinDecl : LCNF.FunDecl .impure :=
+  .mk j `guardedTObjectResetJoin #[param p tobjectType, param u u8Type]
+    objType <| .cases (.mk ``Bool objType u #[
+      .ctorAlt falseInfo (.return p),
+      .ctorAlt trueInfo (.return z)])
+
+def guardedTObjectResetJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x tobjectType, param z objType] objType (.code <|
+      .let (letDecl c u8Type (.isShared x)) <|
+      .jp guardedTObjectResetJoinDecl guardedResetJoinContinuation)] }
+
+def mismatchedGuardObjectJoinContinuation : LCNF.Code .impure :=
+  .cases (.mk ``Bool objType c #[
+    .ctorAlt falseInfo (.jmp j #[.fvar y, .fvar c]),
+    .ctorAlt trueInfo (.jmp j #[.erased, .fvar c])])
+
+/-- A guard for one `tobject` cannot refine a different fast-path argument. -/
+def mismatchedGuardObjectJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main
+      #[param x tobjectType, param y tobjectType, param z objType] objType (.code <|
+      .let (letDecl c u8Type (.isShared x)) <|
+      .jp guardedTObjectResetJoinDecl mismatchedGuardObjectJoinContinuation)] }
+
 /-- A guarded optional object may be deleted before inspecting its sharing guard. -/
 def guardedDeleteJoinDecl : LCNF.FunDecl .impure :=
   .mk j `guardedDeleteJoin #[param p tobjectType, param u u8Type]
@@ -591,6 +615,8 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram scalarUInt8CaseProgram
 #guard supportedProgram abiJoinProgram
 #guard supportedProgram guardedResetJoinProgram
+#guard supportedProgram guardedTObjectResetJoinProgram
+#guard !supportedProgram mismatchedGuardObjectJoinProgram
 #guard supportedProgram guardedDeleteJoinProgram
 #guard !supportedProgram guardedDeleteThenReturnJoinProgram
 #guard !supportedProgram unknownJoinProgram
@@ -685,6 +711,7 @@ def validates? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   abiCtorProjectionProgram,
   abiCaseProgram,
   guardedResetJoinProgram,
+  guardedTObjectResetJoinProgram,
   guardedDeleteJoinProgram,
   abiDefaultCaseProgram] : List Fir.LeanIR.ImpureProgram).all validates?
 

@@ -34,6 +34,7 @@ inductive SymbolicError where
   | unknownCallTarget (function : Name)
   | invalidInitializer (name : Name)
   | invalidConstant (function : Name) (kind : AbiKind) (physical : ValueType)
+  | invalidLocalRefinement (function : Name) (fvarId : FVarId) (kind : AbiKind)
   | stackUnderflow (function : Name) (expected : List AbiKind)
   | stackMismatch (function : Name) (expected actual : List AbiKind)
   | branchStackMismatch (function : Name) (label : FVarId)
@@ -220,6 +221,12 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       let some kind := findLocalKind? context.locals fvarId |
         throw (.unknownLocal context.function.name fvarId)
       return { fallthrough := stack?.map (· ++ [kind]) }
+  | .localGetObject fvarId => do
+      let some kind := findLocalKind? context.locals fvarId |
+        throw (.unknownLocal context.function.name fvarId)
+      unless kind == .tobject do
+        throw (.invalidLocalRefinement context.function.name fvarId kind)
+      return { fallthrough := stack?.map (· ++ [.object]) }
   | .localSet fvarId => do
       let some kind := findLocalKind? context.locals fvarId |
         throw (.unknownLocal context.function.name fvarId)

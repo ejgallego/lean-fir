@@ -23,7 +23,12 @@ def caseIds : Array String :=
     "byte-array-get-zero", "byte-array-get-high-bit", "byte-array-get-max",
     "byte-array-set-unique", "byte-array-set-shared",
     "int-literal-immediate-positive", "int-literal-heap-positive",
-    "int-literal-immediate-negative", "int-literal-heap-negative"]
+    "int-literal-immediate-negative", "int-literal-heap-negative",
+    "branch-nat", "branch-nat-false", "scalar-enum-cases",
+    "int-classify-immediate-positive", "int-classify-immediate-negative",
+    "int-classify-heap-positive", "int-classify-heap-negative",
+    "packed-preserve", "tuple-rotate", "reuse-assoc", "reuse-change-tag",
+    "reuse-grow-delete", "reuse-grow-delete-shared"]
 
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]

@@ -14,6 +14,8 @@ inductive Instruction where
   | i32Const (kind : AbiKind) (value : UInt32)
   | i64Const (kind : AbiKind) (value : UInt64)
   | localGet (fvarId : FVarId)
+  /-- Read a `tobject` local under a proved `isShared(value) == 0` heap refinement. -/
+  | localGetObject (fvarId : FVarId)
   | localSet (fvarId : FVarId)
   | globalGet (index : Nat) (kind : AbiKind)
   | globalSet (index : Nat) (kind : AbiKind)
@@ -562,6 +564,17 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
           local lane selected by that proved source invariant.
           -/
           pure ([.i32Const .object 0], .object)
+      | arg@(.fvar fvarId), .object =>
+          let compiled@(_, actual) ← compileArg context arg
+          if actual == .tobject && guardedObjectJoinParam decl pair.fst then
+            /-
+            The support gate ties this exact argument to the companion
+            `isShared` discriminator's false path. Tagged values report true,
+            so the unchanged physical local is a heap object on this path.
+            -/
+            pure ([.localGetObject fvarId], .object)
+          else
+            pure compiled
       | arg, _ => compileArg context arg
     unless actual.refines expected do
       throw (.malformed "jump argument does not refine its join parameter ABI")

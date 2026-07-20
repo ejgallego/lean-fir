@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-join-erased-tobject
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -32,7 +32,7 @@ parameter has type `tobject` and is consumed only in the `Bool.false` arm.
 ```sh
 python3 scripts/validate_interpreters.py \
   --case tuple-rotate \
-  --plan validation-plans/native-v8.json \
+  --plan validation-plans/native-v8-scalars.json \
   --out-dir /tmp/fir-join-erased-probe
 ```
 
@@ -86,17 +86,21 @@ none
 
 ## Resolution and regression
 
-Partially resolved. Ordinary typed joins and the guarded direct-object reset
-form are admitted. The support gate requires `isShared(object)` provenance, a
-true-path fact for the erased jump, and false-arm dominance for every live use;
-lowering records the physical zero sentinel in the refined object local.
-`guardedResetJoinProgram` plus negative unknown-target, arity, kind,
-unguarded-erased, and fake-guard fixtures are permanent regressions.
+Fixed. Ordinary typed joins and both guarded reset forms are admitted without
+widening `AbiKind.refines`. The erased slow path requires exact
+`isShared(object)` provenance, a true-path fact, and false-arm dominance for
+every live use. The representation-polymorphic fast path requires the
+companion false-path fact, exact provenance for the same `tobject` argument,
+and the same dominance check.
 
-`packed-preserve` and `reuse-assoc` now pass native-to-V8 differential runs.
-`tuple-rotate` remains open because its fast reset argument has static ABI kind
-`tobject`; representing the `isShared(candidate) == 0` refinement at the
-symbolic Wasm boundary requires a coordinated semantic cast or host-contract
-decision, not a global reversal of `AbiKind.refines`. The two `changeOrGrow`
-cases are separately blocked by
-`FIR-BUG-impure-expandResetReuse-delete-erased`.
+Lowering records that second proof with a symbolic `localGetObject` operation.
+The validator accepts it only for a `tobject` local; binary encoding and the
+Talos adapter erase it to the unchanged physical Wasm `local.get`. The
+`mismatchedGuardObjectJoinProgram` regression proves that a guard for one value
+cannot refine another. Existing negative fixtures continue to reject unknown
+targets, arity and kind mismatches, unguarded erased arguments, and fake guards.
+
+`packed-preserve`, `tuple-rotate`, and `reuse-assoc` pass native-to-V8
+differential runs. The two `changeOrGrow` cases were separately resolved by
+`FIR-BUG-impure-expandResetReuse-delete-erased` and remain in the default
+matrix.

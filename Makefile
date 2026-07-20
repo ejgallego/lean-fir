@@ -39,7 +39,7 @@ validate-v8:
 		--case branch-nat --case branch-nat-false --case scalar-enum-cases \
 		--case int-classify-immediate-positive --case int-classify-immediate-negative \
 		--case int-classify-heap-positive --case int-classify-heap-negative \
-		--case packed-preserve --case reuse-assoc \
+		--case packed-preserve --case tuple-rotate --case reuse-assoc \
 		--case reuse-change-tag --case reuse-grow-delete \
 		--case reuse-grow-delete-shared \
 		--plan validation-plans/native-v8-scalars.json \

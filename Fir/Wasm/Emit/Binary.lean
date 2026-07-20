@@ -110,6 +110,11 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
       let some index := findFVarIndex? locals fvarId |
         throw (.unknownLocal context.function.name fvarId)
       return #[0x20] ++ encodeU32 index
+  | .localGetObject fvarId => do
+      let locals := context.function.params.toList ++ context.function.locals.toList
+      let some index := findFVarIndex? locals fvarId |
+        throw (.unknownLocal context.function.name fvarId)
+      return #[0x20] ++ encodeU32 index
   | .localSet fvarId => do
       let locals := context.function.params.toList ++ context.function.locals.toList
       let some index := findFVarIndex? locals fvarId |

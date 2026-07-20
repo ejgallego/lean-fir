@@ -72,6 +72,10 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
       let locals := function.params.toList ++ function.locals.toList
       let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)
       return .localGet index
+  | .localGetObject fvarId => do
+      let locals := function.params.toList ++ function.locals.toList
+      let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)
+      return .localGet index
   | .localSet fvarId => do
       let locals := function.params.toList ++ function.locals.toList
       let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)

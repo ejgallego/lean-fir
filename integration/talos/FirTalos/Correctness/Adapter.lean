@@ -45,6 +45,15 @@ theorem instruction_localGet
   rw [instruction, found]
   rfl
 
+/-- A proved object-refined local read retains the same physical Talos local. -/
+theorem instruction_localGetObject
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {fvarId : FVarId} {index : Nat}
+    (found : findFVar? (source.params.toList ++ source.locals.toList) fvarId = some index) :
+    instruction sourceModule source [] (.localGetObject fvarId) = .ok (.localGet index) := by
+  rw [instruction, found]
+  rfl
+
 /-- A resolved source local assignment becomes the same positional Talos assignment. -/
 theorem instruction_localSet
     {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
