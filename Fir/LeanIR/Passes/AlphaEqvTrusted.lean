@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.AlphaEqvLocalSound
+import Fir.LeanIR.Passes.AlphaEqvLocalTransport
 
 namespace Fir.LeanIR.Passes.AlphaEqv
 

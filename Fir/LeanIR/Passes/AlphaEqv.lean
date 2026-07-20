@@ -40,7 +40,7 @@ def ArgsRelated (rho : FVarIdMap FVarId)
     (left right : Array (LCNF.Arg .impure)) : Prop :=
   ListRel (ArgRelated rho leftScope rightScope) left.toList right.toList
 
-private def ArgCheckRelated (rho : FVarIdMap FVarId)
+def ArgCheckRelated (rho : FVarIdMap FVarId)
     (left right : LCNF.Arg .impure) : Prop :=
   (LCNF.AlphaEqv.eqvArg left right).run rho = true
 
@@ -103,6 +103,62 @@ private theorem subarray_toList_eq_cons_of_next?_eq_some
 
 open Std.Do in
 set_option mvcgen.warning false in
+/-- Lean's executable argument loop accepts every pointwise list of successful
+primitive argument checks. This scope-free form is the parametricity interface
+used to transport the checker between observationally equal reader maps. -/
+theorem eqvArgs_true_of_checks
+    (related : ListRel (ArgCheckRelated rho)
+      leftArgs.toList rightArgs.toList) :
+    (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true := by
+  have sizes : leftArgs.size = rightArgs.size := by
+    simpa using listRel_length_eq related
+  generalize h : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = result
+  apply ReaderM.of_wp_run_eq h
+  simp only [LCNF.AlphaEqv.eqvArgs, sizes, ↓reduceIte, WP.bind,
+    SPred.entails_nil, SPred.down_pure, forall_const]
+  mvcgen invariants
+  | inv1 => Invariant.withEarlyReturnNewDo
+      (fun cursor stream current =>
+        ⌜current = rho ∧
+          ListRel (ArgCheckRelated rho) cursor.suffix stream.toList⌝)
+      (fun _ _ _ => ⌜False⌝)
+  next _ _ _ _ state streamEnd _ invariant =>
+    rcases invariant with ⟨_, _, relatedSuffix⟩ | returned
+    · rw [subarray_toList_eq_nil_of_next?_eq_none streamEnd] at relatedSuffix
+      cases relatedSuffix
+    · simp_all
+  next _ leftArg _ _ state rightArg rest streamNext current invariant =>
+    rcases invariant with ⟨_, currentEq, relatedSuffix⟩ | returned
+    · subst current
+      rw [subarray_toList_eq_cons_of_next?_eq_some streamNext] at relatedSuffix
+      cases relatedSuffix with
+      | cons headRelated tailRelated =>
+          cases leftArg with
+          | erased =>
+              cases rightArg with
+              | erased => simp_all [ArgCheckRelated, LCNF.AlphaEqv.eqvArg]
+              | fvar _ =>
+                  simp [ArgCheckRelated, LCNF.AlphaEqv.eqvArg] at headRelated
+              | type _ impossible => nomatch impossible
+          | fvar leftId =>
+              cases rightArg with
+              | erased =>
+                  simp [ArgCheckRelated, LCNF.AlphaEqv.eqvArg] at headRelated
+              | fvar rightId =>
+                  change (leftId == (rho.get? rightId).getD rightId) = true
+                    at headRelated
+                  simp [LCNF.AlphaEqv.eqvArg, LCNF.AlphaEqv.eqvFVar,
+                    headRelated, tailRelated]
+              | type _ impossible => nomatch impossible
+          | type _ impossible => nomatch impossible
+    · simp_all
+  next =>
+    refine Or.inl ⟨True.intro, True.intro, ?_⟩
+    simpa [Std.toStream] using related
+  next => simp_all
+
+open Std.Do in
+set_option mvcgen.warning false in
 /-- Lean's executable parallel-array checker accepts every pointwise-related argument array. -/
 theorem eqvArgs_true_of_related
     (related : ArgsRelated rho leftScope rightScope leftArgs rightArgs) :
@@ -156,7 +212,7 @@ theorem eqvArgs_true_of_related
 
 open Std.Do in
 set_option mvcgen.warning false in
-private theorem eqvArgs_sound
+theorem eqvArgs_sound
     (accepted : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = true) :
     ListRel (ArgCheckRelated rho) leftArgs.toList rightArgs.toList := by
   generalize hrun : (LCNF.AlphaEqv.eqvArgs leftArgs rightArgs).run rho = result at accepted
