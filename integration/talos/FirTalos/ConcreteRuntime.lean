@@ -100,6 +100,7 @@ inductive HostFailure where
   | runtime (failure : ConcreteTrap)
   | arityMismatch (expected actual : Nat)
   | laneMismatch (index : Nat) (expected : Fir.Wasm.ValueType)
+  | unsupportedScalarKind (kind : AbiKind)
   deriving Inhabited, BEq, Repr
 
 /-- Host-owned concrete linear memory and its latest structured failure. The
@@ -194,6 +195,51 @@ def usizeProjContract (index : Nat) : Wasm.HostContract Host :=
 theorem usizeProjFn_satisfies_contract (index initial args) :
     usizeProjContract index initial args
       ((usizeProjFn index).invoke initial args) := by
+  rfl
+
+def scalarProjStep (width offset : Nat) (kind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      let object := Word32.ofUInt32 bits
+      match kind with
+      | .uint8 =>
+          match readScalarUInt8Field store.host.runtime.heap object width offset with
+          | .ok value =>
+              .Return [.i32 (UInt32.ofNat (Word32.ofUInt8 value).value)] store
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .uint16 =>
+          match readScalarUInt16Field store.host.runtime.heap object width offset with
+          | .ok value =>
+              .Return [.i32 (UInt32.ofNat (Word32.ofUInt16 value).value)] store
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .uint32 =>
+          match readScalarUInt32Field store.host.runtime.heap object width offset with
+          | .ok value =>
+              .Return [.i32 (UInt32.ofNat (Word32.ofUInt32 value).value)] store
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .uint64 =>
+          match readScalarUInt64Field store.host.runtime.heap object width offset with
+          | .ok value => .Return [.i64 value] store
+          | .error failure => trap store (.runtime failure.toTrap)
+      | other => trap store (.unsupportedScalarKind other)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def scalarProjFn (width offset : Nat) (kind : AbiKind) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [FirTalos.abiKind kind]
+  invoke := scalarProjStep width offset kind }
+
+def scalarProjContract (width offset : Nat) (kind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result =>
+    result = scalarProjStep width offset kind initial args
+
+theorem scalarProjFn_satisfies_contract (width offset kind initial args) :
+    scalarProjContract width offset kind initial args
+      ((scalarProjFn width offset kind).invoke initial args) := by
   rfl
 
 /-- Successful semantic projection identifies a mapped constructor and the
@@ -294,6 +340,128 @@ theorem usizeProjStep_of_refines
   refine ⟨read, ?_, valueRelated⟩
   simp [usizeProjStep, clearFailure, read]
 
+theorem scalarProjUInt8Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {value : UInt8}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.uint8 value))) :
+    scalarProjStep width offset .uint8 initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.i32 (UInt32.ofNat (Word32.ofUInt8 value).value)]
+        (clearFailure initial) ∧
+      PhysicalValueRel witness .uint8
+        (.i32 (UInt32.ofNat (Word32.ofUInt8 value).value))
+        (.scalar (.uint8 value)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarUInt8Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .word32 valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
+theorem scalarProjUInt16Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {value : UInt16}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.uint16 value))) :
+    scalarProjStep width offset .uint16 initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.i32 (UInt32.ofNat (Word32.ofUInt16 value).value)]
+        (clearFailure initial) ∧
+      PhysicalValueRel witness .uint16
+        (.i32 (UInt32.ofNat (Word32.ofUInt16 value).value))
+        (.scalar (.uint16 value)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarUInt16Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .word32 valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
+theorem scalarProjUInt32Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {value : UInt32}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.uint32 value))) :
+    scalarProjStep width offset .uint32 initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.i32 (UInt32.ofNat (Word32.ofUInt32 value).value)]
+        (clearFailure initial) ∧
+      PhysicalValueRel witness .uint32
+        (.i32 (UInt32.ofNat (Word32.ofUInt32 value).value))
+        (.scalar (.uint32 value)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarUInt32Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .word32 valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
+theorem scalarProjUInt64Step_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {value : UInt64}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar (.uint64 value))) :
+    scalarProjStep width offset .uint64 initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+      .Return [.i64 value] (clearFailure initial) ∧
+      PhysicalValueRel witness .uint64 (.i64 value)
+        (.scalar (.uint64 value)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨read, valueRelated⟩ :=
+                runtimeRelated.heap.readScalarUInt64Field_refines mapped projected
+              exact ⟨by simp [scalarProjStep, clearFailure, read],
+                .word64 valueRelated⟩
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+              at projected
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -366,6 +534,27 @@ theorem StateRelated.bindWord64
   exact ⟨related.1, related.2.1,
     EnvLocalsRelated.bind related.2.2 resultFound kindAt
       (localUpdate_of_set? targetSet) (.refl witness) (.word64 valueRelated)⟩
+
+theorem StateRelated.bindPhysical
+    {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store Host}
+    {targetLocals updated : Wasm.Locals} {witness : RefinementWitness}
+    {result : Lean.FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (valueRelated : PhysicalValueRel witness kind physical semantic)
+    (targetSet : targetLocals.set? resultIndex physical = some updated) :
+    StateRelated sourceFunction sourceRuntime (bind sourceEnv result semantic)
+      (FirTalos.Concrete.clearFailure targetStore) updated witness := by
+  rw [related.clearFailure]
+  exact ⟨related.1, related.2.1,
+    EnvLocalsRelated.bind related.2.2 resultFound kindAt
+      (localUpdate_of_set? targetSet) (.refl witness) valueRelated⟩
 
 /-- W6 proof judgment for generated code over the concrete host. It mirrors
 W5's structural boundary while indexing both the target runtime and locals by
@@ -603,6 +792,48 @@ theorem wp_usizeProjection_let
     (step := usizeProjStep index)
     (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
     (results := [.i64 value]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+theorem wp_scalarProjection_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {width offset : Nat} {kind : AbiKind} {physical : Wasm.Value}
+    (tail : List Wasm.Value)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract :
+      spec.contracts[id]? = some (scalarProjContract width offset kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation :
+      scalarProjStep width offset kind initial
+          [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [physical] (clearFailure initial))
+    (hSet : locals.set? resultIndex physical = some updated)
+    (continued :
+      Wasm.wp module rest Q (clearFailure initial)
+        { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  have hObjectTail :
+      ({ locals with values := tail } : Wasm.Locals).get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)) := by
+    simpa [Wasm.Locals.get] using hObject
+  rw [Wasm.wp_localGet_cons, hObjectTail]
+  apply wp_exact_host_call_of_return
+    (step := scalarProjStep width offset kind)
+    (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
+    (results := [physical]) hImp hSat hi hContract
   · simp [hParams]
   · exact operation
   · simpa [hParams, hResults] using
@@ -895,6 +1126,145 @@ theorem codeWP_usizeProjection_let
   have step := letStepSimulates_usizeProjection (context := context)
     valueEq sourceLookup projected initialRelated resultFound resultKindAt
     hObject objectRelated descriptor hImp hSat hi hContract hParams hResults
+    targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
+theorem letStepSimulates_scalarProjection
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {width offset : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {sourceObject sourceValue : Value} {resultKind : AbiKind}
+    {physical : Wasm.Value} {sourceRuntime : RuntimeState}
+    {witness : RefinementWitness}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected : getScalarField sourceRuntime sourceObject width offset =
+      .ok sourceValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (physicalRelated :
+      PhysicalValueRel witness resultKind physical sourceValue)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (scalarProjContract width offset resultKind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation :
+      scalarProjStep width offset resultKind initial
+          [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [physical] (clearFailure initial))
+    (targetSet : locals.set? resultIndex physical = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      sourceRuntime sourceRuntime sourceEnv sourceValue initial
+      (clearFailure initial) locals updated resultIndex witness witness := by
+  refine ⟨?_, initialRelated,
+    initialRelated.bindPhysical resultFound resultKindAt physicalRelated targetSet,
+    ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have objectLookup : lookupValue sourceEnv objectId = .ok sourceObject := by
+      simp [lookupValue, sourceLookup]
+    rw [objectLookup]
+    change ((fun projectedValue : Value =>
+      (sourceRuntime, LetAction.value projectedValue)) <$>
+        getScalarField sourceRuntime sourceObject width offset) =
+      .ok (sourceRuntime, .value sourceValue)
+    rw [projected]
+    rfl
+  · intro rest Q tail continued
+    exact wp_scalarProjection_let tail hObject hImp hSat hi hContract hParams
+      hResults operation targetSet continued
+
+theorem codeWP_scalarProjection_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {width offset : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {sourceObject sourceValue : Value} {resultKind : AbiKind}
+    {physical : Wasm.Value} {sourceRuntime : RuntimeState}
+    {witness : RefinementWitness} {targetRest : Wasm.Program}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.scalarProj width offset resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.scalarProj width offset resultKind)) = some id)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected : getScalarField sourceRuntime sourceObject width offset =
+      .ok sourceValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (physicalRelated :
+      PhysicalValueRel witness resultKind physical sourceValue)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (scalarProjContract width offset resultKind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation :
+      scalarProjStep width offset resultKind initial
+          [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [physical] (clearFailure initial))
+    (targetSet : locals.set? resultIndex physical = some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        targetRest (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.scalarProj width offset resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_scalarProjection (context := context)
+    valueEq sourceLookup projected initialRelated resultFound resultKindAt
+    hObject physicalRelated hImp hSat hi hContract hParams hResults operation
     targetSet
   rcases step with ⟨_, stepInitial, _, stepWP⟩
   rcases continued with ⟨continuationAdapted, _, continuedWP⟩

@@ -1896,6 +1896,15 @@ theorems show that the W6.6 machinery is ABI-indexed rather than specific to
 wasm32 object results. An executable maximum-`UInt64` fixture guards the
 nontruncation boundary.
 
+W6.6d completes composition for packed integer projections. One executable
+dispatcher covers `UInt8`, `UInt16`, and `UInt32` i32 results plus the
+`UInt64` i64 result; four operation-refinement lemmas connect those branches
+to the existing complete-heap proofs, and one physical-value rule composes the
+source `sproj`, generated read/call/write prefix, and continuation. A maximum
+`UInt64` executable guard covers the wide lane. Float kinds produce a
+structured unsupported-kind trap and remain governed by
+`FIR-BUG-wasm-none-float-runtime-gap`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

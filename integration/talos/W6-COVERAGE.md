@@ -11,7 +11,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Missing |
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
-| `scalarProj` | Four integer widths | Heap theorems | Partial | Missing; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
+| `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals | Runtime theorem | Partial | Missing |
 | `partialApply` | Closure allocation | Heap theorem | Partial | Missing |
 | `closureApply` | Excluded legacy callback; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Explicit supported-fragment exclusion |
@@ -38,9 +38,10 @@ Cross-cutting W6.5 state:
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
-- `getTag`, `objectProj`, and `usizeProj` are composed with their W5/W2
-  generated case and `let` theorems using representation-aware concrete
-  locals and host-owned memory; and
+- `getTag`, `objectProj`, `usizeProj`, and all four supported integer
+  `scalarProj` variants are composed with their W5/W2 generated case and `let`
+  theorems using representation-aware concrete locals and host-owned memory;
+  and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 

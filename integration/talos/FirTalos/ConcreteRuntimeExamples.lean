@@ -81,4 +81,38 @@ private def usizeProjectionFixture :
       | _ => false
   | .error _ => false
 
+private def scalarProjectionInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `FirTalos.Concrete.scalarProjection
+  cidx := 5
+  size := 0
+  usize := 0
+  ssize := 8 }
+
+private def scalarProjectionFixture :
+    Except ConcreteError (Wasm.Store Host × Word32) := do
+  let (heap, object) ← allocateConstructor MemoryState.initial
+    scalarProjectionInfo #[]
+  let heap ← writeScalarUInt64Field heap object 0 0 18446744073709551615
+  let store : Wasm.Store Host := {
+    emptyHostStore with
+    host := { emptyHostStore.host with
+      runtime := { emptyHostStore.host.runtime with heap } } }
+  return (store, object)
+
+-- The packed-scalar dispatcher preserves a 64-bit field and lane exactly.
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarProjStep 0 0 .uint64 store
+          [.i32 (UInt32.ofNat object.value)] with
+      | .Return [.i64 value] next =>
+          value == 18446744073709551615 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+-- Float scalar kinds remain an explicit structured fragment gate.
+#guard match scalarProjStep 0 0 .float32 emptyHostStore [.i32 1] with
+  | .Trap store _ =>
+      store.host.failure? == some (.unsupportedScalarKind .float32)
+  | _ => false
+
 end FirTalos.Concrete
