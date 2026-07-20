@@ -766,6 +766,84 @@ theorem alphaSingletonAlphaBackward :
         using CaseSelectionRelated.some
           alphaLeftRightCodeRelatedAtFoldScope
 
+theorem alphaSingletonFilteredAlts_eq :
+    shadowFilterUnreachable alphaSingletonFoldCases.alts =
+      alphaSingletonFoldCases.alts := by
+  rfl
+
+theorem alphaSingletonFiltered_size_ne_one :
+    (shadowFilterUnreachable alphaSingletonFoldCases.alts).size ≠ 1 := by
+  native_decide
+
+theorem alphaSingletonPrepared_size_eq_one :
+    (shadowPrepareAlts alphaSingletonFoldCases).size = 1 := by
+  native_decide
+
+/-- The generic compiler-shape theorem classifies the concrete alpha fixture
+without requiring kernel reduction of Lean's opaque `Code.alphaEqv`. -/
+theorem alphaSingletonPrepared_is_singleton_default :
+    ∃ body,
+      shadowAddDefaultAlt
+          (shadowFilterUnreachable alphaSingletonFoldCases.alts) =
+        #[.default body] :=
+  shadowAddDefaultAlt_eq_singleton_default_of_created
+    alphaSingletonFiltered_size_ne_one alphaSingletonPrepared_size_eq_one
+
+theorem alphaSingletonStructuralSelection
+    (selected : chooseAlt tag alphaSingletonFoldCases.alts.toList =
+      some branch) :
+    chooseAlt tag alphaSingletonStructuralCases.alts.toList = some branch := by
+  by_cases zero : tag = 0
+  · subst tag
+    simpa [alphaSingletonFoldCases, alphaSingletonStructuralCases,
+      LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+      falseInfo, trueInfo] using selected
+  · by_cases one : tag = 1
+    · subst tag
+      simpa [alphaSingletonFoldCases, alphaSingletonStructuralCases,
+        LCNF.Cases.alts, chooseAlt, findCtorAlt, findDefaultAlt,
+        falseInfo, trueInfo] using selected
+    · have zeroSymm : 0 ≠ tag := Ne.symm zero
+      have oneSymm : 1 ≠ tag := Ne.symm one
+      simp [alphaSingletonFoldCases, LCNF.Cases.alts, chooseAlt,
+        findCtorAlt, findDefaultAlt, falseInfo, trueInfo, zeroSymm,
+        oneSymm] at selected
+
+theorem alphaSingletonFoldAddDefaultEvidence :
+    shadowAddDefaultAlt
+        (shadowFilterUnreachable alphaSingletonFoldCases.alts) =
+      alphaSingletonFoldedCases.alts →
+    ScopedAddDefaultSelectionEvidence alphaFoldScopeIndex
+      alphaSingletonStructuralCases.alts
+      (shadowFilterUnreachable alphaSingletonFoldCases.alts) := by
+  intro preparedEq
+  exact {
+    forward := by
+      intro tag
+      rw [preparedEq]
+      exact codeRelated_cases_selected alphaSingletonAlphaForward tag
+    backward := by
+      intro tag
+      rw [preparedEq]
+      exact codeRelated_cases_selected alphaSingletonAlphaBackward tag
+  }
+
+/-- Focused regression for the reduced fold contract: the fixture supplies a
+selection-preserving proof intermediate and only the alpha-changing selected
+branch relation, rather than a preassembled three-phase factor. -/
+def alphaSingletonFoldedAlphaEvidence
+    (preparedEq : shadowAddDefaultAlt
+        (shadowFilterUnreachable alphaSingletonFoldCases.alts) =
+      alphaSingletonFoldedCases.alts) :
+    ScopedFoldedAlphaEvidence alphaFoldScopeIndex
+      alphaSingletonFoldCases.alts := {
+  middleAlts := alphaSingletonStructuralCases.alts
+  sourceSelection := by
+    intro tag branch selected reachable
+    exact alphaSingletonStructuralSelection selected
+  folded := alphaSingletonFoldAddDefaultEvidence preparedEq
+}
+
 theorem alphaSingletonStructuralAfter :
     CodeRel alphaSingletonFoldValidCase
       (.cases alphaSingletonFoldedCases) alphaLeft := by
@@ -1763,6 +1841,19 @@ theorem nestedEmptyCaseTraced_of_foldedSingletons
   shadowCode_scopedPhaseTracedTree_of_foldedSingletons
     noCaseReachableSelectionLaws foldedSingletons retainedPhases
     targetIdentities nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
+
+/-- Preferred reduced recursive endpoint: the broad folded-trifactor premise
+has been replaced by the fold's selected-branch alpha presentation. -/
+theorem nestedEmptyCaseTraced_of_foldedAlpha
+    (foldAlpha : ScopedCaseFoldedAlphaLaws noCaseTagValid)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws noCaseTagValid)
+    (targetIdentities :
+      ScopedCasePhaseTargetIdentityLaws noCaseTagValid) :
+    ScopedCodePhaseTraced noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode nestedEmptyCaseExpected :=
+  shadowCode_scopedPhaseTracedTree_of_foldedAlpha
+    noCaseReachableSelectionLaws foldAlpha retainedPhases targetIdentities
+    nestedEmptyCaseAlphaTree nestedEmptyCaseShadowRun
 
 /-- The same recursive empty-table regression through the reduced two-phase
 interface. This path consults neither singleton nor retained folding evidence. -/

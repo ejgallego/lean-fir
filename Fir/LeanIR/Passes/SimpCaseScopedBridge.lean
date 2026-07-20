@@ -2242,6 +2242,38 @@ structure ScopedCaseFoldedSingletonPhaseLaws
       (shadowPrepareAlts
         (.mk typeName resultType discr sourceAlts))[0]!.getCode)
 
+/-- Minimal presentation of the alpha-changing middle of a genuine default
+fold. `middleAlts` may replace one constructor by a default so that selections
+outside the source constructor domain are defined on both alpha sides.
+`sourceSelection` is syntax-only; pointwise endpoint identities later turn it
+into the first `CodeRel` leg. -/
+structure ScopedFoldedAlphaEvidence
+    (index : ScopeIndex) (sourceAlts : Array (LCNF.Alt .impure)) : Type where
+  middleAlts : Array (LCNF.Alt .impure)
+  sourceSelection : ∀ {tag : Nat} {branch : LCNF.Code .impure},
+    chooseAlt tag sourceAlts.toList = some branch →
+    Fir.LeanIR.Passes.SimpCase.isUnreachable branch = false →
+    chooseAlt tag middleAlts.toList = some branch
+  folded : ScopedAddDefaultSelectionEvidence index middleAlts
+    (shadowFilterUnreachable sourceAlts)
+
+/-- The irreducible semantic input for a genuine default fold. Filtering and
+the final singleton elimination are structural; this contract exposes a
+selection-preserving middle table and supplies only the bidirectional alpha
+relation introduced by `shadowAddDefaultAlt`. The pointwise endpoint round is
+available to establish scoped alpha side conditions even for
+selector-shadowed alternatives. -/
+structure ScopedCaseFoldedAlphaLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAltsPhaseResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
+
 /-- Assemble singleton phase classification from the generic direct path and
 the remaining fold-created singleton contract. -/
 theorem scopedCaseSingletonPhaseLaws_of_reachableSelection
@@ -2312,6 +2344,81 @@ structure ScopedCasePhaseTargetIdentityLaws
     ScopedCodeTargetIdentities validCase index
       (.cases ((LCNF.Cases.mk typeName resultType discr sourceAlts).updateAlts
         (shadowAddDefaultAlt (shadowFilterUnreachable sourceAlts))))
+
+/-- Derive the complete three-phase witness for a fold-created singleton.
+Reachable selection makes unreachable filtering a structural step, the
+fold-alpha contract supplies the only alpha-changing step, and the generic
+singleton target identities justify eliminating the newly created default. -/
+theorem scopedCaseFoldedSingletonPhaseLaws_of_reachableSelectionAndAlpha
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldAlpha : ScopedCaseFoldedAlphaLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCaseFoldedSingletonPhaseLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      filteredNotSingleton preparedSingleton
+    let source : LCNF.Cases .impure :=
+      .mk typeName resultType discr sourceAlts
+    let filtered : Array (LCNF.Alt .impure) :=
+      shadowFilterUnreachable sourceAlts
+    let prepared : Array (LCNF.Alt .impure) :=
+      shadowAddDefaultAlt filtered
+    rcases foldAlpha.folded alternatives filteredNotSingleton
+        preparedSingleton with ⟨alphaEvidence⟩
+    have targetIdentity := targetIdentities.singleton root alternatives
+      preparedSingleton
+    refine ⟨{
+      structuralMiddle := .cases (source.updateAlts alphaEvidence.middleAlts)
+      alphaMiddle := .cases (source.updateAlts prepared)
+      structuralBefore := ?_
+      alphaForward := ?_
+      alphaBackward := ?_
+      structuralAfter := ?_
+    }⟩
+    · apply CodeRel.aligned
+      apply HeadRel.cases
+      intro tag valid
+      rcases selection.selected valid with ⟨branch, selected, reachable⟩
+      change chooseAlt tag sourceAlts.toList = some branch at selected
+      have selectedMiddle := alphaEvidence.sourceSelection selected reachable
+      have selectedRefl := structuralChooseAlt_related
+        (tag := tag) alternatives.materialize.targetRefl
+      have branchRefl : CodeRel validCase branch branch := by
+        rw [selected] at selectedRefl
+        cases selectedRefl with
+        | some related => exact related
+      change SelectionRel validCase
+        (chooseAlt tag sourceAlts.toList)
+        (chooseAlt tag alphaEvidence.middleAlts.toList)
+      rw [selected, selectedMiddle]
+      exact .some branchRefl
+    · apply CodeRelated.cases
+      · have discrRelated := codeRelated_cases_discr root.forward
+        change ScopedFVarRelated index.forwardRho index.sourceScope
+          index.targetScope discr discr at discrRelated
+        change ScopedFVarRelated index.forwardRho index.sourceScope
+          index.targetScope discr discr
+        exact discrRelated
+      · exact alphaEvidence.folded.forward
+    · apply CodeRelated.cases
+      · have discrRelated := codeRelated_cases_discr root.backward
+        change ScopedFVarRelated index.backwardRho index.targetScope
+          index.sourceScope discr discr at discrRelated
+        change ScopedFVarRelated index.backwardRho index.targetScope
+          index.sourceScope discr discr
+        exact discrRelated
+      · exact alphaEvidence.folded.backward
+    · apply CodeRel.eliminate
+      intro tag valid
+      have selectedPrepared :=
+        chooseAlt_shadowAddDefaultAlt_of_created_singleton
+          (tag := tag) filteredNotSingleton preparedSingleton
+      change ElimSelectionRel validCase prepared[0]!.getCode
+        (chooseAlt tag prepared.toList)
+      rw [selectedPrepared]
+      exact .some (by
+        simpa [prepared, filtered, shadowPrepareAlts, LCNF.Cases.alts] using
+          targetIdentity.structural)
 
 /-- Phase-aware local output-shape contract. Empty tables retain the ordinary
 elimination evidence; singleton tables explicitly classify direct versus
@@ -2406,6 +2513,21 @@ theorem scopedCasePhaseShapeLaws_of_reachableSelectionAndFolded
   scopedCasePhaseShapeLaws_of_reachableSelection selection
     (scopedCaseSingletonPhaseLaws_of_reachableSelection selection
       foldedSingletons)
+    retainedPhases targetIdentities
+
+/-- Preferred folded-singleton assembly: callers provide only the selected
+alpha relation introduced by default folding. The two structural legs are
+derived by `scopedCaseFoldedSingletonPhaseLaws_of_reachableSelectionAndAlpha`.
+-/
+theorem scopedCasePhaseShapeLaws_of_reachableSelectionAndFoldedAlpha
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldAlpha : ScopedCaseFoldedAlphaLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase) :
+    ScopedCasePhaseShapeLaws validCase :=
+  scopedCasePhaseShapeLaws_of_reachableSelectionAndFolded selection
+    (scopedCaseFoldedSingletonPhaseLaws_of_reachableSelectionAndAlpha
+      selection foldAlpha targetIdentities)
     retainedPhases targetIdentities
 
 /-- The retained-table half of the phase contract. Genuine default folding
@@ -3756,6 +3878,21 @@ theorem shadowCode_scopedPhaseTracedTree_of_foldedSingletons
   shadowCode_scopedPhaseTracedTree_of_phaseShapes
     (scopedCasePhaseShapeLaws_of_reachableSelectionAndFolded selection
       foldedSingletons retainedPhases targetIdentities) hygiene run
+
+/-- End-to-end recursive trace whose only singleton-fold premise is the
+bidirectional selected-branch alpha contract. Filtering and elimination are
+now discharged generically. -/
+theorem shadowCode_scopedPhaseTracedTree_of_foldedAlpha
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldAlpha : ScopedCaseFoldedAlphaLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (targetIdentities : ScopedCasePhaseTargetIdentityLaws validCase)
+    (hygiene : ScopedAlphaBireflexiveTree index source)
+    (run : shadowCode? fuel source = some target) :
+    ScopedCodePhaseTraced validCase index source target :=
+  shadowCode_scopedPhaseTracedTree_of_phaseShapes
+    (scopedCasePhaseShapeLaws_of_reachableSelectionAndFoldedAlpha selection
+      foldAlpha retainedPhases targetIdentities) hygiene run
 
 /-- Recursive correctness for the trace relation reduces exactly to a local
 case-kernel law, just as it does for the one-round result relation. -/

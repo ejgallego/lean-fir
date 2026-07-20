@@ -153,3 +153,21 @@ folding, and `shadowCode_scopedPhaseTracedTree_of_foldedSingletons` exposes
 that reduced contract at the universal recursive endpoint. The remaining
 proof frontier is fold-created singleton evidence, retained-table folding,
 and the corresponding target identities.
+
+Fold-created singleton evidence has now been reduced to its genuine alpha
+boundary. Compiler-shape lemmas prove that a singleton created from a
+non-singleton filtered table came from an input of size at least two, is
+exactly one default arm, and selects that arm at every tag.
+`ScopedFoldedAlphaEvidence` exposes only a selection-preserving proof
+intermediate plus the bidirectional selected-branch alpha relation for
+`shadowAddDefaultAlt`; reachable selection and the recursive pointwise
+identity round derive the first structural leg, while the singleton shape and
+target structural identity derive the final elimination leg.
+`scopedCaseFoldedSingletonPhaseLaws_of_reachableSelectionAndAlpha` therefore
+constructs the former broad trifactor contract, and
+`shadowCode_scopedPhaseTracedTree_of_foldedAlpha` carries the smaller alpha
+contract to the universal recursive endpoint. The alpha-singleton fixture
+pins both the compiler shape and the selection-preserving intermediate. The
+remaining frontier is construction of the general fold-alpha presentation,
+retained-table folding, and the shared target identities; no folded
+three-phase factor is assumed by the preferred recursive API.

@@ -98,6 +98,42 @@ theorem shadowAddDefaultAlt_size_ne_zero
   · split
     split <;> simp_all
 
+/-- A singleton produced from a non-singleton input is necessarily created by
+the folding branch; in particular the input had at least two alternatives. -/
+theorem one_lt_size_of_shadowAddDefaultAlt_singleton
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1) :
+    1 < alts.size := by
+  by_cases empty : alts.size = 0
+  · have small : alts.size ≤ 1 := by omega
+    have unchanged := shadowAddDefaultAlt_eq_of_small (alts := alts) small
+    rw [unchanged, empty] at singleton
+    omega
+  · omega
+
+/-- More precisely, a singleton created from a non-singleton input is the
+default arm appended by the genuine folding branch. -/
+theorem shadowAddDefaultAlt_eq_singleton_default_of_created
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1) :
+    ∃ body, shadowAddDefaultAlt alts = #[.default body] := by
+  unfold shadowAddDefaultAlt at singleton ⊢
+  split
+  · simp_all
+  · split
+    split <;> simp_all
+
+/-- A fold-created singleton selects its sole default body at every tag. -/
+theorem chooseAlt_shadowAddDefaultAlt_of_created_singleton
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1) :
+    chooseAlt tag (shadowAddDefaultAlt alts).toList =
+      some (shadowAddDefaultAlt alts)[0]!.getCode := by
+  rcases shadowAddDefaultAlt_eq_singleton_default_of_created
+      notSingleton singleton with ⟨body, folded⟩
+  simp [folded, chooseAlt, findCtorAlt, findDefaultAlt]
+  rfl
+
 /-- Pure output projection of Lean's private unreachable-arm filter. -/
 def shadowFilterUnreachable (alts : Array (LCNF.Alt .impure)) :
     Array (LCNF.Alt .impure) :=
