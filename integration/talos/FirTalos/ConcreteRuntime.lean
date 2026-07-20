@@ -488,6 +488,51 @@ theorem allocCtorFn_satisfies_contract (info fieldKinds resultKind initial args)
       ((allocCtorFn info fieldKinds resultKind).invoke initial args) := by
   rfl
 
+def replaceRuntime (store : Wasm.Store Host) (runtime : ConcreteRuntimeState) :
+    Wasm.Store Host :=
+  let store := clearFailure store
+  { store with host := { store.host with runtime } }
+
+/-- Decode one physical Talos value into W6's ABI lane selected by its static
+kind. This is a bit-preserving conversion, not a semantic value decoder. -/
+def decodePhysicalLane (kind : AbiKind) (physical : Wasm.Value) :
+    Except HostFailure LaneValue :=
+  match kind.valueType, physical with
+  | .i32, .i32 bits => .ok (.word32 (Word32.ofUInt32 bits))
+  | .i64, .i64 word => .ok (.word64 word)
+  | .f32, .f32 bits => .ok (.float32Bits bits)
+  | .f64, .f64 bits => .ok (.float64Bits bits)
+  | expected, _ => .error (.laneMismatch 0 expected)
+
+/-- Executable concrete lazy-cache update. The physical value is returned
+unchanged for the following generated `global.set`. -/
+def cacheSetStep (declaration : Lean.Name) (kind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [physical] =>
+      match decodePhysicalLane kind physical with
+      | .ok lane =>
+          match store.host.runtime.writeGlobal declaration kind lane with
+          | .ok runtime => .Return [physical] (replaceRuntime store runtime)
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .error failure => trap store failure
+  | args => trap store (.arityMismatch 1 args.length)
+
+def cacheSetFn (declaration : Lean.Name) (kind : AbiKind) : Wasm.HostFn Host := {
+  params := [FirTalos.abiKind kind]
+  results := [FirTalos.abiKind kind]
+  invoke := cacheSetStep declaration kind }
+
+def cacheSetContract (declaration : Lean.Name) (kind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result => result = cacheSetStep declaration kind initial args
+
+theorem cacheSetFn_satisfies_contract (declaration kind initial args) :
+    cacheSetContract declaration kind initial args
+      ((cacheSetFn declaration kind).invoke initial args) := by
+  rfl
+
 /-- Successful semantic projection identifies a mapped constructor and the
 checked concrete read returns a field related at its static descriptor kind. -/
 theorem ConcreteRuntimeRel.readObjectField_refines
@@ -852,6 +897,52 @@ theorem allocCtorNonemptyStep_of_refines
     allocCtor_nonempty_eq runtime info semanticFields semanticArity nonempty⟩
   · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+
+/-- A related physical value always decodes to the exact W6 lane witnessed by
+`ValueRel`. -/
+theorem decodePhysicalLane_of_related
+    {witness : RefinementWitness} {kind : AbiKind} {physical : Wasm.Value}
+    {semantic : Value}
+    (related : PhysicalValueRel witness kind physical semantic) :
+    ∃ lane,
+      decodePhysicalLane kind physical = .ok lane ∧
+      ValueRel witness kind lane semantic := by
+  cases related with
+  | word32 valueRelated =>
+      refine ⟨_, ?_, valueRelated⟩
+      cases valueRelated <;>
+        simp [decodePhysicalLane, AbiKind.valueType]
+  | word64 valueRelated =>
+      refine ⟨_, ?_, valueRelated⟩
+      cases valueRelated <;> rfl
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/-- Successful concrete cache update refines FIR's `setGlobal` and returns the
+same physical lane for the generated Wasm global write. -/
+theorem cacheSetStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value} {slot : ConcreteGlobalSlot}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : PhysicalValueRel witness kind physical semantic)
+    (found : initial.host.runtime.globals.find? declaration = some slot)
+    (kindEq : slot.kind = kind) :
+    ∃ after,
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] (replaceRuntime initial after) ∧
+      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
+        (runtime.setGlobal declaration semantic) ∧
+      PhysicalValueRel witness kind physical semantic := by
+  obtain ⟨lane, decoded, laneRelated⟩ :=
+    decodePhysicalLane_of_related valueRelated
+  obtain ⟨after, operation, nextRuntimeRelated⟩ :=
+    Fir.Wasm.Concrete.ConcreteRuntimeRel.writeGlobal runtimeRelated found kindEq
+      laneRelated
+  refine ⟨after, ?_, ?_, valueRelated⟩
+  · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
+  · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated
 
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
@@ -1354,6 +1445,78 @@ theorem wp_allocCtor_let
   · exact operation
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+/-- Concrete-host WP for the value-preserving cache update call. -/
+theorem wp_cacheSet_call
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial after : Wasm.Store Host} {locals : Wasm.Locals}
+    {declaration : Lean.Name} {kind : AbiKind} {physical : Wasm.Value}
+    {tail : List Wasm.Value}
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (cacheSetContract declaration kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : cacheSetStep declaration kind initial [physical] =
+      .Return [physical] after)
+    (continued : Wasm.wp module rest Q after
+      { locals with values := physical :: tail } env) :
+    Wasm.wp module (.call id :: rest) Q initial
+      { locals with values := physical :: tail } env := by
+  apply wp_exact_host_call_of_return
+    (step := cacheSetStep declaration kind) (physicalArgs := [physical])
+    (results := [physical]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using continued
+
+/-- Atomic store update performed by one generated Wasm `global.set`. -/
+def writeWasmGlobal (store : Wasm.Store Host) (index : Nat)
+    (value : Wasm.Value) : Wasm.Store Host :=
+  { store with globals := { globals := store.globals.globals.set index value } }
+
+/-- Exact generated cache-write suffix after a lazy declaration has left its
+result on the operand stack. The host cache and the two physical Wasm globals
+are updated in their distinct stores. -/
+theorem wp_cacheSet_miss_suffix
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial afterCache valueStore : Wasm.Store Host} {locals : Wasm.Locals}
+    {declaration : Lean.Name} {kind : AbiKind} {physical : Wasm.Value}
+    {valueIndex flagIndex : Nat} {oldValue oldFlag : Wasm.Value}
+    {tail : List Wasm.Value}
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (cacheSetContract declaration kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : cacheSetStep declaration kind initial [physical] =
+      .Return [physical] afterCache)
+    (hValue : afterCache.globals.globals[valueIndex]? = some oldValue)
+    (valueStoreEq : valueStore = writeWasmGlobal afterCache valueIndex physical)
+    (hFlag : valueStore.globals.globals[flagIndex]? = some oldFlag)
+    (continued : Wasm.wp module rest Q
+      (writeWasmGlobal valueStore flagIndex (.i32 1))
+      { locals with values := tail } env) :
+    Wasm.wp module
+      (.call id :: .globalSet valueIndex :: .const 1 ::
+        .globalSet flagIndex :: rest)
+      Q initial { locals with values := physical :: tail } env := by
+  subst valueStore
+  apply wp_cacheSet_call hImp hSat hi hContract hParams hResults operation
+  rw [Wasm.wp_globalSet_cons, hValue]
+  change Wasm.wp module (.const 1 :: .globalSet flagIndex :: rest) Q
+    (writeWasmGlobal afterCache valueIndex physical)
+    { locals with values := tail } env
+  rw [Wasm.wp_const_cons, Wasm.wp_globalSet_cons, hFlag]
+  exact continued
 
 /-- Object-projection instance of the concrete direct-`let` boundary. It
 proves the source interpreter step, the result-local refinement, and a Talos

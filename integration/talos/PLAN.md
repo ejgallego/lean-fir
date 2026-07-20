@@ -1927,6 +1927,17 @@ destination local, and continuation. Executable guards cover the immediate
 empty case and a nonempty one-field allocation/readback. The generated
 artifact still awaits the concrete-host switch.
 
+W6.6g begins lazy-cache composition at the store boundary. A generic physical
+lane decoder now covers every currently inhabitable ABI relation, and the
+executable `cacheSet` host performs a typed `ConcreteGlobals` update while
+returning the exact same Talos value. Its theorem lifts the existing whole-
+runtime `setGlobal` refinement, while the generated suffix WP keeps the host
+cache distinct from the Wasm value/flag globals and proves the exact
+`cacheSet; global.set; i32.const 1; global.set` sequence. A maximum-`UInt64`
+guard checks the wide lane. The remaining cache work is the interprocedural
+lazy declaration call and surrounding hit/miss conditional; the artifact is
+still pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

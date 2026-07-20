@@ -166,4 +166,24 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _, _ => false
   | _ => false
 
+private def cacheDeclaration : Lean.Name := `FirTalos.Concrete.cachedValue
+
+private def cacheStore : Wasm.Store Host := {
+  emptyHostStore with
+  host := { emptyHostStore.host with
+    runtime := { emptyHostStore.host.runtime with
+      globals := ConcreteGlobals.declare [(cacheDeclaration, .uint64)] } } }
+
+-- Cache writes preserve the full i64 lane and return it unchanged for the
+-- generated Wasm value-global update.
+#guard match cacheSetStep cacheDeclaration .uint64 cacheStore
+    [.i64 18446744073709551615] with
+  | .Return [.i64 returned] store =>
+      match store.host.runtime.readGlobal cacheDeclaration .uint64 with
+      | .ok (.word64 cached) =>
+          returned == 18446744073709551615 && cached == returned &&
+            store.host.failure?.isNone
+      | _ => false
+  | _ => false
+
 end FirTalos.Concrete
