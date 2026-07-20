@@ -13,6 +13,7 @@ def caseIds : Array String :=
     "boxed-uint32", "packed-project-usize",
     "direct-call", "captured-partial", "capture-17-list",
     "recursive-empty", "recursive-traversal", "nat-add-small",
+    "effect-record-nat", "effect-record-twice", "effect-record-byte-array-twice",
     "uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max",
     "uint8-roundtrip", "uint16-roundtrip", "uint32-roundtrip", "uint64-roundtrip",
     "usize-roundtrip", "nat-list-nonempty", "nat-list-nonempty-bool",

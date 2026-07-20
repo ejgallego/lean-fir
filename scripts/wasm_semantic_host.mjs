@@ -141,6 +141,10 @@ export class SemanticHost {
     this.globals = new Map();
     this.world = 0;
     this.trace = [];
+    // Successful external calls with immutable event-time heap views. These
+    // are kept separate from the public semantic trace so adapters can project
+    // structured effects without changing the runtime observation contract.
+    this.externalSnapshots = [];
     this.externalRegistry = externalRegistry instanceof Map
       ? new Map(externalRegistry)
       : new Map(Object.entries(externalRegistry ?? {}));
@@ -461,11 +465,90 @@ export class SemanticHost {
     return this.encode(operation.result, value);
   }
 
+  cloneValue(value) {
+    switch (value.kind) {
+      case "tagged":
+        return { kind: "tagged", payload: value.payload };
+      case "heap":
+        return { kind: "heap", location: value.location };
+      case "usize":
+        return { kind: "usize", value: value.value };
+      case "scalar":
+        return { kind: "scalar", scalarKind: value.scalarKind, value: value.value };
+      case "erased":
+        return { kind: "erased" };
+      case "reuseToken":
+        return { kind: "reuseToken", location: value.location };
+      default:
+        throw new Error(`cannot snapshot semantic value kind ${value.kind}`);
+    }
+  }
+
+  cloneObject(object) {
+    switch (object.kind) {
+      case "ctor":
+        return {
+          kind: "ctor",
+          tag: object.tag,
+          objectFields: object.objectFields.map((value) => this.cloneValue(value)),
+          usizeFields: [...object.usizeFields],
+          scalarFields: object.scalarFields.map((field) => ({
+            width: field.width,
+            offset: field.offset,
+            value: this.cloneValue(field.value),
+          })),
+        };
+      case "boxed":
+        return {
+          kind: "boxed",
+          scalarKind: object.scalarKind,
+          value: this.cloneValue(object.value),
+        };
+      case "closure":
+        return {
+          kind: "closure",
+          function: object.function,
+          arity: object.arity,
+          fixed: object.fixed.map((value) => this.cloneValue(value)),
+        };
+      case "string":
+        return { kind: "string", value: object.value };
+      case "natural":
+        return { kind: "natural", value: object.value };
+      case "integer":
+        return { kind: "integer", value: object.value };
+      case "byteArray":
+        return { kind: "byteArray", value: [...object.value] };
+      default:
+        throw new Error(`cannot snapshot heap object kind ${object.kind}`);
+    }
+  }
+
+  runtimeSnapshot() {
+    const heap = this.heap.map((cell) => ({
+      location: cell.location,
+      rc: cell.rc,
+      persistent: cell.persistent,
+      live: cell.live,
+      object: this.cloneObject(cell.object),
+    }));
+    return {
+      liveCell(location) {
+        const cell = heap.find((candidate) => candidate.location === location);
+        if (!cell?.live) {
+          throw new SemanticFault({ kind: "deadObject", location });
+        }
+        return cell;
+      },
+    };
+  }
+
   external(operation, physicalArgs) {
     assert.equal(physicalArgs.length, operation.params.length,
       "external host arity mismatch");
     const args = operation.params.map((kind, index) =>
       this.decode(kind, physicalArgs[index]));
+    const before = this.runtimeSnapshot();
     const implementation = this.externalRegistry.get(operation.declaration);
     if (implementation === undefined) {
       throw new SemanticFault({
@@ -490,6 +573,13 @@ export class SemanticHost {
     if (response.world !== undefined) {
       this.world = response.world;
     }
+    this.externalSnapshots.push({
+      name: operation.declaration,
+      args: args.map((value) => this.cloneValue(value)),
+      result: this.cloneValue(response.value),
+      before,
+      after: this.runtimeSnapshot(),
+    });
     this.trace.push({
       name: operation.declaration,
       args: args.map((value) => this.valueJson(value)),

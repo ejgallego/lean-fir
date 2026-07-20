@@ -147,6 +147,48 @@ function semanticDatum(schema, value, host, context) {
   throw new Error(`${context} uses an unsupported validation schema`);
 }
 
+function projectedEffects(caseId, projections, snapshots) {
+  const byExternal = new Map();
+  for (const projection of projections) {
+    assert.equal(typeof projection.external, "string",
+      `${caseId} effect projection external must be a string`);
+    assert.equal(typeof projection.operation, "string",
+      `${caseId} effect projection operation must be a string`);
+    assert.ok(Array.isArray(projection.argSchemas),
+      `${caseId} effect projection argument schemas must be an array`);
+    assert.ok(!byExternal.has(projection.external),
+      `${caseId} has duplicate effect projection ${projection.external}`);
+    byExternal.set(projection.external, projection);
+  }
+
+  const effects = [];
+  for (const [eventIndex, snapshot] of snapshots.entries()) {
+    const projection = byExternal.get(snapshot.name);
+    if (projection === undefined) {
+      continue;
+    }
+    assert.equal(snapshot.args.length, projection.argSchemas.length,
+      `${caseId} projected external ${snapshot.name} argument arity mismatch`);
+    const args = projection.argSchemas.map((schema, index) => semanticDatum(
+      schema,
+      snapshot.args[index],
+      snapshot.before,
+      `${caseId} effect ${eventIndex} argument ${index}`,
+    ));
+    const effect = { operation: projection.operation, args };
+    if (projection.resultSchema !== null) {
+      effect.result = semanticDatum(
+        projection.resultSchema,
+        snapshot.result,
+        snapshot.after,
+        `${caseId} effect ${eventIndex} result`,
+      );
+    }
+    effects.push(effect);
+  }
+  return effects;
+}
+
 function requiredEnvironment(name) {
   const value = process.env[name];
   assert.ok(value, `${name} is not set`);
@@ -246,8 +288,8 @@ for (const caseId of selectedCases) {
   const descriptor = descriptorMatches[0];
   assert.equal(descriptor.args.length, descriptor.argSchemas.length,
     `${caseId} argument schema/fixture arity mismatch`);
-  assert.deepStrictEqual(descriptor.effectProjections, [],
-    `${caseId} must not project host effects`);
+  assert.ok(Array.isArray(descriptor.effectProjections),
+    `${caseId} effect projections must be an array`);
 
   const manifestProduct = caseProduct(
     caseId, "wasm-manifest", ".json");
@@ -327,6 +369,11 @@ for (const caseId of selectedCases) {
     host,
     `${caseId} result`,
   );
+  const effects = projectedEffects(
+    caseId,
+    descriptor.effectProjections,
+    host.externalSnapshots,
+  );
   const receipt = JSON.stringify([
     {
       kind: inventoryProduct.kind,
@@ -357,7 +404,7 @@ for (const caseId of selectedCases) {
           },
           stdout: "",
           stderr: "",
-          effects: [],
+          effects,
         },
       },
     },

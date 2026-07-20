@@ -183,6 +183,44 @@ function ctorRuntime() {
 }
 
 {
+  const host = new SemanticHost({
+    nextLocation: 1,
+    heap: [{
+      location: 0,
+      rc: 1,
+      persistent: false,
+      live: true,
+      object: { kind: "byteArray", value: [0, 127, 128, 255] },
+    }],
+  }, validationExternalRegistry);
+  const record = host.importFunction({
+    kind: "external",
+    declaration: "Fir.Validation.Corpus.NativeEffects.recordByteArrayImpl",
+    params: ["object", "uint8"],
+    results: ["object"],
+  });
+  const array = host.encode("object", { kind: "heap", location: 0 });
+  const first = record(array, host.encode("uint8", scalar("uint8", 1n)));
+  const second = record(first, host.encode("uint8", scalar("uint8", 2n)));
+  assert.deepStrictEqual(host.decode("object", second), { kind: "heap", location: 0 });
+  assert.equal(host.world, 2);
+  assert.deepStrictEqual(
+    host.externalSnapshots.map((snapshot) => ({
+      before: snapshot.before.liveCell(0).object.value,
+      after: snapshot.after.liveCell(0).object.value,
+    })),
+    [
+      { before: [0, 127, 128, 255], after: [1, 127, 128, 255] },
+      { before: [1, 127, 128, 255], after: [2, 127, 128, 255] },
+    ],
+  );
+  assert.deepStrictEqual(host.trace.map((event) => event.name), [
+    "Fir.Validation.Corpus.NativeEffects.recordByteArrayImpl",
+    "Fir.Validation.Corpus.NativeEffects.recordByteArrayImpl",
+  ]);
+}
+
+{
   const host = new SemanticHost(ctorRuntime());
   const root = host.encode("object", { kind: "heap", location: 0 });
   const tokenPhysical = host.importFunction({ kind: "reset", objectFields: 1 })(root);
