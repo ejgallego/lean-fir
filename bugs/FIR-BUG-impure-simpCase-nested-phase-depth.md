@@ -240,3 +240,13 @@ that recursive result, so it no longer assumes a global recovery principle
 from weaker endpoint identities. This certified result has been lifted to the
 folded-alpha interface; the next step is to carry it through singleton and
 retained-case reconstruction.
+
+Singleton reconstruction is now certificate-preserving end to end. A new
+transparent source-origin theorem proves that the sole prepared body is an
+actual recursively processed source body in both the direct-filter and
+default-fold paths. `ScopedCaseCertifiedSingletonPhaseLaws` therefore obtains
+the selected endpoint certificate from the synchronized alternative result,
+classifies direct versus fold-created elimination, and returns a certified
+phase result without consulting `ScopedCasePhaseTargetIdentityLaws`. The
+remaining local output shape is the retained case table, whose rebuilt root
+normalization and body-side certificate must be established next.

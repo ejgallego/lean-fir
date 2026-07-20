@@ -1253,6 +1253,23 @@ theorem ScopedAltsPhaseCertifiedResult.targetBodyCertificate_of_mem
       · exact ⟨body.certificate⟩
       · exact ih member
 
+/-- The concrete body selected by a prepared singleton inherits the complete
+certificate of one recursively transformed source alternative. This covers
+both direct filtering and a singleton created by default folding. -/
+theorem ScopedAltsPhaseCertifiedResult.preparedSingletonCertificate
+    (result : ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList)
+    (singleton : (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1) :
+    Nonempty (ScopedCodeTargetCertificate validCase index
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode) := by
+  rcases exists_source_alt_of_shadowPrepareAlts_singleton singleton with
+    ⟨alt, member, bodyEq⟩
+  rcases result.targetBodyCertificate_of_mem (Array.mem_def.mp member) with
+    ⟨certificate⟩
+  exact ⟨by simpa [bodyEq] using certificate⟩
+
 /-- Certified endpoint identity round for a synchronized alternative result. -/
 def ScopedAltsPhaseCertifiedResult.targetIdentity
     (result : ScopedAltsPhaseCertifiedResult validCase index source target) :
@@ -2360,6 +2377,25 @@ def ScopedSingletonPhaseResultEvidence.result
     ScopedCodePhaseResult validCase index (.cases source) target :=
   evidence.phase.phaseResult evidence.identities
 
+/-- Singleton phase evidence that retains the full target certificate needed
+by a later alpha-fold comparison and by certified trace padding. -/
+structure ScopedSingletonPhaseCertifiedResultEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure) (target : LCNF.Code .impure) : Type where
+  phase : ScopedSingletonPhaseEvidence validCase index source target
+  certificate : ScopedCodeTargetCertificate validCase index target
+
+def ScopedSingletonPhaseCertifiedResultEvidence.result
+    (evidence : ScopedSingletonPhaseCertifiedResultEvidence
+      validCase index source target) :
+    ScopedCodePhaseCertifiedResult validCase index (.cases source) target := {
+  result := evidence.phase.phaseResult {
+    structural := evidence.certificate.structural
+    alpha := evidence.certificate.alpha
+  }
+  targetSide := evidence.certificate.side
+}
+
 /-- Empty prepared tables need no branch intermediate: once the phase rules
 out every valid source tag, `unreach` is the fixed structural and alpha
 intermediate. -/
@@ -2607,6 +2643,24 @@ structure ScopedCaseSingletonPhaseLaws
       (shadowPrepareAlts
         (.mk typeName resultType discr sourceAlts))[0]!.getCode)
 
+/-- Singleton classification for the invariant-carrying recursive path. Both
+direct and fold-created results retain the selected body's endpoint
+certificate. -/
+structure ScopedCaseCertifiedSingletonPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedSingletonPhaseCertifiedResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+
 /-- Direct-singleton convergence when unreachable filtering itself leaves one
 arm. Pointwise alternative identities supply structural and alpha reflexivity
 for that exact array entry, including entries hidden from case selectors. -/
@@ -2663,6 +2717,25 @@ structure ScopedCaseFoldedSingletonPhaseLaws
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     Nonempty (ScopedCodeTrifactor validCase index
       (.cases (.mk typeName resultType discr sourceAlts))
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+
+/-- Fold-created singleton contract for the invariant-carrying path. The
+result includes the selected endpoint certificate rather than discarding it
+after the final structural elimination leg. -/
+structure ScopedCaseFoldedCertifiedSingletonPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAlphaBireflexive index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedSingletonPhaseCertifiedResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
       (shadowPrepareAlts
         (.mk typeName resultType discr sourceAlts))[0]!.getCode)
 
@@ -3245,6 +3318,111 @@ theorem scopedCaseFoldedSingletonPhaseLaws_of_reachableSelectionAndAlpha
       exact .some (by
         simpa [prepared, filtered, shadowPrepareAlts, LCNF.Cases.alts] using
           targetIdentity.structural)
+
+/-- Certified fold-created singleton assembly. The selected endpoint
+certificate is recovered from the recursive alternative result itself, so no
+separate target-identity law is needed for the elimination leg. -/
+theorem scopedCaseFoldedCertifiedSingletonPhaseLaws_of_reachableSelectionAndAlpha
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (foldAlpha : ScopedCaseFoldedCertifiedAlphaLaws validCase) :
+    ScopedCaseFoldedCertifiedSingletonPhaseLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      filteredNotSingleton preparedSingleton
+    let source : LCNF.Cases .impure :=
+      .mk typeName resultType discr sourceAlts
+    let filtered : Array (LCNF.Alt .impure) :=
+      shadowFilterUnreachable sourceAlts
+    let prepared : Array (LCNF.Alt .impure) :=
+      shadowAddDefaultAlt filtered
+    rcases foldAlpha.folded alternatives filteredNotSingleton
+        preparedSingleton with ⟨alphaEvidence⟩
+    rcases alternatives.preparedSingletonCertificate preparedSingleton with
+      ⟨targetCertificate⟩
+    refine ⟨{
+      phase := .folded {
+        structuralMiddle := .cases
+          (source.updateAlts alphaEvidence.middleAlts)
+        alphaMiddle := .cases (source.updateAlts prepared)
+        structuralBefore := ?_
+        alphaForward := ?_
+        alphaBackward := ?_
+        structuralAfter := ?_
+      }
+      certificate := targetCertificate
+    }⟩
+    · apply CodeRel.aligned
+      apply HeadRel.cases
+      intro tag valid
+      rcases selection.selected valid with ⟨branch, selected, reachable⟩
+      change chooseAlt tag sourceAlts.toList = some branch at selected
+      have selectedMiddle := alphaEvidence.sourceSelection selected reachable
+      have selectedRefl := structuralChooseAlt_related
+        (tag := tag) alternatives.forget.materialize.targetRefl
+      have branchRefl : CodeRel validCase branch branch := by
+        rw [selected] at selectedRefl
+        cases selectedRefl with
+        | some related => exact related
+      change SelectionRel validCase
+        (chooseAlt tag sourceAlts.toList)
+        (chooseAlt tag alphaEvidence.middleAlts.toList)
+      rw [selected, selectedMiddle]
+      exact .some branchRefl
+    · apply CodeRelated.cases
+      · have discrRelated := codeRelated_cases_discr root.forward
+        change ScopedFVarRelated index.forwardRho index.sourceScope
+          index.targetScope discr discr at discrRelated
+        change ScopedFVarRelated index.forwardRho index.sourceScope
+          index.targetScope discr discr
+        exact discrRelated
+      · exact alphaEvidence.folded.forward
+    · apply CodeRelated.cases
+      · have discrRelated := codeRelated_cases_discr root.backward
+        change ScopedFVarRelated index.backwardRho index.targetScope
+          index.sourceScope discr discr at discrRelated
+        change ScopedFVarRelated index.backwardRho index.targetScope
+          index.sourceScope discr discr
+        exact discrRelated
+      · exact alphaEvidence.folded.backward
+    · apply CodeRel.eliminate
+      intro tag valid
+      have selectedPrepared :=
+        chooseAlt_shadowAddDefaultAlt_of_created_singleton
+          (tag := tag) filteredNotSingleton preparedSingleton
+      change ElimSelectionRel validCase prepared[0]!.getCode
+        (chooseAlt tag prepared.toList)
+      rw [selectedPrepared]
+      exact .some (by
+        simpa [prepared, filtered, shadowPrepareAlts, LCNF.Cases.alts] using
+          targetCertificate.structural)
+
+/-- Assemble both singleton shapes without an external endpoint-identity
+contract. Direct filtering and default folding use the same certificate
+extracted from the recursively processed alternative table. -/
+theorem scopedCaseCertifiedSingletonPhaseLaws_of_reachableSelection
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (folded : ScopedCaseFoldedCertifiedSingletonPhaseLaws validCase) :
+    ScopedCaseCertifiedSingletonPhaseLaws validCase where
+  singleton := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      preparedSingleton
+    rcases alternatives.preparedSingletonCertificate preparedSingleton with
+      ⟨targetCertificate⟩
+    by_cases filteredSingleton :
+        (shadowFilterUnreachable sourceAlts).size = 1
+    · have preparedEq : shadowPrepareAlts
+          (.mk typeName resultType discr sourceAlts) =
+          shadowFilterUnreachable sourceAlts :=
+        shadowPrepareAlts_eq_filter_of_small (by
+          simp [LCNF.Cases.alts, filteredSingleton])
+      rcases scopedDirectSingletonSelectionConvergence selection
+          alternatives.forget filteredSingleton with ⟨convergence⟩
+      exact ⟨{
+        phase := .direct (by simpa [preparedEq] using convergence)
+        certificate := targetCertificate
+      }⟩
+    · exact folded.folded root alternatives filteredSingleton
+        preparedSingleton
 
 /-- Phase-aware local output-shape contract. Empty tables retain the ordinary
 elimination evidence; singleton tables explicitly classify direct versus

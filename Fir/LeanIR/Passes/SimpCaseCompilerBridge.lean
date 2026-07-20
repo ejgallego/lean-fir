@@ -390,6 +390,46 @@ theorem shadowPrepareAlts_eq_filter_of_small
     shadowPrepareAlts cases = shadowFilterUnreachable cases.alts := by
   exact shadowAddDefaultAlt_eq_of_small small
 
+/-- The body of a prepared singleton is always inherited from a syntactic
+source alternative. In the direct path it is the sole reachable arm; in the
+folding path it is the occurrence counter's representative reintroduced as a
+default. -/
+theorem exists_source_alt_of_shadowPrepareAlts_singleton
+    (singleton : (shadowPrepareAlts cases).size = 1) :
+    ∃ alt ∈ cases.alts,
+      alt.getCode = (shadowPrepareAlts cases)[0]!.getCode := by
+  let filtered := shadowFilterUnreachable cases.alts
+  have foldedSingleton : (shadowAddDefaultAlt filtered).size = 1 := by
+    simpa [shadowPrepareAlts, filtered] using singleton
+  by_cases filteredSingleton : filtered.size = 1
+  · have small : (shadowFilterUnreachable cases.alts).size ≤ 1 := by
+      simpa [filtered] using Nat.le_of_eq filteredSingleton
+    have preparedEq : shadowPrepareAlts cases = filtered :=
+      shadowPrepareAlts_eq_filter_of_small small
+    have member : filtered[0]! ∈ filtered := by
+      rw [getElem!_pos filtered 0 (by omega)]
+      exact Array.getElem_mem _
+    refine ⟨filtered[0]!, ?_, ?_⟩
+    · exact Array.mem_of_mem_filter member
+    · rw [preparedEq]
+  · have filteredNonempty : filtered.size ≠ 0 := by
+      intro empty
+      have small : filtered.size ≤ 1 := by omega
+      have unchanged := shadowAddDefaultAlt_eq_of_small
+        (alts := filtered) small
+      rw [unchanged, empty] at foldedSingleton
+      omega
+    have representativeMember : (shadowGetMaxOccs filtered).1 ∈ filtered :=
+      shadowGetMaxOccs_fst_mem filteredNonempty
+    have foldedEq :=
+      shadowAddDefaultAlt_eq_singleton_default_max_of_created
+        filteredSingleton foldedSingleton
+    refine ⟨(shadowGetMaxOccs filtered).1,
+      Array.mem_of_mem_filter representativeMember, ?_⟩
+    rw [show shadowPrepareAlts cases = shadowAddDefaultAlt filtered by rfl,
+      foldedEq]
+    rfl
+
 /-- Pure output projection of Lean's private `simplifyCases`. -/
 def shadowSimplifyCases (cases : LCNF.Cases .impure) : LCNF.Code .impure :=
   let alts := shadowPrepareAlts cases
