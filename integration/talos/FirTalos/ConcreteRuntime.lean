@@ -35,6 +35,65 @@ def EnvLocalsRelated (witness : RefinementWitness)
       target.get index = some physical ∧
       PhysicalValueRel witness kind physical value
 
+theorem PhysicalValueRel.witnessExtension
+    {before after : RefinementWitness} (extension : before.Extends after)
+    {kind : AbiKind} {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel before kind physical semantic) :
+    PhysicalValueRel after kind physical semantic := by
+  cases related with
+  | word32 valueRelated =>
+      exact .word32 (valueRelated.witnessExtension extension)
+  | word64 valueRelated =>
+      exact .word64 (valueRelated.witnessExtension extension)
+  | float32Bits valueRelated =>
+      exact .float32Bits (valueRelated.witnessExtension extension)
+  | float64Bits valueRelated =>
+      exact .float64Bits (valueRelated.witnessExtension extension)
+
+/-- A concrete local write binds its semantic result while preserving every
+old binding under monotone proof-witness growth. -/
+theorem EnvLocalsRelated.bind
+    {before after : RefinementWitness}
+    {bindings : List (Lean.FVarId × AbiKind)} {source : Env}
+    {target updated : Wasm.Locals} {result : Lean.FVarId}
+    {resultIndex : Nat} {kind : AbiKind} {semantic : Value}
+    {physical : Wasm.Value}
+    (related : EnvLocalsRelated before bindings source target)
+    (resultFound : findFVar? bindings result = some resultIndex)
+    (kindAt : bindings[resultIndex]?.map Prod.snd = some kind)
+    (localUpdate : FirTalos.Correctness.LocalUpdate target updated resultIndex
+      physical)
+    (extension : before.Extends after)
+    (physicalRelated : PhysicalValueRel after kind physical semantic) :
+    EnvLocalsRelated after bindings
+      (Fir.LeanIR.Impure.bind source result semantic) updated := by
+  intro fvar value sourceLookup
+  by_cases sameName : (result.name == fvar.name) = true
+  · have names : result.name = fvar.name := LawfulBEq.eq_of_beq sameName
+    have sameFind := findFVar?_eq_of_name_eq bindings names
+    have found : findFVar? bindings fvar = some resultIndex := by
+      rw [← sameFind]
+      exact resultFound
+    have valueEq : value = semantic := by
+      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using sourceLookup.symm
+    subst value
+    exact ⟨resultIndex, kind, physical, found, kindAt, localUpdate.1,
+      physicalRelated⟩
+  · have oldLookup : lookup source fvar = some value := by
+      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using sourceLookup
+    rcases related oldLookup with
+      ⟨index, oldKind, oldPhysical, found, oldKindAt, targetLookup,
+        oldRelated⟩
+    have names : result.name ≠ fvar.name := by
+      intro equal
+      apply sameName
+      rw [equal]
+      exact beq_self_eq_true _
+    have different := findFVar?_ne_of_name_ne bindings names resultFound found
+    exact ⟨index, oldKind, oldPhysical, found, oldKindAt,
+      (localUpdate.2 different.symm).trans targetLookup,
+      oldRelated.witnessExtension extension⟩
+
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
 inductive HostFailure where
@@ -86,6 +145,85 @@ theorem getTagFn_satisfies_contract (initial args) :
     getTagContract initial args (getTagFn.invoke initial args) := by
   rfl
 
+/-- Executable concrete implementation of an object-field projection import.
+The field index and result ABI are frozen in the import; the runtime reads one
+full semantic slot and returns its exact wasm32 word. -/
+def objectProjStep (index : Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match readObjectField store.host.runtime.heap (Word32.ofUInt32 bits) index with
+      | .ok word => .Return [.i32 (UInt32.ofNat word.value)] store
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def objectProjFn (index : Nat) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [.i32]
+  invoke := objectProjStep index }
+
+def objectProjContract (index : Nat) : Wasm.HostContract Host :=
+  fun initial args result => result = objectProjStep index initial args
+
+theorem objectProjFn_satisfies_contract (index initial args) :
+    objectProjContract index initial args
+      ((objectProjFn index).invoke initial args) := by
+  rfl
+
+/-- Successful semantic projection identifies a mapped constructor and the
+checked concrete read returns a field related at its static descriptor kind. -/
+theorem ConcreteRuntimeRel.readObjectField_refines
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat} {kind : AbiKind}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (kindAt : fieldKinds[index]? = some kind)
+    (projected : getObjectField runtime sourceObject index = .ok value) :
+    ∃ word, readObjectField concrete.heap objectWord index = .ok word ∧
+      ValueRel witness kind (.word32 word) value := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap mapped =>
+          cases mapped with
+          | mapped found =>
+              exact related.heap.readObjectField_refines found descriptor kindAt
+                projected
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getObjectField, getConstructor, Bind.bind, Except.bind] at projected
+
+theorem objectProjStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat} {kind : AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (kindAt : fieldKinds[index]? = some kind)
+    (projected : getObjectField runtime sourceObject index = .ok value) :
+    ∃ word,
+      readObjectField initial.host.runtime.heap objectWord index = .ok word ∧
+      objectProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [.i32 (UInt32.ofNat word.value)] (clearFailure initial) ∧
+      ValueRel witness kind (.word32 word) value := by
+  obtain ⟨word, read, valueRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.readObjectField_refines runtimeRelated
+      objectRelated descriptor kindAt projected
+  refine ⟨word, read, ?_, valueRelated⟩
+  simp [objectProjStep, clearFailure, read]
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -112,6 +250,73 @@ theorem StateRelated.clearFailure
   have failureEq : failure = none := related.2.1
   subst failure
   rfl
+
+/-- A successful read-only concrete operation may bind its result without
+changing the runtime witness. -/
+theorem StateRelated.bindWord32
+    {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store Host}
+    {targetLocals updated : Wasm.Locals} {witness : RefinementWitness}
+    {result : Lean.FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {word : Word32} {semantic : Value}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (valueRelated : ValueRel witness kind (.word32 word) semantic)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some updated) :
+    StateRelated sourceFunction sourceRuntime (bind sourceEnv result semantic)
+      (FirTalos.Concrete.clearFailure targetStore) updated witness := by
+  rw [related.clearFailure]
+  exact ⟨related.1, related.2.1,
+    EnvLocalsRelated.bind related.2.2 resultFound kindAt
+      (localUpdate_of_set? targetSet) (.refl witness) (.word32 valueRelated)⟩
+
+/-- W6 proof judgment for generated code over the concrete host. It mirrors
+W5's structural boundary while indexing both the target runtime and locals by
+the representation witness. -/
+def CodeWP (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (code : Lean.Compiler.LCNF.Code .impure) (target : Wasm.Program)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) (tail : List Wasm.Value)
+    (Q : Wasm.Assertion Host) : Prop :=
+  FirTalos.Correctness.CodeAdapted context sourceModule sourceFunction labels
+      code target ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    Wasm.wp module target Q targetStore
+      { targetLocals with values := tail } hostEnv
+
+/-- One direct source `let` step paired with its concrete host/local update.
+Separate witnesses allow later allocation operations to grow ghost metadata. -/
+def LetStepSimulates (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure) (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat)
+    (witness nextWitness : RefinementWitness) : Prop :=
+  FirTalos.Correctness.SourceLetResult context sourceRuntime sourceEnv decl
+      nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion Host)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
 
 /-- A successful concrete tag read is the exact executable realization of the
 semantic `getTag` result whenever the case tag satisfies the lowerer's checked
@@ -177,6 +382,253 @@ theorem wp_exact_host_call_of_return
         (locals.values.take imp.params.length).reverse at contract
     rw [hArgs, operation] at contract
     contradiction
+
+/-- Host-polymorphic local-write rule used by concrete result-producing
+imports. The semantic W5 rule is specialized to `RuntimeHost`; this is the
+same Talos instruction fact over the W6 host. -/
+theorem wp_localSet_of_set
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals updated : Wasm.Locals}
+    {index : Nat} {value : Wasm.Value} {tail : List Wasm.Value}
+    (hSet : locals.set? index value = some updated)
+    (continued :
+      Wasm.wp module rest Q store { updated with values := tail } env) :
+    Wasm.wp module (.localSet index :: rest) Q store
+      { locals with values := value :: tail } env := by
+  have stackSet :
+      ({ locals with values := value :: tail }.set? index value) =
+        (locals.set? index value).map
+          (fun next => { next with values := value :: tail }) := by
+    simp only [Wasm.Locals.set?]
+    split
+    · rfl
+    · split <;> rfl
+  simp only [Wasm.wp_localSet_cons]
+  rw [stackSet, hSet]
+  exact continued
+
+/-- Concrete-host WP for the generated object projection and destination
+write. Both the input and result are physical wasm32 words; their meanings are
+established only by `ValueRel` and the constructor descriptor. -/
+theorem wp_objectProjection_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {witness : RefinementWitness} {runtime : RuntimeState}
+    {sourceObject value : Value} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {index : Nat} {kind : AbiKind}
+    (tail : List Wasm.Value)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (objectProjContract index))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (fieldKind : fieldKinds[index]? = some kind)
+    (projected : getObjectField runtime sourceObject index = .ok value)
+    (hSet :
+      ∀ word,
+        readObjectField initial.host.runtime.heap objectWord index = .ok word →
+        ValueRel witness kind (.word32 word) value →
+        ∃ nextLocals,
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+            some nextLocals ∧
+          Wasm.wp module rest Q (clearFailure initial)
+            { nextLocals with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  obtain ⟨word, read, operation, valueRelated⟩ :=
+    objectProjStep_of_refines runtimeRelated objectRelated descriptor fieldKind
+      projected
+  obtain ⟨nextLocals, targetSet, continued⟩ :=
+    hSet word read valueRelated
+  have hObjectTail :
+      ({ locals with values := tail } : Wasm.Locals).get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)) := by
+    simpa [Wasm.Locals.get] using hObject
+  rw [Wasm.wp_localGet_cons, hObjectTail]
+  apply wp_exact_host_call_of_return
+    (step := objectProjStep index)
+    (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
+    (results := [.i32 (UInt32.ofNat word.value)])
+    hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
+/-- Object-projection instance of the concrete direct-`let` boundary. It
+proves the source interpreter step, the result-local refinement, and a Talos
+WP transformer for the generated read/call/write prefix. -/
+theorem letStepSimulates_objectProjection
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {index : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord resultWord : Word32}
+    {sourceObject value : Value} {resultKind : AbiKind}
+    {sourceRuntime : RuntimeState}
+    {witness : RefinementWitness} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (valueEq : decl.value = .oproj index objectId)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getObjectField sourceRuntime sourceObject index = .ok value)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (fieldKind : fieldKinds[index]? = some resultKind)
+    (concreteRead :
+      readObjectField initial.host.runtime.heap objectWord index = .ok resultWord)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (objectProjContract index))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat resultWord.value)) =
+        some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      sourceRuntime sourceRuntime sourceEnv value initial
+      (clearFailure initial) locals updated resultIndex witness witness := by
+  obtain ⟨actualWord, actualRead, valueRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.readObjectField_refines
+      initialRelated.1 objectRelated descriptor fieldKind projected
+  rw [concreteRead] at actualRead
+  have wordEq : resultWord = actualWord := Except.ok.inj actualRead
+  subst actualWord
+  refine ⟨?_, initialRelated,
+    initialRelated.bindWord32 resultFound resultKindAt valueRelated targetSet,
+    ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have objectLookup : lookupValue sourceEnv objectId = .ok sourceObject := by
+      simp [lookupValue, sourceLookup]
+    rw [objectLookup]
+    change ((fun projectedValue : Value =>
+      (sourceRuntime, LetAction.value projectedValue)) <$>
+        getObjectField sourceRuntime sourceObject index) =
+      .ok (sourceRuntime, .value value)
+    rw [projected]
+    rfl
+  · intro rest Q tail continued
+    apply wp_objectProjection_let tail hObject hImp hSat hi hContract hParams
+      hResults initialRelated.1 objectRelated descriptor fieldKind projected
+    intro word read related
+    rw [concreteRead] at read
+    have equal : resultWord = word := Except.ok.inj read
+    subst word
+    exact ⟨updated, targetSet, continued⟩
+
+/-- W6.6 composition for the actual object-projection code emitted by the FIR
+lowerer and Talos adapter, followed by any already-composed continuation. -/
+theorem codeWP_objectProjection_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {index : Nat} {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord resultWord : Word32}
+    {sourceObject value : Value} {resultKind : AbiKind}
+    {sourceRuntime : RuntimeState}
+    {witness : RefinementWitness} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {targetRest : Wasm.Program}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .oproj index objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.objectProj index resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.objectProj index resultKind)) = some id)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getObjectField sourceRuntime sourceObject index = .ok value)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (fieldKind : fieldKinds[index]? = some resultKind)
+    (concreteRead :
+      readObjectField initial.host.runtime.heap objectWord index = .ok resultWord)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (objectProjContract index))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat resultWord.value)) =
+        some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime (bind sourceEnv decl.fvarId value)
+        continuation targetRest (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.objectProj index resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_objectProjection (context := context)
+    valueEq sourceLookup projected initialRelated resultFound resultKindAt
+    hObject objectRelated descriptor fieldKind concreteRead hImp hSat hi
+    hContract hParams hResults targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
 
 /-- Host-polymorphic form of W5's exact i32 compare/branch stack rule. W6
 needs the same Wasm instruction fact for a concrete host state. -/

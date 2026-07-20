@@ -1878,6 +1878,16 @@ sequence with `ConcreteRuntimeRel` and the W5 compiler/adapter theorem. The
 semantic-host artifact remains unchanged until the remaining supported
 operations acquire the same boundary.
 
+W6.6b generalizes that boundary to the first result-producing object read.
+The executable `objectProj` host validates arity and lane shape, performs the
+checked eight-byte-slot read, and returns the exact wasm32 field word. The
+proof recovers the constructor descriptor and ABI-indexed result relation from
+`ConcreteRuntimeRel`, writes that result to the compiler-assigned local, proves
+the source interpreter's `oproj` step, and composes the actual generated
+`local.get; objectProj; local.set` prefix with any already-composed
+continuation. Witness-monotone physical-local lemmas introduced by this slice
+are shared infrastructure for later allocation and mutation composition.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -9,7 +9,7 @@ failure correspondence. The matrix is intentionally conservative.
 |---|---|---|---|---|
 | `literal` | Naturals only | Tagged encoder and large-natural heap theorem | Partial | Missing; strings missing |
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Missing |
-| `objectProj` | Yes | Heap theorem | Partial | Missing |
+| `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Missing |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Missing; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals | Runtime theorem | Partial | Missing |
@@ -38,10 +38,11 @@ Cross-cutting W6.5 state:
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
-- `getTag` is composed with the W5/W2 generated constructor-case theorem using
-  representation-aware concrete locals and host-owned memory; and
-- every other operation still needs that composition, while the generated V8
-  artifact lane continues to use the semantic host runtime.
+- `getTag` and `objectProj` are composed with their W5/W2 generated case and
+  `let` theorems using representation-aware concrete locals and host-owned
+  memory; and
+- the other supported operations still need that composition, while the
+  generated V8 artifact lane continues to use the semantic host runtime.
 
 Update this table in the same commit whenever an operation crosses one of
 these boundaries. A broad W6 completion claim requires every supported row to

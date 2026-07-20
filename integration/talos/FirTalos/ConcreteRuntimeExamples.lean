@@ -2,6 +2,8 @@ import FirTalos.ConcreteRuntime
 
 namespace FirTalos.Concrete
 
+open Fir.Wasm.Concrete
+
 private def emptyHostStore : Wasm.Store Host :=
   ({ funcs := [] } : Wasm.Module).initialStore
 
@@ -23,5 +25,33 @@ private def emptyHostStore : Wasm.Store Host :=
   | .Trap store _ =>
       store.host.failure? == some (.laneMismatch 0 .i32)
   | _ => false
+
+private def projectionInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `FirTalos.Concrete.projection
+  cidx := 3
+  size := 1
+  usize := 0
+  ssize := 0 }
+
+private def objectProjectionFixture :
+    Except ConcreteError (Wasm.Store Host × Word32) := do
+  let field := Word32.encodeImmediate 11 (by decide)
+  let (heap, object) ← allocateConstructor MemoryState.initial projectionInfo
+    #[field]
+  let store : Wasm.Store Host := {
+    emptyHostStore with
+    host := { emptyHostStore.host with
+      runtime := { emptyHostStore.host.runtime with heap } } }
+  return (store, object)
+
+-- The concrete Talos host projects the exact word stored in an eight-byte
+-- semantic object slot and leaves its failure channel clear.
+#guard match objectProjectionFixture with
+  | .ok (store, object) =>
+      match objectProjStep 0 store [.i32 (UInt32.ofNat object.value)] with
+      | .Return [.i32 field] next =>
+          field == 23 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
 
 end FirTalos.Concrete
