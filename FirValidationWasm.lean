@@ -9,14 +9,15 @@ open Fir.Validation
 namespace FirValidationWasm
 
 def caseIds : Array String :=
-  #["lit-nat", "id-nat", "pair-first", "local-tail", "big-ctor-70",
+  #["lit-nat", "id-nat", "pair-first", "local-tail", "big-ctor-70", "large-nat",
     "boxed-uint32", "packed-project-usize",
     "direct-call", "captured-partial", "capture-17-list",
     "recursive-empty", "recursive-traversal", "nat-add-small",
+    "nat-add-tagged-to-heap", "nat-add-heap-input",
     "effect-record-nat", "effect-record-twice", "effect-record-byte-array-twice",
     "uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max",
     "uint8-roundtrip", "uint16-roundtrip", "uint32-roundtrip", "uint64-roundtrip",
-    "usize-roundtrip", "nat-list-nonempty", "nat-list-nonempty-bool",
+    "usize-roundtrip", "nat-list-roundtrip", "nat-list-nonempty", "nat-list-nonempty-bool",
     "nat-list-empty-bool", "unicode-string-roundtrip",
     "int-positive-roundtrip", "int-negative-roundtrip",
     "int-immediate-max", "int-immediate-min",
@@ -100,14 +101,14 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     let name := moduleName.toString.replace "." "/" ++ ".olean"
     return buildInputJson "lean-olean" name path
   let buildInputManifest := Json.mkObj [
-    ("version", Json.num 1),
+    ("version", Json.num protocolVersion),
     ("scope", "reported-loaded"),
     ("inputs", Json.arr <| #[leanInput] ++ oleanInputs)]
   liftIO <| IO.FS.writeFile
     ((outputDirectory : System.FilePath) / "build-inputs.json")
     buildInputManifest.compress
   let productManifest := Json.mkObj [
-    ("version", Json.num 1),
+    ("version", Json.num protocolVersion),
     ("products", Json.arr manifestProducts)]
   liftIO <| IO.FS.writeFile
     ((outputDirectory : System.FilePath) / "products.json")

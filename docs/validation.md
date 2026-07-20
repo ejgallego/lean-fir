@@ -168,7 +168,7 @@ changing the harness:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
   "pairs": [
     {"reference": "native", "candidate": "lcnf"},
@@ -365,7 +365,7 @@ reported-loaded inventory distinct from both tools and products:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "scope": "reported-loaded",
   "inputs": [
     {
@@ -523,7 +523,7 @@ harness did not observe.
 
 The optional static `products` array or dynamic `productManifest` declares
 regular build outputs whose bytes affect the backend's semantics.  A dynamic
-manifest is a strict `{"version":1,"products":[...]}` object emitted by the
+manifest is a strict `{"version":2,"products":[...]}` object emitted by the
 current build; the harness retains it as a `product-manifest` product and
 verifies that its declarations exactly match the matrix products for that
 backend.  Each declaration has a restricted lowercase `kind` and a normalized
@@ -672,7 +672,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 52 cases.  Beyond literals,
+The compiler-generated corpus currently has 64 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -709,9 +709,13 @@ in-place ByteArray updates.  Native Lean and LCNF must preserve the original,
 intermediate, and final byte arrays in the correct argument/result positions,
 even though all runtime references point at the same uniquely owned location.
 
-The protocol already has recursive data, signed integers, scalar-bit, `USize`,
-output, and controlled effect fields.  The LCNF codec intentionally supports
-only the shapes needed by the checked corpus.  Immediate signed integers use
+Protocol v2 encodes arbitrary `Nat` datum payloads as canonical decimal
+strings; structural tags, widths, and bytes remain compact JSON numbers. This
+keeps Lean's semantic type as `Nat` while making every backend observation
+exact in Python and JavaScript. The protocol also has recursive data, signed
+integers, scalar-bit, `USize`, output, and controlled effect fields. The LCNF
+codec intentionally supports only the shapes needed by the checked corpus.
+Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
 signed-integer heap object.  Externally supplied packed constructors,
 boxed-object arrays, and more effect shapes remain vertical slices with matching
@@ -721,8 +725,8 @@ are supported; out-of-bounds behavior remains a controlled external-primitive
 follow-up.  The LCNF adapter retains immutable runtime snapshots immediately
 before and after each successful external call, so heap effects are decoded at
 event time rather than through potentially mutated or dead final-heap
-references.  A future V8 adapter will materialize the same schema-directed
-datums at the Wasm import boundary.
+references. The V8 adapter materializes the same schema-directed datums at the
+Wasm import boundary and retains its own private event-time heap views.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Int.ofNat`, `Int.neg`, `Int.decLt`, `ByteArray.size`,
@@ -795,9 +799,11 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-Large odd naturals remain excluded from this adapter because the version-1
-validation protocol encodes `Nat` as an inexact JSON number; the limitation is
-tracked by `FIR-BUG-wasm-none-json-nat-precision`.
+The default native-to-V8 matrix covers all 64 corpus cases, including a natural
+above `UInt64`, a recursive list containing that value, tagged-to-heap
+`Nat.add`, heap-input `Nat.add`, and all three controlled-effect programs.
+`FIR-BUG-wasm-none-json-nat-precision` records the protocol-v2 exact-decimal
+repair.
 Native Lean remains the source oracle.
 Talos can subsequently consume the exact same module and inputs, with V8 as
 the reference Wasm engine:

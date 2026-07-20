@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "adapterConfigs": [
     "../validation-adapters/v8-scalars.json"
   ],

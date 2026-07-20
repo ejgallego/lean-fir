@@ -5,7 +5,7 @@ namespace Fir.Validation
 open Lean
 
 /-- Version of the JSONL protocol shared by validation backends and the runner. -/
-def protocolVersion : Nat := 1
+def protocolVersion : Nat := 2
 
 /--
 A backend-neutral semantic value.
@@ -26,7 +26,64 @@ inductive ValidationDatum where
   | bytes (value : Array Nat)
   | seq (value : Array ValidationDatum)
   | ctor (name : String) (tag : Nat) (fields : Array ValidationDatum)
-  deriving Inhabited, BEq, Repr, ToJson, FromJson
+  deriving Inhabited, BEq, Repr
+
+/--
+The protocol-v2 wire representation. Arbitrary source naturals use canonical
+decimal strings so JSON consumers with an IEEE-754 numeric type cannot silently
+round them. The remaining natural fields are structural metadata or bytes and
+retain their compact numeric representation.
+-/
+private inductive ValidationDatumWire where
+  | unit
+  | bool (value : Bool)
+  | nat (value : String)
+  | int (value : Int)
+  | usize (value : UInt64)
+  | bits (width : Nat) (value : UInt64)
+  | string (value : String)
+  | bytes (value : Array Nat)
+  | seq (value : Array ValidationDatumWire)
+  | ctor (name : String) (tag : Nat) (fields : Array ValidationDatumWire)
+  deriving Inhabited, ToJson, FromJson
+
+private partial def ValidationDatum.toWire : ValidationDatum → ValidationDatumWire
+  | .unit => .unit
+  | .bool value => .bool value
+  | .nat value => .nat s!"{value}"
+  | .int value => .int value
+  | .usize value => .usize value
+  | .bits width value => .bits width value
+  | .string value => .string value
+  | .bytes value => .bytes value
+  | .seq value => .seq (value.map ValidationDatum.toWire)
+  | .ctor name tag fields => .ctor name tag (fields.map ValidationDatum.toWire)
+
+private partial def ValidationDatumWire.decode : ValidationDatumWire → Except String ValidationDatum
+  | .unit => return .unit
+  | .bool value => return .bool value
+  | .nat text => do
+      let some value := text.toNat?
+        | throw s!"natural payload is not a decimal string: {text}"
+      unless s!"{value}" == text do
+        throw s!"natural payload is not canonical decimal: {text}"
+      return .nat value
+  | .int value => return .int value
+  | .usize value => return .usize value
+  | .bits width value => return .bits width value
+  | .string value => return .string value
+  | .bytes value => return .bytes value
+  | .seq value => return .seq (← value.mapM ValidationDatumWire.decode)
+  | .ctor name tag fields =>
+      return .ctor name tag (← fields.mapM ValidationDatumWire.decode)
+
+instance : ToJson ValidationDatum where
+  toJson value := toJson value.toWire
+
+instance : FromJson ValidationDatum where
+  fromJson? json := do
+    let wire : ValidationDatumWire ← fromJson? json
+    wire.decode
 
 /-- Expected source-level shape used to decode an untyped backend result. -/
 inductive ValidationSchema where
@@ -195,7 +252,7 @@ private def protocolRoundTripRequest : CaseRequest := {
   caseId := "protocol.round-trip"
   entry := "Fir.Validation.protocolRoundTrip"
   args := #[
-    .nat 42,
+    .nat 18446744073709551617,
     .int (-2147483648),
     .int (-2147483649),
     .usize 18446744073709551615,
@@ -208,6 +265,21 @@ private def protocolRoundTripRequest : CaseRequest := {
 #guard match Jsonl.decodeCaseRequest (Jsonl.encode protocolRoundTripRequest) with
   | .ok request => request == protocolRoundTripRequest
   | .error _ => false
+
+#guard toJson (.nat 18446744073709551617 : ValidationDatum) ==
+  Json.mkObj [("nat", Json.mkObj [("value", "18446744073709551617")])]
+
+#guard match (fromJson?
+    (Json.mkObj [("nat", Json.mkObj [("value", "018446744073709551617")])]) :
+    Except String ValidationDatum) with
+  | .error _ => true
+  | .ok _ => false
+
+#guard match (fromJson?
+    (Json.mkObj [("nat", Json.mkObj [("value", Json.num 42)])]) :
+    Except String ValidationDatum) with
+  | .error _ => true
+  | .ok _ => false
 
 private def protocolRoundTripResult : BackendResult := {
   caseId := protocolRoundTripRequest.caseId

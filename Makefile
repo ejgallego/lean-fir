@@ -19,17 +19,18 @@ validate:
 validate-v8:
 	python3 scripts/validate_interpreters.py \
 		--case lit-nat --case id-nat --case pair-first \
-		--case local-tail --case big-ctor-70 \
+		--case local-tail --case big-ctor-70 --case large-nat \
 		--case boxed-uint32 --case packed-project-usize \
 		--case direct-call --case captured-partial --case capture-17-list \
 		--case recursive-empty --case recursive-traversal --case nat-add-small \
+		--case nat-add-tagged-to-heap --case nat-add-heap-input \
 		--case effect-record-nat --case effect-record-twice \
 		--case effect-record-byte-array-twice \
 		--case uint8-max --case uint16-max --case uint32-max \
 		--case uint64-max --case usize-max \
 		--case uint8-roundtrip --case uint16-roundtrip \
 		--case uint32-roundtrip --case uint64-roundtrip --case usize-roundtrip \
-		--case nat-list-nonempty --case nat-list-nonempty-bool \
+		--case nat-list-roundtrip --case nat-list-nonempty --case nat-list-nonempty-bool \
 		--case nat-list-empty-bool --case unicode-string-roundtrip \
 		--case int-positive-roundtrip --case int-negative-roundtrip \
 		--case int-immediate-max --case int-immediate-min \

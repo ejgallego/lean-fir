@@ -22,12 +22,11 @@ const SCALAR_KINDS = new Map([
   [64, "uint64"],
 ]);
 
-function exactJsonNatural(value, context) {
+const PROTOCOL_VERSION = 2;
+
+function jsonNatural(value, context) {
   assert.ok(value >= 0n, `${context} must be nonnegative`);
-  const result = Number(value);
-  assert.ok(Number.isFinite(result) && BigInt(result) === value,
-    `${context} cannot be represented exactly by the validation JSON protocol`);
-  return result;
+  return value.toString();
 }
 
 function exactJsonInteger(value, context) {
@@ -57,7 +56,7 @@ function semanticDatum(schema, value, host, context) {
         return { bool: { value: value.value === 1n } };
       case "nat":
         return {
-          nat: { value: exactJsonNatural(naturalValue(host, value, context), context) },
+          nat: { value: jsonNatural(naturalValue(host, value, context), context) },
         };
       case "int":
         return {
@@ -199,7 +198,8 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-assert.equal(requiredEnvironment("FIR_VALIDATION_PROTOCOL_VERSION"), "1");
+assert.equal(requiredEnvironment("FIR_VALIDATION_PROTOCOL_VERSION"),
+  String(PROTOCOL_VERSION));
 assert.equal(requiredEnvironment("FIR_VALIDATION_BACKEND"), "v8");
 
 const selectedCases = JSON.parse(requiredEnvironment("FIR_VALIDATION_CASES"));
@@ -211,7 +211,7 @@ assert.equal(new Set(selectedCases).size, selectedCases.length,
 const corpus = JSON.parse(
   await readFile(requiredEnvironment("FIR_VALIDATION_CORPUS"), "utf8"),
 );
-assert.equal(corpus.version, 1, "unsupported validation corpus version");
+assert.equal(corpus.version, PROTOCOL_VERSION, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
 const buildInputManifest = JSON.parse(
@@ -220,7 +220,7 @@ const buildInputManifest = JSON.parse(
     "utf8",
   ),
 );
-assert.equal(buildInputManifest.version, 1,
+assert.equal(buildInputManifest.version, PROTOCOL_VERSION,
   "unsupported build input manifest version");
 assert.equal(buildInputManifest.scope, "reported-loaded",
   "unsupported build input manifest scope");
@@ -262,7 +262,8 @@ const expectedInventoryProducts = products
   .map((product) => ({ kind: product.kind, path: product.name }))
   .sort((left, right) =>
     left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path));
-assert.equal(inventory.version, 1, "unsupported product inventory version");
+assert.equal(inventory.version, PROTOCOL_VERSION,
+  "unsupported product inventory version");
 assert.deepStrictEqual(
   [...inventory.products].sort((left, right) =>
     left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path)),
@@ -392,7 +393,7 @@ for (const caseId of selectedCases) {
     },
   ]);
   const result = {
-    version: 1,
+    version: PROTOCOL_VERSION,
     caseId,
     backend: "v8",
     diagnostics: [{ key: "validation-products", value: receipt }],

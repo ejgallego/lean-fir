@@ -19,14 +19,14 @@ import validation_lcnf as lcnf
 
 def success(case_id: str, backend: str, value: int = 42) -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "caseId": case_id,
         "backend": backend,
         "diagnostics": [],
         "outcome": {
             "success": {
                 "observation": {
-                    "termination": {"returned": {"value": {"nat": {"value": value}}}},
+                    "termination": {"returned": {"value": {"nat": {"value": str(value)}}}},
                     "stdout": "",
                     "stderr": "",
                     "effects": [],
@@ -55,11 +55,11 @@ def descriptor(
     effect_projections: list[dict] | None = None,
 ) -> dict:
     item = {
-        "version": 1,
+        "version": 2,
         "id": case_id,
         "entry": f"Fir.Validation.Source.{case_id}",
         "dependencies": [],
-        "args": [{"nat": {"value": 42}}],
+        "args": [{"nat": {"value": "42"}}],
         "argSchemas": ["nat"],
         "resultSchema": "nat",
         "tags": tags or ["quick"],
@@ -235,8 +235,8 @@ class HarnessTests(unittest.TestCase):
         native["outcome"]["success"]["observation"]["effects"] = [
             {
                 "operation": "validation.record",
-                "args": [{"nat": {"value": 7}}],
-                "result": {"nat": {"value": 8}},
+                "args": [{"nat": {"value": "7"}}],
+                "result": {"nat": {"value": "8"}},
             }
         ]
         equal, _, _ = harness.compare_success(native, success("case", "lcnf"))
@@ -248,8 +248,8 @@ class HarnessTests(unittest.TestCase):
         effects = [
             {
                 "operation": "validation.record",
-                "args": [{"nat": {"value": value}}],
-                "result": {"nat": {"value": value + 1}},
+                "args": [{"nat": {"value": str(value)}}],
+                "result": {"nat": {"value": str(value + 1)}},
             }
             for value in (7, 8)
         ]
@@ -267,7 +267,7 @@ class HarnessTests(unittest.TestCase):
 
     def test_wrong_version_rejected(self) -> None:
         record = success("case", "native")
-        record["version"] = 2
+        record["version"] = 3
         with self.assertRaises(harness.ValidationError):
             harness.checked_record(record, "native")
 
@@ -448,8 +448,8 @@ class HarnessTests(unittest.TestCase):
 
     def test_manifest_protocol_version_rejected(self) -> None:
         item = descriptor("case")
-        item["version"] = 2
-        with self.assertRaisesRegex(harness.ValidationError, "protocol version 2"):
+        item["version"] = 3
+        with self.assertRaisesRegex(harness.ValidationError, "protocol version 3"):
             harness.manifest_from_output(json.dumps(item), ["native", "--manifest"])
 
     def test_manifest_argument_arity_rejected(self) -> None:
@@ -477,7 +477,7 @@ class HarnessTests(unittest.TestCase):
             harness.write_corpus_manifest(out_dir, manifest)
             self.assertEqual(first, (out_dir / "corpus.json").read_bytes())
             artifact = json.loads(first)
-            self.assertEqual(artifact, {"version": 1, "cases": manifest})
+            self.assertEqual(artifact, {"version": 2, "cases": manifest})
 
     def test_evidence_blobs_are_append_only_and_content_addressed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2178,7 +2178,7 @@ class HarnessTests(unittest.TestCase):
             module.write_bytes(b"wasm product")
             manifest = backend_dir / "products.json"
             manifest_value = {
-                "version": 1,
+                "version": 2,
                 "products": [
                     {"kind": "wasm-module", "path": "modules/module.wasm"}
                 ],
@@ -2220,20 +2220,20 @@ class HarnessTests(unittest.TestCase):
 
             invalid_manifests = [
                 (
-                    {"version": 2, "products": []},
+                    {"version": 1, "products": []},
                     "unsupported version",
                 ),
                 (
-                    {"version": 1, "products": []},
+                    {"version": 2, "products": []},
                     "nonempty array",
                 ),
                 (
-                    {"version": 1, "products": [], "extra": True},
+                    {"version": 2, "products": [], "extra": True},
                     "must contain version and products",
                 ),
                 (
                     {
-                        "version": 1,
+                        "version": 2,
                         "products": [
                             {"kind": "wasm-module", "path": "module.wasm"},
                             {"kind": "debug-info", "path": "module.wasm"},
@@ -2243,7 +2243,7 @@ class HarnessTests(unittest.TestCase):
                 ),
                 (
                     {
-                        "version": 1,
+                        "version": 2,
                         "products": [
                             {
                                 "kind": "wasm-module",
@@ -2417,7 +2417,7 @@ class HarnessTests(unittest.TestCase):
                 manifest.write_text(
                     json.dumps(
                         {
-                            "version": 1,
+                            "version": 2,
                             "scope": "reported-loaded",
                             "inputs": [
                                 {
@@ -2518,7 +2518,7 @@ class HarnessTests(unittest.TestCase):
             def manifest(inputs: list[dict], **extra: object) -> bytes:
                 return json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "scope": "reported-loaded",
                         "inputs": inputs,
                         **extra,
@@ -2539,16 +2539,16 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(captured.sha256, harness.sha256_bytes(b"olean"))
 
             malformed = (
-                {"version": 2, "scope": "reported-loaded", "inputs": [valid]},
-                {"version": 1, "scope": "exact", "inputs": [valid]},
-                {"version": 1, "scope": "reported-loaded", "inputs": []},
+                {"version": 1, "scope": "reported-loaded", "inputs": [valid]},
+                {"version": 2, "scope": "exact", "inputs": [valid]},
+                {"version": 2, "scope": "reported-loaded", "inputs": []},
                 {
-                    "version": 1,
+                    "version": 2,
                     "scope": "reported-loaded",
                     "inputs": [valid, valid],
                 },
                 {
-                    "version": 1,
+                    "version": 2,
                     "scope": "reported-loaded",
                     "inputs": [
                         valid,
@@ -2560,7 +2560,7 @@ class HarnessTests(unittest.TestCase):
                     ],
                 },
                 {
-                    "version": 1,
+                    "version": 2,
                     "scope": "reported-loaded",
                     "inputs": [valid | {"path": "relative.olean"}],
                 },
@@ -2603,7 +2603,7 @@ class HarnessTests(unittest.TestCase):
             source = root / "compiler.input"
             source.write_bytes(b"original input")
             raw_manifest = {
-                "version": 1,
+                "version": 2,
                 "scope": "reported-loaded",
                 "inputs": [
                     {
@@ -2678,7 +2678,7 @@ class HarnessTests(unittest.TestCase):
             backend_dir.mkdir()
             content = json.dumps(
                 {
-                    "version": 1,
+                    "version": 2,
                     "products": [
                         {"kind": "wasm-module", "path": "module.wasm"}
                     ],
@@ -2826,7 +2826,7 @@ class HarnessTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "adapterConfigs": [
                             "../adapters/v8.json",
                             "../adapters/talos.json",
@@ -3094,7 +3094,7 @@ class HarnessTests(unittest.TestCase):
                 "'modules','validation.wasm');"
                 "path.parent.mkdir(parents=True,exist_ok=True);"
                 f"path.write_bytes({product_bytes!r});"
-                "closure={'version':1,'scope':'reported-loaded','inputs':["
+                "closure={'version':2,'scope':'reported-loaded','inputs':["
                 "{'kind':'fixture-source','name':'compiler.input','path':"
                 f"{str(material_path)!r}" "}]};"
                 "pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
@@ -3187,7 +3187,7 @@ class HarnessTests(unittest.TestCase):
             plan_path.write_text(
                 json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "adapterConfigs": ["v8.json"],
                         "pairs": [
                             {"reference": "native", "candidate": "v8"}
