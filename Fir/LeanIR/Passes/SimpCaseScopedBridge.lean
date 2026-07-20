@@ -2716,6 +2716,22 @@ structure ScopedCaseAddDefaultAlphaLaws
       (shadowAddDefaultMiddle (shadowFilterUnreachable sourceAlts))
       (shadowFilterUnreachable sourceAlts)
 
+/-- Certified pure-alpha boundary: recursive alternatives provide the full
+endpoint certificate for every body instead of relying on a global recovery
+law from weaker identities. -/
+structure ScopedCaseAddDefaultCertifiedAlphaLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    ScopedAddDefaultSelectionEvidence index
+      (shadowAddDefaultMiddle (shadowFilterUnreachable sourceAlts))
+      (shadowFilterUnreachable sourceAlts)
+
 /-- Scoped conversion required after the transparent fold has identified two
 selected bodies and the exact upstream alpha check between them. The identity
 records provide the hygiene, metadata, and endpoint structure from which the
@@ -2936,6 +2952,105 @@ theorem scopedCaseAddDefaultAlphaLaws_of_transport
       backward := fun tag => (relatedAt tag).2
     }
 
+/-- Certified default folding obtains unary side conditions directly from the
+recursive alternative endpoints. The table/selector proof is otherwise the
+same transparent calculation as the identity-only presentation. -/
+theorem scopedCaseAddDefaultCertifiedAlphaLaws_of_transport
+    (transport : ScopedFoldAlphaCertifiedTransportLaws validCase) :
+    ScopedCaseAddDefaultCertifiedAlphaLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts alternatives
+      filteredNotSingleton preparedSingleton
+    have foldedSingleton :
+        (shadowAddDefaultAlt
+          (shadowFilterUnreachable sourceAlts)).size = 1 := by
+      simpa [shadowPrepareAlts, LCNF.Cases.alts] using preparedSingleton
+    have filteredLarge :
+        1 < (shadowFilterUnreachable sourceAlts).size :=
+      one_lt_size_of_shadowAddDefaultAlt_singleton
+        filteredNotSingleton foldedSingleton
+    have filteredNonempty :
+        (shadowFilterUnreachable sourceAlts).size ≠ 0 := by omega
+    have representativeMemberFiltered :
+        (shadowGetMaxOccs
+          (shadowFilterUnreachable sourceAlts)).1 ∈
+            shadowFilterUnreachable sourceAlts :=
+      shadowGetMaxOccs_fst_mem filteredNonempty
+    have representativeMemberSource :
+        (shadowGetMaxOccs
+          (shadowFilterUnreachable sourceAlts)).1 ∈ sourceAlts := by
+      unfold shadowFilterUnreachable at representativeMemberFiltered
+      exact (Array.mem_filter.mp representativeMemberFiltered).1
+    rcases alternatives.targetBodyCertificate_of_mem (by
+        simpa using representativeMemberSource) with
+      ⟨representativeCertificate⟩
+    have relatedAt : ∀ tag,
+        CaseSelectionRelated
+            (leftJoins := index.sourceJoins)
+            (rightJoins := index.targetJoins)
+            index.forwardRho index.sourceScope index.targetScope
+            (chooseAlt tag (shadowAddDefaultMiddle
+              (shadowFilterUnreachable sourceAlts)).toList)
+            (chooseAlt tag (shadowAddDefaultAlt
+              (shadowFilterUnreachable sourceAlts)).toList) ∧
+          CaseSelectionRelated
+            (leftJoins := index.targetJoins)
+            (rightJoins := index.sourceJoins)
+            index.backwardRho index.targetScope index.sourceScope
+            (chooseAlt tag (shadowAddDefaultAlt
+              (shadowFilterUnreachable sourceAlts)).toList)
+            (chooseAlt tag (shadowAddDefaultMiddle
+              (shadowFilterUnreachable sourceAlts)).toList) := by
+      intro tag
+      rcases chooseAlt_foldCreatedSingleton_alpha
+          filteredNotSingleton foldedSingleton with
+        ⟨middleBody, middleSelected, foldedSelected,
+          ⟨middleAlt, middleMemberFiltered, middleBodyEq⟩, sameOrAlpha⟩
+      have middleMemberSource : middleAlt ∈ sourceAlts := by
+        unfold shadowFilterUnreachable at middleMemberFiltered
+        exact (Array.mem_filter.mp middleMemberFiltered).1
+      rcases alternatives.targetBodyCertificate_of_mem (by
+          simpa using middleMemberSource) with ⟨rawMiddleCertificate⟩
+      have middleCertificate :
+          ScopedCodeTargetCertificate validCase index middleBody := by
+        simpa [middleBodyEq] using rawMiddleCertificate
+      have directions :
+          CodeRelated
+              (leftJoins := index.sourceJoins)
+              (rightJoins := index.targetJoins)
+              index.forwardRho index.sourceScope index.targetScope
+              middleBody
+              (shadowGetMaxOccs
+                (shadowFilterUnreachable sourceAlts)).1.getCode ∧
+            CodeRelated
+              (leftJoins := index.targetJoins)
+              (rightJoins := index.sourceJoins)
+              index.backwardRho index.targetScope index.sourceScope
+              (shadowGetMaxOccs
+                (shadowFilterUnreachable sourceAlts)).1.getCode
+              middleBody := by
+        rcases sameOrAlpha with same | accepted
+        · have middleAltEq : middleAlt.getCode =
+              (shadowGetMaxOccs
+                (shadowFilterUnreachable sourceAlts)).1.getCode :=
+            middleBodyEq.trans same
+          constructor
+          · simpa [same, middleAltEq] using
+              representativeCertificate.alpha.forward
+          · simpa [same, middleAltEq] using
+              representativeCertificate.alpha.backward
+        · exact transport.related middleCertificate
+            representativeCertificate accepted
+      constructor
+      · rw [middleSelected, foldedSelected]
+        exact .some directions.1
+      · rw [middleSelected, foldedSelected]
+        exact .some directions.2
+    exact {
+      forward := fun tag => (relatedAt tag).1
+      backward := fun tag => (relatedAt tag).2
+    }
+
 /-- The irreducible semantic input for a genuine default fold. Filtering and
 the final singleton elimination are structural; this contract exposes a
 selection-preserving middle table and supplies only the bidirectional alpha
@@ -2953,11 +3068,32 @@ structure ScopedCaseFoldedAlphaLaws
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
 
+/-- Certified folded-alpha law used by the invariant-carrying recursive path. -/
+structure ScopedCaseFoldedCertifiedAlphaLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowFilterUnreachable sourceAlts).size ≠ 1 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1 →
+    Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
+
 /-- Lift the pure alpha boundary to the fold presentation consumed by the
 three-phase constructor. No additional semantic premise is introduced. -/
 theorem scopedCaseFoldedAlphaLaws_of_addDefaultAlpha
     (alpha : ScopedCaseAddDefaultAlphaLaws validCase) :
     ScopedCaseFoldedAlphaLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts alternatives
+      filteredNotSingleton preparedSingleton
+    exact ⟨scopedFoldedAlphaEvidence_of_addDefault
+      (alpha.folded alternatives filteredNotSingleton preparedSingleton)⟩
+
+theorem scopedCaseFoldedCertifiedAlphaLaws_of_addDefaultAlpha
+    (alpha : ScopedCaseAddDefaultCertifiedAlphaLaws validCase) :
+    ScopedCaseFoldedCertifiedAlphaLaws validCase where
   folded := by
     intro index typeName resultType discr sourceAlts alternatives
       filteredNotSingleton preparedSingleton

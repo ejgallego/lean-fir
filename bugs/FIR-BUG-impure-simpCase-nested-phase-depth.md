@@ -234,4 +234,9 @@ kernel has a certified synchronization theorem, and
 `ScopedFoldAlphaCertifiedTransportLaws` consumes the resulting per-body
 certificates directly. Its only remaining cross-code input is
 `ScopedFoldRuntimeTypeLaws`; the audited upstream bridge is still called once
-and reverse alpha remains derived by `codeRelated_symm`.
+and reverse alpha remains derived by `codeRelated_symm`. The certified
+default-fold law now uses the two concrete body certificates selected from
+that recursive result, so it no longer assumes a global recovery principle
+from weaker endpoint identities. This certified result has been lifted to the
+folded-alpha interface; the next step is to carry it through singleton and
+retained-case reconstruction.
