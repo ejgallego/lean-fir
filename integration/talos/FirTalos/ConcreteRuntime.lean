@@ -94,6 +94,98 @@ theorem EnvLocalsRelated.bind
       (localUpdate.2 different.symm).trans targetLookup,
       oldRelated.witnessExtension extension⟩
 
+/-- Unified natural-literal refinement assembled after both the natural and
+promoted-tag proof modules are available. -/
+theorem allocateNatural_liveHeapRel_extends
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (value : Nat) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (allocated : allocateNatural state value = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness (literal runtime (.nat value)).1 ∧
+      ValueRel nextWitness .tobject (.word32 word)
+        (literal runtime (.nat value)).2 := by
+  by_cases small : value ≤ maxTaggedPayload
+  · have encoded : encodeTagged state (UInt64.ofNat value) =
+        .ok (result, word) := by
+      unfold allocateNatural at allocated
+      rw [if_pos small] at allocated
+      exact allocated
+    obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+      encodeTagged_liveHeapRel_extends state result witness runtime
+        (UInt64.ofNat value) word related encoded
+    have literalEq : literal runtime (.nat value) =
+        (runtime, .object (.tagged (UInt64.ofNat value))) := by
+      simp [literal, small]
+    rw [literalEq]
+    exact ⟨nextWitness, extension, heapRelated, valueRelated⟩
+  · have large : maxTaggedPayload < value := Nat.lt_of_not_ge small
+    obtain ⟨_, _, _, objectAllocation, _, _⟩ :=
+      allocateNatural_heap_decompose state result value word large allocated
+    have freshAddress := related.frontier.allocateObject_address objectAllocation
+    have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
+      cases found : witness.locations.lookup? runtime.nextLocation with
+      | none => rfl
+      | some oldAddress =>
+          exfalso
+          obtain ⟨cell, semanticFound, _⟩ :=
+            related.concreteToSemantic runtime.nextLocation oldAddress found
+          have beforeNext :=
+            related.locationsBeforeNext runtime.nextLocation cell semanticFound
+          exact (Nat.lt_irrefl runtime.nextLocation) beforeNext
+    have descriptorFresh : ∀ old descriptor,
+        witness.descriptors.lookup? old = some descriptor →
+        word.value ≠ old.value := by
+      intro old descriptor found equal
+      have owned := related.descriptorsOwned old descriptor found
+      simp [headerBytes] at owned
+      omega
+    have extension := witness.bindNatural_extends runtime.nextLocation word value
+      locationFresh descriptorFresh
+    have refined := allocateNatural_heap_liveHeapRel state result witness runtime
+      value word related large allocated
+    rw [semanticLiteral_natural_heap_eq runtime value large]
+    exact ⟨witness.bindNatural runtime.nextLocation word value, extension,
+      refined.1, refined.2⟩
+
+theorem ConcreteRuntimeRel.allocateNatural
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState} {value : Nat}
+    {word : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (allocated : allocateNatural concrete.heap value = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness
+        (literal runtime (.nat value)).1 ∧
+      ValueRel nextWitness .tobject (.word32 word)
+        (literal runtime (.nat value)).2 := by
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+    allocateNatural_liveHeapRel_extends concrete.heap result witness runtime
+      value word related.heap allocated
+  have auxiliary :
+      (literal runtime (.nat value)).1.globals = runtime.globals ∧
+      (literal runtime (.nat value)).1.world = runtime.world ∧
+      (literal runtime (.nat value)).1.trace = runtime.trace := by
+    by_cases small : value ≤ maxTaggedPayload
+    · simp [literal, small]
+    · have large : maxTaggedPayload < value := Nat.lt_of_not_ge small
+      rw [semanticLiteral_natural_heap_eq runtime value large]
+      simp [semanticNaturalResult]
+  refine ⟨nextWitness, extension, ?_, valueRelated⟩
+  exact {
+    heap := heapRelated
+    globals := by
+      rw [auxiliary.1]
+      exact related.globals.witnessExtension extension
+    world := by
+      rw [auxiliary.2.1]
+      exact related.world
+    trace := by
+      rw [auxiliary.2.2]
+      exact related.trace.witnessExtension extension }
+
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
 inductive HostFailure where
@@ -240,6 +332,36 @@ def scalarProjContract (width offset : Nat) (kind : AbiKind) :
 theorem scalarProjFn_satisfies_contract (width offset kind initial args) :
     scalarProjContract width offset kind initial args
       ((scalarProjFn width offset kind).invoke initial args) := by
+  rfl
+
+def replaceHeap (store : Wasm.Store Host) (heap : MemoryState) :
+    Wasm.Store Host :=
+  let store := clearFailure store
+  { store with host := { store.host with
+      runtime := { store.host.runtime with heap } } }
+
+def naturalLiteralStep (value : Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [] =>
+      match allocateNatural store.host.runtime.heap value with
+      | .ok (heap, word) =>
+          .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | args => trap store (.arityMismatch 0 args.length)
+
+def naturalLiteralFn (value : Nat) : Wasm.HostFn Host := {
+  params := []
+  results := [.i32]
+  invoke := naturalLiteralStep value }
+
+def naturalLiteralContract (value : Nat) : Wasm.HostContract Host :=
+  fun initial args result => result = naturalLiteralStep value initial args
+
+theorem naturalLiteralFn_satisfies_contract (value initial args) :
+    naturalLiteralContract value initial args
+      ((naturalLiteralFn value).invoke initial args) := by
   rfl
 
 /-- Successful semantic projection identifies a mapped constructor and the
@@ -462,6 +584,28 @@ theorem scalarProjUInt64Step_of_refines
             simp [getScalarField, getConstructor, Bind.bind, Except.bind]
               at projected
 
+theorem naturalLiteralStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {value : Nat} {heap : MemoryState}
+    {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (allocated : allocateNatural initial.host.runtime.heap value =
+      .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      naturalLiteralStep value initial [] =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (literal runtime (.nat value)).1 ∧
+      PhysicalValueRel nextWitness .tobject
+        (.i32 (UInt32.ofNat word.value)) (literal runtime (.nat value)).2 := by
+  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
+  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated⟩
+  · simp [naturalLiteralStep, replaceHeap, clearFailure, allocated]
+  · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -555,6 +699,32 @@ theorem StateRelated.bindPhysical
   exact ⟨related.1, related.2.1,
     EnvLocalsRelated.bind related.2.2 resultFound kindAt
       (localUpdate_of_set? targetSet) (.refl witness) valueRelated⟩
+
+theorem StateRelated.bindAfter
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals updated : Wasm.Locals}
+    {witness nextWitness : RefinementWitness}
+    {result : Lean.FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (extension : witness.Extends nextWitness)
+    (runtimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (valueRelated : PhysicalValueRel nextWitness kind physical semantic)
+    (targetSet : targetLocals.set? resultIndex physical = some updated) :
+    StateRelated sourceFunction nextRuntime (bind sourceEnv result semantic)
+      nextStore updated nextWitness := by
+  exact ⟨runtimeRelated, failureClear,
+    EnvLocalsRelated.bind related.2.2 resultFound kindAt
+      (localUpdate_of_set? targetSet) extension valueRelated⟩
 
 /-- W6 proof judgment for generated code over the concrete host. It mirrors
 W5's structural boundary while indexing both the target runtime and locals by
@@ -834,6 +1004,35 @@ theorem wp_scalarProjection_let
     (step := scalarProjStep width offset kind)
     (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
     (results := [physical]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+theorem wp_naturalLiteral_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {value : Nat} {word : Word32}
+    (tail : List Wasm.Value)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (naturalLiteralContract value))
+    (hParams : imp.params.length = 0)
+    (hResults : imp.results.length = 1)
+    (operation : naturalLiteralStep value initial [] =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (hSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module (.call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_exact_host_call_of_return
+    (step := naturalLiteralStep value) (physicalArgs := [])
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
   · simp [hParams]
   · exact operation
   · simpa [hParams, hResults] using
@@ -1268,6 +1467,125 @@ theorem codeWP_scalarProjection_let
     targetSet
   rcases step with ⟨_, stepInitial, _, stepWP⟩
   rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
+theorem letStepSimulates_naturalLiteral
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {value : Nat} {heap : MemoryState} {word : Word32}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    (valueEq : decl.value = .lit (.nat value))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .tobject)
+    (allocated : allocateNatural initial.host.runtime.heap value =
+      .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (naturalLiteralContract value))
+    (hParams : imp.params.length = 0)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) = some updated) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (literal sourceRuntime (.nat value)).1 ∧
+      PhysicalValueRel nextWitness .tobject
+        (.i32 (UInt32.ofNat word.value)) (literal sourceRuntime (.nat value)).2 ∧
+      LetStepSimulates context sourceFunction module hostEnv decl [.call id]
+        sourceRuntime (literal sourceRuntime (.nat value)).1 sourceEnv
+        (literal sourceRuntime (.nat value)).2 initial (replaceHeap initial heap)
+        locals updated resultIndex witness nextWitness := by
+  obtain ⟨nextWitness, extension, operation, nextRuntimeRelated,
+      valueRelated⟩ :=
+    naturalLiteralStep_of_refines initialRelated.1 allocated
+  have failureClear : (replaceHeap initial heap).host.failure? = none := by
+    simp [replaceHeap, clearFailure]
+  have nextState := initialRelated.bindAfter extension nextRuntimeRelated
+    failureClear resultFound resultKindAt valueRelated targetSet
+  refine ⟨nextWitness, extension, nextRuntimeRelated, valueRelated,
+    ?_, initialRelated, nextState, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    rfl
+  · intro rest Q tail continued
+    exact wp_naturalLiteral_let tail hImp hSat hi hContract hParams hResults
+      operation targetSet continued
+
+theorem codeWP_naturalLiteral_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {value : Nat} {heap : MemoryState} {word : Word32}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .lit (.nat value))
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.call (.runtime (.literal (.nat value) .tobject))])
+    (callFound : callIndex? sourceModule
+      (.runtime (.literal (.nat value) .tobject)) = some id)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .tobject)
+    (allocated : allocateNatural initial.host.runtime.heap value =
+      .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (naturalLiteralContract value))
+    (hParams : imp.params.length = 0)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : ∀ nextWitness,
+      witness.Extends nextWitness →
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (literal sourceRuntime (.nat value)).1 →
+      PhysicalValueRel nextWitness .tobject
+        (.i32 (UInt32.ofNat word.value)) (literal sourceRuntime (.nat value)).2 →
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        (literal sourceRuntime (.nat value)).1
+        (bind sourceEnv decl.fvarId (literal sourceRuntime (.nat value)).2)
+        continuation targetRest (replaceHeap initial heap) updated nextWitness
+        tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.call (.runtime (.literal (.nat value) .tobject))] =
+        .ok [.call id] := by
+    simp [instructions, instruction, callFound]
+    rfl
+  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+    letStepSimulates_naturalLiteral (context := context) valueEq initialRelated
+      resultFound resultKindAt allocated hImp hSat hi hContract hParams hResults
+      targetSet
+  have nextCode := continued nextWitness extension nextRuntimeRelated valueRelated
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases nextCode with ⟨continuationAdapted, _, continuedWP⟩
   refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
       continuationAdapted, stepInitial, ?_⟩
   exact stepWP targetRest Q tail continuedWP

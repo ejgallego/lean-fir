@@ -115,4 +115,20 @@ private def scalarProjectionFixture :
       store.host.failure? == some (.unsupportedScalarKind .float32)
   | _ => false
 
+-- Small naturals stay immediate and do not move the concrete heap frontier.
+#guard match naturalLiteralStep 42 emptyHostStore [] with
+  | .Return [.i32 word] store =>
+      word == 85 && store.host.runtime.heap.heapCursor == heapBase &&
+        store.host.failure?.isNone
+  | _ => false
+
+-- Large naturals allocate their complete little-endian limb representation.
+#guard match naturalLiteralStep (UInt64.size + 5) emptyHostStore [] with
+  | .Return [.i32 bits] store =>
+      let word := Word32.ofUInt32 bits
+      match readNatural store.host.runtime.heap word with
+      | .ok value => value == UInt64.size + 5 && store.host.failure?.isNone
+      | .error _ => false
+  | _ => false
+
 end FirTalos.Concrete

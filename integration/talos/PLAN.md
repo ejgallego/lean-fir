@@ -1905,6 +1905,16 @@ source `sproj`, generated read/call/write prefix, and continuation. A maximum
 structured unsupported-kind trap and remain governed by
 `FIR-BUG-wasm-none-float-runtime-gap`.
 
+W6.6e establishes the first allocation-producing composition rule. Natural
+literals now execute directly against concrete memory for immediate,
+promoted-tag, and limb-backed representations. Strengthened allocation
+theorems return explicit monotone witness extensions, allowing the whole
+runtime relation and every old global, trace entry, and local to survive heap
+growth. The source literal step, generated host call/local write, and arbitrary
+continuation compose under the resulting witness. Executable guards cover a
+small immediate and a two-limb natural. String literals remain outside this
+slice and are still an explicit coverage gap.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

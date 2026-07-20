@@ -341,4 +341,46 @@ theorem encodeTagged_liveHeapRel
       allocatePromotedTag_liveHeapRel state result witness runtime payload word
         related promoted⟩
 
+/-- Allocation-producing clients also need the monotonicity fact for proof
+metadata so pre-existing globals, trace entries, and locals remain related. -/
+theorem encodeTagged_liveHeapRel_extends
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : Fir.LeanIR.Impure.RuntimeState)
+    (payload : UInt64) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (encoded : encodeTagged state payload = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness runtime ∧
+      ValueRel nextWitness .tobject (.word32 word)
+        (.object (.tagged payload)) := by
+  by_cases fits : payload.toNat ≤ maxImmediatePayload
+  · rw [encodeTagged_immediate state payload fits] at encoded
+    have pairEq : (state, Word32.encodeImmediate payload.toNat fits) =
+        (result, word) := Except.ok.inj encoded
+    have stateEq := congrArg Prod.fst pairEq
+    have wordEq := congrArg Prod.snd pairEq
+    change state = result at stateEq
+    change Word32.encodeImmediate payload.toNat fits = word at wordEq
+    subst result
+    subst word
+    exact ⟨witness, .refl witness, related,
+      encodeTagged_immediate_refines witness payload fits⟩
+  · have promoted : allocatePromotedTag state payload = .ok (result, word) := by
+      simpa [encodeTagged, fits] using encoded
+    obtain ⟨_, objectAllocation, _, _⟩ :=
+      allocatePromotedTag_decompose state result payload word promoted
+    have freshAddress := related.frontier.allocateObject_address objectAllocation
+    have descriptorFresh : ∀ old descriptor,
+        witness.descriptors.lookup? old = some descriptor →
+        word.value ≠ old.value := by
+      intro old descriptor found equal
+      have owned := related.descriptorsOwned old descriptor found
+      simp [headerBytes] at owned
+      omega
+    have extension := witness.promoteTag_extends payload word descriptorFresh
+    have refined := allocatePromotedTag_liveHeapRel state result witness runtime
+      payload word related promoted
+    exact ⟨witness.promoteTag payload word, extension, refined.1, refined.2⟩
+
 end Fir.Wasm.Concrete
