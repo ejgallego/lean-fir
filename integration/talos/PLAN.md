@@ -1888,6 +1888,14 @@ the source interpreter's `oproj` step, and composes the actual generated
 continuation. Witness-monotone physical-local lemmas introduced by this slice
 are shared infrastructure for later allocation and mutation composition.
 
+W6.6c carries the same read-and-bind proof through the first 64-bit physical
+lane. The executable `usizeProj` host decodes an i32 object address, performs a
+checked `USize` field read, and returns the full value in an i64 lane. Its
+source-step, state/local refinement, compiler/adapter, and Talos continuation
+theorems show that the W6.6 machinery is ABI-indexed rather than specific to
+wasm32 object results. An executable maximum-`UInt64` fixture guards the
+nontruncation boundary.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

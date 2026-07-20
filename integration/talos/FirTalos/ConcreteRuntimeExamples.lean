@@ -54,4 +54,31 @@ private def objectProjectionFixture :
       | _ => false
   | .error _ => false
 
+private def usizeProjectionInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `FirTalos.Concrete.usizeProjection
+  cidx := 4
+  size := 0
+  usize := 1
+  ssize := 0 }
+
+private def usizeProjectionFixture :
+    Except ConcreteError (Wasm.Store Host × Word32) := do
+  let (heap, object) ← allocateConstructor MemoryState.initial
+    usizeProjectionInfo #[]
+  let heap ← writeUSizeField heap object 0 18446744073709551615
+  let store : Wasm.Store Host := {
+    emptyHostStore with
+    host := { emptyHostStore.host with
+      runtime := { emptyHostStore.host.runtime with heap } } }
+  return (store, object)
+
+-- USize projection preserves the full Lean64 payload in an i64 lane.
+#guard match usizeProjectionFixture with
+  | .ok (store, object) =>
+      match usizeProjStep 0 store [.i32 (UInt32.ofNat object.value)] with
+      | .Return [.i64 value] next =>
+          value == 18446744073709551615 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
 end FirTalos.Concrete
