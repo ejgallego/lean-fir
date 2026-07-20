@@ -29,7 +29,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Missing |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Missing |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
-| `getTag` | Yes | Mapped constructor theorem; tagged operation wrapper missing | Partial | Missing |
+| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Missing |
 
 Cross-cutting W6.5 state:
 

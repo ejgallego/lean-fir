@@ -209,6 +209,22 @@ theorem ConstructorObjectRel.readTag_refines
   simp [liftMemory, headerKind, tag64, constructorBeq]
   rfl
 
+/-- Exact tagged references decode through `readTag`, whether their physical
+word is immediate or a promoted-tag allocation. -/
+theorem LiveHeapRel.readTaggedReferenceTag_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {payload : UInt64}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : TaggedReferenceRel witness word payload) :
+    readTag state word = .ok payload := by
+  cases valueRelated with
+  | immediate payload fits =>
+      unfold readTag
+      simp [Word32.classify_encodeImmediate, Word32.decode_encodeImmediate]
+      rfl
+  | promoted found =>
+      exact (related.promoted payload word found).decoded
+
 /-- The checked concrete object projection refines the actual W2 semantic
 `getObjectField` operation for a mapped live constructor. -/
 theorem LiveHeapRel.readObjectField_refines
@@ -348,5 +364,26 @@ theorem LiveHeapRel.readTag_refines
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
       simp at semanticTag
+
+/-- Complete `.getTag` wrapper for its representation-polymorphic object ABI.
+Mapped constructors use the heap theorem above; exact tagged values use the
+immediate/promoted decoder relation without consulting the semantic heap. -/
+theorem LiveHeapRel.readTag_tobject_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value} {tag : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (semanticTag : getTag runtime value = .ok tag) :
+    readTag state word = .ok (UInt64.ofNat tag) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped => exact related.readTag_refines mapped semanticTag
+      | tagged taggedRelated =>
+          have tagEq := Except.ok.inj semanticTag
+          rw [← tagEq]
+          simpa using related.readTaggedReferenceTag_refines taggedRelated
 
 end Fir.Wasm.Concrete

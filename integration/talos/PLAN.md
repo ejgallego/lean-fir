@@ -1861,6 +1861,12 @@ allocation. Explicit conversions between exact tagged relations and the
 representation-polymorphic `.tobject` boundary make that ABI refinement
 visible rather than burying it in an existential witness.
 
+W6.5o closes `.getTag` at its declared `.tobject` input boundary. The complete
+wrapper now dispatches proof-side between mapped live constructors and exact
+tagged references; the latter decodes identically for immediate words and
+promoted-tag allocations. In both cases the concrete `UInt64` result is the
+exact image of FIR's semantic `Nat` tag.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
