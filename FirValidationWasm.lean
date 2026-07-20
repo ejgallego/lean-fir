@@ -9,7 +9,8 @@ open Fir.Validation
 namespace FirValidationWasm
 
 def caseIds : Array String :=
-  #["boxed-uint32", "packed-project-usize",
+  #["lit-nat", "id-nat", "pair-first", "local-tail", "big-ctor-70",
+    "boxed-uint32", "packed-project-usize",
     "direct-call", "captured-partial", "capture-17-list",
     "recursive-empty", "recursive-traversal", "nat-add-small",
     "uint8-max", "uint16-max", "uint32-max", "uint64-max", "usize-max",
