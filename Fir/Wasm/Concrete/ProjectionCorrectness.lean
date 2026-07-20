@@ -31,6 +31,161 @@ theorem getUSizeField_eq_ok_iff_of_cell
   simp only [Pure.pure, Except.pure]
   cases fieldAt : semantic.usizeFields[index]? <;> simp
 
+/-- A successful semantic packed-scalar projection identifies the exact
+field selected by its compiler operands. -/
+theorem scalarField_of_getScalarField_eq_ok_of_cell
+    (runtime : RuntimeState) (location : Location) (cell : HeapCell)
+    (semantic : ConstructorObject) (width offset : Nat) (value : ScalarValue)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (objectEq : cell.object = .ctor semantic)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar value)) :
+    ∃ field, field ∈ semantic.scalarFields ∧ field.width = width ∧
+      field.offset = offset ∧ field.value = value := by
+  unfold getScalarField at projected
+  simp [getConstructor, getLiveCell, found, live, objectEq, Bind.bind,
+    Except.bind] at projected
+  simp only [pure, Except.pure] at projected
+  cases fieldFound : semantic.scalarFields.find? fun field =>
+      field.width == width && field.offset == offset with
+  | none =>
+      rw [fieldFound] at projected
+      contradiction
+  | some field =>
+      have selected := List.find?_some fieldFound
+      have member := List.mem_of_find?_eq_some fieldFound
+      rw [fieldFound] at projected
+      have valueEq := Value.scalar.inj (Except.ok.inj projected)
+      simp at selected
+      exact ⟨field, member, selected.1, selected.2, valueEq⟩
+
+/-- Successful semantic scalar projection exposes the related constructor
+decoder and its selected packed-field witness. -/
+theorem LiveHeapRel.scalarField_of_projected
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {value : ScalarValue}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar value)) :
+    ∃ info fieldKinds semantic field,
+      ConstructorObjectRel state witness address info fieldKinds semantic ∧
+      field ∈ semantic.scalarFields ∧ field.width = width ∧
+      field.offset = offset ∧ field.value = value := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getScalarField, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | constructor descriptor objectEq objectRelated headerRead headerKind refCount
+      persistent cellLive =>
+      obtain ⟨field, member, fieldWidth, fieldOffset, fieldValue⟩ :=
+        scalarField_of_getScalarField_eq_ok_of_cell runtime location cell _ width
+          offset value found live objectEq projected
+      exact ⟨_, _, _, field, objectRelated, member, fieldWidth, fieldOffset,
+        fieldValue⟩
+  | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+  | natural descriptor objectEq headerRead headerKind ordinary marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+
+/-- Checked packed `UInt8` projection refines semantic `getScalarField`. -/
+theorem LiveHeapRel.readScalarUInt8Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat} {value : UInt8}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.uint8 value))) :
+    readScalarUInt8Field state address width offset = .ok value ∧
+      ValueRel witness .uint8 (.word32 (Word32.ofUInt8 value))
+        (.scalar (.uint8 value)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, BoxedScalar.valueRel witness (.uint8 value)⟩
+
+/-- Checked packed `UInt16` projection refines semantic `getScalarField`. -/
+theorem LiveHeapRel.readScalarUInt16Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {value : UInt16}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.uint16 value))) :
+    readScalarUInt16Field state address width offset = .ok value ∧
+      ValueRel witness .uint16 (.word32 (Word32.ofUInt16 value))
+        (.scalar (.uint16 value)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, BoxedScalar.valueRel witness (.uint16 value)⟩
+
+/-- Checked packed `UInt32` projection refines semantic `getScalarField`. -/
+theorem LiveHeapRel.readScalarUInt32Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {value : UInt32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.uint32 value))) :
+    readScalarUInt32Field state address width offset = .ok value ∧
+      ValueRel witness .uint32 (.word32 (Word32.ofUInt32 value))
+        (.scalar (.uint32 value)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, BoxedScalar.valueRel witness (.uint32 value)⟩
+
+/-- Checked packed `UInt64` projection refines semantic `getScalarField`. -/
+theorem LiveHeapRel.readScalarUInt64Field_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {width offset : Nat}
+    {value : UInt64}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (projected : getScalarField runtime (.object (.heap location)) width offset =
+      .ok (.scalar (.uint64 value))) :
+    readScalarUInt64Field state address width offset = .ok value ∧
+      ValueRel witness .uint64 (.word64 value) (.scalar (.uint64 value)) := by
+  obtain ⟨info, fieldKinds, semantic, field, objectRelated, member, fieldWidth,
+      fieldOffset, fieldValue⟩ := related.scalarField_of_projected mapped projected
+  have observed := objectRelated.semanticScalarFields field member
+  rw [fieldValue] at observed
+  simp only at observed
+  rw [← fieldWidth, ← fieldOffset]
+  exact ⟨observed.2.2, BoxedScalar.valueRel witness (.uint64 value)⟩
+
 /-- Reading a concrete constructor tag returns the exact semantic constructor
 tag recorded by the decoded-object relation. -/
 theorem ConstructorObjectRel.readTag_refines

@@ -1819,6 +1819,15 @@ performs FIR's matching `setObjectField`, and reconstructs `LiveHeapRel` for
 all non-target allocations. Packed-scalar and closure projections remain the
 successful-operation audit gaps before the full structured-fault matrix.
 
+W6.5k closes integer packed-scalar projection at the complete heap boundary.
+A successful semantic `getScalarField` now exposes the exact selected field
+and its compiler width/offset operands; the decoded constructor relation then
+proves checked concrete `UInt8`, `UInt16`, `UInt32`, or `UInt64` readback and
+the corresponding ABI-indexed `ValueRel`. Float projection remains outside
+the claim under `FIR-BUG-wasm-none-float-runtime-gap`, because the shared FIR
+runtime still has no semantic float scalar values. Closure match and capture
+projection are the remaining successful read-operation audit gap.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
