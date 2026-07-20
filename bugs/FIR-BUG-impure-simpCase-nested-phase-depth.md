@@ -223,3 +223,15 @@ back through deterministic table permutations. The next step is to thread the
 endpoint certificates and exact runtime-type compatibility through the
 recursive phase result, rather than reintroducing the original monolithic
 side-condition assumption.
+
+The stronger invariant now has a non-lossy trace carrier. A
+`ScopedCodeTargetCertificate` packages structural identity, alpha identity,
+and `ScopedCodeSideReflexive`; certified code and alternative phase results
+retain it at every round. Certified traces implement append, padding, sibling
+depth synchronization, pointwise target lookup (including shadowed entries),
+and erasure back to the established phase traces. The full-tree alternative
+kernel has a certified synchronization theorem, and
+`ScopedFoldAlphaCertifiedTransportLaws` consumes the resulting per-body
+certificates directly. Its only remaining cross-code input is
+`ScopedFoldRuntimeTypeLaws`; the audited upstream bridge is still called once
+and reverse alpha remains derived by `codeRelated_symm`.

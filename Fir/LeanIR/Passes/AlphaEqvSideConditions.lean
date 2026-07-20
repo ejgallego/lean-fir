@@ -589,4 +589,46 @@ mutual
 
 end
 
+mutual
+
+  /-- Forget unary scope and normalization evidence while retaining the exact
+  runtime-type compatibility carried by a side-condition proof. -/
+  theorem CodeSideConditions.runtimeTypesEq
+      (side : CodeSideConditions
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope left right) :
+      CodeRuntimeTypesEq left right :=
+    match side with
+    | .ret _ _ => .ret
+    | .unreachable => .unreach
+    | .letE typeEq _ _ boxTypesEq _ _ _ _ continuation =>
+        .letE typeEq boxTypesEq continuation.runtimeTypesEq
+    | .jp _ _ body continuation =>
+        .jp body.runtimeTypesEq continuation.runtimeTypesEq
+    | .jmp _ _ _ _ => .jmp
+    | .cases _ _ _ _ ctorBranches defaultBranches =>
+        .cases
+          (fun tag leftCode rightCode leftHas rightHas =>
+            (ctorBranches tag leftCode rightCode leftHas rightHas).runtimeTypesEq)
+          (fun leftCode rightCode leftHas rightHas =>
+            (defaultBranches leftCode rightCode leftHas rightHas).runtimeTypesEq)
+    | .oset _ _ _ _ continuation => .oset continuation.runtimeTypesEq
+    | .uset _ _ _ _ continuation => .uset continuation.runtimeTypesEq
+    | .sset _ _ _ _ continuation => .sset continuation.runtimeTypesEq
+    | .setTag _ _ continuation => .setTag continuation.runtimeTypesEq
+    | .inc _ _ continuation => .inc continuation.runtimeTypesEq
+    | .dec _ _ continuation => .dec continuation.runtimeTypesEq
+    | .del _ _ continuation => .del continuation.runtimeTypesEq
+
+  theorem ParamBodySideConditions.runtimeTypesEq
+      (side : ParamBodySideConditions
+        (leftJoins := leftJoins) (rightJoins := rightJoins)
+        rho leftScope rightScope leftParams rightParams left right) :
+      ParamRuntimeTypesEq leftParams rightParams left right :=
+    match side with
+    | .nil body => .nil body.runtimeTypesEq
+    | .cons _ _ _ _ rest => .cons rest.runtimeTypesEq
+
+end
+
 end Fir.LeanIR.Passes.AlphaEqv

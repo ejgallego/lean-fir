@@ -774,11 +774,44 @@ structure ScopedCodeTargetIdentities
   structural : CodeRel validCase target target
   alpha : ScopedAlphaBireflexive index target
 
+/-- Endpoint identities together with the full side-condition certificate
+needed by a later alpha-fold comparison. This parallel certificate keeps the
+existing phase API stable while the stronger recursive path is threaded. -/
+structure ScopedCodeTargetCertificate
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (target : LCNF.Code .impure) : Prop
+    extends ScopedCodeTargetIdentities validCase index target where
+  side : ScopedCodeSideReflexive index target
+
 theorem ScopedCodePhaseResult.identities
     (result : ScopedCodePhaseResult validCase index source target) :
     ScopedCodeTargetIdentities validCase index target := {
   structural := result.targetRefl
   alpha := result.targetAlpha
+}
+
+/-- One ordinary phase result whose target retains the stronger endpoint
+certificate instead of dropping normalization/runtime metadata. -/
+structure ScopedCodePhaseCertifiedResult
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) where
+  result : ScopedCodePhaseResult validCase index source target
+  targetSide : ScopedCodeSideReflexive index target
+
+theorem ScopedCodePhaseCertifiedResult.certificate
+    (result : ScopedCodePhaseCertifiedResult validCase index source target) :
+    ScopedCodeTargetCertificate validCase index target := {
+  structural := result.result.targetRefl
+  alpha := result.result.targetAlpha
+  side := result.targetSide
+}
+
+def ScopedCodePhaseResult.certify
+    (result : ScopedCodePhaseResult validCase index source target)
+    (side : ScopedCodeSideReflexive index target) :
+    ScopedCodePhaseCertifiedResult validCase index source target := {
+  result
+  targetSide := side
 }
 
 def ScopedCodeBifactor.phaseResult
@@ -835,6 +868,13 @@ def ScopedCodePhaseResult.identity
   targetAlpha := alpha
 }
 
+def ScopedCodeTargetCertificate.identity
+    (certificate : ScopedCodeTargetCertificate validCase index code) :
+    ScopedCodePhaseCertifiedResult validCase index code code := {
+  result := .identity certificate.structural certificate.alpha
+  targetSide := certificate.side
+}
+
 theorem scopedUnreachTargetIdentities
     (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
     (type : Expr) :
@@ -844,6 +884,18 @@ theorem scopedUnreachTargetIdentities
     forward := .terminal .unreachable
     backward := .terminal .unreachable
   }
+}
+
+theorem scopedUnreachTargetCertificate
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (type : Expr) :
+    ScopedCodeTargetCertificate validCase index (.unreach type) := {
+  structural := .aligned (.unreach type)
+  alpha := {
+    forward := .terminal .unreachable
+    backward := .terminal .unreachable
+  }
+  side := .unreachable
 }
 
 /-- Nonempty sequence of local phase rounds. Nested case simplifiers append
@@ -909,6 +961,66 @@ theorem ScopedCodePhaseTrace.rounds_append
     trace.pad.rounds = trace.rounds + 1 := by
   rw [ScopedCodePhaseTrace.pad, ScopedCodePhaseTrace.rounds_append]
   rfl
+
+/-- Nonempty phase trace retaining the endpoint side certificate of every
+round. This is the invariant-carrying counterpart of `ScopedCodePhaseTrace`. -/
+inductive ScopedCodePhaseCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    LCNF.Code .impure → LCNF.Code .impure → Type where
+  | single
+      (round : ScopedCodePhaseCertifiedResult validCase index source target) :
+      ScopedCodePhaseCertifiedTrace validCase index source target
+  | trans
+      (round : ScopedCodePhaseCertifiedResult validCase index source middle)
+      (rest : ScopedCodePhaseCertifiedTrace validCase index middle target) :
+      ScopedCodePhaseCertifiedTrace validCase index source target
+
+def ScopedCodePhaseCertifiedTrace.forget
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target) :
+    ScopedCodePhaseTrace validCase index source target :=
+  match trace with
+  | .single round => .single round.result
+  | .trans round rest => .trans round.result rest.forget
+
+theorem ScopedCodePhaseCertifiedTrace.targetCertificate
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target) :
+    ScopedCodeTargetCertificate validCase index target :=
+  match trace with
+  | .single round => round.certificate
+  | .trans _ rest => rest.targetCertificate
+
+def ScopedCodePhaseCertifiedTrace.rounds
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+def ScopedCodePhaseCertifiedTrace.append
+    (left : ScopedCodePhaseCertifiedTrace validCase index source middle)
+    (right : ScopedCodePhaseCertifiedTrace validCase index middle target) :
+    ScopedCodePhaseCertifiedTrace validCase index source target :=
+  match left with
+  | .single round => .trans round right
+  | .trans round rest => .trans round (rest.append right)
+
+def ScopedCodePhaseCertifiedTrace.pad
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target) :
+    ScopedCodePhaseCertifiedTrace validCase index source target :=
+  trace.append (.single trace.targetCertificate.identity)
+
+def ScopedCodePhaseCertifiedResult.trace
+    (result : ScopedCodePhaseCertifiedResult validCase index source target) :
+    ScopedCodePhaseCertifiedTrace validCase index source target :=
+  .single result
+
+@[simp] theorem ScopedCodePhaseCertifiedTrace.rounds_forget
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target) :
+    trace.forget.rounds = trace.rounds := by
+  induction trace with
+  | single round => rfl
+  | trans round rest ih =>
+      simp [ScopedCodePhaseCertifiedTrace.forget,
+        ScopedCodePhaseCertifiedTrace.rounds, ScopedCodePhaseTrace.rounds, ih]
 
 def ScopedCodePhaseResult.trace
     (result : ScopedCodePhaseResult validCase index source target) :
@@ -1094,6 +1206,175 @@ def ScopedAltsPhaseResult.targetIdentity
       .default (.identity body.targetRefl body.targetAlpha)
         rest.targetIdentity
 
+/-- Pointwise phase round that retains the complete endpoint certificate for
+every alternative body, including selector-shadowed entries. -/
+inductive ScopedAltsPhaseCertifiedResult
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    List (LCNF.Alt .impure) → List (LCNF.Alt .impure) → Type where
+  | nil : ScopedAltsPhaseCertifiedResult validCase index [] []
+  | ctor
+      (body : ScopedCodePhaseCertifiedResult validCase index left right)
+      (rest : ScopedAltsPhaseCertifiedResult
+        validCase index leftRest rightRest) :
+      ScopedAltsPhaseCertifiedResult validCase index
+        (.ctorAlt info left :: leftRest) (.ctorAlt info right :: rightRest)
+  | default
+      (body : ScopedCodePhaseCertifiedResult validCase index left right)
+      (rest : ScopedAltsPhaseCertifiedResult
+        validCase index leftRest rightRest) :
+      ScopedAltsPhaseCertifiedResult validCase index
+        (.default left :: leftRest) (.default right :: rightRest)
+
+def ScopedAltsPhaseCertifiedResult.forget
+    (result : ScopedAltsPhaseCertifiedResult validCase index source target) :
+    ScopedAltsPhaseResult validCase index source target :=
+  match result with
+  | .nil => .nil
+  | .ctor body rest => .ctor body.result rest.forget
+  | .default body rest => .default body.result rest.forget
+
+/-- Complete endpoint certificate for any target alternative in one
+synchronized certified round. -/
+theorem ScopedAltsPhaseCertifiedResult.targetBodyCertificate_of_mem
+    (result : ScopedAltsPhaseCertifiedResult validCase index source target)
+    (member : alt ∈ target) :
+    Nonempty (ScopedCodeTargetCertificate
+      validCase index alt.getCode) := by
+  induction result with
+  | nil => simp at member
+  | ctor body rest ih =>
+      simp at member
+      rcases member with rfl | member
+      · exact ⟨body.certificate⟩
+      · exact ih member
+  | default body rest ih =>
+      simp at member
+      rcases member with rfl | member
+      · exact ⟨body.certificate⟩
+      · exact ih member
+
+/-- Certified endpoint identity round for a synchronized alternative result. -/
+def ScopedAltsPhaseCertifiedResult.targetIdentity
+    (result : ScopedAltsPhaseCertifiedResult validCase index source target) :
+    ScopedAltsPhaseCertifiedResult validCase index target target :=
+  match result with
+  | .nil => .nil
+  | .ctor body rest =>
+      .ctor body.certificate.identity rest.targetIdentity
+  | .default body rest =>
+      .default body.certificate.identity rest.targetIdentity
+
+/-- Synchronized alternative trace retaining endpoint certificates at every
+round and for every syntactic body. -/
+inductive ScopedAltsPhaseCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
+    List (LCNF.Alt .impure) → List (LCNF.Alt .impure) → Type where
+  | single
+      (round : ScopedAltsPhaseCertifiedResult validCase index source target) :
+      ScopedAltsPhaseCertifiedTrace validCase index source target
+  | trans
+      (round : ScopedAltsPhaseCertifiedResult validCase index source middle)
+      (rest : ScopedAltsPhaseCertifiedTrace validCase index middle target) :
+      ScopedAltsPhaseCertifiedTrace validCase index source target
+
+def ScopedAltsPhaseCertifiedTrace.targetIdentity
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target) :
+    ScopedAltsPhaseCertifiedResult validCase index target target :=
+  match trace with
+  | .single round => round.targetIdentity
+  | .trans _ rest => rest.targetIdentity
+
+def ScopedAltsPhaseCertifiedTrace.rounds
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+def ScopedAltsPhaseCertifiedTrace.prependCtorIdentity
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target)
+    (certificate : ScopedCodeTargetCertificate validCase index code) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.ctorAlt info code :: source) (.ctorAlt info code :: target) :=
+  match trace with
+  | .single round =>
+      .single (.ctor certificate.identity round)
+  | .trans round rest =>
+      .trans (.ctor certificate.identity round)
+        (rest.prependCtorIdentity certificate)
+
+def ScopedAltsPhaseCertifiedTrace.prependDefaultIdentity
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target)
+    (certificate : ScopedCodeTargetCertificate validCase index code) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.default code :: source) (.default code :: target) :=
+  match trace with
+  | .single round =>
+      .single (.default certificate.identity round)
+  | .trans round rest =>
+      .trans (.default certificate.identity round)
+        (rest.prependDefaultIdentity certificate)
+
+def ScopedCodePhaseCertifiedTrace.withCtorTailIdentity
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target)
+    (tail : ScopedAltsPhaseCertifiedResult validCase index rest rest) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.ctorAlt info source :: rest) (.ctorAlt info target :: rest) :=
+  match trace with
+  | .single round => .single (.ctor round tail)
+  | .trans round later =>
+      .trans (.ctor round tail)
+        (later.withCtorTailIdentity tail)
+
+def ScopedCodePhaseCertifiedTrace.withDefaultTailIdentity
+    (trace : ScopedCodePhaseCertifiedTrace validCase index source target)
+    (tail : ScopedAltsPhaseCertifiedResult validCase index rest rest) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.default source :: rest) (.default target :: rest) :=
+  match trace with
+  | .single round => .single (.default round tail)
+  | .trans round later =>
+      .trans (.default round tail)
+        (later.withDefaultTailIdentity tail)
+
+def ScopedCodePhaseCertifiedTrace.consCtor
+    (body : ScopedCodePhaseCertifiedTrace validCase index source target)
+    (rest : ScopedAltsPhaseCertifiedTrace
+      validCase index sourceRest targetRest) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.ctorAlt info source :: sourceRest)
+      (.ctorAlt info target :: targetRest) :=
+  match body, rest with
+  | .single bodyRound, .single restRound =>
+      .single (.ctor bodyRound restRound)
+  | .single bodyRound, .trans restRound restLater =>
+      .trans (.ctor bodyRound restRound)
+        (restLater.prependCtorIdentity bodyRound.certificate)
+  | .trans bodyRound bodyLater, .single restRound =>
+      .trans (.ctor bodyRound restRound)
+        (bodyLater.withCtorTailIdentity restRound.targetIdentity)
+  | .trans bodyRound bodyLater, .trans restRound restLater =>
+      .trans (.ctor bodyRound restRound)
+        (bodyLater.consCtor restLater)
+
+def ScopedCodePhaseCertifiedTrace.consDefault
+    (body : ScopedCodePhaseCertifiedTrace validCase index source target)
+    (rest : ScopedAltsPhaseCertifiedTrace
+      validCase index sourceRest targetRest) :
+    ScopedAltsPhaseCertifiedTrace validCase index
+      (.default source :: sourceRest) (.default target :: targetRest) :=
+  match body, rest with
+  | .single bodyRound, .single restRound =>
+      .single (.default bodyRound restRound)
+  | .single bodyRound, .trans restRound restLater =>
+      .trans (.default bodyRound restRound)
+        (restLater.prependDefaultIdentity bodyRound.certificate)
+  | .trans bodyRound bodyLater, .single restRound =>
+      .trans (.default bodyRound restRound)
+        (bodyLater.withDefaultTailIdentity restRound.targetIdentity)
+  | .trans bodyRound bodyLater, .trans restRound restLater =>
+      .trans (.default bodyRound restRound)
+        (bodyLater.consDefault restLater)
+
 /-- A nonempty sequence of synchronized alternative rounds. -/
 inductive ScopedAltsPhaseTrace
     (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex) :
@@ -1117,6 +1398,22 @@ def ScopedAltsPhaseTrace.rounds
   match trace with
   | .single _ => 1
   | .trans _ rest => 1 + rest.rounds
+
+def ScopedAltsPhaseCertifiedTrace.forget
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target) :
+    ScopedAltsPhaseTrace validCase index source target :=
+  match trace with
+  | .single round => .single round.forget
+  | .trans round rest => .trans round.forget rest.forget
+
+@[simp] theorem ScopedAltsPhaseCertifiedTrace.rounds_forget
+    (trace : ScopedAltsPhaseCertifiedTrace validCase index source target) :
+    trace.forget.rounds = trace.rounds := by
+  induction trace with
+  | single round => rfl
+  | trans round rest ih =>
+      simp [ScopedAltsPhaseCertifiedTrace.forget,
+        ScopedAltsPhaseCertifiedTrace.rounds, ScopedAltsPhaseTrace.rounds, ih]
 
 /-- Pad an already-finished constructor body while the remaining alternatives
 continue through later rounds. -/
@@ -1318,6 +1615,15 @@ def ScopedCodePhaseTracedOnAlphaTree
   fun index source target =>
     ScopedAlphaBireflexiveTree index source →
       ScopedCodePhaseTraced validCase index source target
+
+/-- Strong full-tree presentation whose phase trace retains side certificates
+at every round boundary. -/
+def ScopedCodePhaseCertifiedTracedOnAlphaTree
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedAlphaBireflexiveTree index source →
+      Nonempty (ScopedCodePhaseCertifiedTrace
+        validCase index source target)
 
 theorem ScopedAlphaBireflexiveAlts.forward
     (evidence : ScopedAlphaBireflexiveAlts index alts) :
@@ -1836,6 +2142,32 @@ theorem scopedAltsPhaseTrace_of_tree
       (ScopedCodePhaseTracedOnAlphaTree validCase) index source target)
     (tree : ScopedAlphaBireflexiveAlts index source) :
     Nonempty (ScopedAltsPhaseTrace validCase index source target) := by
+  induction related with
+  | nil => exact ⟨.single .nil⟩
+  | cons head tail ih =>
+      cases head with
+      | ctor body =>
+          cases tree with
+          | ctor bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨bodyTrace.consCtor restTrace⟩
+      | default body =>
+          cases tree with
+          | default bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨bodyTrace.consDefault restTrace⟩
+
+/-- Certified counterpart of `scopedAltsPhaseTrace_of_tree`; pointwise child
+certificates survive depth synchronization and identity padding. -/
+theorem scopedAltsPhaseCertifiedTrace_of_tree
+    (related : ScopedAltsRelated
+      (ScopedCodePhaseCertifiedTracedOnAlphaTree validCase)
+      index source target)
+    (tree : ScopedAlphaBireflexiveAlts index source) :
+    Nonempty (ScopedAltsPhaseCertifiedTrace
+      validCase index source target) := by
   induction related with
   | nil => exact ⟨.single .nil⟩
   | cons head tail ih =>
@@ -2424,6 +2756,52 @@ theorem scopedFoldAlphaSideLaws_of_endpoints
     exact (endpoints.runtimeTypes leftIdentities rightIdentities accepted).sideConditions
       (endpoints.self leftIdentities)
       (endpoints.self rightIdentities).target
+
+/-- Exact cross-code runtime type obligation when endpoint certificates are
+already carried by the recursive phase trace. -/
+structure ScopedFoldRuntimeTypeLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  compatible : ∀ {index : ScopeIndex} {left right : LCNF.Code .impure},
+    ScopedCodeTargetCertificate validCase index left →
+    ScopedCodeTargetCertificate validCase index right →
+    left.alphaEqv right = true →
+    CodeRuntimeTypesEq left right
+
+/-- Certified fold transport consumes the actual endpoint certificates from
+the recursive alternatives instead of recovering them from a global law. -/
+structure ScopedFoldAlphaCertifiedTransportLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  related : ∀ {index : ScopeIndex} {left right : LCNF.Code .impure},
+    ScopedCodeTargetCertificate validCase index left →
+    ScopedCodeTargetCertificate validCase index right →
+    left.alphaEqv right = true →
+    CodeRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope left right ∧
+      CodeRelated
+        (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+        index.backwardRho index.targetScope index.sourceScope right left
+
+/-- The certified endpoint path still uses exactly one audited upstream
+comparison; reverse orientation remains kernel-derived. -/
+theorem scopedFoldAlphaCertifiedTransportLaws_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (runtimeTypes : ScopedFoldRuntimeTypeLaws validCase) :
+    ScopedFoldAlphaCertifiedTransportLaws validCase where
+  related := by
+    intro index left right leftCertificate rightCertificate accepted
+    have side : CodeSideConditions
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope left right :=
+      (runtimeTypes.compatible
+        leftCertificate rightCertificate accepted).sideConditions
+          leftCertificate.side rightCertificate.side.target
+    have forward : CodeRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope left right :=
+      codeRelated_of_local_accepts side
+        (index.localAcceptsAtForward_of_upstream bridge left right accepted)
+    exact ⟨forward, index.codeRelated_symm forward⟩
 
 /-- Scoped conversion required after the transparent fold has identified two
 selected bodies and the exact upstream alpha check between them. -/
