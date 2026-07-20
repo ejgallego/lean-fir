@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.SimpCaseAlphaBridge
+import Fir.LeanIR.Passes.AlphaEqvLocalTransport
 
 namespace Fir.LeanIR.Passes.SimpCaseScopedBridge
 
@@ -25,6 +26,8 @@ also the structural intermediate's side of the later alpha relation. -/
 structure ScopeIndex where
   forwardRho : FVarIdMap FVarId
   backwardRho : FVarIdMap FVarId
+  forwardEmpty : ResolverEquivalent forwardRho {}
+  backwardEmpty : ResolverEquivalent backwardRho {}
   sourceScope : List FVarId
   targetScope : List FVarId
   sourceJoins : List FVarId
@@ -34,6 +37,8 @@ structure ScopeIndex where
 def ScopeIndex.empty : ScopeIndex where
   forwardRho := {}
   backwardRho := {}
+  forwardEmpty := resolverEquivalent_refl {}
+  backwardEmpty := resolverEquivalent_refl {}
   sourceScope := []
   targetScope := []
   sourceJoins := []
@@ -44,6 +49,8 @@ def ScopeIndex.pushVar (index : ScopeIndex) (fvarId : FVarId) : ScopeIndex := {
   index with
   forwardRho := index.forwardRho.insert fvarId fvarId
   backwardRho := index.backwardRho.insert fvarId fvarId
+  forwardEmpty := index.forwardEmpty.insertSelf_of_empty fvarId
+  backwardEmpty := index.backwardEmpty.insertSelf_of_empty fvarId
   sourceScope := fvarId :: index.sourceScope
   targetScope := fvarId :: index.targetScope
 }
@@ -53,6 +60,8 @@ def ScopeIndex.pushJoin (index : ScopeIndex) (fvarId : FVarId) : ScopeIndex := {
   index with
   forwardRho := index.forwardRho.insert fvarId fvarId
   backwardRho := index.backwardRho.insert fvarId fvarId
+  forwardEmpty := index.forwardEmpty.insertSelf_of_empty fvarId
+  backwardEmpty := index.backwardEmpty.insertSelf_of_empty fvarId
   sourceJoins := fvarId :: index.sourceJoins
   targetJoins := fvarId :: index.targetJoins
 }
@@ -73,6 +82,8 @@ direction. This lets directional helper lemmas serve both alpha orientations. -/
 def ScopeIndex.reverse (index : ScopeIndex) : ScopeIndex where
   forwardRho := index.backwardRho
   backwardRho := index.forwardRho
+  forwardEmpty := index.backwardEmpty
+  backwardEmpty := index.forwardEmpty
   sourceScope := index.targetScope
   targetScope := index.sourceScope
   sourceJoins := index.targetJoins
@@ -101,6 +112,28 @@ def ScopeIndex.reverse (index : ScopeIndex) : ScopeIndex where
     (index : ScopeIndex) (params : Array (LCNF.Param .impure)) :
     (index.pushParams params).reverse = (index.reverse).pushParams params := by
   simp [ScopeIndex.pushParams]
+
+/-- The audited upstream comparison can be replayed under the forward resolver
+at every recursive scope index because self-renamings are observationally
+empty. The bridge remains an explicit parameter here. -/
+theorem ScopeIndex.localAcceptsAtForward_of_upstream
+    (index : ScopeIndex) (bridge : UpstreamBridge)
+    (left right : LCNF.Code .impure)
+    (accepted : left.alphaEqv right = true) :
+    Local.AcceptsAt index.forwardRho left right :=
+  localAcceptsAt_of_resolverEquivalent_empty index.forwardEmpty left right
+    (bridge.accepted left right accepted)
+
+/-- The same audited comparison is valid under the reverse outer resolver.
+This does not reverse the compared code; reversal is a separate relational
+obligation. -/
+theorem ScopeIndex.localAcceptsAtBackward_of_upstream
+    (index : ScopeIndex) (bridge : UpstreamBridge)
+    (left right : LCNF.Code .impure)
+    (accepted : left.alphaEqv right = true) :
+    Local.AcceptsAt index.backwardRho left right :=
+  localAcceptsAt_of_resolverEquivalent_empty index.backwardEmpty left right
+    (bridge.accepted left right accepted)
 
 abbrev ScopedCodeRelation :=
   ScopeIndex → LCNF.Code .impure → LCNF.Code .impure → Prop

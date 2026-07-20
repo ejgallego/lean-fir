@@ -191,3 +191,15 @@ selector bookkeeping. The remaining fold obligation is now the uniform
 plus the endpoint hygiene/normalization evidence, to the two scoped
 `CodeRelated` orientations. No additional axiom or compiler discrepancy was
 introduced by this reduction.
+
+The resolver-transport half of that obligation is now kernel-proved. A new
+transparent parametricity layer shows that every primitive check, parameter
+traversal, alternative traversal, and the complete fuel-indexed impure local
+checker is invariant under extensionally equal totalized resolver lookups.
+`ScopeIndex` now records as an intrinsic invariant that both outer maps behave
+like the empty map; `empty`, `pushVar`, `pushJoin`, `pushParams`, and `reverse`
+preserve the invariant. Consequently the single explicit `UpstreamBridge`
+can replay an accepted body comparison under either recursive outer resolver.
+The remaining transport work is precisely the reverse code orientation and
+the explicit cross-code side conditions, including normalization for nested
+case tables; neither fact is being inferred from endpoint identities alone.

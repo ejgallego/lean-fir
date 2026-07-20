@@ -52,6 +52,21 @@ theorem ResolverEquivalent.insert
       if_neg same, if_neg same]
     exact equivalent fvarId
 
+/-- A hygienic self-renaming remains observationally empty. -/
+theorem ResolverEquivalent.insertSelf_of_empty
+    (equivalent : ResolverEquivalent rho {}) (binder : FVarId) :
+    ResolverEquivalent (rho.insert binder binder) {} := by
+  intro fvarId
+  rw [fvarIdMap_get?_insert]
+  split
+  · rename_i same
+    rcases binder with ⟨binderName⟩
+    rcases fvarId with ⟨fvarName⟩
+    change binderName = fvarName at same
+    subst fvarName
+    rfl
+  · exact equivalent fvarId
+
 theorem eqvFVar_run_congr
     (equivalent : ResolverEquivalent leftMap rightMap)
     (left right : FVarId) :

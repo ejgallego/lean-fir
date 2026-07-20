@@ -576,6 +576,12 @@ theorem alphaFoldCasesAlphaBackward :
 def alphaFoldScopeIndex : ScopeIndex := {
   forwardRho := alphaFoldParamRho
   backwardRho := alphaFoldParamRho
+  forwardEmpty := by
+    unfold alphaFoldParamRho
+    exact ((resolverEquivalent_refl {}).insertSelf_of_empty c).insertSelf_of_empty x
+  backwardEmpty := by
+    unfold alphaFoldParamRho
+    exact ((resolverEquivalent_refl {}).insertSelf_of_empty c).insertSelf_of_empty x
   sourceScope := [x, c]
   targetScope := [x, c]
   sourceJoins := []
@@ -1620,6 +1626,8 @@ theorem emptyCaseNotReachableCaseTag (tag : Nat) :
 def emptyCaseScopeIndex : ScopeIndex := {
   forwardRho := {}
   backwardRho := {}
+  forwardEmpty := resolverEquivalent_refl {}
+  backwardEmpty := resolverEquivalent_refl {}
   sourceScope := [c]
   targetScope := [c]
   sourceJoins := []
