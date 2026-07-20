@@ -262,6 +262,38 @@ theorem shadowAddDefaultAlt_size_ne_zero
   · split
     split <;> simp_all
 
+/-- Every body in the default-fold output comes from a body in the input
+table. A genuine fold may change the representative's selector to `default`,
+but it does not synthesize code. -/
+theorem exists_source_alt_of_mem_shadowAddDefaultAlt
+    (member : alt ∈ shadowAddDefaultAlt alts) :
+    ∃ sourceAlt ∈ alts, sourceAlt.getCode = alt.getCode := by
+  unfold shadowAddDefaultAlt at member
+  split at member
+  · exact ⟨alt, member, rfl⟩
+  · rename_i active
+    split at member
+    rename_i pair representative occurrences selectedPair
+    split at member
+    · exact ⟨alt, member, rfl⟩
+    · rename_i folded
+      change alt ∈
+        (alts.filter fun sourceAlt =>
+          !sourceAlt.getCode.alphaEqv representative.getCode).push
+            (.default representative.getCode) at member
+      simp only [Array.mem_push] at member
+      rcases member with filteredMember | appended
+      · exact ⟨alt, Array.mem_of_mem_filter filteredMember, rfl⟩
+      · subst alt
+        have nonempty : alts.size ≠ 0 := by
+          intro empty
+          simp [empty] at active
+        have representativeMember : representative ∈ alts := by
+          have sourceMember := shadowGetMaxOccs_fst_mem nonempty
+          rw [selectedPair] at sourceMember
+          exact sourceMember
+        exact ⟨representative, representativeMember, rfl⟩
+
 /-- A singleton produced from a non-singleton input is necessarily created by
 the folding branch; in particular the input had at least two alternatives. -/
 theorem one_lt_size_of_shadowAddDefaultAlt_singleton
@@ -429,6 +461,15 @@ theorem exists_source_alt_of_shadowPrepareAlts_singleton
     rw [show shadowPrepareAlts cases = shadowAddDefaultAlt filtered by rfl,
       foldedEq]
     rfl
+
+/-- Preparation only removes alternatives or changes one existing body's
+selector to `default`; every prepared body therefore has a source witness. -/
+theorem exists_source_alt_of_mem_shadowPrepareAlts
+    (member : alt ∈ shadowPrepareAlts cases) :
+    ∃ sourceAlt ∈ cases.alts, sourceAlt.getCode = alt.getCode := by
+  rcases exists_source_alt_of_mem_shadowAddDefaultAlt member with
+    ⟨filteredAlt, filteredMember, bodyEq⟩
+  exact ⟨filteredAlt, Array.mem_of_mem_filter filteredMember, bodyEq⟩
 
 /-- Pure output projection of Lean's private `simplifyCases`. -/
 def shadowSimplifyCases (cases : LCNF.Cases .impure) : LCNF.Code .impure :=

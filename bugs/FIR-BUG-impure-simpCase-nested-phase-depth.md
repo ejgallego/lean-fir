@@ -250,3 +250,16 @@ classifies direct versus fold-created elimination, and returns a certified
 phase result without consulting `ScopedCasePhaseTargetIdentityLaws`. The
 remaining local output shape is the retained case table, whose rebuilt root
 normalization and body-side certificate must be established next.
+
+Retained reconstruction is now certificate-preserving as well. Preparation
+has transparent source-origin lemmas for every output alternative, including
+the representative relabeled as `default`; filtering and default insertion
+preserve selector determinism and the complete case-table normalization
+invariant. Those facts rebuild the prepared case's structural identity, both
+scoped-alpha orientations, root scope facts, and every constructor/default
+body-side certificate from the incoming root plus the certified recursive
+alternative round. Empty, singleton, and retained outcomes now assemble into
+one `ScopedLocalCaseCertifiedPhaseLaws` contract without the former external
+`ScopedCasePhaseTargetIdentityLaws`. The remaining depth obligation is to
+lift certified alternative traces through an arbitrary case root and append
+this certified local round, yielding the invariant-carrying recursive kernel.

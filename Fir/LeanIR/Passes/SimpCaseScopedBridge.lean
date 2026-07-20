@@ -187,6 +187,118 @@ theorem ScopedCodeSideReflexive.target
   rw [← index.scopesEq, ← index.joinsEq]
   exact side
 
+/-- Selector determinism is inherited by any subtable. -/
+theorem caseTableDeterministic_of_subset
+    (deterministic : CaseTableDeterministic source)
+    (subset : ∀ alt, alt ∈ target → alt ∈ source) :
+    CaseTableDeterministic target where
+  ctor := by
+    intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    exact deterministic.ctor tag left right
+      ⟨leftInfo, subset _ leftMember, leftTag⟩
+      ⟨rightInfo, subset _ rightMember, rightTag⟩
+  default := by
+    intro left right leftHas rightHas
+    exact deterministic.default left right
+      (subset _ leftHas) (subset _ rightHas)
+
+/-- Array filtering preserves selector determinism. -/
+theorem caseTableDeterministic_filter
+    (alts : Array (LCNF.Alt .impure))
+    (predicate : LCNF.Alt .impure → Bool)
+    (deterministic : CaseTableDeterministic alts.toList) :
+    CaseTableDeterministic (alts.filter predicate).toList :=
+  caseTableDeterministic_of_subset deterministic (by
+    intro alt member
+    exact Array.mem_def.mp
+      (Array.mem_of_mem_filter (Array.mem_def.mpr member)))
+
+/-- Appending the sole default to a table that had none preserves selector
+determinism. -/
+theorem caseTableDeterministic_pushDefault
+    (alts : Array (LCNF.Alt .impure))
+    (body : LCNF.Code .impure)
+    (deterministic : CaseTableDeterministic alts.toList)
+    (noDefault : ∀ code, ¬HasDefaultAlt code alts.toList) :
+    CaseTableDeterministic (alts.push (.default body)).toList where
+  ctor := by
+    intro tag left right leftHas rightHas
+    apply deterministic.ctor tag left right
+    · rcases leftHas with ⟨info, member, selected⟩
+      refine ⟨info, ?_, selected⟩
+      simpa [Array.toList_push] using member
+    · rcases rightHas with ⟨info, member, selected⟩
+      refine ⟨info, ?_, selected⟩
+      simpa [Array.toList_push] using member
+  default := by
+    intro left right leftHas rightHas
+    have leftEq : left = body := by
+      unfold HasDefaultAlt at leftHas
+      rw [Array.toList_push] at leftHas
+      simp only [List.mem_append, List.mem_singleton] at leftHas
+      rcases leftHas with old | appended
+      · exact False.elim (noDefault left old)
+      · exact LCNF.Alt.default.inj appended
+    have rightEq : right = body := by
+      unfold HasDefaultAlt at rightHas
+      rw [Array.toList_push] at rightHas
+      simp only [List.mem_append, List.mem_singleton] at rightHas
+      rcases rightHas with old | appended
+      · exact False.elim (noDefault right old)
+      · exact LCNF.Alt.default.inj appended
+    exact leftEq.trans rightEq.symm
+
+/-- The compiler's default-fold calculation preserves the selector
+determinism needed by executable alpha equivalence. -/
+theorem caseTableNormalization_shadowAddDefaultAlt
+    (normalization : CaseTableNormalizationInvariant alts) :
+    CaseTableNormalizationInvariant (shadowAddDefaultAlt alts) := by
+  constructor
+  unfold shadowAddDefaultAlt
+  split
+  · exact normalization.deterministic
+  · rename_i active
+    rw [Bool.or_eq_true] at active
+    split
+    rename_i pair representative occurrences selectedPair
+    split
+    · exact normalization.deterministic
+    · rename_i folded
+      have noDefaultSource : ∀ code,
+          ¬HasDefaultAlt code alts.toList := by
+        intro code hasDefault
+        have member : (.default code : LCNF.Alt .impure) ∈ alts :=
+          Array.mem_def.mpr hasDefault
+        apply active
+        exact Or.inr (Array.any_eq_true'.mpr
+          ⟨.default code, member, rfl⟩)
+      have filteredDeterministic : CaseTableDeterministic
+          (alts.filter fun alt =>
+            !alt.getCode.alphaEqv representative.getCode).toList :=
+        caseTableDeterministic_filter _ _ normalization.deterministic
+      have noFilteredDefault : ∀ code,
+          ¬HasDefaultAlt code
+            (alts.filter fun alt =>
+              !alt.getCode.alphaEqv representative.getCode).toList := by
+        intro code hasDefault
+        apply noDefaultSource code
+        exact Array.mem_def.mp
+          (Array.mem_of_mem_filter (Array.mem_def.mpr hasDefault))
+      exact caseTableDeterministic_pushDefault _ _ filteredDeterministic
+        noFilteredDefault
+
+/-- Unreachable-arm filtering and default folding preserve table
+normalization together. -/
+theorem caseTableNormalization_shadowPrepareAlts
+    (normalization : CaseTableNormalizationInvariant cases.alts) :
+    CaseTableNormalizationInvariant (shadowPrepareAlts cases) :=
+  caseTableNormalization_shadowAddDefaultAlt {
+    deterministic := caseTableDeterministic_filter _ _
+      normalization.deterministic
+  }
+
 abbrev ScopedCodeRelation :=
   ScopeIndex → LCNF.Code .impure → LCNF.Code .impure → Prop
 
@@ -1269,6 +1381,151 @@ theorem ScopedAltsPhaseCertifiedResult.preparedSingletonCertificate
   rcases result.targetBodyCertificate_of_mem (Array.mem_def.mp member) with
     ⟨certificate⟩
   exact ⟨by simpa [bodyEq] using certificate⟩
+
+/-- Every syntactic prepared alternative inherits the certificate of a
+source alternative with the same body. This also covers the representative
+whose selector is changed to `default` by genuine folding. -/
+theorem ScopedAltsPhaseCertifiedResult.preparedBodyCertificate_of_mem
+    (result : ScopedAltsPhaseCertifiedResult validCase index
+      cases.alts.toList cases.alts.toList)
+    (member : alt ∈ shadowPrepareAlts cases) :
+    Nonempty (ScopedCodeTargetCertificate validCase index alt.getCode) := by
+  rcases exists_source_alt_of_mem_shadowPrepareAlts member with
+    ⟨sourceAlt, sourceMember, bodyEq⟩
+  rcases result.targetBodyCertificate_of_mem
+      (Array.mem_def.mp sourceMember) with ⟨certificate⟩
+  exact ⟨by simpa [bodyEq] using certificate⟩
+
+/-- Certificate for a concrete runtime selection from the prepared table. -/
+theorem ScopedAltsPhaseCertifiedResult.preparedSelectionCertificate
+    (result : ScopedAltsPhaseCertifiedResult validCase index
+      cases.alts.toList cases.alts.toList)
+    (selected : chooseAlt tag (shadowPrepareAlts cases).toList = some code) :
+    Nonempty (ScopedCodeTargetCertificate validCase index code) := by
+  rcases exists_mem_getCode_eq_of_chooseAlt selected with
+    ⟨alt, member, bodyEq⟩
+  rcases result.preparedBodyCertificate_of_mem
+      (Array.mem_def.mpr member) with ⟨certificate⟩
+  exact ⟨by simpa [bodyEq] using certificate⟩
+
+/-- Rebuild the complete endpoint certificate for a retained prepared case.
+Root scope facts come from the incoming case certificate; normalization is
+preserved by the transparent table algorithm; every selected or syntactic
+branch body comes from the certified recursive alternative result. -/
+theorem scopedPreparedCaseTargetCertificate
+    {typeName : Name} {resultType : Expr} {discr : FVarId}
+    {alts : Array (LCNF.Alt .impure)}
+    (root : ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr alts)))
+    (alternatives : ScopedAltsPhaseCertifiedResult validCase index
+      alts.toList alts.toList) :
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr
+        (shadowPrepareAlts (.mk typeName resultType discr alts)))) := by
+  let source : LCNF.Cases .impure :=
+    .mk typeName resultType discr alts
+  let prepared := shadowPrepareAlts source
+  have alternativesSource : ScopedAltsPhaseCertifiedResult validCase index
+      source.alts.toList source.alts.toList := by
+    change ScopedAltsPhaseCertifiedResult validCase index
+      alts.toList alts.toList
+    exact alternatives
+  have selectedCertificate : ∀ tag code,
+      chooseAlt tag prepared.toList = some code →
+      Nonempty (ScopedCodeTargetCertificate validCase index code) := by
+    intro tag code selected
+    exact alternativesSource.preparedSelectionCertificate (by
+      simpa [prepared] using selected)
+  have structural : CodeRel validCase
+      (.cases (.mk typeName resultType discr prepared))
+      (.cases (.mk typeName resultType discr prepared)) :=
+    .aligned (.cases typeName resultType discr prepared prepared (by
+      intro tag valid
+      change SelectionRel validCase
+        (chooseAlt tag prepared.toList) (chooseAlt tag prepared.toList)
+      cases selected : chooseAlt tag prepared.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.structural))
+  have discrForward : ScopedFVarRelated index.forwardRho
+      index.sourceScope index.targetScope discr discr := by
+    cases root.alpha.forward with
+    | terminal impossible => cases impossible
+    | cases discrRelated selected => exact discrRelated
+  have alphaForward : CodeRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope
+      (.cases (.mk typeName resultType discr prepared))
+      (.cases (.mk typeName resultType discr prepared)) :=
+    .cases discrForward (by
+      intro tag
+      change CaseSelectionRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope
+        (chooseAlt tag prepared.toList) (chooseAlt tag prepared.toList)
+      cases selected : chooseAlt tag prepared.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.alpha.forward)
+  have discrBackward : ScopedFVarRelated index.backwardRho
+      index.targetScope index.sourceScope discr discr := by
+    cases root.alpha.backward with
+    | terminal impossible => cases impossible
+    | cases discrRelated selected => exact discrRelated
+  have alphaBackward : CodeRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope
+      (.cases (.mk typeName resultType discr prepared))
+      (.cases (.mk typeName resultType discr prepared)) :=
+    .cases discrBackward (by
+      intro tag
+      change CaseSelectionRelated
+        (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+        index.backwardRho index.targetScope index.sourceScope
+        (chooseAlt tag prepared.toList) (chooseAlt tag prepared.toList)
+      cases selected : chooseAlt tag prepared.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.alpha.backward)
+  have side : ScopedCodeSideReflexive index
+      (.cases (.mk typeName resultType discr prepared)) := by
+    cases root.side with
+    | cases leftDiscrScoped rightDiscrScoped leftNormalization
+        rightNormalization ctorBranches defaultBranches =>
+      have preparedNormalization :
+          CaseTableNormalizationInvariant prepared := by
+        simpa [prepared, source] using
+          caseTableNormalization_shadowPrepareAlts leftNormalization
+      exact .cases leftDiscrScoped rightDiscrScoped
+        preparedNormalization preparedNormalization
+        (by
+          intro tag leftCode rightCode leftHas rightHas
+          have same := preparedNormalization.deterministic.ctor
+            tag leftCode rightCode leftHas rightHas
+          subst rightCode
+          rcases leftHas with ⟨info, member, selected⟩
+          rcases alternativesSource.preparedBodyCertificate_of_mem
+              (Array.mem_def.mpr member) with ⟨certificate⟩
+          exact certificate.side)
+        (by
+          intro leftCode rightCode leftHas rightHas
+          have same := preparedNormalization.deterministic.default
+            leftCode rightCode leftHas rightHas
+          subst rightCode
+          rcases alternativesSource.preparedBodyCertificate_of_mem
+              (Array.mem_def.mpr leftHas) with ⟨certificate⟩
+          exact certificate.side)
+  exact {
+    structural := by simpa [prepared, source] using structural
+    alpha := {
+      forward := by simpa [prepared, source] using alphaForward
+      backward := by simpa [prepared, source] using alphaBackward
+    }
+    side := by simpa [prepared, source] using side
+  }
 
 /-- Certified endpoint identity round for a synchronized alternative result. -/
 def ScopedAltsPhaseCertifiedResult.targetIdentity
@@ -2497,6 +2754,31 @@ def ScopedRetainedPhaseResultEvidence.result
         (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts)))) :=
   (evidence.phase.aligned root).phaseResult evidence.identities
 
+/-- Retained-table phase evidence with the complete rebuilt case endpoint
+certificate. -/
+structure ScopedRetainedPhaseCertifiedResultEvidence
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source : LCNF.Cases .impure)
+    (targetAlts : Array (LCNF.Alt .impure)) : Type where
+  phase : ScopedRetainedPhaseEvidence validCase index source targetAlts
+  certificate : ScopedCodeTargetCertificate validCase index
+    (.cases (source.updateAlts
+      (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts))))
+
+def ScopedRetainedPhaseCertifiedResultEvidence.result
+    (evidence : ScopedRetainedPhaseCertifiedResultEvidence
+      validCase index source targetAlts)
+    (root : ScopedAlphaBireflexive index (.cases source)) :
+    ScopedCodePhaseCertifiedResult validCase index (.cases source)
+      (.cases (source.updateAlts
+        (shadowAddDefaultAlt (shadowFilterUnreachable targetAlts)))) := {
+  result := (evidence.phase.aligned root).phaseResult {
+    structural := evidence.certificate.structural
+    alpha := evidence.certificate.alpha
+  }
+  targetSide := evidence.certificate.side
+}
+
 /-- Output-shape classification for one admissible nonrecursive case-kernel
 step. -/
 inductive ScopedCaseFactorEvidence
@@ -3213,6 +3495,44 @@ structure ScopedCaseRetainedPhaseLaws
     Nonempty (ScopedRetainedPhaseEvidence validCase index
       (.mk typeName resultType discr sourceAlts) sourceAlts)
 
+/-- Retained-table folding for the invariant-carrying path. The semantic
+phase witness is unchanged, while the prepared endpoint certificate is
+rebuilt from the incoming case certificate and the certified recursive
+alternative round. -/
+structure ScopedCaseCertifiedRetainedPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
+    Nonempty (ScopedRetainedPhaseCertifiedResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) sourceAlts)
+
+/-- Upgrade the retained semantic law to the certified path without an
+external target-identity premise. Preparation preserves table normalization
+and every retained body comes from the certified recursive result. -/
+theorem scopedCaseCertifiedRetainedPhaseLaws_of_retained
+    (retained : ScopedCaseRetainedPhaseLaws validCase) :
+    ScopedCaseCertifiedRetainedPhaseLaws validCase where
+  retained := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      nonempty nonsingleton
+    rcases retained.retained root.alpha alternatives.forget nonempty
+        nonsingleton with ⟨phase⟩
+    have certificate := scopedPreparedCaseTargetCertificate root alternatives
+    exact ⟨{
+      phase := phase
+      certificate := by
+        simpa [shadowPrepareAlts, LCNF.Cases.alts, LCNF.Cases.updateAlts]
+          using certificate
+    }⟩
+
 /-- Endpoint identities for the two nonterminal output shapes. Empty-table
 identities are generic because `unreach` is structurally and alpha reflexive.
 Keeping these facts independent avoids baking traversal padding into the
@@ -3464,6 +3784,44 @@ structure ScopedCasePhaseShapeLaws
     Nonempty (ScopedRetainedPhaseResultEvidence validCase index
       (.mk typeName resultType discr sourceAlts) sourceAlts)
 
+/-- Invariant-carrying local output-shape contract. Each branch returns the
+complete endpoint certificate needed by a following recursive round. -/
+structure ScopedCaseCertifiedPhaseShapeLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  empty : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 0 →
+    Nonempty (ScopedCodePhaseCertifiedResult validCase index
+      (.cases (.mk typeName resultType discr sourceAlts))
+      (.unreach resultType))
+  singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (singleton : (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size = 1) →
+    Nonempty (ScopedSingletonPhaseCertifiedResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts)
+      (shadowPrepareAlts
+        (.mk typeName resultType discr sourceAlts))[0]!.getCode)
+  retained : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 0 →
+    (shadowPrepareAlts
+      (.mk typeName resultType discr sourceAlts)).size ≠ 1 →
+    Nonempty (ScopedRetainedPhaseCertifiedResultEvidence validCase index
+      (.mk typeName resultType discr sourceAlts) sourceAlts)
+
 /-- Assemble the phase-aware shape contract from independently dischargeable
 selection, phase-classification, folding, and endpoint-identity laws. -/
 theorem scopedCasePhaseShapeLaws_of_components
@@ -3493,6 +3851,36 @@ theorem scopedCasePhaseShapeLaws_of_components
       identities := targetIdentities.retained root alternatives nonempty
         nonsingleton
     }⟩
+
+/-- Assemble all certified local shapes from reachable selection and the two
+nonempty semantic phase contracts. Endpoint certificates are carried by the
+recursive result instead of supplied through a separate identity law. -/
+theorem scopedCaseCertifiedPhaseShapeLaws_of_components
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (singletonPhases : ScopedCaseCertifiedSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseCertifiedRetainedPhaseLaws validCase) :
+    ScopedCaseCertifiedPhaseShapeLaws validCase where
+  empty := by
+    intro index typeName resultType discr sourceAlts root empty
+    rcases scopedEmptyCaseEvidence_of_noValid
+        ((scopedCaseEmptySelectionLaws_of_reachableSelection selection).empty
+          empty) with ⟨evidence⟩
+    let certificate := scopedUnreachTargetCertificate
+      validCase index resultType
+    exact ⟨{
+      result := evidence.phaseResult {
+        structural := certificate.structural
+        alpha := certificate.alpha
+      }
+      targetSide := certificate.side
+    }⟩
+  singleton := by
+    intro index typeName resultType discr sourceAlts root alternatives singleton
+    exact singletonPhases.singleton root.alpha alternatives singleton
+  retained := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      nonempty nonsingleton
+    exact retainedPhases.retained root alternatives nonempty nonsingleton
 
 /-- Three remaining phase components plus reachable-selection refinement are
 enough for the full shape law; empty selection is now derived, not assumed. -/
@@ -3631,6 +4019,21 @@ structure ScopedLocalCasePhaseLaws
       (.cases (.mk typeName resultType discr alts))
       (shadowSimplifyCases (.mk typeName resultType discr alts)))
 
+/-- Certified nonrecursive phase contract for `shadowSimplifyCases`. The
+incoming root and recursively transformed alternatives both carry their full
+side certificates, and the local result returns the corresponding endpoint
+certificate for the selected output shape. -/
+structure ScopedLocalCaseCertifiedPhaseLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  simplify : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {alts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr alts)) →
+    ScopedAltsPhaseCertifiedResult validCase index alts.toList alts.toList →
+    Nonempty (ScopedCodePhaseCertifiedResult validCase index
+      (.cases (.mk typeName resultType discr alts))
+      (shadowSimplifyCases (.mk typeName resultType discr alts)))
+
 /-- Assemble the exact local phase law by following
 `shadowSimplifyCases`' output-shape decision tree. Unlike the older two-phase
 assembly, the singleton branch preserves the direct/folded classification. -/
@@ -3656,6 +4059,29 @@ theorem scopedLocalCasePhaseLaws_of_shapes
           simpa [cases, shadowPrepareAlts, LCNF.Cases.alts] using
             evidence.result root⟩
 
+/-- Assemble the certified local phase by following the same concrete
+empty/singleton/retained decision tree as `shadowSimplifyCases`. -/
+theorem scopedLocalCaseCertifiedPhaseLaws_of_shapes
+    (shapes : ScopedCaseCertifiedPhaseShapeLaws validCase) :
+    ScopedLocalCaseCertifiedPhaseLaws validCase where
+  simplify := by
+    intro index typeName resultType discr alts root alternatives
+    let cases : LCNF.Cases .impure :=
+      .mk typeName resultType discr alts
+    by_cases empty : (shadowPrepareAlts cases).size = 0
+    · rw [shadowSimplifyCases_eq_unreach empty]
+      exact shapes.empty root empty
+    · by_cases singleton : (shadowPrepareAlts cases).size = 1
+      · rw [shadowSimplifyCases_eq_singleton singleton]
+        rcases shapes.singleton root alternatives singleton with ⟨evidence⟩
+        exact ⟨evidence.result⟩
+      · rw [shadowSimplifyCases_eq_cases empty singleton]
+        rcases shapes.retained root alternatives empty singleton with
+          ⟨evidence⟩
+        exact ⟨by
+          simpa [cases, shadowPrepareAlts, LCNF.Cases.alts] using
+            evidence.result root.alpha⟩
+
 /-- Direct local-phase constructor from the four lower-level contracts. -/
 theorem scopedLocalCasePhaseLaws_of_components
     (emptySelection : ScopedCaseEmptySelectionLaws validCase)
@@ -3666,6 +4092,18 @@ theorem scopedLocalCasePhaseLaws_of_components
   scopedLocalCasePhaseLaws_of_shapes
     (scopedCasePhaseShapeLaws_of_components emptySelection singletonPhases
       retainedPhases targetIdentities)
+
+/-- Direct certified local-phase constructor. The former endpoint-identity
+parameter disappears because the recursive result supplies body certificates
+and preparation preserves the root certificate. -/
+theorem scopedLocalCaseCertifiedPhaseLaws_of_components
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (singletonPhases : ScopedCaseCertifiedSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseCertifiedRetainedPhaseLaws validCase) :
+    ScopedLocalCaseCertifiedPhaseLaws validCase :=
+  scopedLocalCaseCertifiedPhaseLaws_of_shapes
+    (scopedCaseCertifiedPhaseShapeLaws_of_components selection
+      singletonPhases retainedPhases)
 
 /-- The trace-aware recursive case kernel. It synchronizes all recursive
 alternative traces, lifts them to the source case table, and appends the one
