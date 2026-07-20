@@ -76,6 +76,41 @@ theorem allocateConstructor_empty_liveHeapRel
   exact ⟨nextWitness, heapRelated, valueRelated.tobject_tagged_to_tagged,
     allocCtor_empty_eq runtime info semanticFields semanticArity empty⟩
 
+/-- Monotone-witness form of empty constructor allocation. It is the form
+needed when a promoted tag grows the concrete heap while old locals remain
+live across the generated host call. -/
+theorem allocateConstructor_empty_liveHeapRel_extends
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (info : LCNF.CtorInfo)
+    (fields : Array Word32) (semanticFields : Array Value) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (allocated : allocateConstructor state info fields = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness runtime ∧
+      ValueRel nextWitness .tagged (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  have encoded : encodeTagged state (UInt64.ofNat info.cidx) =
+      .ok (result, word) := by
+    unfold allocateConstructor at allocated
+    rw [if_pos arity] at allocated
+    rw [uint32Field_eq_ok "constructor tag" info.cidx tagFits] at allocated
+    simp only [Bind.bind, Except.bind] at allocated
+    rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])] at allocated
+    simpa [UInt32.toNat_ofNat_of_lt' tagFits] using allocated
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+    encodeTagged_liveHeapRel_extends state result witness runtime
+      (UInt64.ofNat info.cidx) word related encoded
+  exact ⟨nextWitness, extension, heapRelated,
+    valueRelated.tobject_tagged_to_tagged,
+    allocCtor_empty_eq runtime info semanticFields semanticArity empty⟩
+
 /-- A nonempty constructor allocation extends the complete concrete/semantic
 live-heap relation and relates the returned concrete address to the fresh
 semantic location.  This is the W6.1 operation-level refinement boundary
@@ -309,5 +344,66 @@ theorem allocateConstructor_nonempty_liveHeapRel
   · intro payload concreteAddress mapped
     exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
       |>.witnessExtension witnessExtension
+
+/-- Monotone-witness form of nonempty constructor allocation. The concrete
+constructor binding is fresh in both witness maps, so every pre-existing
+value relation survives the allocation. -/
+theorem allocateConstructor_nonempty_liveHeapRel_extends
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (info : LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (fields : Array Word32)
+    (semanticFields : Array Value) (address : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (allocated : allocateConstructor state info fields = .ok (result, address)) :
+    let nextWitness :=
+      witness.bindConstructor runtime.nextLocation address info fieldKinds
+    witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨_, objectAllocation, _, _⟩ :=
+    allocateConstructor_nonempty_decompose state result info fields address arity
+      nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have freshAddress := related.frontier.allocateObject_address objectAllocation
+  have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
+    cases found : witness.locations.lookup? runtime.nextLocation with
+    | none => rfl
+    | some oldAddress =>
+        exfalso
+        obtain ⟨cell, semanticFound, _⟩ :=
+          related.concreteToSemantic runtime.nextLocation oldAddress found
+        have beforeNext :=
+          related.locationsBeforeNext runtime.nextLocation cell semanticFound
+        exact (Nat.lt_irrefl runtime.nextLocation) beforeNext
+  have descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value := by
+    intro old descriptor found equal
+    have owned := related.descriptorsOwned old descriptor found
+    simp [headerBytes] at owned
+    omega
+  have extension := witness.bindConstructor_extends runtime.nextLocation address
+    info fieldKinds locationFresh descriptorFresh
+  have refined := allocateConstructor_nonempty_liveHeapRel state result witness
+    runtime info fieldKinds fields semanticFields address related arity semanticArity
+    fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits objectFieldsFit
+    usizeFieldsFit scalarBytesFit allocated
+  exact ⟨extension, refined.1, refined.2⟩
 
 end Fir.Wasm.Concrete

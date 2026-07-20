@@ -186,6 +186,86 @@ theorem ConcreteRuntimeRel.allocateNatural
       rw [auxiliary.2.2]
       exact related.trace.witnessExtension extension }
 
+/-- Empty constructor allocation preserves semantic runtime state while its
+concrete tagged result may extend the heap with a promoted-tag object. -/
+theorem ConcreteRuntimeRel.allocateConstructorEmpty
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fields : Array Word32}
+    {semanticFields : Array Value} {word : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (allocated : allocateConstructor concrete.heap info fields =
+      .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness runtime ∧
+      ValueRel nextWitness .tagged (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated, semanticStep⟩ :=
+    allocateConstructor_empty_liveHeapRel_extends concrete.heap result witness
+      runtime info fields semanticFields word related.heap arity semanticArity
+      empty tagFits allocated
+  refine ⟨nextWitness, extension, ?_, valueRelated, semanticStep⟩
+  exact {
+    heap := heapRelated
+    globals := related.globals.witnessExtension extension
+    world := related.world
+    trace := related.trace.witnessExtension extension }
+
+/-- Nonempty constructor allocation grows both heaps by one related object and
+preserves every auxiliary runtime component under the extended witness. -/
+theorem ConcreteRuntimeRel.allocateConstructorNonempty
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {fields : Array Word32} {semanticFields : Array Value} {address : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (allocated : allocateConstructor concrete.heap info fields =
+      .ok (result, address)) :
+    let nextWitness :=
+      witness.bindConstructor runtime.nextLocation address info fieldKinds
+    witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      ValueRel nextWitness .object (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨extension, heapRelated, valueRelated⟩ :=
+    allocateConstructor_nonempty_liveHeapRel_extends concrete.heap result witness
+      runtime info fieldKinds fields semanticFields address related.heap arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits
+      objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  refine ⟨extension, ?_, valueRelated⟩
+  exact {
+    heap := heapRelated
+    globals := by
+      simpa [semanticConstructorResult] using
+        related.globals.witnessExtension extension
+    world := by simpa [semanticConstructorResult] using related.world
+    trace := by
+      simpa [semanticConstructorResult] using
+        related.trace.witnessExtension extension }
+
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
 inductive HostFailure where
@@ -362,6 +442,50 @@ def naturalLiteralContract (value : Nat) : Wasm.HostContract Host :=
 theorem naturalLiteralFn_satisfies_contract (value initial args) :
     naturalLiteralContract value initial args
       ((naturalLiteralFn value).invoke initial args) := by
+  rfl
+
+/-- Decode the i32-only physical fields accepted by constructor allocation.
+The index is carried solely to produce a precise structured lane failure. -/
+def decodeConstructorWords : Nat → List Wasm.Value → Except HostFailure (List Word32)
+  | _, [] => .ok []
+  | index, .i32 bits :: rest => do
+      let tail ← decodeConstructorWords (index + 1) rest
+      return Word32.ofUInt32 bits :: tail
+  | index, _ :: _ => .error (.laneMismatch index .i32)
+
+/-- Executable concrete implementation of the constructor-allocation import.
+It decodes raw wasm32 fields, allocates in linear memory, and never consults
+semantic values or a handle table. -/
+def allocCtorStep (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (_resultKind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  if args.length = fieldKinds.size then
+    match decodeConstructorWords 0 args with
+    | .ok fields =>
+        match allocateConstructor store.host.runtime.heap info fields.toArray with
+        | .ok (heap, word) =>
+            .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap store heap)
+        | .error failure => trap store (.runtime failure.toTrap)
+    | .error failure => trap store failure
+  else
+    trap store (.arityMismatch fieldKinds.size args.length)
+
+def allocCtorFn (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind) : Wasm.HostFn Host := {
+  params := fieldKinds.toList.map FirTalos.abiKind
+  results := [FirTalos.abiKind resultKind]
+  invoke := allocCtorStep info fieldKinds resultKind }
+
+def allocCtorContract (info : Lean.Compiler.LCNF.CtorInfo)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result =>
+    result = allocCtorStep info fieldKinds resultKind initial args
+
+theorem allocCtorFn_satisfies_contract (info fieldKinds resultKind initial args) :
+    allocCtorContract info fieldKinds resultKind initial args
+      ((allocCtorFn info fieldKinds resultKind).invoke initial args) := by
   rfl
 
 /-- Successful semantic projection identifies a mapped constructor and the
@@ -604,6 +728,129 @@ theorem naturalLiteralStep_of_refines
     FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
   refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated⟩
   · simp [naturalLiteralStep, replaceHeap, clearFailure, allocated]
+  · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+
+/-- The compiler may widen an exact tagged constructor result to `tobject`. -/
+theorem taggedConstructorResult_of_refines
+    {witness : RefinementWitness} {info : Lean.Compiler.LCNF.CtorInfo}
+    {resultKind : AbiKind} {word : Word32}
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (related : ValueRel witness .tagged (.word32 word)
+      (.object (.tagged (UInt64.ofNat info.cidx)))) :
+    ValueRel witness resultKind (.word32 word)
+      (.object (.tagged (UInt64.ofNat info.cidx))) := by
+  cases resultKind <;>
+    simp [constructorKind, empty.1.1, empty.1.2, empty.2, AbiKind.refines]
+      at resultRefines
+  · exact related
+  · exact related.tagged_to_tobject
+
+/-- The compiler may widen an exact heap constructor result to `tobject`. -/
+theorem objectConstructorResult_of_refines
+    {witness : RefinementWitness} {info : Lean.Compiler.LCNF.CtorInfo}
+    {resultKind : AbiKind} {word : Word32} {location : Location}
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (related : ValueRel witness .object (.word32 word)
+      (.object (.heap location))) :
+    ValueRel witness resultKind (.word32 word) (.object (.heap location)) := by
+  cases resultKind <;>
+    simp [constructorKind, nonempty, AbiKind.refines] at resultRefines
+  · exact related
+  · exact related.object_to_tobject
+
+/-- Executable/refinement boundary for an empty constructor. The returned word
+is immediate when possible and otherwise a fresh promoted tag. -/
+theorem allocCtorEmptyStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated : allocateConstructor initial.host.runtime.heap info fields.toArray =
+      .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness runtime ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value))
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
+      semanticStep⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty runtimeRelated
+      arity semanticArity empty tagFits allocated
+  have valueRelated := taggedConstructorResult_of_refines empty resultRefines
+    exactRelated
+  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated,
+    semanticStep⟩
+  · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
+  · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+
+/-- Executable/refinement boundary for a nonempty constructor allocation. -/
+theorem allocCtorNonemptyStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {address : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields.toArray[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated : allocateConstructor initial.host.runtime.heap info fields.toArray =
+      .ok (heap, address)) :
+    let nextWitness := witness.bindConstructor runtime.nextLocation address info
+      fieldKinds
+    witness.Extends nextWitness ∧
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat address.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat address.value))
+        (.object (.heap runtime.nextLocation)) ∧
+      allocCtor runtime info semanticFields =
+        .ok (semanticConstructorResult runtime info semanticFields,
+          .object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨extension, nextRuntimeRelated, exactRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorNonempty runtimeRelated
+      arity semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have valueRelated := objectConstructorResult_of_refines nonempty resultRefines
+    exactRelated
+  refine ⟨extension, ?_, ?_, .word32 valueRelated,
+    allocCtor_nonempty_eq runtime info semanticFields semanticArity nonempty⟩
+  · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
 
 /-- The complete concrete state relation used by W6.6 composition: host-owned
@@ -858,6 +1105,36 @@ theorem wp_localSet_of_set
   rw [stackSet, hSet]
   exact continued
 
+/-- Host-polymorphic generated `local.get` sequence. Constructor allocation is
+the first concrete W6 operation with an arbitrary number of operands. -/
+theorem wp_localGets
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {indices : List Nat} {values : List Wasm.Value}
+    (tail : List Wasm.Value)
+    (hGets :
+      List.Forall₂ (fun index value => locals.get index = some value)
+        indices values)
+    (continued :
+      Wasm.wp module rest Q store
+        { locals with values := values.reverse ++ tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++ rest)
+      Q store { locals with values := tail } env := by
+  induction hGets generalizing tail with
+  | nil => simpa using continued
+  | cons hGet hGets ih =>
+      rename_i index value indices values
+      simp only [List.map_cons, List.cons_append, Wasm.wp_localGet_cons]
+      have hGetNext :
+          ({ locals with values := tail } : Wasm.Locals).get index =
+            some value := by
+        simpa [Wasm.Locals.get] using hGet
+      rw [hGetNext]
+      apply ih (tail := value :: tail)
+      simpa [List.reverse_cons, List.append_assoc] using continued
+
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are
 established only by `ValueRel` and the constructor descriptor. -/
@@ -1032,6 +1309,46 @@ theorem wp_naturalLiteral_let
       Q initial { locals with values := tail } env := by
   apply wp_exact_host_call_of_return
     (step := naturalLiteralStep value) (physicalArgs := [])
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+/-- Concrete-host WP for the exact arbitrary-arity constructor sequence
+emitted by the lowerer. -/
+theorem wp_allocCtor_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind} {word : Word32}
+    (tail : List Wasm.Value)
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (hSet : locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+      some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_exact_host_call_of_return
+    (step := allocCtorStep info fieldKinds resultKind)
+    (physicalArgs := physicalArgs)
     (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
   · simp [hParams]
   · exact operation
@@ -1470,6 +1787,167 @@ theorem codeWP_scalarProjection_let
   refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
       continuationAdapted, stepInitial, ?_⟩
   exact stepWP targetRest Q tail continuedWP
+
+/-- Constructor-allocation instance of the concrete direct-`let` boundary.
+The operation-specific refinement supplies the grown runtime witness; this
+rule composes it with source evaluation, generated locals, and Talos WP. -/
+theorem letStepSimulates_constructor
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value} {sourceRuntime nextRuntime : RuntimeState}
+    {sourceValue : Value} {resultIndex : Nat} {word : Word32}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .ctor info args)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      (indices.map Wasm.Instruction.localGet ++ [.call id])
+      sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+      locals updated resultIndex witness nextWitness := by
+  refine ⟨?_, initialRelated,
+    initialRelated.bindAfter extension nextRuntimeRelated failureClear
+      resultFound resultKindAt valueRelated targetSet,
+    ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq, evaluated]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        allocCtor sourceRuntime info semanticArgs) =
+      .ok (nextRuntime, .value sourceValue)
+    rw [semanticStep]
+    rfl
+  · intro rest Q tail continued
+    simpa [List.append_assoc] using
+      wp_allocCtor_let tail hGets hImp hSat hi hContract hParams hResults
+        operation targetSet continued
+
+/-- Recursive source/compiler/Talos rule for a concrete constructor `let`. -/
+theorem codeWP_constructor_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {fvarIds : List Lean.FVarId} {indices : List Nat}
+    {physicalArgs : List Wasm.Value} {semanticArgs : Array Value}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceValue : Value}
+    {resultIndex : Nat}
+    {word : Word32} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .ctor info args)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok (fvarIds.map Fir.Wasm.Instruction.localGet ++
+        [.call (.runtime (.allocCtor info fieldKinds resultKind))]))
+    (argumentsFound : List.Forall₂
+      (fun fvarId index =>
+        findFVar? (functionBindings sourceFunction) fvarId = some index)
+      fvarIds indices)
+    (callFound : callIndex? sourceModule
+      (.runtime (.allocCtor info fieldKinds resultKind)) = some id)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep : allocCtor sourceRuntime info semanticArgs =
+      .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : CodeWP context sourceModule sourceFunction labels module hostEnv
+      nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+      targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have argumentsAdapted := FirTalos.Correctness.instructions_localGets
+    (sourceModule := sourceModule) (sourceFunction := sourceFunction)
+    (labels := labels) (found := by
+      simpa [functionBindings] using argumentsFound)
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (fvarIds.map Fir.Wasm.Instruction.localGet ++
+            [.call (.runtime (.allocCtor info fieldKinds resultKind))]) =
+        .ok (indices.map Wasm.Instruction.localGet ++ [.call id]) := by
+    rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+    simp [instructions, instruction, callFound]
+  have step := letStepSimulates_constructor (context := context) valueEq
+    evaluated semanticStep initialRelated resultFound resultKindAt hGets hImp
+    hSat hi hContract hParams hResults operation extension nextRuntimeRelated
+    failureClear valueRelated targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  have adapted := codeAdapted_let valueCompiled valueAdapted resultFound
+    continuationAdapted
+  refine ⟨?_, stepInitial, ?_⟩
+  · simpa only [List.append_assoc, List.singleton_append] using adapted
+  · simpa only [List.append_assoc, List.singleton_append] using
+      stepWP targetRest Q tail continuedWP
 
 theorem letStepSimulates_naturalLiteral
     {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}

@@ -8,7 +8,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
 | `literal` | Naturals only | Tagged encoder and large-natural heap theorem | Partial | Natural concrete host plus generated literal-`let` WP; artifact pending; strings missing |
-| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Missing |
+| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP; artifact pending |
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
@@ -38,10 +38,10 @@ Cross-cutting W6.5 state:
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
-- natural literals, `getTag`, `objectProj`, `usizeProj`, and all four supported
-  integer `scalarProj` variants are composed with their W5/W2 generated case
-  and `let` theorems using representation-aware concrete locals and host-owned
-  memory; and
+- natural literals, `allocCtor`, `getTag`, `objectProj`, `usizeProj`, and all
+  four supported integer `scalarProj` variants are composed with their W5/W2
+  generated case and `let` theorems using representation-aware concrete locals
+  and host-owned memory; and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 

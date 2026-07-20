@@ -881,6 +881,16 @@ theorem ValueRel.tagged_to_tobject
   cases related with
   | tagged taggedRelated => exact .tobject (.tagged taggedRelated)
 
+/-- Exact heap-object results may flow through a representation-polymorphic
+`tobject` ABI boundary without changing their physical address. -/
+theorem ValueRel.object_to_tobject
+    {witness : RefinementWitness} {word : Word32} {location : Location}
+    (related : ValueRel witness .object (.word32 word)
+      (.object (.heap location))) :
+    ValueRel witness .tobject (.word32 word) (.object (.heap location)) := by
+  cases related with
+  | object heapRelated => exact .tobject (.heap heapRelated)
+
 theorem HeapReferenceRel.witnessExtension
     {before after : RefinementWitness} (extension : before.Extends after)
     {word : Word32} {location : Location}

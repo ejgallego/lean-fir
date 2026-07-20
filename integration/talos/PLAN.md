@@ -1915,6 +1915,18 @@ continuation compose under the resulting witness. Executable guards cover a
 small immediate and a two-limb natural. String literals remain outside this
 slice and are still an explicit coverage gap.
 
+W6.6f composes constructor allocation across both physical representations.
+The concrete Talos import decodes an arbitrary list of wasm32 object fields,
+allocates directly in host-owned linear memory, and returns either the exact
+tagged word for an empty constructor or the fresh heap address for a nonempty
+one. Both heap refinements now expose monotone witness growth, and exact
+`.tagged`/`.object` results widen to `.tobject` only through the ABI's declared
+refinement. A host-polymorphic `local.get` sequence rule connects arbitrary
+constructor arity to the source interpreter step, compiler/adapter output,
+destination local, and continuation. Executable guards cover the immediate
+empty case and a nonempty one-field allocation/readback. The generated
+artifact still awaits the concrete-host switch.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

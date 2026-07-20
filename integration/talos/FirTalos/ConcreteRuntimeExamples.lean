@@ -131,4 +131,39 @@ private def scalarProjectionFixture :
       | .error _ => false
   | _ => false
 
+private def emptyConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `FirTalos.Concrete.emptyConstructor
+  cidx := 7
+  size := 0
+  usize := 0
+  ssize := 0 }
+
+-- Empty constructor allocation uses the exact tagged wasm32 representation
+-- and does not allocate when the tag is immediate.
+#guard match allocCtorStep emptyConstructorInfo #[] .tagged emptyHostStore [] with
+  | .Return [.i32 word] store =>
+      word == 15 && store.host.runtime.heap.heapCursor == heapBase &&
+        store.host.failure?.isNone
+  | _ => false
+
+private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
+  name := `FirTalos.Concrete.unaryConstructor
+  cidx := 8
+  size := 1
+  usize := 0
+  ssize := 0 }
+
+-- Nonempty constructor allocation writes the exact supplied object word into
+-- its semantic slot and exposes the checked tag through the concrete decoder.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 bits] store =>
+      let object := Word32.ofUInt32 bits
+      match readTag store.host.runtime.heap object,
+          readObjectField store.host.runtime.heap object 0 with
+      | .ok tag, .ok field =>
+          tag == 8 && field.value == 23 && store.host.failure?.isNone
+      | _, _ => false
+  | _ => false
+
 end FirTalos.Concrete
