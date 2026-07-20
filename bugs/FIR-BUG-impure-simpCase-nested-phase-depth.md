@@ -200,6 +200,11 @@ checker is invariant under extensionally equal totalized resolver lookups.
 like the empty map; `empty`, `pushVar`, `pushJoin`, `pushParams`, and `reverse`
 preserve the invariant. Consequently the single explicit `UpstreamBridge`
 can replay an accepted body comparison under either recursive outer resolver.
-The remaining transport work is precisely the reverse code orientation and
-the explicit cross-code side conditions, including normalization for nested
-case tables; neither fact is being inferred from endpoint identities alone.
+The reverse code orientation is now kernel-derived rather than checked again:
+`RenamingBijection` follows opposite binder insertions through ordinary and
+join scopes, and `codeRelated_symm` reverses the entire declarative relation.
+Thus `scopedFoldAlphaTransportLaws_of_upstreamBridge` needs only one audited
+upstream check and one forward `CodeSideConditions` witness. The remaining
+fold-transport work is precisely construction of those explicit cross-code
+side conditions, including normalization for nested case tables; that fact is
+not being inferred from endpoint identities alone.

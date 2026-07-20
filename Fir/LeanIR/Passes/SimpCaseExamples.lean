@@ -584,8 +584,10 @@ def alphaFoldScopeIndex : ScopeIndex := {
     exact ((resolverEquivalent_refl {}).insertSelf_of_empty c).insertSelf_of_empty x
   sourceScope := [x, c]
   targetScope := [x, c]
+  scopesEq := rfl
   sourceJoins := []
   targetJoins := []
+  joinsEq := rfl
 }
 
 /-- The current structural-then-alpha singleton interface is too strong for
@@ -1630,8 +1632,10 @@ def emptyCaseScopeIndex : ScopeIndex := {
   backwardEmpty := resolverEquivalent_refl {}
   sourceScope := [c]
   targetScope := [c]
+  scopesEq := rfl
   sourceJoins := []
   targetJoins := []
+  joinsEq := rfl
 }
 
 def everyCaseTagValid (_ : LCNF.Cases .impure) (_ : Nat) : Prop :=

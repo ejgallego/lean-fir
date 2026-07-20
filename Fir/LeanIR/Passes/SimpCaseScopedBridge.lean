@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCaseAlphaBridge
-import Fir.LeanIR.Passes.AlphaEqvLocalTransport
+import Fir.LeanIR.Passes.AlphaEqvCodeReverse
 
 namespace Fir.LeanIR.Passes.SimpCaseScopedBridge
 
@@ -30,8 +30,10 @@ structure ScopeIndex where
   backwardEmpty : ResolverEquivalent backwardRho {}
   sourceScope : List FVarId
   targetScope : List FVarId
+  scopesEq : sourceScope = targetScope
   sourceJoins : List FVarId
   targetJoins : List FVarId
+  joinsEq : sourceJoins = targetJoins
 
 /-- Empty declaration-body index. -/
 def ScopeIndex.empty : ScopeIndex where
@@ -41,8 +43,10 @@ def ScopeIndex.empty : ScopeIndex where
   backwardEmpty := resolverEquivalent_refl {}
   sourceScope := []
   targetScope := []
+  scopesEq := rfl
   sourceJoins := []
   targetJoins := []
+  joinsEq := rfl
 
 /-- Descend through an unchanged ordinary binder. -/
 def ScopeIndex.pushVar (index : ScopeIndex) (fvarId : FVarId) : ScopeIndex := {
@@ -53,6 +57,7 @@ def ScopeIndex.pushVar (index : ScopeIndex) (fvarId : FVarId) : ScopeIndex := {
   backwardEmpty := index.backwardEmpty.insertSelf_of_empty fvarId
   sourceScope := fvarId :: index.sourceScope
   targetScope := fvarId :: index.targetScope
+  scopesEq := congrArg (fun scope => fvarId :: scope) index.scopesEq
 }
 
 /-- Descend through an unchanged join binder. -/
@@ -64,6 +69,7 @@ def ScopeIndex.pushJoin (index : ScopeIndex) (fvarId : FVarId) : ScopeIndex := {
   backwardEmpty := index.backwardEmpty.insertSelf_of_empty fvarId
   sourceJoins := fvarId :: index.sourceJoins
   targetJoins := fvarId :: index.targetJoins
+  joinsEq := congrArg (fun joins => fvarId :: joins) index.joinsEq
 }
 
 /-- Function and join-body parameters enter scope from left to right. -/
@@ -86,8 +92,10 @@ def ScopeIndex.reverse (index : ScopeIndex) : ScopeIndex where
   backwardEmpty := index.forwardEmpty
   sourceScope := index.targetScope
   targetScope := index.sourceScope
+  scopesEq := index.scopesEq.symm
   sourceJoins := index.targetJoins
   targetJoins := index.sourceJoins
+  joinsEq := index.joinsEq.symm
 
 @[simp] theorem ScopeIndex.reverse_pushVar
     (index : ScopeIndex) (fvarId : FVarId) :
@@ -134,6 +142,31 @@ theorem ScopeIndex.localAcceptsAtBackward_of_upstream
     Local.AcceptsAt index.backwardRho left right :=
   localAcceptsAt_of_resolverEquivalent_empty index.backwardEmpty left right
     (bridge.accepted left right accepted)
+
+theorem ScopeIndex.variableBijection (index : ScopeIndex) :
+    RenamingBijection index.forwardRho index.backwardRho
+      index.sourceScope index.targetScope :=
+  RenamingBijection.of_resolverEquivalent_empty
+    index.forwardEmpty index.backwardEmpty index.scopesEq
+
+theorem ScopeIndex.joinBijection (index : ScopeIndex) :
+    RenamingBijection index.forwardRho index.backwardRho
+      index.sourceJoins index.targetJoins :=
+  RenamingBijection.of_resolverEquivalent_empty
+    index.forwardEmpty index.backwardEmpty index.joinsEq
+
+/-- Every forward scoped alpha relation at a traversal index has the required
+reverse orientation; binder freshness inside `CodeRelated` preserves the
+paired inverse maps recursively. -/
+theorem ScopeIndex.codeRelated_symm
+    (index : ScopeIndex)
+    (related : CodeRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope left right) :
+    CodeRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope right left :=
+  AlphaEqv.codeRelated_symm index.variableBijection index.joinBijection related
 
 abbrev ScopedCodeRelation :=
   ScopeIndex → LCNF.Code .impure → LCNF.Code .impure → Prop
@@ -2337,6 +2370,18 @@ selected bodies and the exact upstream alpha check between them. The identity
 records provide the hygiene, metadata, and endpoint structure from which the
 trusted adapter will derive this law; the table algorithm itself is absent
 from the contract. -/
+structure ScopedFoldAlphaSideLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  side : ∀ {index : ScopeIndex} {left right : LCNF.Code .impure},
+    ScopedCodeTargetIdentities validCase index left →
+    ScopedCodeTargetIdentities validCase index right →
+    left.alphaEqv right = true →
+    CodeSideConditions
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope left right
+
+/-- Scoped conversion required after the transparent fold has identified two
+selected bodies and the exact upstream alpha check between them. -/
 structure ScopedFoldAlphaTransportLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   related : ∀ {index : ScopeIndex} {left right : LCNF.Code .impure},
@@ -2349,6 +2394,24 @@ structure ScopedFoldAlphaTransportLaws
       CodeRelated
         (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
         index.backwardRho index.targetScope index.sourceScope right left
+
+/-- The single audited upstream bridge plus explicit cross-code side
+conditions constructs the complete bidirectional transport law. Only the
+forward local check is replayed; the reverse `CodeRelated` orientation is a
+kernel theorem from the paired scope-index renamings. -/
+theorem scopedFoldAlphaTransportLaws_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (sides : ScopedFoldAlphaSideLaws validCase) :
+    ScopedFoldAlphaTransportLaws validCase where
+  related := by
+    intro index left right leftIdentities rightIdentities accepted
+    have forward : CodeRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope left right :=
+      codeRelated_of_local_accepts
+        (sides.side leftIdentities rightIdentities accepted)
+        (index.localAcceptsAtForward_of_upstream bridge left right accepted)
+    exact ⟨forward, index.codeRelated_symm forward⟩
 
 /-- The transparent fold discharges the complete table/selector part of the
 alpha boundary. What remains is only scoped soundness of one successful

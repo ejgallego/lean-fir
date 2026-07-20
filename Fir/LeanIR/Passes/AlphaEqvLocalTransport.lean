@@ -19,6 +19,11 @@ def ResolverEquivalent (left right : FVarIdMap FVarId) : Prop :=
   ∀ fvarId, (left.get? fvarId).getD fvarId =
     (right.get? fvarId).getD fvarId
 
+@[simp] theorem emptyResolver_getD (fvarId : FVarId) :
+    (({} : FVarIdMap FVarId).get? fvarId).getD fvarId = fvarId := by
+  cases fvarId
+  rfl
+
 theorem resolverEquivalent_refl (rho : FVarIdMap FVarId) :
     ResolverEquivalent rho rho := by
   intro fvarId
