@@ -171,3 +171,23 @@ pins both the compiler shape and the selection-preserving intermediate. The
 remaining frontier is construction of the general fold-alpha presentation,
 retained-table folding, and the shared target identities; no folded
 three-phase factor is assumed by the preferred recursive API.
+
+The fold-alpha frontier is now split at the exact executable boundary. The
+proof-only intermediate is the filtered table with the occurrence-count
+representative appended as a default; generic lookup lemmas prove that this
+append preserves every successful source selection and supplies the fallback
+when selection previously failed. The transparent maximum loop now also
+exposes that its representative is a real source-table member.
+
+For a fold-created singleton, kernel theorems show that the actual shadow
+output is exactly that representative as one default and that every removed
+alternative passed Lean's upstream alpha check against it. Consequently
+`chooseAlt_foldCreatedSingleton_alpha` classifies every tag: the intermediate
+and folded tables select real endpoint bodies that are either identical or
+the exact checked alpha pair. `scopedCaseAddDefaultAlphaLaws_of_transport`
+uses the recursive pointwise endpoint identities to discharge all table and
+selector bookkeeping. The remaining fold obligation is now the uniform
+`ScopedFoldAlphaTransportLaws`: transport one successful upstream body check,
+plus the endpoint hygiene/normalization evidence, to the two scoped
+`CodeRelated` orientations. No additional axiom or compiler discrepancy was
+introduced by this reduction.

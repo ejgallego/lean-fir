@@ -34,25 +34,58 @@ so that obligation must be discharged by a future composed relation.
 def lean432SimpCaseSourceSha256 : String :=
   "270df8851deb0a5f4c6a656377e83e2cf237e76f70a36301239781839122620b"
 
-/-- Transparent copy of the private occurrence counter used by `simpCase`. -/
+/-- Transparent copy of the private occurrence count at one alternative. -/
+def shadowGetNumOccs (alts : Array (LCNF.Alt .impure)) (i : Nat) : Nat :=
+    Id.run do
+  let code := alts[i]!.getCode
+  let mut count := 1
+  for h : j in (i + 1)...alts.size do
+    if LCNF.Code.alphaEqv alts[j].getCode code then
+      count := count + 1
+  return count
+
+/-- Transparent list recursion for the private maximum-selection loop. -/
+def shadowSelectMaxOccs (alts : Array (LCNF.Alt .impure)) :
+    List Nat → LCNF.Alt .impure × Nat → LCNF.Alt .impure × Nat
+  | [], best => best
+  | i :: rest, best =>
+      let current := shadowGetNumOccs alts i
+      let next := if current > best.2 then (alts[i]!, current) else best
+      shadowSelectMaxOccs alts rest next
+
+/-- Transparent copy of the private occurrence counter used by `simpCase`.
+The explicit index list is extensionally the compiler's `1...alts.size` loop
+and exposes the representative-membership invariant to the kernel. -/
 def shadowGetMaxOccs (alts : Array (LCNF.Alt .impure)) :
-    LCNF.Alt .impure × Nat := Id.run do
-  let mut maxAlt := alts[0]!
-  let mut max := getNumOccsOf alts 0
-  for h : i in 1...alts.size do
-    let curr := getNumOccsOf alts i
-    if curr > max then
-      maxAlt := alts[i]
-      max := curr
-  return (maxAlt, max)
-where
-  getNumOccsOf (alts : Array (LCNF.Alt .impure)) (i : Nat) : Nat := Id.run do
-    let code := alts[i]!.getCode
-    let mut count := 1
-    for h : j in (i + 1)...alts.size do
-      if LCNF.Code.alphaEqv alts[j].getCode code then
-        count := count + 1
-    return count
+    LCNF.Alt .impure × Nat :=
+  shadowSelectMaxOccs alts (List.range alts.size |>.drop 1)
+    (alts[0]!, shadowGetNumOccs alts 0)
+
+theorem shadowSelectMaxOccs_fst_mem
+    (bestMem : best.1 ∈ alts)
+    (bounded : ∀ i ∈ indices, i < alts.size) :
+    (shadowSelectMaxOccs alts indices best).1 ∈ alts := by
+  induction indices generalizing best with
+  | nil => simpa [shadowSelectMaxOccs] using bestMem
+  | cons i rest ih =>
+      simp only [shadowSelectMaxOccs]
+      apply ih
+      · split
+        · rw [getElem!_pos alts i (bounded i List.mem_cons_self)]
+          exact Array.getElem_mem _
+        · exact bestMem
+      · intro j member
+        exact bounded j (List.mem_cons_of_mem i member)
+
+theorem shadowGetMaxOccs_fst_mem
+    (nonempty : alts.size ≠ 0) :
+    (shadowGetMaxOccs alts).1 ∈ alts := by
+  unfold shadowGetMaxOccs
+  apply shadowSelectMaxOccs_fst_mem
+  · rw [getElem!_pos alts 0 (by omega)]
+    exact Array.getElem_mem _
+  · intro i member
+    exact List.mem_range.mp (List.mem_of_mem_drop member)
 
 /-- Appending a default cannot change constructor lookup. -/
 theorem findCtorAlt_append_default
@@ -85,6 +118,56 @@ theorem findDefaultAlt_append_default_of_selected
       | default code =>
           simpa only [List.cons_append, findDefaultAlt] using selected
 
+theorem findDefaultAlt_append_default_of_none
+    (selected : findDefaultAlt alts = none) :
+    findDefaultAlt (alts ++ [.default body]) = some body := by
+  induction alts with
+  | nil => simp [findDefaultAlt]
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findDefaultAlt] at selected
+          simpa only [List.cons_append, findDefaultAlt] using ih selected
+      | default code => simp [findDefaultAlt] at selected
+
+theorem exists_mem_getCode_eq_of_findCtorAlt
+    (selected : findCtorAlt tag alts = some branch) :
+    ∃ alt ∈ alts, alt.getCode = branch := by
+  induction alts with
+  | nil => simp [findCtorAlt] at selected
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findCtorAlt] at selected
+          split at selected
+          · have bodyEq : code = branch := Option.some.inj selected
+            exact ⟨.ctorAlt info code, List.mem_cons_self, bodyEq⟩
+          · rcases ih selected with ⟨found, member, bodyEq⟩
+            exact ⟨found, List.mem_cons_of_mem _ member, bodyEq⟩
+      | default code =>
+          simp only [findCtorAlt] at selected
+          rcases ih selected with ⟨found, member, bodyEq⟩
+          exact ⟨found, List.mem_cons_of_mem _ member, bodyEq⟩
+
+theorem exists_mem_getCode_eq_of_findDefaultAlt
+    (selected : findDefaultAlt alts = some branch) :
+    ∃ alt ∈ alts, alt.getCode = branch := by
+  induction alts with
+  | nil => simp [findDefaultAlt] at selected
+  | cons alt rest ih =>
+      cases alt with
+      | alt ctorName params code impossible => nomatch impossible
+      | ctorAlt info code _ =>
+          simp only [findDefaultAlt] at selected
+          rcases ih selected with ⟨found, member, bodyEq⟩
+          exact ⟨found, List.mem_cons_of_mem _ member, bodyEq⟩
+      | default code =>
+          simp only [findDefaultAlt, Option.some.injEq] at selected
+          subst branch
+          exact ⟨.default code, List.mem_cons_self, rfl⟩
+
 /-- Appending a fallback default preserves every already-successful source
 selection. This is the structural fact needed by the proof-only fold
 intermediate. -/
@@ -99,6 +182,33 @@ theorem chooseAlt_append_default_of_selected
       exact findDefaultAlt_append_default_of_selected selected
   | some code =>
       simpa only [ctor, Option.orElse_some] using selected
+
+/-- If the source table has no selected constructor or default, appending a
+default makes that body the selected fallback. -/
+theorem chooseAlt_append_default_of_none
+    (selected : chooseAlt tag alts = none) :
+    chooseAlt tag (alts ++ [.default body]) = some body := by
+  unfold chooseAlt at selected ⊢
+  rw [findCtorAlt_append_default]
+  cases ctor : findCtorAlt tag alts with
+  | some code => simp [ctor] at selected
+  | none =>
+      simp only [ctor, Option.orElse_none] at selected ⊢
+      exact findDefaultAlt_append_default_of_none selected
+
+/-- Every successful table selection is the body of an alternative in the
+source list. -/
+theorem exists_mem_getCode_eq_of_chooseAlt
+    (selected : chooseAlt tag alts = some branch) :
+    ∃ alt ∈ alts, alt.getCode = branch := by
+  unfold chooseAlt at selected
+  cases ctor : findCtorAlt tag alts with
+  | some code =>
+      have codeEq : code = branch := by simpa [ctor] using selected
+      exact exists_mem_getCode_eq_of_findCtorAlt (codeEq ▸ ctor)
+  | none =>
+      simp only [ctor, Option.orElse_none] at selected
+      exact exists_mem_getCode_eq_of_findDefaultAlt selected
 
 /-- Proof-only alpha-fold intermediate. It retains the whole filtered table
 and appends the occurrence-count representative as a fallback default. The
@@ -185,6 +295,63 @@ theorem shadowAddDefaultAlt_eq_singleton_default_max_of_created
       intro alt member
       simp [singleton alt member]
     simp [filteredEmpty]
+
+/-- Every alternative removed by a fold-created singleton is accepted by the
+upstream alpha checker against the occurrence-count representative. -/
+theorem alphaEqv_shadowGetMaxOccs_of_mem_of_created_singleton
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1)
+    (member : alt ∈ alts) :
+    alt.getCode.alphaEqv (shadowGetMaxOccs alts).1.getCode = true := by
+  unfold shadowAddDefaultAlt at singleton
+  split at singleton
+  · simp_all
+  · split at singleton
+    split at singleton <;> simp_all
+
+/-- Selector-level presentation of a fold-created singleton. The canonical
+middle always selects a body and the folded table always selects the maximum
+representative. Their bodies are either definitionally identical (the newly
+appended fallback path) or related by the exact upstream alpha check that
+caused the source arm to be removed. -/
+theorem chooseAlt_foldCreatedSingleton_alpha
+    (notSingleton : alts.size ≠ 1)
+    (singleton : (shadowAddDefaultAlt alts).size = 1) :
+    ∃ middleBody,
+      chooseAlt tag (shadowAddDefaultMiddle alts).toList = some middleBody ∧
+      chooseAlt tag (shadowAddDefaultAlt alts).toList =
+        some (shadowGetMaxOccs alts).1.getCode ∧
+      (∃ alt ∈ alts, alt.getCode = middleBody) ∧
+      (middleBody = (shadowGetMaxOccs alts).1.getCode ∨
+        middleBody.alphaEqv (shadowGetMaxOccs alts).1.getCode = true) := by
+  have foldedEq := shadowAddDefaultAlt_eq_singleton_default_max_of_created
+    notSingleton singleton
+  have foldedSelected :
+      chooseAlt tag (shadowAddDefaultAlt alts).toList =
+        some (shadowGetMaxOccs alts).1.getCode := by
+    simp [foldedEq, chooseAlt, findCtorAlt, findDefaultAlt]
+  cases selected : chooseAlt tag alts.toList with
+  | none =>
+      have nonempty : alts.size ≠ 0 := by
+        have bigger := one_lt_size_of_shadowAddDefaultAlt_singleton
+          notSingleton singleton
+        omega
+      refine ⟨(shadowGetMaxOccs alts).1.getCode, ?_, foldedSelected,
+        ⟨(shadowGetMaxOccs alts).1,
+          shadowGetMaxOccs_fst_mem nonempty, rfl⟩, Or.inl rfl⟩
+      simpa [shadowAddDefaultMiddle] using
+        chooseAlt_append_default_of_none
+          (body := (shadowGetMaxOccs alts).1.getCode) selected
+  | some branch =>
+      rcases exists_mem_getCode_eq_of_chooseAlt selected with
+        ⟨alt, member, bodyEq⟩
+      refine ⟨branch, ?_, foldedSelected, ⟨alt, ?_, bodyEq⟩, Or.inr ?_⟩
+      · exact chooseAlt_shadowAddDefaultMiddle_of_selected selected
+      · simpa using member
+      · rw [← bodyEq]
+        apply alphaEqv_shadowGetMaxOccs_of_mem_of_created_singleton
+          notSingleton singleton
+        simpa using member
 
 /-- Existential presentation of the exact representative theorem. -/
 theorem shadowAddDefaultAlt_eq_singleton_default_of_created
