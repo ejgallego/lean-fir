@@ -208,3 +208,18 @@ upstream check and one forward `CodeSideConditions` witness. The remaining
 fold-transport work is precisely construction of those explicit cross-code
 side conditions, including normalization for nested case tables; that fact is
 not being inferred from endpoint identities alone.
+
+The forward side obligation is now factored more precisely. Recursive
+`CodeRuntimeTypesEq` carries only the exact declaration-result and boxed-scalar
+types observed by FIR's current runtime relation; Lean's checker establishes
+only type alpha-equivalence, so these cross-code equalities remain explicit.
+All unary scope, freshness, and case-normalization premises instead come from
+`ScopedCodeSideReflexive` endpoint certificates.
+`CodeRuntimeTypesEq.sideConditions` kernel-combines the two sources, and
+`scopedFoldAlphaSideLaws_of_endpoints` feeds the result into the existing
+single-check transport theorem. The transparent ordered-alternative proof now
+also exposes constructor/default body checks after sorting and transports them
+back through deterministic table permutations. The next step is to thread the
+endpoint certificates and exact runtime-type compatibility through the
+recursive phase result, rather than reintroducing the original monolithic
+side-condition assumption.

@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCaseAlphaBridge
-import Fir.LeanIR.Passes.AlphaEqvCodeReverse
+import Fir.LeanIR.Passes.AlphaEqvSideConditions
 
 namespace Fir.LeanIR.Passes.SimpCaseScopedBridge
 
@@ -167,6 +167,25 @@ theorem ScopeIndex.codeRelated_symm
       (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
       index.backwardRho index.targetScope index.sourceScope right left :=
   AlphaEqv.codeRelated_symm index.variableBijection index.joinBijection related
+
+/-- Full reflexive side-condition certificate at one scoped endpoint. Unlike
+`ScopedAlphaBireflexive`, this records nested case normalization and the exact
+runtime-observed type metadata required by local alpha soundness. -/
+def ScopedCodeSideReflexive (index : ScopeIndex)
+    (code : LCNF.Code .impure) : Prop :=
+  CodeSideConditions
+    (leftJoins := index.sourceJoins) (rightJoins := index.sourceJoins)
+    index.forwardRho index.sourceScope index.sourceScope code code
+
+/-- The equal source/target scope invariant lets one endpoint certificate be
+viewed at the target side of a cross-code comparison. -/
+theorem ScopedCodeSideReflexive.target
+    (side : ScopedCodeSideReflexive index code) :
+    CodeSideConditions
+      (leftJoins := index.targetJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.targetScope index.targetScope code code := by
+  rw [← index.scopesEq, ← index.joinsEq]
+  exact side
 
 abbrev ScopedCodeRelation :=
   ScopeIndex → LCNF.Code .impure → LCNF.Code .impure → Prop
@@ -2379,6 +2398,32 @@ structure ScopedFoldAlphaSideLaws
     CodeSideConditions
       (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
       index.forwardRho index.sourceScope index.targetScope left right
+
+/-- Factored endpoint obligation for default folding. Endpoint certificates
+carry all unary hygiene and normalization facts; the cross-code field retains
+only exact runtime type compatibility, which Lean's Boolean alpha checker does
+not imply. -/
+structure ScopedFoldAlphaEndpointLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  self : ∀ {index : ScopeIndex} {code : LCNF.Code .impure},
+    ScopedCodeTargetIdentities validCase index code →
+    ScopedCodeSideReflexive index code
+  runtimeTypes : ∀ {index : ScopeIndex} {left right : LCNF.Code .impure},
+    ScopedCodeTargetIdentities validCase index left →
+    ScopedCodeTargetIdentities validCase index right →
+    left.alphaEqv right = true →
+    CodeRuntimeTypesEq left right
+
+/-- Unary endpoint invariants plus exact runtime type compatibility construct
+the complete forward side-condition law. -/
+theorem scopedFoldAlphaSideLaws_of_endpoints
+    (endpoints : ScopedFoldAlphaEndpointLaws validCase) :
+    ScopedFoldAlphaSideLaws validCase where
+  side := by
+    intro index left right leftIdentities rightIdentities accepted
+    exact (endpoints.runtimeTypes leftIdentities rightIdentities accepted).sideConditions
+      (endpoints.self leftIdentities)
+      (endpoints.self rightIdentities).target
 
 /-- Scoped conversion required after the transparent fold has identified two
 selected bodies and the exact upstream alpha check between them. -/
