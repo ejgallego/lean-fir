@@ -26,6 +26,22 @@ theorem MemoryState.TargetMutationFrame.targetLiveHeader
   unfold MemoryState.readLiveHeader
   rw [frame.targetHeader, frame.memorySize]
 
+/-- A mutation framed inside a logical target prefix is also framed by any
+larger retained physical extent for the same allocation. -/
+theorem MemoryState.TargetMutationFrame.widen
+    {before after : MemoryState} {targetAddress : Word32}
+    {targetBytes largerBytes : Nat}
+    (frame : before.TargetMutationFrame after targetAddress targetBytes)
+    (contained : targetBytes ≤ largerBytes) :
+    before.TargetMutationFrame after targetAddress largerBytes := by
+  refine ⟨frame.cursor, frame.memorySize, frame.targetHeader, ?_⟩
+  intro otherAddress otherBytes disjoint
+  apply frame.other
+  rcases disjoint with targetBefore | otherBefore
+  · exact .inl (Nat.le_trans (Nat.add_le_add_left contained targetAddress.value)
+      targetBefore)
+  · exact .inr otherBefore
+
 /-- A checked 64-bit payload write wholly inside the target allocation
 provides the generic target-mutation frame. -/
 theorem MemoryState.TargetMutationFrame.ofWriteUInt64

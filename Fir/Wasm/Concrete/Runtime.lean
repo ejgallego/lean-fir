@@ -375,6 +375,16 @@ def readObjectField (state : MemoryState) (object : Word32) (index : Nat) :
     throw (.target (.nonzeroPadding (offset + 4) padding.toNat))
   return word
 
+/-- Replace one checked constructor object slot. Decoding the old field first
+validates the constructor, index, and canonical zero padding; the store then
+changes only the low wasm32 word of the eight-byte semantic slot. -/
+def writeObjectField (state : MemoryState) (object : Word32) (index : Nat)
+    (field : Word32) : Except ConcreteError MemoryState := do
+  let _ ← readObjectField state object index
+  let offset := objectFieldAddress object.value index
+  let memory ← liftMemory <| state.memory.writeWord32 offset field
+  return { state with memory }
+
 def readUSizeField (state : MemoryState) (object : Word32) (index : Nat) :
     Except ConcreteError UInt64 := do
   let header ← readConstructorHeader state object

@@ -1809,6 +1809,16 @@ The existing tagged-value equation retains both checked no-op and unchecked
 source-fault behavior. One-field object mutation is the next successful
 operation slice.
 
+W6.5j adds that missing `.objectSet` operation. `writeObjectField` validates
+the constructor, bounds, and existing canonical high-word padding before
+replacing only the low wasm32 word of the eight-byte semantic slot. Its local
+proof reads back the new typed `ValueRel`, frames every other object, `USize`,
+and packed-scalar observation, and preserves the zero frontier. The complete
+heap theorem widens the active-layout frame to any retained reuse capacity,
+performs FIR's matching `setObjectField`, and reconstructs `LiveHeapRel` for
+all non-target allocations. Packed-scalar and closure projections remain the
+successful-operation audit gaps before the full structured-fault matrix.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

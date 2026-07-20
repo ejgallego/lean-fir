@@ -739,6 +739,18 @@ def releasedErasedFieldConstructor : Except ConcreteError (MemoryState × Word32
 #guard match concreteMixedConstructor with
   | .error _ => false
   | .ok (state, object) =>
+      match writeObjectField state object 0 (Word32.encodeImmediate 41 (by decide)) with
+      | .error _ => false
+      | .ok result =>
+          match readTag result object, readObjectField result object 0,
+              readUSizeField result object 0 with
+          | .ok tag, .ok field, .ok usize =>
+              tag == 3 && field.value == 83 && usize == 0
+          | _, _, _ => false
+
+#guard match concreteMixedConstructor with
+  | .error _ => false
+  | .ok (state, object) =>
       match writeUSizeField state object 0 77 with
       | .error _ => false
       | .ok result =>
