@@ -1969,7 +1969,7 @@ theorem LiveCellRel.incrementReference_natural
         simp only
         rw [headerReadAfter, headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
-        simp [headerKind, ordinary, marker]
+        simp [headerKind, marker]
         rw [Header.readNaturalLimbs_of_write_eq_ok state.memory memory address
           { header with refCount := UInt32.ofNat (cell.rc + amount) }
           0 _ headerInBounds headerWrite]
@@ -2053,7 +2053,7 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
         simp only
         rw [headerReadAfter, headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
-        simp [headerKind, ordinary, marker]
+        simp [headerKind, marker]
         rw [Header.readNaturalLimbs_of_write_eq_ok state.memory memory address
           { header with refCount := UInt32.ofNat (cell.rc - 1) }
           0 _ headerInBounds headerWrite]

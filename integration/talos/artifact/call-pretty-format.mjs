@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { formatExternalRegistry } from "../../../scripts/wasm_format_externals.mjs";
-import { SemanticFault, SemanticHost } from "../../../scripts/wasm_semantic_host.mjs";
+import { SemanticHost } from "../../../scripts/wasm_semantic_host.mjs";
 
 const artifactPath = process.argv[2];
 assert.ok(artifactPath, "usage: node call-pretty-format.mjs ARTIFACT.wasm");
@@ -91,14 +91,10 @@ assert.equal(callPretty(allConstructors, 80), "α β\n. γ\n  δ\n  ε");
 assert.ok(!host.trace.some((event) => event.name === "panicCore" ||
   event.name === "instInhabitedOfMonad._redArg"));
 
-// FIR-BUG-impure-none-cached-heap-persistence: the shared interpreter and
-// semantic host currently leave a cached heap `SpaceResult` nonpersistent.
-// A longer group reuses the cache enough to expose the dangling cell. Keep the
-// reproducer last because the failed call deliberately poisons that cache.
+// A longer standalone group reuses `spaceUptoLine._closed_0`; this is the
+// regression that originally exposed missing recursive cache persistence.
 const grouped = () => group(append(append(text("left"), line()), text("right")));
-assert.throws(
-  () => callPretty(grouped(), 80),
-  (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
-);
+assert.equal(callPretty(grouped(), 80), "left right");
+assert.equal(callPretty(grouped(), 5), "left\nright");
 
 console.log(`PASS reusable JavaScript prettyM client (${manifest.entry})`);

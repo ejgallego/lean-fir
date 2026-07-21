@@ -353,6 +353,27 @@ function ctorRuntime() {
 
 {
   const host = new SemanticHost();
+  const child = host.alloc({ kind: "string", value: "cached child" });
+  const root = host.alloc({
+    kind: "ctor",
+    tag: 0n,
+    objectFields: [child],
+    usizeFields: [],
+    scalarFields: [],
+  });
+  const cached = host.importFunction({
+    kind: "cacheSet", declaration: "cachedGraph", value: "object",
+  })(host.encode("object", root));
+  assert.deepStrictEqual(host.decode("object", cached), root);
+  for (const value of [root, child]) {
+    const cell = host.liveCell(value.location);
+    assert.equal(cell.persistent, true);
+    assert.equal(cell.rc, 0);
+  }
+}
+
+{
+  const host = new SemanticHost();
   assert.throws(
     () => host.importFunction({
       kind: "external",

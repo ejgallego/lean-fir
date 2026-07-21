@@ -530,7 +530,7 @@ theorem LiveCellRel.prefixExtension
         simp [heap]
         rw [headerAfter, headerRead]
         simp only [Bind.bind, Except.bind]
-        simp [liftMemory, headerKind, ordinary, marker]
+        simp [liftMemory, headerKind, marker]
         rw [extension.readNaturalLimbs address.value 0 _ (by
           simp [target] at limbsFit extent ⊢
           omega)]

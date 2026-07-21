@@ -539,8 +539,7 @@ def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError N
   unless object.classify = .heap do
     throw (.source .expectedObject)
   let header ← liftMemory <| state.readLiveHeader object
-  unless header.kind == .natural && !header.persistent &&
-      header.aux0 == bigNaturalMarker do
+  unless header.kind == .natural && header.aux0 == bigNaturalMarker do
     throw (.source .expectedObject)
   liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
 
@@ -580,6 +579,42 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
       readClosureOwnedReferences state object 0 captureKinds.toList
   | .freed => throw (.target (.unsupportedOwnershipKind .freed))
   | .boxed | .string | .natural | .integer | .byteArray | .opaque => .ok []
+
+/-- Fuel-indexed mirror of Lean's `lean_mark_persistent`. The current object
+is rewritten before its owned references are visited, so cycles terminate at
+the newly persistent header. Immediate and sentinel lanes contain no heap
+graph and are exact no-ops. -/
+def markPersistentFuel : Nat → MemoryState → Word32 →
+    (descriptors : ClosureDescriptorTable := #[]) → Except ConcreteError MemoryState
+  | 0, state, object, _ => do
+      match object.classify with
+      | .heap =>
+          let header ← liftMemory <| state.readLiveHeader object
+          if header.persistent then return state
+          else throw (.target .releaseFuelExhausted)
+      | .immediate | .sentinel => return state
+      | .invalid => throw (.source .expectedObject)
+  | fuel + 1, state, object, descriptors => do
+      match object.classify with
+      | .heap =>
+          let header ← liftMemory <| state.readLiveHeader object
+          if header.persistent then
+            return state
+          let owned ← readOwnedReferences state object header descriptors
+          let state ← writeLiveHeader state object
+            { header with persistent := true, refCount := 0 }
+          owned.foldlM (init := state) fun state child =>
+            markPersistentFuel fuel state child descriptors
+      | .immediate | .sentinel => return state
+      | .invalid => throw (.source .expectedObject)
+
+/-- Mark a concrete value's complete reachable heap graph persistent. The
+allocated prefix bounds every simple heap path; mark-before-descend handles
+cycles without a separate visited structure. -/
+def markPersistent (state : MemoryState) (object : Word32)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState :=
+  markPersistentFuel (state.heapCursor / headerBytes + 1) state object descriptors
 
 /-- Fuel-indexed recursive release. Each nested heap object consumes one unit;
 siblings reuse the remaining depth while threading the updated memory. Tagged

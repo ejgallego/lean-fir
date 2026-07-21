@@ -519,7 +519,7 @@ theorem allocateNatural_heap_objectRel
     simp only [addressHeap, ↓reduceIte, Bind.bind, Except.bind]
     rw [headerRead]
     simp only [liftMemory]
-    have accepted : header.kind == ObjectKind.natural && !header.persistent &&
+    have accepted : header.kind == ObjectKind.natural &&
         header.aux0 == bigNaturalMarker := by
       simp [header, Header.forAllocation]
       change (ObjectKind.natural == ObjectKind.natural) = true

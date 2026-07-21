@@ -541,7 +541,8 @@ def cacheSetStep (declaration : Lean.Name) (kind : AbiKind)
   | [physical] =>
       match decodePhysicalLane kind physical with
       | .ok lane =>
-          match store.host.runtime.writeGlobal declaration kind lane with
+          match store.host.runtime.writeGlobal declaration kind lane
+              store.host.closureDescriptors with
           | .ok runtime => .Return [physical] (replaceRuntime store runtime)
           | .error failure => trap store (.runtime failure.toTrap)
       | .error failure => trap store failure
@@ -1294,7 +1295,11 @@ theorem cacheSetStep_of_refines
       ConcreteRuntimeRel initial.host.runtime witness runtime)
     (valueRelated : PhysicalValueRel witness kind physical semantic)
     (found : initial.host.runtime.globals.find? declaration = some slot)
-    (kindEq : slot.kind = kind) :
+    (kindEq : slot.kind = kind)
+    (persistence : ∀ lane,
+      decodePhysicalLane kind physical = .ok lane →
+      CachePersistenceRefines initial.host.runtime.heap witness runtime
+        kind lane semantic initial.host.closureDescriptors) :
     ∃ after,
       cacheSetStep declaration kind initial [physical] =
         .Return [physical] (replaceRuntime initial after) ∧
@@ -1305,7 +1310,7 @@ theorem cacheSetStep_of_refines
     decodePhysicalLane_of_related valueRelated
   obtain ⟨after, operation, nextRuntimeRelated⟩ :=
     Fir.Wasm.Concrete.ConcreteRuntimeRel.writeGlobal runtimeRelated found kindEq
-      laneRelated
+      laneRelated (persistence lane decoded)
   refine ⟨after, ?_, ?_, valueRelated⟩
   · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
   · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated

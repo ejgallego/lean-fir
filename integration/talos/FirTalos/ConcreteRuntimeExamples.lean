@@ -373,6 +373,40 @@ private def cacheStore : Wasm.Store Host := {
       | _ => false
   | _ => false
 
+private def persistentCacheFixture :
+    Except ConcreteError (Wasm.Store Host × Word32 × Word32) := do
+  let immediate := Word32.encodeImmediate 11 (by decide)
+  let (innerHeap, inner) ← allocateConstructor MemoryState.initial
+    unaryConstructorInfo #[immediate]
+  let (heap, outer) ← allocateConstructor innerHeap unaryConstructorInfo #[inner]
+  let store : Wasm.Store Host := {
+    emptyHostStore with
+    host := { emptyHostStore.host with
+      runtime := { emptyHostStore.host.runtime with
+        heap
+        globals := ConcreteGlobals.declare [(cacheDeclaration, .object)] } } }
+  return (store, outer, inner)
+
+-- Lean's cache transition marks the complete reachable object graph before
+-- publishing the root. Both constructor headers become persistent with a
+-- zero reference count, while the exact object word is retained globally.
+#guard match persistentCacheFixture with
+  | .ok (store, outer, inner) =>
+      match cacheSetStep cacheDeclaration .object store
+          [.i32 (UInt32.ofNat outer.value)] with
+      | .Return [.i32 returned] next =>
+          match next.host.runtime.heap.readLiveHeader outer,
+              next.host.runtime.heap.readLiveHeader inner,
+              next.host.runtime.readGlobal cacheDeclaration .object with
+          | .ok outerHeader, .ok innerHeader, .ok (.word32 cached) =>
+              returned == UInt32.ofNat outer.value && cached == outer &&
+                outerHeader.persistent && innerHeader.persistent &&
+                outerHeader.refCount == 0 && innerHeader.refCount == 0 &&
+                next.host.failure?.isNone
+          | _, _, _ => false
+      | _ => false
+  | .error _ => false
+
 private def closureTarget : Lean.Name := `FirTalos.Concrete.closureTarget
 
 private def closureStore : Wasm.Store Host := {

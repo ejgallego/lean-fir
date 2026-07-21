@@ -354,11 +354,24 @@ def ConcreteRuntimeState.readGlobal (state : ConcreteRuntimeState)
     (name : Lean.Name) (kind : AbiKind) : Except ConcreteError LaneValue :=
   state.globals.read name kind
 
+/-- Apply Lean's cache-persistence transition to the physical lane before the
+generated global is published. Only object-like ABI lanes can name a heap
+graph; scalar, erased, and reuse-token lanes leave memory unchanged. -/
+def persistGlobalValue (state : MemoryState) (kind : AbiKind) (value : LaneValue)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    Except ConcreteError MemoryState :=
+  match kind, value with
+  | .object, .word32 object | .tagged, .word32 object
+  | .tobject, .word32 object => markPersistent state object descriptors
+  | _, _ => pure state
+
 def ConcreteRuntimeState.writeGlobal (state : ConcreteRuntimeState)
-    (name : Lean.Name) (kind : AbiKind) (value : LaneValue) :
+    (name : Lean.Name) (kind : AbiKind) (value : LaneValue)
+    (descriptors : ClosureDescriptorTable := #[]) :
     Except ConcreteError ConcreteRuntimeState := do
+  let heap ← persistGlobalValue state.heap kind value descriptors
   let globals ← state.globals.write name kind value
-  return { state with globals }
+  return { state with heap, globals }
 
 /-- `LiveHeapRel` depends only on the semantic heap and allocation cursor;
 globals, world, and trace can therefore change in the layered runtime without
@@ -437,32 +450,52 @@ theorem ConcreteRuntimeRel.moduleInitial
   exact ConcreteRuntimeRel.initial (LiveHeapRel.initial dispatch descriptors)
     rfl rfl rfl declarations
 
+/-- Explicit proof boundary for Lean's recursive cache-persistence transition.
+W6's ordinary-cell heap relation historically covered only nonpersistent mapped
+objects; cache composition now carries this obligation instead of silently
+assuming the heap is unchanged. -/
+structure CachePersistenceRefines (concrete : MemoryState)
+    (witness : RefinementWitness) (semantic : RuntimeState)
+    (kind : AbiKind) (lane : LaneValue) (value : Value)
+    (descriptors : ClosureDescriptorTable) where
+  after : MemoryState
+  operation : persistGlobalValue concrete kind lane descriptors = .ok after
+  heap : LiveHeapRel after witness (semantic.markPersistent value)
+
 /-- A successful concrete cache write and FIR `setGlobal` remain related at
 the full runtime-state boundary. -/
 theorem ConcreteRuntimeRel.writeGlobal
     {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
     {semantic : RuntimeState} {name : Lean.Name} {slot : ConcreteGlobalSlot}
     {kind : AbiKind} {lane : LaneValue} {value : Value}
+    {descriptors : ClosureDescriptorTable}
     (related : ConcreteRuntimeRel concrete witness semantic)
     (found : concrete.globals.find? name = some slot)
     (kindEq : slot.kind = kind)
-    (valueRelated : ValueRel witness kind lane value) :
+    (valueRelated : ValueRel witness kind lane value)
+    (persistence : CachePersistenceRefines concrete.heap witness semantic
+      kind lane value descriptors) :
     ∃ after,
-      concrete.writeGlobal name kind lane = .ok after ∧
+      concrete.writeGlobal name kind lane descriptors = .ok after ∧
         ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
   obtain ⟨globals, operation, globalsRelated⟩ :=
     related.globals.write found kindEq valueRelated
-  let after : ConcreteRuntimeState := { concrete with globals }
+  let after : ConcreteRuntimeState := {
+    concrete with heap := persistence.after, globals }
   refine ⟨after, ?_, ?_⟩
   · unfold ConcreteRuntimeState.writeGlobal
+    rw [persistence.operation]
     rw [operation]
     rfl
   · exact {
-      heap := related.heap.auxiliary rfl rfl
+      heap := by
+        apply persistence.heap.auxiliary
+        · simp [RuntimeState.setGlobal]
+        · simp [RuntimeState.setGlobal]
       globals := by
         simpa [RuntimeState.setGlobal] using globalsRelated
-      world := related.world
-      trace := related.trace }
+      world := by simpa [RuntimeState.setGlobal] using related.world
+      trace := by simpa [RuntimeState.setGlobal] using related.trace }
 
 /-- Any initialized semantic global has a checked concrete lane read at its
 retained static ABI kind. -/

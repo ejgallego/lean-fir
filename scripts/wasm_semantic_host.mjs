@@ -409,6 +409,7 @@ export class SemanticHost {
   cacheSet(operation, physicalArgs) {
     assert.equal(physicalArgs.length, 1, "cacheSet host arity mismatch");
     const value = this.decode(operation.value, physicalArgs[0]);
+    this.markPersistent(value);
     this.globals.set(operation.declaration, value);
     return this.encode(operation.value, value);
   }
@@ -697,6 +698,24 @@ export class SemanticHost {
         return object.fixed;
       default:
         return [];
+    }
+  }
+
+  // Lean's `lean_mark_persistent` marks the complete reachable object graph.
+  // Mark before descending so cyclic heap graphs terminate without a separate
+  // visited table; an already-persistent cell is an exact traversal barrier.
+  markPersistent(value) {
+    if (value.kind !== "heap") {
+      return;
+    }
+    const cell = this.liveCell(value.location);
+    if (cell.persistent) {
+      return;
+    }
+    cell.persistent = true;
+    cell.rc = 0;
+    for (const child of this.ownedValues(cell.object)) {
+      this.markPersistent(child);
     }
   }
 
