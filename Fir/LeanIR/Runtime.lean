@@ -148,6 +148,47 @@ def replaceCell : Heap → Location → HeapCell → Option Heap
       else
         ((candidate, current) :: ·) <$> replaceCell rest location replacement
 
+/-- Exact semantic-heap frame produced by replacing the first cell at one
+location. Besides recording the successful replacement, this packages the
+target lookup, every other lookup, and the unchanged heap length. -/
+structure HeapReplacePost (before after : Heap) (location : Location)
+    (replacement : HeapCell) : Prop where
+  replaced : replaceCell before location replacement = some after
+  target : findCell? after location = some replacement
+  frame : ∀ other, other ≠ location →
+    findCell? after other = findCell? before other
+  length : after.length = before.length
+
+/-- Replacing a location known to occur in the semantic heap succeeds and
+exposes its complete lookup frame. -/
+theorem replaceCell_spec_of_find
+    (heap : Heap) (location : Location) (current replacement : HeapCell)
+    (found : findCell? heap location = some current) :
+    ∃ after, HeapReplacePost heap after location replacement := by
+  induction heap with
+  | nil => simp [findCell?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, cell⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        refine ⟨(location, replacement) :: rest, ?_, ?_, ?_, rfl⟩
+        · simp [replaceCell]
+        · simp [findCell?]
+        · intro other different
+          simp [findCell?, Ne.symm different]
+      · have tailFound : findCell? rest location = some current := by
+          simpa [findCell?, here] using found
+        obtain ⟨after, post⟩ := ih tailFound
+        refine ⟨(candidate, cell) :: after, ?_, ?_, ?_, ?_⟩
+        · simp [replaceCell, here, post.replaced]
+        · simp [findCell?, here, post.target]
+        · intro other different
+          by_cases atHead : candidate = other
+          · subst candidate
+            simp [findCell?]
+          · simp [findCell?, atHead, post.frame other different]
+        · simp [post.length]
+
 def getLiveCell (runtime : RuntimeState) (location : Location) :
     Except RuntimeFault HeapCell :=
   match findCell? runtime.heap location with
@@ -159,6 +200,29 @@ def setCell (runtime : RuntimeState) (location : Location) (cell : HeapCell) :
   match replaceCell runtime.heap location cell with
   | some heap => .ok { runtime with heap }
   | none => .error (.deadObject location)
+
+/-- `setCell` succeeds whenever its source lookup succeeded, changing only
+the requested cell while preserving heap length and the non-heap runtime
+components. -/
+theorem setCell_spec_of_find
+    (runtime : RuntimeState) (location : Location) (current replacement : HeapCell)
+    (found : findCell? runtime.heap location = some current) :
+    ∃ result,
+      setCell runtime location replacement = .ok result ∧
+      findCell? result.heap location = some replacement ∧
+      (∀ other, other ≠ location →
+        findCell? result.heap other = findCell? runtime.heap other) ∧
+      result.heap.length = runtime.heap.length ∧
+      result.nextLocation = runtime.nextLocation ∧
+      result.globals = runtime.globals ∧
+      result.world = runtime.world ∧
+      result.trace = runtime.trace := by
+  obtain ⟨after, post⟩ := replaceCell_spec_of_find runtime.heap location current
+    replacement found
+  refine ⟨{ runtime with heap := after }, ?_, post.target, post.frame,
+    post.length, rfl, rfl, rfl, rfl⟩
+  unfold setCell
+  rw [post.replaced]
 
 def alloc (runtime : RuntimeState) (object : HeapObject) (persistent := false) :
     RuntimeState × ObjectRef :=
@@ -201,6 +265,54 @@ def markPersistentLocationFuel : Nat → Heap → Location → Heap
                     | _ => heap
       | none => heap
 
+/-- Recursive persistence rewrites cell metadata in place and therefore
+preserves the semantic heap's allocation count. -/
+@[simp] theorem markPersistentLocationFuel_length
+    (fuel : Nat) (heap : Heap) (location : Location) :
+    (markPersistentLocationFuel fuel heap location).length = heap.length := by
+  induction fuel generalizing heap location with
+  | zero => rfl
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap location with
+      | none => rfl
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [found, skip]
+          · simp only [found, skip, Bool.false_eq_true, if_false]
+            let replacement : HeapCell :=
+              { cell with rc := 0, persistent := true }
+            obtain ⟨after, post⟩ := replaceCell_spec_of_find heap location cell
+              replacement found
+            have replaced : replaceCell heap location replacement = some after :=
+              post.replaced
+            rw [replaced]
+            have foldLength (values : Array Value) (start : Heap) :
+                (values.foldl (init := start) fun next value =>
+                  match value with
+                  | .object (.heap child) =>
+                      markPersistentLocationFuel fuel next child
+                  | _ => next).length = start.length := by
+              rw [← Array.foldl_toList]
+              generalize values.toList = items
+              induction items generalizing start with
+              | nil => rfl
+              | cons value items itemsIH =>
+                  simp only [List.foldl]
+                  calc
+                    _ = (match value with
+                        | .object (.heap child) =>
+                            markPersistentLocationFuel fuel start child
+                        | _ => start).length := itemsIH _
+                    _ = start.length := by
+                          cases value with
+                          | object reference =>
+                              cases reference with
+                              | tagged => rfl
+                              | heap child => exact ih _ child
+                          | usize | scalar | erased | reuseToken => rfl
+            exact (foldLength cell.object.ownedValues after).trans post.length
+
 /-- Mirror Lean's `lean_mark_persistent`: heap objects reachable from the
 value become live process-lifetime roots with reference count zero. Immediate
 and non-object values require no heap transition. -/
@@ -209,6 +321,14 @@ def RuntimeState.markPersistent (runtime : RuntimeState) : Value → RuntimeStat
       { runtime with heap :=
           markPersistentLocationFuel (runtime.heap.length + 1) runtime.heap location }
   | _ => runtime
+
+@[simp] theorem RuntimeState.markPersistent_heap_length
+    (runtime : RuntimeState) (value : Value) :
+    (runtime.markPersistent value).heap.length = runtime.heap.length := by
+  cases value with
+  | object reference =>
+      cases reference <;> simp [RuntimeState.markPersistent]
+  | usize | scalar | erased | reuseToken => rfl
 
 @[simp] theorem RuntimeState.markPersistent_nextLocation
     (runtime : RuntimeState) (value : Value) :
