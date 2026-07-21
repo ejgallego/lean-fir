@@ -1948,7 +1948,21 @@ composes the arbitrary-arity host call plus destination-local write. A maximum
 `RuntimeOp.abiWellFormed` admits an impossible `.tagged` closure result; this is
 recorded as `FIR-BUG-wasm-none-partial-apply-tagged-result`, and the refinement
 claim remains restricted to exact `.object` or widened `.tobject`. The source
-`pap`/compiler theorem and artifact switch remain follow-ups.
+`pap`/compiler theorem and artifact switch remained follow-ups at that
+checkpoint.
+
+W6.6i completes partial-application composition through the source and
+generated-code boundaries. A direct `pap` rule proves the interpreter's
+strict-underapplication branch allocates the same semantic closure described
+by the complete concrete heap refinement, then binds the returned physical
+address under the grown representation witness. Its recursive `CodeWP` rule
+connects the transparent compiler equation, Talos adapter output, arbitrary-
+arity capture loads, exact host call, destination-local write, and an already-
+composed continuation. Argument adaptation remains an explicit premise so the
+rule supports every independently proved LCNF argument encoding rather than
+assuming captures are all local variables. The generated artifact still uses
+the semantic host; closure match/projection and trampoline/direct-call
+composition remain the next proof slices.
 
 ## Parallel agent packages
 

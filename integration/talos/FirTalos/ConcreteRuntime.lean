@@ -2292,6 +2292,179 @@ theorem codeWP_constructor_let
   · simpa only [List.append_assoc, List.singleton_append] using
       stepWP targetRest Q tail continuedWP
 
+/-- Partial-application instance of the concrete direct-`let` boundary.  The
+source interpreter and concrete runtime allocate the same closure at the next
+semantic/physical heap locations, respectively; the operation refinement
+supplies the grown witness relating those locations. -/
+theorem letStepSimulates_partialApply
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {function : Lean.Name} {target : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value} {sourceRuntime : RuntimeState}
+    {resultIndex : Nat} {word : Word32}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .pap function args)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (targetFound : context.program.findDecl? function = some target)
+    (semanticLt : semanticArgs.size < target.params.size)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (partialApplyContract function target.params.size args.size
+        fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : partialApplyStep function target.params.size args.size
+      fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness
+        (semanticClosureResult sourceRuntime function target.params.size
+          semanticArgs))
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value))
+      (.object (.heap sourceRuntime.nextLocation)))
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      (indices.map Wasm.Instruction.localGet ++ [.call id])
+      sourceRuntime
+      (semanticClosureResult sourceRuntime function target.params.size
+        semanticArgs)
+      sourceEnv (.object (.heap sourceRuntime.nextLocation)) initial nextStore
+      locals updated resultIndex witness nextWitness := by
+  refine ⟨?_, initialRelated,
+    initialRelated.bindAfter extension nextRuntimeRelated failureClear
+      resultFound resultKindAt valueRelated targetSet,
+    ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq, evaluated, targetFound,
+      alloc_closure_eq]
+    change (if target.params.size ≤ semanticArgs.size then _ else _) = _
+    rw [if_neg (Nat.not_le.mpr semanticLt)]
+    rfl
+  · intro rest Q tail continued
+    simpa [List.append_assoc] using
+      wp_partialApply_let (tail := tail) hGets hImp hSat hi hContract hParams
+        hResults operation targetSet continued
+
+/-- Recursive source/compiler/Talos rule for closure allocation by partial
+application.  `argumentsAdapted` keeps this rule independent of which
+supported LCNF argument forms produced the physical capture lanes. -/
+theorem codeWP_partialApply_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {function : Lean.Name} {target : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {argumentCode : List Fir.Wasm.Instruction} {indices : List Nat}
+    {physicalArgs : List Wasm.Value} {semanticArgs : Array Value}
+    {sourceRuntime : RuntimeState} {resultIndex : Nat} {word : Word32}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .pap function args)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok (argumentCode ++ [
+        .call (.runtime (.partialApply function target.params.size args.size
+          fieldKinds resultKind))]))
+    (argumentsAdapted :
+      instructions sourceModule sourceFunction labels argumentCode =
+        .ok (indices.map Wasm.Instruction.localGet))
+    (callFound : callIndex? sourceModule
+      (.runtime (.partialApply function target.params.size args.size
+        fieldKinds resultKind)) = some id)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (targetFound : context.program.findDecl? function = some target)
+    (semanticLt : semanticArgs.size < target.params.size)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (partialApplyContract function target.params.size args.size
+        fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : partialApplyStep function target.params.size args.size
+      fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness
+        (semanticClosureResult sourceRuntime function target.params.size
+          semanticArgs))
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value))
+      (.object (.heap sourceRuntime.nextLocation)))
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : CodeWP context sourceModule sourceFunction labels module hostEnv
+      (semanticClosureResult sourceRuntime function target.params.size
+        semanticArgs)
+      (bind sourceEnv decl.fvarId (.object (.heap sourceRuntime.nextLocation)))
+      continuation targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (argumentCode ++ [
+            .call (.runtime (.partialApply function target.params.size args.size
+              fieldKinds resultKind))]) =
+        .ok (indices.map Wasm.Instruction.localGet ++ [.call id]) := by
+    rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+    simp [instructions, instruction, callFound]
+  have step := letStepSimulates_partialApply (context := context) valueEq
+    evaluated targetFound semanticLt initialRelated resultFound resultKindAt
+    hGets hImp hSat hi hContract hParams hResults operation extension
+    nextRuntimeRelated failureClear valueRelated targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  have adapted := codeAdapted_let valueCompiled valueAdapted resultFound
+    continuationAdapted
+  refine ⟨?_, stepInitial, ?_⟩
+  · simpa only [List.append_assoc, List.singleton_append] using adapted
+  · simpa only [List.append_assoc, List.singleton_append] using
+      stepWP targetRest Q tail continuedWP
+
 theorem letStepSimulates_naturalLiteral
     {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
