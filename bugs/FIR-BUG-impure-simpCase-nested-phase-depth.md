@@ -278,3 +278,16 @@ syntactic child, including selector-shadowed alternatives, and the traversal
 laws preserve the endpoint certificate through every non-case constructor.
 `shadowCode_scopedPhaseEndpointCertifiedTree` is the resulting end-to-end
 theorem, with a recursive empty-case regression crossing a `setTag` parent.
+
+The preferred API has since removed the separate retained semantic premise.
+`ScopedCasePreparedCertifiedAlphaLaws` presents the complete preparation
+pipeline uniformly, whether default folding is inert, partial, or collapses
+the table to one arm. Reachable selection plus recursive body certificates
+derive the first structural leg; the same prepared-alpha witness then feeds
+both certified singleton classification and retained reconstruction.
+`shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared` therefore needs
+only reachable selection, this one generalized preparation law, the source
+certificate tree, and the executable run. The remaining semantic frontier is
+to derive that generalized law from the transparent default-fold algorithm,
+the endpoint runtime-type compatibility premise, and the single audited
+upstream-alpha bridge.

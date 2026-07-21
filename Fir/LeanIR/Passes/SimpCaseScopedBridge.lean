@@ -3902,6 +3902,17 @@ structure ScopedCaseFoldedCertifiedAlphaLaws
       (.mk typeName resultType discr sourceAlts)).size = 1 →
     Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
 
+/-- Unified certified alpha presentation for the complete preparation
+pipeline. Unlike the singleton-only folded law, this covers unchanged,
+partially folded retained, and fully folded singleton tables uniformly. -/
+structure ScopedCasePreparedCertifiedAlphaLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  prepared : ∀ {index : ScopeIndex}
+      {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedAltsPhaseCertifiedResult validCase index
+      sourceAlts.toList sourceAlts.toList →
+    Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
+
 /-- Lift the pure alpha boundary to the fold presentation consumed by the
 three-phase constructor. No additional semantic premise is introduced. -/
 theorem scopedCaseFoldedAlphaLaws_of_addDefaultAlpha
@@ -3921,6 +3932,16 @@ theorem scopedCaseFoldedCertifiedAlphaLaws_of_addDefaultAlpha
       filteredNotSingleton preparedSingleton
     exact ⟨scopedFoldedAlphaEvidence_of_addDefault
       (alpha.folded alternatives filteredNotSingleton preparedSingleton)⟩
+
+/-- The unified preparation law immediately supplies the genuine
+fold-created singleton boundary. -/
+theorem scopedCaseFoldedCertifiedAlphaLaws_of_prepared
+    (prepared : ScopedCasePreparedCertifiedAlphaLaws validCase) :
+    ScopedCaseFoldedCertifiedAlphaLaws validCase where
+  folded := by
+    intro index typeName resultType discr sourceAlts alternatives
+      filteredNotSingleton preparedSingleton
+    exact prepared.prepared alternatives
 
 /-- Assemble singleton phase classification from the generic direct path and
 the remaining fold-created singleton contract. -/
@@ -3999,6 +4020,38 @@ theorem scopedCaseCertifiedRetainedPhaseLaws_of_retained
         simpa [shadowPrepareAlts, LCNF.Cases.alts, LCNF.Cases.updateAlts]
           using certificate
     }⟩
+
+/-- Reachable source selection plus the unified preparation alpha witness
+constructs the retained semantic phase directly. The recursive endpoint
+certificate supplies the structural identity of the selected source body. -/
+theorem scopedCaseCertifiedRetainedPhaseLaws_of_prepared
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (prepared : ScopedCasePreparedCertifiedAlphaLaws validCase) :
+    ScopedCaseCertifiedRetainedPhaseLaws validCase where
+  retained := by
+    intro index typeName resultType discr sourceAlts root alternatives
+      nonempty nonsingleton
+    rcases prepared.prepared alternatives with ⟨preparation⟩
+    have certificate := scopedPreparedCaseTargetCertificate root alternatives
+    refine ⟨{
+      phase := {
+        middleAlts := preparation.middleAlts
+        structuralSelected := ?_
+        folded := preparation.folded
+      }
+      certificate := by
+        simpa [shadowPrepareAlts, LCNF.Cases.alts, LCNF.Cases.updateAlts]
+          using certificate
+    }⟩
+    intro tag valid
+    rcases selection.selected valid with ⟨branch, selected, reachable⟩
+    have middleSelected := preparation.sourceSelection selected reachable
+    rcases exists_mem_getCode_eq_of_chooseAlt selected with
+      ⟨alt, member, bodyEq⟩
+    rcases alternatives.targetBodyCertificate_of_mem member with
+      ⟨bodyCertificate⟩
+    rw [selected, middleSelected]
+    exact .some (by simpa [bodyEq] using bodyCertificate.structural)
 
 /-- Endpoint identities for the two nonterminal output shapes. Empty-table
 identities are generic because `unreach` is structurally and alpha reflexive.
@@ -4571,6 +4624,19 @@ theorem scopedLocalCaseCertifiedPhaseLaws_of_components
   scopedLocalCaseCertifiedPhaseLaws_of_shapes
     (scopedCaseCertifiedPhaseShapeLaws_of_components selection
       singletonPhases retainedPhases)
+
+/-- Preferred certified local contract: one generalized preparation-alpha
+law discharges both fold-created singleton and retained outputs. -/
+theorem scopedLocalCaseCertifiedPhaseLaws_of_prepared
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (prepared : ScopedCasePreparedCertifiedAlphaLaws validCase) :
+    ScopedLocalCaseCertifiedPhaseLaws validCase :=
+  scopedLocalCaseCertifiedPhaseLaws_of_components selection
+    (scopedCaseCertifiedSingletonPhaseLaws_of_reachableSelection selection
+      (scopedCaseFoldedCertifiedSingletonPhaseLaws_of_reachableSelectionAndAlpha
+        selection
+        (scopedCaseFoldedCertifiedAlphaLaws_of_prepared prepared)))
+    (scopedCaseCertifiedRetainedPhaseLaws_of_prepared selection prepared)
 
 /-- The trace-aware recursive case kernel. It synchronizes all recursive
 alternative traces, lifts them to the source case table, and appends the one
@@ -5969,6 +6035,20 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_components
     (scopedLocalCaseCertifiedPhaseLaws_of_components selection
       singletonPhases
       (scopedCaseCertifiedRetainedPhaseLaws_of_retained retainedPhases))
+    certificates run
+
+/-- Preferred end-to-end certified API. Reachable selection and one unified
+preparation-alpha contract cover empty, singleton, and retained local shapes
+at every recursive depth. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (prepared : ScopedCasePreparedCertifiedAlphaLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree
+    (scopedLocalCaseCertifiedPhaseLaws_of_prepared selection prepared)
     certificates run
 
 theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :
