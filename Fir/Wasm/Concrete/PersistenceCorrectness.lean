@@ -508,6 +508,118 @@ def markPersistentValueFuel (fuel : Nat) (runtime : RuntimeState) :
           markPersistentLocationFuel fuel runtime.heap location }
   | _ => runtime
 
+/-- Number of semantic cells that are both live and not yet persistent. This
+is the decreasing measure behind total recursive persistence: the parent is
+marked before any child is visited, so every genuine recursive step removes
+one cell from this count. -/
+def ordinaryLiveCount : Heap → Nat
+  | [] => 0
+  | (_, cell) :: rest =>
+      (if cell.live && !cell.persistent then 1 else 0) + ordinaryLiveCount rest
+
+theorem ordinaryLiveCount_le_length (heap : Heap) :
+    ordinaryLiveCount heap ≤ heap.length := by
+  induction heap with
+  | nil => exact Nat.le_refl _
+  | cons entry rest ih =>
+      obtain ⟨location, cell⟩ := entry
+      simp only [ordinaryLiveCount, List.length_cons]
+      split <;> omega
+
+/-- Replacing one ordinary live cell by its persistent metadata removes
+exactly one element from the recursion measure. -/
+theorem ordinaryLiveCount_replace_persistent
+    {heap after : Heap} {location : Location} {cell : HeapCell}
+    (found : findCell? heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (replaced : replaceCell heap location
+      { cell with rc := 0, persistent := true } = some after) :
+    ordinaryLiveCount after + 1 = ordinaryLiveCount heap := by
+  induction heap generalizing after with
+  | nil => simp [findCell?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, current⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        simp [findCell?] at found
+        subst current
+        simp [replaceCell] at replaced
+        subst after
+        simp [ordinaryLiveCount, live, ordinary]
+        omega
+      · have tailFound : findCell? rest location = some cell := by
+          simpa [findCell?, here] using found
+        cases tailReplaced : replaceCell rest location
+            { cell with rc := 0, persistent := true } with
+        | none => simp [replaceCell, here, tailReplaced] at replaced
+        | some tailAfter =>
+            have afterEq : after = (candidate, current) :: tailAfter := by
+              simpa [replaceCell, here, tailReplaced] using replaced.symm
+            subst after
+            have tailCount := ih tailFound tailReplaced
+            simp only [ordinaryLiveCount]
+            omega
+
+/-- Semantic recursive persistence never creates a new ordinary live cell. -/
+theorem ordinaryLiveCount_markPersistentLocationFuel_le
+    (fuel : Nat) (heap : Heap) (location : Location) :
+    ordinaryLiveCount (markPersistentLocationFuel fuel heap location) ≤
+      ordinaryLiveCount heap := by
+  induction fuel generalizing heap location with
+  | zero => exact Nat.le_refl _
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap location with
+      | none => simp
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [skip]
+          · have live : cell.live = true := by
+              cases liveEq : cell.live <;> simp_all
+            have ordinary : cell.persistent = false := by
+              cases persistentEq : cell.persistent <;> simp_all
+            simp only [skip, Bool.false_eq_true, if_false]
+            obtain ⟨after, post⟩ := replaceCell_spec_of_find heap location cell
+              { cell with rc := 0, persistent := true } found
+            rw [post.replaced]
+            have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
+              post.replaced
+            have foldLe (values : Array Value) (start : Heap) :
+                ordinaryLiveCount
+                    (values.foldl (init := start) fun next value =>
+                      match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel fuel next child
+                      | _ => next) ≤
+                  ordinaryLiveCount start := by
+              rw [← Array.foldl_toList]
+              generalize values.toList = items
+              induction items generalizing start with
+              | nil => exact Nat.le_refl _
+              | cons value items itemsIH =>
+                  simp only [List.foldl]
+                  apply Nat.le_trans (itemsIH _)
+                  cases value with
+                  | object reference =>
+                      cases reference with
+                      | tagged payload => exact Nat.le_refl _
+                      | heap child => exact ih start child
+                  | usize | scalar | erased | reuseToken => exact Nat.le_refl _
+            exact Nat.le_trans (foldLe cell.object.ownedValues after) (by omega)
+
+theorem ordinaryLiveCount_markPersistentValueFuel_le
+    (fuel : Nat) (runtime : RuntimeState) (value : Value) :
+    ordinaryLiveCount (markPersistentValueFuel fuel runtime value).heap ≤
+      ordinaryLiveCount runtime.heap := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload => exact Nat.le_refl _
+      | heap location =>
+          exact ordinaryLiveCount_markPersistentLocationFuel_le fuel runtime.heap
+            location
+  | usize | scalar | erased | reuseToken => exact Nat.le_refl _
+
 /-- Both physical tagged encodings are exact concrete persistence no-ops at
 every fuel budget. -/
 theorem LiveHeapRel.markPersistentFuel_tagged
@@ -570,10 +682,12 @@ theorem OwnershipValuesRel.foldlM_markPersistent_refines
     {fuel : Nat} {descriptors : ClosureDescriptorTable}
     (related : OwnershipValuesRel witness words values)
     (heap : LiveHeapRel state witness runtime)
+    (bound : ordinaryLiveCount runtime.heap ≤ fuel)
     (recurse : ∀ {before : MemoryState} {semantic : RuntimeState}
         {location : Location} {address : Word32},
       LiveHeapRel before witness semantic →
       witness.locations.lookup? location = some address →
+      ordinaryLiveCount semantic.heap ≤ fuel →
       ∃ after,
         markPersistentFuel fuel before address descriptors = .ok after ∧
         LiveHeapRel after witness
@@ -590,14 +704,21 @@ theorem OwnershipValuesRel.foldlM_markPersistent_refines
       rcases head.persistenceStep heap fuel descriptors with heapStep | noOpStep
       · obtain ⟨location, valueEq, mapped⟩ := heapStep
         subst value
-        obtain ⟨nextState, concreteHead, nextHeap⟩ := recurse heap mapped
-        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih nextHeap
+        obtain ⟨nextState, concreteHead, nextHeap⟩ := recurse heap mapped bound
+        have nextBound : ordinaryLiveCount
+              (markPersistentValueFuel fuel runtime
+                (.object (.heap location))).heap ≤ fuel :=
+          Nat.le_trans
+            (ordinaryLiveCount_markPersistentValueFuel_le fuel runtime
+              (.object (.heap location))) bound
+        obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+          ih nextHeap nextBound
         refine ⟨finalState, ?_, finalHeap⟩
         simp only [List.foldlM_cons, Bind.bind, Except.bind]
         rw [concreteHead]
         exact concreteTail
       · obtain ⟨concreteHead, semanticHead⟩ := noOpStep
-        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih heap
+        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih heap bound
         refine ⟨finalState, ?_, ?_⟩
         · simp only [List.foldlM_cons, Bind.bind, Except.bind]
           rw [concreteHead]
@@ -637,10 +758,12 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true) (ordinary : cell.persistent = false)
     (objectEq : cell.object = .ctor semantic)
+    (bound : ordinaryLiveCount runtime.heap ≤ fuel + 1)
     (recurse : ∀ {before : MemoryState} {semanticState : RuntimeState}
         {childLocation : Location} {childAddress : Word32},
       LiveHeapRel before witness semanticState →
       witness.locations.lookup? childLocation = some childAddress →
+      ordinaryLiveCount semanticState.heap ≤ fuel →
       ∃ after,
         markPersistentFuel fuel before childAddress descriptors = .ok after ∧
         LiveHeapRel after witness
@@ -681,8 +804,12 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
           rw [replacedEq] at semanticUpdate
           have parentRuntimeEq := Except.ok.inj semanticUpdate
           subst parentRuntime
+          have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
+            replacedEq
+          have parentBound : ordinaryLiveCount parentHeap ≤ fuel := by omega
           obtain ⟨result, concreteFold, finalRelated⟩ :=
-            ownershipRelated.foldlM_markPersistent_refines parentRelated recurse
+            ownershipRelated.foldlM_markPersistent_refines parentRelated parentBound
+              recurse
           have rootHeapEq :
               markPersistentLocationFuel (fuel + 1) runtime.heap location =
                 semantic.objectFields.toList.foldl (init := parentHeap)
@@ -822,10 +949,12 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
     (live : cell.live = true) (ordinary : cell.persistent = false)
     (objectEq : cell.object = .closure function arity captures)
     (descriptorsEq : descriptors = witness.closureDescriptors)
+    (bound : ordinaryLiveCount runtime.heap ≤ fuel + 1)
     (recurse : ∀ {before : MemoryState} {semanticState : RuntimeState}
         {childLocation : Location} {childAddress : Word32},
       LiveHeapRel before witness semanticState →
       witness.locations.lookup? childLocation = some childAddress →
+      ordinaryLiveCount semanticState.heap ≤ fuel →
       ∃ after,
         markPersistentFuel fuel before childAddress descriptors = .ok after ∧
         LiveHeapRel after witness
@@ -889,8 +1018,12 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
               rw [replacedEq] at semanticUpdate
               have parentRuntimeEq := Except.ok.inj semanticUpdate
               subst parentRuntime
+              have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
+                replacedEq
+              have parentBound : ordinaryLiveCount parentHeap ≤ fuel := by omega
               obtain ⟨result, concreteFold, filteredRelated⟩ :=
-                ownershipRelated.foldlM_markPersistent_refines parentRelated recurse
+                ownershipRelated.foldlM_markPersistent_refines parentRelated parentBound
+                  recurse
               have foldEq := objectRelated.foldl_markPersistent_closureOwnedValues fuel
                 ({ runtime with heap := parentHeap } : RuntimeState)
               rw [← foldEq] at filteredRelated
@@ -926,6 +1059,131 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
               refine ⟨result, concreteOperation, ?_⟩
               rw [foldl_markPersistentValueFuel] at filteredRelated
               simpa [rootHeapEq] using filteredRelated
+
+/-- A semantic cell already carrying the persistent bit is an exact no-op at
+every fuel budget, including zero. -/
+theorem markPersistentLocationFuel_eq_of_persistent
+    {heap : Heap} {location : Location} {cell : HeapCell}
+    (found : findCell? heap location = some cell)
+    (persistent : cell.persistent = true) (fuel : Nat) :
+    markPersistentLocationFuel fuel heap location = heap := by
+  cases fuel with
+  | zero => rfl
+  | succ fuel => simp [markPersistentLocationFuel, found, persistent]
+
+/-- Complete same-fuel recursive persistence for one mapped semantic heap
+location. The ordinary-live-cell bound is the proof-visible termination
+invariant: an ordinary parent consumes one unit before its constructor fields
+or closure captures recurse, while dead and persistent targets are all-fuel
+no-ops. -/
+theorem LiveHeapRel.markPersistentFuel_refines
+    {fuel : Nat} {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (bound : ordinaryLiveCount runtime.heap ≤ fuel) :
+    ∃ result,
+      markPersistentFuel fuel state address witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness {
+        runtime with heap :=
+          markPersistentLocationFuel fuel runtime.heap location } := by
+  induction fuel generalizing state runtime location address with
+  | zero =>
+      obtain ⟨cell, found, cellRelation⟩ :=
+        related.concreteToSemantic location address mapped
+      cases liveEq : cell.live with
+      | false =>
+          exact related.markPersistentFuel_refines_dead
+            (fuel := 0) (descriptors := witness.closureDescriptors)
+            mapped found liveEq
+      | true =>
+          have targetRelated := cellRelation.live_of_eq_true liveEq
+          by_cases persistentCase : cell.persistent = true
+          · obtain ⟨header, headerRead, rawRead, notPromoted, persistent, refCount⟩ :=
+              targetRelated.ownershipHeader
+            have headerPersistent : header.persistent = true :=
+              persistent.trans persistentCase
+            refine ⟨state,
+              markPersistentFuel_eq_of_persistent headerRead headerPersistent 0
+                witness.closureDescriptors,
+              ?_⟩
+            rw [markPersistentLocationFuel_eq_of_persistent found persistentCase 0]
+            exact related
+          · have ordinary : cell.persistent = false := by
+              cases persistentEq : cell.persistent <;> simp_all
+            obtain ⟨after, post⟩ := replaceCell_spec_of_find runtime.heap location cell
+              { cell with rc := 0, persistent := true } found
+            have positive := ordinaryLiveCount_replace_persistent found liveEq ordinary
+              post.replaced
+            omega
+  | succ fuel ih =>
+      obtain ⟨cell, found, cellRelation⟩ :=
+        related.concreteToSemantic location address mapped
+      cases liveEq : cell.live with
+      | false =>
+          exact related.markPersistentFuel_refines_dead
+            (fuel := fuel + 1) (descriptors := witness.closureDescriptors)
+            mapped found liveEq
+      | true =>
+          have targetRelated := cellRelation.live_of_eq_true liveEq
+          by_cases persistentCase : cell.persistent = true
+          · obtain ⟨header, headerRead, rawRead, notPromoted, persistent, refCount⟩ :=
+              targetRelated.ownershipHeader
+            have headerPersistent : header.persistent = true :=
+              persistent.trans persistentCase
+            refine ⟨state,
+              markPersistentFuel_eq_of_persistent headerRead headerPersistent (fuel + 1)
+                witness.closureDescriptors,
+              ?_⟩
+            rw [markPersistentLocationFuel_eq_of_persistent found persistentCase
+              (fuel + 1)]
+            exact related
+          · have ordinary : cell.persistent = false := by
+              cases persistentEq : cell.persistent <;> simp_all
+            have recurse : ∀ {before : MemoryState}
+                {semanticState : RuntimeState} {childLocation : Location}
+                {childAddress : Word32},
+                LiveHeapRel before witness semanticState →
+                witness.locations.lookup? childLocation = some childAddress →
+                ordinaryLiveCount semanticState.heap ≤ fuel →
+                ∃ after,
+                  markPersistentFuel fuel before childAddress
+                      witness.closureDescriptors = .ok after ∧
+                  LiveHeapRel after witness
+                    (markPersistentValueFuel fuel semanticState
+                      (.object (.heap childLocation))) := by
+              intro before semanticState childLocation childAddress childRelated
+                childMapped childBound
+              exact ih childRelated childMapped childBound
+            cases targetRelated with
+            | constructor descriptor objectEq objectRelated headerRead headerKind
+                  refCount persistent cellLive =>
+                exact related.markPersistentFuel_refines_constructor_step mapped found
+                  liveEq ordinary objectEq bound recurse
+            | @boxed kind scalar header _ descriptor objectEq objectRelated refCount
+                  persistent cellLive =>
+                let leafCell :
+                    (∃ (boxedKind : BoxedScalarKind) (boxedScalar : BoxedScalar),
+                      cell.object = .boxed boxedKind.semanticType
+                        boxedScalar.semanticValue) ∨
+                    (∃ value : Nat, cell.object = .natural value) :=
+                  .inl ⟨kind, scalar, objectEq⟩
+                exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
+                  leafCell fuel
+            | @natural value header _ descriptor objectEq headerRead headerKind marker
+                  extent limbsFit decoded refCount persistent cellLive =>
+                let leafCell :
+                    (∃ (boxedKind : BoxedScalarKind) (boxedScalar : BoxedScalar),
+                      cell.object = .boxed boxedKind.semanticType
+                        boxedScalar.semanticValue) ∨
+                    (∃ value : Nat, cell.object = .natural value) :=
+                  .inr ⟨value, objectEq⟩
+                exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
+                  leafCell fuel
+            | closure closureRelated =>
+                obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
+                exact related.markPersistentFuel_refines_closure_step mapped found liveEq
+                  ordinary objectEq rfl bound recurse
 
 /-- Syntactic classification used by cache composition: only a semantic heap
 reference requires the recursive persistence simulation. -/

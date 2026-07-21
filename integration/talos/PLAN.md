@@ -2262,6 +2262,17 @@ structured failure. Runtime guards cover the accepted and rejected cases, and
 provide the exact recursive induction branch. No shared FIR semantic contract
 changed.
 
+W6.6ah closes the complete same-fuel recursive persistence simulation. The
+proof counts semantic cells that are simultaneously live and ordinary,
+establishes that the parent metadata rewrite removes exactly one, and proves
+that every child persistence fold is measure-nonincreasing. Constructor and
+closure recursion now thread the resulting remaining-fuel bound, including
+cycles, persistent revisits, and canonical dead targets, into a single
+`LiveHeapRel.markPersistentFuel_refines` theorem. The concrete zero-fuel fault
+for an ordinary live object remains intact; lifting successful semantic heap
+fuel to the larger cursor-derived public fuel is the next slice. No executable
+or shared FIR semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
