@@ -252,6 +252,33 @@ private def requiresInitialHeap : Value → Bool
   | .object (.heap _) | .reuseToken (some _) => true
   | _ => false
 
+/-- Execute the source boundary corresponding to one generated Wasm export.
+Exports enter a lowered declaration body after exact parameter binding; they
+do not pass through the internal nullary-declaration cache protocol. -/
+private def runSourceExport (fuel : Nat) (externals : ExternalImpl)
+    (program : Fir.LeanIR.ImpureProgram) (entry : Lean.Name)
+    (args : Array Value) : RunResult :=
+  match program.findDecl? entry with
+  | none => .done {
+      outcome := .fault (.unknownDecl entry)
+      heap := []
+      world := 0
+      trace := #[] }
+  | some decl =>
+      match bindParams decl.params args with
+      | .error fault => .done {
+          outcome := .fault fault
+          heap := []
+          world := 0
+          trace := #[] }
+      | .ok env =>
+          match decl.value with
+          | .code code => run fuel externals {
+              program
+              control := .code code
+              env }
+          | .extern _ => runProgram fuel externals program entry args
+
 /--
 Run final impure LCNF and its generated Talos module from the same entry and
 semantic arguments, then compare outcome, world, trace, and reachable heap.
@@ -259,7 +286,7 @@ semantic arguments, then compare outcome, world, trace, and reachable heap.
 def runDifferential (program : Fir.LeanIR.ImpureProgram) (entry : Lean.Name)
     (args : Array Value) (externals : ExternalImpl := rejectExternals) :
     DifferentialResult :=
-  match Fir.LeanIR.Impure.runProgram sourceFuel externals program entry args with
+  match runSourceExport sourceFuel externals program entry args with
   | .outOfFuel _ => .sourceOutOfFuel
   | .done sourceObservation =>
       if args.any requiresInitialHeap then
