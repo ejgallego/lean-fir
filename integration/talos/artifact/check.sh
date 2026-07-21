@@ -149,7 +149,9 @@ node test-module-client.mjs \
 node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
 if [[ -n "${FIR_BROWSER:-}" ]]; then
+  make -C "$here/../../.." validate-v8
   ./browser-check.sh "$FIR_BROWSER"
+  ./browser-validation-check.sh "$FIR_BROWSER"
 fi
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"

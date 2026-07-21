@@ -3663,6 +3663,7 @@ class HarnessTests(unittest.TestCase):
                 "scripts/run_validation_v8.mjs",
                 "scripts/wasm_semantic_host.mjs",
                 "scripts/wasm_validation_externals.mjs",
+                "scripts/wasm_validation_case.mjs",
             ],
         )
         self.assertEqual(adapter.product_declarations, ())
@@ -3698,6 +3699,7 @@ class HarnessTests(unittest.TestCase):
                 ("engine", "node"),
                 ("external-registry", "scripts/wasm_validation_externals.mjs"),
                 ("runner", "scripts/run_validation_v8.mjs"),
+                ("runner-library", "scripts/wasm_validation_case.mjs"),
                 ("runtime", "scripts/wasm_semantic_host.mjs"),
             ],
         )

@@ -167,6 +167,25 @@ The initial browser validation used Google Chrome 150.0.7871.114. Chrome is
 not added to the repository's required tooling; any compatible headless
 Chromium-family executable may be passed explicitly.
 
+The browser lane also consumes the validation harness's shared semantic-Wasm
+product bundle rather than rebuilding or renaming case artifacts. The Node
+adapter and browser Worker share `scripts/wasm_validation_case.mjs` for ABI
+argument checking, module import/export checking, result normalization, and
+effect projection. The Worker fetches `matrix.json`, `corpus.json`, and each
+case-bound manifest/module, verifies every product digest with Web Crypto,
+executes all 64 selected cases, and compares each observation with the
+canonical Node/V8 result from that same run. Generate the products and run the
+standalone browser check with:
+
+```text
+make -C ../../.. validate-v8
+./browser-validation-check.sh google-chrome
+```
+
+Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
+the complete shared-product Worker. A repository-local alternate validation
+directory can be supplied as the second argument for focused runs.
+
 The client also retains the focused expected-failure regression for
 `FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads
 a cached heap `SpaceResult` after shared FIR cache semantics have allowed it to

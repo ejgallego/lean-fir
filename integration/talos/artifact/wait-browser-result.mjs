@@ -1,10 +1,13 @@
 const debugUrl = process.argv[2];
 const pageUrl = process.argv[3];
-if (!debugUrl || !pageUrl) {
-  throw new Error("usage: node wait-browser-result.mjs DEBUG_URL PAGE_URL");
+const timeoutSeconds = Number(process.argv[4] ?? "15");
+if (!debugUrl || !pageUrl || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+  throw new Error(
+    "usage: node wait-browser-result.mjs DEBUG_URL PAGE_URL [TIMEOUT_SECONDS]",
+  );
 }
 
-const deadline = Date.now() + 15000;
+const deadline = Date.now() + timeoutSeconds * 1000;
 const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 async function findPageTarget() {
@@ -73,7 +76,7 @@ try {
     await pause();
   }
   if (process.exitCode === undefined) {
-    throw new Error("timed out waiting for browser prettyM result");
+    throw new Error(`timed out after ${timeoutSeconds}s waiting for browser result`);
   }
 } finally {
   socket.close();

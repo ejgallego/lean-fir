@@ -4,7 +4,8 @@
     "node",
     "scripts/run_validation_v8.mjs",
     "scripts/wasm_semantic_host.mjs",
-    "scripts/wasm_validation_externals.mjs"
+    "scripts/wasm_validation_externals.mjs",
+    "scripts/wasm_validation_case.mjs"
   ],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
@@ -32,6 +33,11 @@
       "kind": "runner",
       "name": "scripts/run_validation_v8.mjs",
       "path": "../scripts/run_validation_v8.mjs"
+    },
+    {
+      "kind": "runner-library",
+      "name": "scripts/wasm_validation_case.mjs",
+      "path": "../scripts/wasm_validation_case.mjs"
     },
     {
       "kind": "runtime",
