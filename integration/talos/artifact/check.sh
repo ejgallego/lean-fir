@@ -143,6 +143,9 @@ node --input-type=module -e '
   _build/source-pretty-format.wasm \
   _build/source-pretty-format-coverage.wasm
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
+node test-module-client.mjs \
+  _build/source-usize-id-module.wasm \
+  _build/source-usize-id.wasm
 node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"

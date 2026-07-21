@@ -135,6 +135,13 @@ with:
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
+`module-client.mjs` factors only the reusable loading boundary: it validates
+the invocation-free descriptor, creates (or accepts) a `SemanticHost`,
+instantiates the module, and returns its raw exported function. It deliberately
+does not create source-language values or adapt a function-specific API. The
+caller continues to allocate runtime values in the host and use
+`host.encode`/`host.decode` with the descriptor's ABI kinds.
+
 The client also retains the focused expected-failure regression for
 `FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads
 a cached heap `SpaceResult` after shared FIR cache semantics have allowed it to

@@ -1,29 +1,21 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 
 import { formatExternalRegistry } from "../../../scripts/wasm_format_externals.mjs";
-import { SemanticHost } from "../../../scripts/wasm_semantic_host.mjs";
+import { instantiateModuleArtifact } from "./module-client.mjs";
 
 const artifactPath = process.argv[2];
 assert.ok(artifactPath, "usage: node call-pretty-format.mjs ARTIFACT.wasm");
 
-const bytes = fs.readFileSync(artifactPath);
-const manifest = JSON.parse(fs.readFileSync(`${artifactPath}.json`, "utf8"));
-assert.ok(WebAssembly.validate(bytes), `${artifactPath} failed WebAssembly validation`);
+const { manifest, host, entry: prettyM } = await instantiateModuleArtifact(
+  artifactPath,
+  { externalRegistry: formatExternalRegistry },
+);
 assert.equal(manifest.result, "object");
 assert.deepStrictEqual(manifest.params, ["tobject", "tobject", "tobject", "tobject"]);
-assert.ok(!Object.hasOwn(manifest, "fixture"));
-assert.ok(!Object.hasOwn(manifest, "arguments"));
-assert.ok(!Object.hasOwn(manifest, "initialRuntime"));
 
 // This descriptor intentionally contains no reproducible build-time
 // invocation. A caller allocates ordinary semantic runtime values and passes
 // their opaque handles directly to the reusable module.
-const host = new SemanticHost(undefined, formatExternalRegistry);
-const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-const prettyM = instance.exports[manifest.entry];
-assert.equal(typeof prettyM, "function");
-
 const tagged = (payload) => ({ kind: "tagged", payload: BigInt(payload) });
 const scalarUInt8 = (value) => ({
   kind: "scalar",
