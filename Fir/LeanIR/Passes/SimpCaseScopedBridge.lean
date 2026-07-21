@@ -299,6 +299,139 @@ theorem caseTableNormalization_shadowPrepareAlts
       normalization.deterministic
   }
 
+/-- A constructor body in a successful pointwise traversal has a source body
+with the same selector metadata and the exact recursive run equation. -/
+theorem exists_source_ctor_of_mem_mapM_shadowAltUsing
+    {recurse : LCNF.Code .impure → Option (LCNF.Code .impure)}
+    {source target : List (LCNF.Alt .impure)}
+    (run : source.mapM (shadowAltUsing? recurse) = some target)
+    (member : (.ctorAlt info targetCode : LCNF.Alt .impure) ∈ target) :
+    ∃ sourceCode,
+      (.ctorAlt info sourceCode : LCNF.Alt .impure) ∈ source ∧
+      recurse sourceCode = some targetCode := by
+  induction source generalizing target with
+  | nil =>
+      simp at run
+      subst target
+      simp at member
+  | cons alt rest ih =>
+      cases alt with
+      | ctorAlt sourceInfo sourceCode =>
+          cases bodyRun : recurse sourceCode with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none => simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst target
+                  simp only [List.mem_cons] at member
+                  rcases member with head | tail
+                  · cases head
+                    exact ⟨sourceCode, List.mem_cons_self, bodyRun⟩
+                  · rcases ih restRun tail with ⟨code, codeMem, codeRun⟩
+                    exact ⟨code, List.mem_cons_of_mem _ codeMem, codeRun⟩
+      | default sourceCode =>
+          cases bodyRun : recurse sourceCode with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none => simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst target
+                  simp only [List.mem_cons] at member
+                  rcases member with head | tail
+                  · cases head
+                  · rcases ih restRun tail with ⟨code, codeMem, codeRun⟩
+                    exact ⟨code, List.mem_cons_of_mem _ codeMem, codeRun⟩
+      | alt _ _ _ impossible => nomatch impossible
+
+/-- Default-body counterpart of
+`exists_source_ctor_of_mem_mapM_shadowAltUsing`. -/
+theorem exists_source_default_of_mem_mapM_shadowAltUsing
+    {recurse : LCNF.Code .impure → Option (LCNF.Code .impure)}
+    {source target : List (LCNF.Alt .impure)}
+    (run : source.mapM (shadowAltUsing? recurse) = some target)
+    (member : (.default targetCode : LCNF.Alt .impure) ∈ target) :
+    ∃ sourceCode,
+      (.default sourceCode : LCNF.Alt .impure) ∈ source ∧
+      recurse sourceCode = some targetCode := by
+  induction source generalizing target with
+  | nil =>
+      simp at run
+      subst target
+      simp at member
+  | cons alt rest ih =>
+      cases alt with
+      | ctorAlt sourceInfo sourceCode =>
+          cases bodyRun : recurse sourceCode with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none => simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst target
+                  simp only [List.mem_cons] at member
+                  rcases member with head | tail
+                  · cases head
+                  · rcases ih restRun tail with ⟨code, codeMem, codeRun⟩
+                    exact ⟨code, List.mem_cons_of_mem _ codeMem, codeRun⟩
+      | default sourceCode =>
+          cases bodyRun : recurse sourceCode with
+          | none => simp [shadowAltUsing?, bodyRun] at run
+          | some transformed =>
+              cases restRun : rest.mapM (shadowAltUsing? recurse) with
+              | none => simp [shadowAltUsing?, bodyRun, restRun] at run
+              | some transformedRest =>
+                  simp [shadowAltUsing?, bodyRun, restRun] at run
+                  subst target
+                  simp only [List.mem_cons] at member
+                  rcases member with head | tail
+                  · cases head
+                    exact ⟨sourceCode, List.mem_cons_self, bodyRun⟩
+                  · rcases ih restRun tail with ⟨code, codeMem, codeRun⟩
+                    exact ⟨code, List.mem_cons_of_mem _ codeMem, codeRun⟩
+      | alt _ _ _ impossible => nomatch impossible
+
+/-- Deterministic recursive syntax transformation preserves selector
+determinism. Equal source bodies are passed to the same pure `recurse`
+function, so duplicate selectors still select definitionally equal targets. -/
+theorem caseTableNormalization_mapM_shadowAltUsing
+    {recurse : LCNF.Code .impure → Option (LCNF.Code .impure)}
+    {source target : List (LCNF.Alt .impure)}
+    (run : source.mapM (shadowAltUsing? recurse) = some target)
+    (normalization : CaseTableNormalizationInvariant source.toArray) :
+    CaseTableNormalizationInvariant target.toArray := by
+  constructor
+  change CaseTableDeterministic target
+  constructor
+  · intro tag left right leftHas rightHas
+    rcases leftHas with ⟨leftInfo, leftMember, leftTag⟩
+    rcases rightHas with ⟨rightInfo, rightMember, rightTag⟩
+    rcases exists_source_ctor_of_mem_mapM_shadowAltUsing run leftMember with
+      ⟨leftSource, leftSourceMember, leftRun⟩
+    rcases exists_source_ctor_of_mem_mapM_shadowAltUsing run rightMember with
+      ⟨rightSource, rightSourceMember, rightRun⟩
+    have sourceEq := normalization.deterministic.ctor tag
+      leftSource rightSource
+      ⟨leftInfo, leftSourceMember, leftTag⟩
+      ⟨rightInfo, rightSourceMember, rightTag⟩
+    subst rightSource
+    rw [leftRun] at rightRun
+    exact Option.some.inj rightRun
+  · intro left right leftHas rightHas
+    rcases exists_source_default_of_mem_mapM_shadowAltUsing run leftHas with
+      ⟨leftSource, leftSourceMember, leftRun⟩
+    rcases exists_source_default_of_mem_mapM_shadowAltUsing run rightHas with
+      ⟨rightSource, rightSourceMember, rightRun⟩
+    have sourceEq := normalization.deterministic.default
+      leftSource rightSource leftSourceMember rightSourceMember
+    subst rightSource
+    rw [leftRun] at rightRun
+    exact Option.some.inj rightRun
+
 abbrev ScopedCodeRelation :=
   ScopeIndex → LCNF.Code .impure → LCNF.Code .impure → Prop
 
@@ -1101,6 +1234,36 @@ theorem ScopedCodePhaseCertifiedTrace.targetCertificate
   | .single round => round.certificate
   | .trans _ rest => rest.targetCertificate
 
+/-- A non-lockstep phase trace with a certified executable endpoint. Proof
+intermediates remain ordinary phase rounds: independently chosen alpha
+witnesses need not preserve duplicate-selector normalization, while the
+actual deterministic compiler endpoint does. -/
+structure ScopedCodePhaseEndpointCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : LCNF.Code .impure) : Type where
+  trace : ScopedCodePhaseTrace validCase index source target
+  targetSide : ScopedCodeSideReflexive index target
+
+theorem ScopedCodePhaseEndpointCertifiedTrace.targetCertificate
+    (trace : ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :
+    ScopedCodeTargetCertificate validCase index target := {
+  structural := trace.trace.targetRefl
+  alpha := trace.trace.targetAlpha
+  side := trace.targetSide
+}
+
+/-- Append a certified local round while retaining every ordinary phase edge
+and replacing the endpoint side certificate with the local result's one. -/
+def ScopedCodePhaseEndpointCertifiedTrace.append
+    (left : ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source middle)
+    (right : ScopedCodePhaseCertifiedResult validCase index middle target) :
+    ScopedCodePhaseEndpointCertifiedTrace validCase index source target := {
+  trace := left.trace.append (.single right.result)
+  targetSide := right.targetSide
+}
+
 def ScopedCodePhaseCertifiedTrace.rounds
     (trace : ScopedCodePhaseCertifiedTrace validCase index source target) : Nat :=
   match trace with
@@ -1527,6 +1690,136 @@ theorem scopedPreparedCaseTargetCertificate
     side := by simpa [prepared, source] using side
   }
 
+/-- Rebuild a case certificate from normalized selector metadata and complete
+body certificates. The source root is used only for the unchanged
+discriminant's scope and alpha facts. -/
+theorem scopedCaseTargetCertificate_of_normalized
+    {sourceAlts targetAlts : Array (LCNF.Alt .impure)}
+    (root : ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)))
+    (normalization : CaseTableNormalizationInvariant targetAlts)
+    (bodies : ∀ alt, alt ∈ targetAlts →
+      Nonempty (ScopedCodeTargetCertificate validCase index alt.getCode)) :
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr targetAlts)) := by
+  have selectedCertificate : ∀ tag code,
+      chooseAlt tag targetAlts.toList = some code →
+      Nonempty (ScopedCodeTargetCertificate validCase index code) := by
+    intro tag code selected
+    rcases exists_mem_getCode_eq_of_chooseAlt selected with
+      ⟨alt, member, bodyEq⟩
+    rcases bodies alt (Array.mem_def.mpr member) with ⟨certificate⟩
+    exact ⟨by simpa [bodyEq] using certificate⟩
+  have structural : CodeRel validCase
+      (.cases (.mk typeName resultType discr targetAlts))
+      (.cases (.mk typeName resultType discr targetAlts)) :=
+    .aligned (.cases typeName resultType discr targetAlts targetAlts (by
+      intro tag valid
+      change SelectionRel validCase
+        (chooseAlt tag targetAlts.toList) (chooseAlt tag targetAlts.toList)
+      cases selected : chooseAlt tag targetAlts.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.structural))
+  have discrForward : ScopedFVarRelated index.forwardRho
+      index.sourceScope index.targetScope discr discr := by
+    cases root.alpha.forward with
+    | terminal impossible => cases impossible
+    | cases discrRelated selected => exact discrRelated
+  have alphaForward : CodeRelated
+      (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+      index.forwardRho index.sourceScope index.targetScope
+      (.cases (.mk typeName resultType discr targetAlts))
+      (.cases (.mk typeName resultType discr targetAlts)) :=
+    .cases discrForward (by
+      intro tag
+      change CaseSelectionRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope
+        (chooseAlt tag targetAlts.toList) (chooseAlt tag targetAlts.toList)
+      cases selected : chooseAlt tag targetAlts.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.alpha.forward)
+  have discrBackward : ScopedFVarRelated index.backwardRho
+      index.targetScope index.sourceScope discr discr := by
+    cases root.alpha.backward with
+    | terminal impossible => cases impossible
+    | cases discrRelated selected => exact discrRelated
+  have alphaBackward : CodeRelated
+      (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+      index.backwardRho index.targetScope index.sourceScope
+      (.cases (.mk typeName resultType discr targetAlts))
+      (.cases (.mk typeName resultType discr targetAlts)) :=
+    .cases discrBackward (by
+      intro tag
+      change CaseSelectionRelated
+        (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+        index.backwardRho index.targetScope index.sourceScope
+        (chooseAlt tag targetAlts.toList) (chooseAlt tag targetAlts.toList)
+      cases selected : chooseAlt tag targetAlts.toList with
+      | none => exact .none
+      | some code =>
+          rcases selectedCertificate tag code selected with ⟨certificate⟩
+          exact .some certificate.alpha.backward)
+  have side : ScopedCodeSideReflexive index
+      (.cases (.mk typeName resultType discr targetAlts)) := by
+    cases root.side with
+    | cases leftDiscrScoped rightDiscrScoped leftNormalization
+        rightNormalization ctorBranches defaultBranches =>
+      exact .cases leftDiscrScoped rightDiscrScoped
+        normalization normalization
+        (by
+          intro tag leftCode rightCode leftHas rightHas
+          have same := normalization.deterministic.ctor
+            tag leftCode rightCode leftHas rightHas
+          subst rightCode
+          rcases leftHas with ⟨info, member, selected⟩
+          rcases bodies (.ctorAlt info leftCode)
+              (Array.mem_def.mpr member) with ⟨certificate⟩
+          exact certificate.side)
+        (by
+          intro leftCode rightCode leftHas rightHas
+          have same := normalization.deterministic.default
+            leftCode rightCode leftHas rightHas
+          subst rightCode
+          rcases bodies (.default leftCode)
+              (Array.mem_def.mpr leftHas) with ⟨certificate⟩
+          exact certificate.side)
+  exact {
+    structural := structural
+    alpha := {
+      forward := alphaForward
+      backward := alphaBackward
+    }
+    side := side
+  }
+
+/-- The actual deterministic recursive alternative run has a certified case
+endpoint. This theorem deliberately certifies the executable endpoint, not
+arbitrary proof-only intermediate tables in a synchronized trace. -/
+theorem scopedTransformedCaseTargetCertificate
+    (run : sourceAlts.toList.mapM
+      (shadowAltUsing? (shadowCode? fuel)) = some targetAlts)
+    (root : ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)))
+    (alternatives : ScopedAltsPhaseCertifiedResult validCase index
+      targetAlts targetAlts) :
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr targetAlts.toArray)) := by
+  have sourceNormalization : CaseTableNormalizationInvariant sourceAlts := by
+    cases root.side with
+    | cases leftDiscrScoped rightDiscrScoped leftNormalization
+        rightNormalization ctorBranches defaultBranches =>
+      exact leftNormalization
+  apply scopedCaseTargetCertificate_of_normalized root
+    (caseTableNormalization_mapM_shadowAltUsing run (by
+      simpa using sourceNormalization))
+  intro alt member
+  exact alternatives.targetBodyCertificate_of_mem (by simpa using member)
+
 /-- Certified endpoint identity round for a synchronized alternative result. -/
 def ScopedAltsPhaseCertifiedResult.targetIdentity
     (result : ScopedAltsPhaseCertifiedResult validCase index source target) :
@@ -1679,6 +1972,15 @@ def ScopedAltsPhaseCertifiedTrace.forget
   match trace with
   | .single round => .single round.forget
   | .trans round rest => .trans round.forget rest.forget
+
+/-- Synchronized non-lockstep alternative trace with complete certificates
+for the actual endpoint bodies. Intermediate tables remain ordinary for the
+same normalization-coherence reason as the enclosing code trace. -/
+structure ScopedAltsPhaseEndpointCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) (index : ScopeIndex)
+    (source target : List (LCNF.Alt .impure)) : Type where
+  trace : ScopedAltsPhaseTrace validCase index source target
+  targetIdentity : ScopedAltsPhaseCertifiedResult validCase index target target
 
 @[simp] theorem ScopedAltsPhaseCertifiedTrace.rounds_forget
     (trace : ScopedAltsPhaseCertifiedTrace validCase index source target) :
@@ -1881,6 +2183,121 @@ theorem ScopedAlphaBireflexiveTree.root
     ScopedAlphaBireflexive index code := by
   cases evidence <;> assumption
 
+mutual
+
+  /-- Complete source certificates for every recursive position. This is the
+  certified traversal input corresponding to `ScopedAlphaBireflexiveTree`;
+  in particular, case alternatives hidden by duplicate selectors remain
+  available pointwise. -/
+  inductive ScopedCodeTargetCertificateTree
+      (validCase : LCNF.Cases .impure → Nat → Prop) :
+      (index : ScopeIndex) → LCNF.Code .impure → Prop where
+    | letE
+        (root : ScopedCodeTargetCertificate validCase index
+          (.let declaration continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          (index.pushVar declaration.fvarId) continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.let declaration continuation)
+    | jp
+        (root : ScopedCodeTargetCertificate validCase index
+          (.jp (.mk fvarId binderName params type body) continuation))
+        (bodyTree : ScopedCodeTargetCertificateTree validCase
+          (index.pushParams params) body)
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          (index.pushJoin fvarId) continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.jp (.mk fvarId binderName params type body) continuation)
+    | jmp
+        (root : ScopedCodeTargetCertificate validCase index
+          (.jmp fvarId args)) :
+        ScopedCodeTargetCertificateTree validCase index (.jmp fvarId args)
+    | cases
+        (root : ScopedCodeTargetCertificate validCase index (.cases cases))
+        (alternativesTree : ScopedCodeTargetCertificateAlts validCase
+          index cases.alts.toList) :
+        ScopedCodeTargetCertificateTree validCase index (.cases cases)
+    | ret
+        (root : ScopedCodeTargetCertificate validCase index
+          (.return fvarId)) :
+        ScopedCodeTargetCertificateTree validCase index (.return fvarId)
+    | unreach
+        (root : ScopedCodeTargetCertificate validCase index
+          (.unreach type)) :
+        ScopedCodeTargetCertificateTree validCase index (.unreach type)
+    | oset
+        (root : ScopedCodeTargetCertificate validCase index
+          (.oset fvarId fieldIndex value continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.oset fvarId fieldIndex value continuation)
+    | uset
+        (root : ScopedCodeTargetCertificate validCase index
+          (.uset fvarId fieldIndex value continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.uset fvarId fieldIndex value continuation)
+    | sset
+        (root : ScopedCodeTargetCertificate validCase index
+          (.sset fvarId width offset value type continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.sset fvarId width offset value type continuation)
+    | setTag
+        (root : ScopedCodeTargetCertificate validCase index
+          (.setTag fvarId tag continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.setTag fvarId tag continuation)
+    | inc
+        (root : ScopedCodeTargetCertificate validCase index
+          (.inc fvarId amount check persistent continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.inc fvarId amount check persistent continuation)
+    | dec
+        (root : ScopedCodeTargetCertificate validCase index
+          (.dec fvarId amount check persistent objects continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.dec fvarId amount check persistent objects continuation)
+    | del
+        (root : ScopedCodeTargetCertificate validCase index
+          (.del fvarId continuation))
+        (continuationTree : ScopedCodeTargetCertificateTree validCase
+          index continuation) :
+        ScopedCodeTargetCertificateTree validCase index
+          (.del fvarId continuation)
+
+  /-- Pointwise complete certificates for an alternative list. -/
+  inductive ScopedCodeTargetCertificateAlts
+      (validCase : LCNF.Cases .impure → Nat → Prop) :
+      (index : ScopeIndex) → List (LCNF.Alt .impure) → Prop where
+    | nil : ScopedCodeTargetCertificateAlts validCase index []
+    | ctor
+        (bodyTree : ScopedCodeTargetCertificateTree validCase index code)
+        (rest : ScopedCodeTargetCertificateAlts validCase index alts) :
+        ScopedCodeTargetCertificateAlts validCase index
+          (.ctorAlt info code :: alts)
+    | default
+        (bodyTree : ScopedCodeTargetCertificateTree validCase index code)
+        (rest : ScopedCodeTargetCertificateAlts validCase index alts) :
+        ScopedCodeTargetCertificateAlts validCase index
+          (.default code :: alts)
+
+end
+
+theorem ScopedCodeTargetCertificateTree.root
+    (tree : ScopedCodeTargetCertificateTree validCase index code) :
+    ScopedCodeTargetCertificate validCase index code := by
+  cases tree <;> assumption
+
 /-- Full-tree trace presentation used by the recursive case kernel. The tree
 supplies hygiene for every alternative, including syntactically shadowed
 entries that root alpha selection cannot expose. -/
@@ -1897,6 +2314,15 @@ def ScopedCodePhaseCertifiedTracedOnAlphaTree
   fun index source target =>
     ScopedAlphaBireflexiveTree index source →
       Nonempty (ScopedCodePhaseCertifiedTrace
+        validCase index source target)
+
+/-- Recursive non-lockstep relation driven by complete source certificates
+and returning a certified actual endpoint. -/
+def ScopedCodePhaseEndpointCertifiedOnCertificateTree
+    (validCase : LCNF.Cases .impure → Nat → Prop) : ScopedCodeRelation :=
+  fun index source target =>
+    ScopedCodeTargetCertificateTree validCase index source →
+      Nonempty (ScopedCodePhaseEndpointCertifiedTrace
         validCase index source target)
 
 theorem ScopedAlphaBireflexiveAlts.forward
@@ -2458,6 +2884,47 @@ theorem scopedAltsPhaseCertifiedTrace_of_tree
               rcases body bodyTree with ⟨bodyTrace⟩
               rcases ih restTree with ⟨restTrace⟩
               exact ⟨bodyTrace.consDefault restTrace⟩
+
+/-- Synchronize endpoint-certified child traces without requiring their
+proof-only intermediate tables to be normalized. The ordinary trace keeps
+every phase edge, while `targetIdentity` certifies every body produced by the
+actual recursive traversal. -/
+theorem scopedAltsPhaseEndpointCertifiedTrace_of_tree
+    (related : ScopedAltsRelated
+      (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase)
+      index source target)
+    (tree : ScopedCodeTargetCertificateAlts validCase index source) :
+    Nonempty (ScopedAltsPhaseEndpointCertifiedTrace
+      validCase index source target) := by
+  induction related with
+  | nil => exact ⟨{
+      trace := .single .nil
+      targetIdentity := .nil
+    }⟩
+  | cons head tail ih =>
+      cases head with
+      | ctor body =>
+          cases tree with
+          | ctor bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨{
+                trace := bodyTrace.trace.consCtor restTrace.trace
+                targetIdentity := .ctor
+                  bodyTrace.targetCertificate.identity
+                  restTrace.targetIdentity
+              }⟩
+      | default body =>
+          cases tree with
+          | default bodyTree restTree =>
+              rcases body bodyTree with ⟨bodyTrace⟩
+              rcases ih restTree with ⟨restTrace⟩
+              exact ⟨{
+                trace := bodyTrace.trace.consDefault restTrace.trace
+                targetIdentity := .default
+                  bodyTrace.targetCertificate.identity
+                  restTrace.targetIdentity
+              }⟩
 
 /-- Selection-local evidence for a simplifier result that remains a case
 table. The structural leg only needs tags accepted by the phase predicate;
@@ -4132,6 +4599,42 @@ theorem scopedCaseTraceKernelLaws_of_localPhases
           simpa using alternativesTrace.targetIdentity) with ⟨parentRound⟩
         exact (recursiveTrace.append parentRound.trace).traced
 
+/-- Certified arbitrary-depth case kernel. Recursive bodies may take
+different numbers of phase rounds; their ordinary traces are synchronized,
+the deterministic `mapM` endpoint is certified pointwise, and the certified
+local case round is appended without imposing normalization on proof-only
+intermediate tables. -/
+theorem scopedCaseEndpointCertifiedTraceKernelLaws_of_localPhases
+    (phases : ScopedLocalCaseCertifiedPhaseLaws validCase) :
+    ScopedCaseKernelLaws
+      (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase) where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun related tree
+    cases tree with
+    | cases root alternativesTree =>
+        rcases scopedAltsPhaseEndpointCertifiedTrace_of_tree
+            related alternativesTree with ⟨alternativesTrace⟩
+        have recursiveTrace : ScopedCodePhaseTrace validCase index
+            (.cases (.mk typeName resultType discr sourceAlts))
+            (.cases (.mk typeName resultType discr targetAlts.toArray)) := by
+          simpa using alternativesTrace.trace.casesTrace
+            typeName resultType discr root.alpha
+        have recursiveCertificate : ScopedCodeTargetCertificate validCase index
+            (.cases (.mk typeName resultType discr targetAlts.toArray)) :=
+          scopedTransformedCaseTargetCertificate altsRun root
+            alternativesTrace.targetIdentity
+        rcases phases.simplify recursiveCertificate (by
+          simpa using alternativesTrace.targetIdentity) with ⟨parentRound⟩
+        have recursiveCertified : ScopedCodePhaseEndpointCertifiedTrace
+            validCase index
+            (.cases (.mk typeName resultType discr sourceAlts))
+            (.cases (.mk typeName resultType discr targetAlts.toArray)) := {
+          trace := recursiveTrace
+          targetSide := recursiveCertificate.side
+        }
+        exact ⟨recursiveCertified.append parentRound⟩
+
 /-- Peel unchanged parameters to expose the code relation at their final
 scope index. -/
 theorem paramBodyRelated_finalCode
@@ -4179,13 +4682,15 @@ theorem paramBodyRelated_replaceCode
   induction params generalizing index with
   | nil =>
       cases shape
-      exact .nil (by simpa [ScopeIndex.pushParamList] using body)
+      exact .nil (by
+        simpa [ScopeIndex.pushParamList, ScopedCodeSideReflexive] using body)
   | cons param rest ih =>
       cases shape with
       | cons leftFresh rightFresh leftJoinFresh rightJoinFresh tail =>
           exact .cons leftFresh rightFresh leftJoinFresh rightJoinFresh
             (ih (index := index.pushVar param.fvarId) tail
-              (by simpa [ScopeIndex.pushParamList] using body))
+              (by simpa [ScopeIndex.pushParamList,
+                  ScopedCodeSideReflexive] using body))
 
 theorem paramBodyRelated_finalCode_backward
     {index : ScopeIndex} {params : List (LCNF.Param .impure)}
@@ -4232,6 +4737,33 @@ theorem paramBodyRelated_replaceCode_backward
     simpa [ScopeIndex.reverse] using body
   simpa [ScopeIndex.reverse] using
     (paramBodyRelated_replaceCode (index := index.reverse) shape converted)
+
+/-- Reuse parameter freshness from a reflexive source side certificate while
+replacing the final body with a certified transformed endpoint. -/
+theorem paramBodySideConditions_replaceCode
+    {index : ScopeIndex} {params : List (LCNF.Param .impure)}
+    {source target : LCNF.Code .impure}
+    (shape : ParamBodySideConditions
+      (leftJoins := index.sourceJoins) (rightJoins := index.sourceJoins)
+      index.forwardRho index.sourceScope index.sourceScope
+      params params source source)
+    (body : ScopedCodeSideReflexive
+      (index.pushParamList params) target) :
+    ParamBodySideConditions
+      (leftJoins := index.sourceJoins) (rightJoins := index.sourceJoins)
+      index.forwardRho index.sourceScope index.sourceScope
+      params params target target := by
+  unfold ScopedCodeSideReflexive at body
+  induction params generalizing index with
+  | nil =>
+      cases shape
+      exact .nil (by simpa [ScopeIndex.pushParamList] using body)
+  | cons param rest ih =>
+      cases shape with
+      | cons leftFresh rightFresh leftJoinFresh rightJoinFresh tail =>
+          exact .cons leftFresh rightFresh leftJoinFresh rightJoinFresh
+            (ih (index := index.pushVar param.fvarId) tail
+              (by simpa [ScopeIndex.pushParamList] using body))
 
 /-- Explicit alpha reflexivity supplies exactly the scoped metadata and binder
 freshness needed to lift a structural/alpha factor through every ordinary
@@ -5218,6 +5750,226 @@ theorem scopedCodePhaseTracedOnAlphaTree_traversalLaws :
     | del root childTree =>
         exact (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.del
           (fun _ => child childTree)) root
+
+/-- Endpoint certification is stable through every non-case constructor.
+Ordinary trace lifting retains the non-lockstep schedule; constructor-local
+scope and metadata facts come from the source root certificate, with only the
+recursively transformed endpoint side certificates replaced. -/
+theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
+    ScopedTraversalLaws
+      (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase) where
+  letE := by
+    intro index declaration left right child tree
+    cases tree with
+    | letE root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.letE
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.let declaration right) := by
+          cases root.side with
+          | letE typeEq leftValueScoped rightValueScoped boxTypesEq
+              leftFresh rightFresh leftJoinFresh rightJoinFresh continuation =>
+            exact .letE typeEq leftValueScoped rightValueScoped boxTypesEq
+              leftFresh rightFresh leftJoinFresh rightJoinFresh
+              childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  jp := by
+    intro index fvarId binderName params type leftBody rightBody
+      leftContinuation rightContinuation body continuation tree
+    cases tree with
+    | jp root bodyTree continuationTree =>
+        rcases body bodyTree with ⟨bodyTrace⟩
+        rcases continuation continuationTree with ⟨continuationTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.jp
+            (fun _ => bodyTrace.trace.traced)
+            (fun _ => continuationTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.jp (.mk fvarId binderName params type rightBody)
+              rightContinuation) := by
+          cases root.side with
+          | jp leftFresh rightFresh bodyShape continuationShape =>
+            have bodySide : ScopedCodeSideReflexive
+                (index.pushParamList params.toList) rightBody := by
+              simpa [ScopeIndex.pushParams, LCNF.FunDecl.params,
+                LCNF.FunDecl.value] using bodyTrace.targetSide
+            have replacedBody := paramBodySideConditions_replaceCode
+              (index := index) bodyShape bodySide
+            exact .jp leftFresh rightFresh
+              (by simpa [LCNF.FunDecl.params, LCNF.FunDecl.value] using
+                replacedBody)
+              (show ScopedCodeSideReflexive
+                (index.pushJoin fvarId) rightContinuation from
+                  continuationTrace.targetSide)
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  jmp := by
+    intro index fvarId args tree
+    exact ⟨{
+      trace := .single (.identity tree.root.structural tree.root.alpha)
+      targetSide := tree.root.side
+    }⟩
+  ret := by
+    intro index fvarId tree
+    exact ⟨{
+      trace := .single (.identity tree.root.structural tree.root.alpha)
+      targetSide := tree.root.side
+    }⟩
+  unreach := by
+    intro index type tree
+    exact ⟨{
+      trace := .single (.identity tree.root.structural tree.root.alpha)
+      targetSide := tree.root.side
+    }⟩
+  oset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | oset root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.oset
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.oset fvarId fieldIndex value right) := by
+          cases root.side with
+          | oset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped continuation =>
+            exact .oset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  uset := by
+    intro index fvarId fieldIndex value left right child tree
+    cases tree with
+    | uset root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.uset
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.uset fvarId fieldIndex value right) := by
+          cases root.side with
+          | uset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped continuation =>
+            exact .uset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  sset := by
+    intro index fvarId width offset value type left right child tree
+    cases tree with
+    | sset root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.sset
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.sset fvarId width offset value type right) := by
+          cases root.side with
+          | sset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped continuation =>
+            exact .sset leftObjectScoped rightObjectScoped leftFieldScoped
+              rightFieldScoped childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  setTag := by
+    intro index fvarId tag left right child tree
+    cases tree with
+    | setTag root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.setTag
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.setTag fvarId tag right) := by
+          cases root.side with
+          | setTag leftObjectScoped rightObjectScoped continuation =>
+            exact .setTag leftObjectScoped rightObjectScoped
+              childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  inc := by
+    intro index fvarId amount check persistent left right child tree
+    cases tree with
+    | inc root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.inc
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.inc fvarId amount check persistent right) := by
+          cases root.side with
+          | inc leftObjectScoped rightObjectScoped continuation =>
+            exact .inc leftObjectScoped rightObjectScoped
+              childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  dec := by
+    intro index fvarId amount check persistent objects left right child tree
+    cases tree with
+    | dec root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.dec
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.dec fvarId amount check persistent objects right) := by
+          cases root.side with
+          | dec leftObjectScoped rightObjectScoped continuation =>
+            exact .dec leftObjectScoped rightObjectScoped
+              childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+  del := by
+    intro index fvarId left right child tree
+    cases tree with
+    | del root childTree =>
+        rcases child childTree with ⟨childTrace⟩
+        rcases (scopedCodePhaseTracedOnAlphaReflexive_traversalLaws.del
+            (fun _ => childTrace.trace.traced) root.alpha) with ⟨trace⟩
+        have targetSide : ScopedCodeSideReflexive index
+            (.del fvarId right) := by
+          cases root.side with
+          | del leftObjectScoped rightObjectScoped continuation =>
+            exact .del leftObjectScoped rightObjectScoped
+              childTrace.targetSide
+        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+
+theorem scopedCodePhaseEndpointCertifiedTree_caseBoundary_iff_kernel :
+    ScopedCaseBoundarySound
+        (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase) ↔
+      ScopedCaseKernelLaws
+        (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase) :=
+  scopedCaseBoundarySound_iff_kernel
+    scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws
+
+/-- Universal certified recursive boundary from the exact certified local
+phase contract. -/
+theorem scopedCaseBoundarySoundEndpointCertifiedTree_of_localPhases
+    (phases : ScopedLocalCaseCertifiedPhaseLaws validCase) :
+    ScopedCaseBoundarySound
+      (ScopedCodePhaseEndpointCertifiedOnCertificateTree validCase) :=
+  scopedCaseBoundarySound_of_kernel
+    scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws
+    (scopedCaseEndpointCertifiedTraceKernelLaws_of_localPhases phases)
+
+/-- End-to-end arbitrary-depth non-lockstep trace with a certified actual
+endpoint. Complete source certificates are consumed pointwise, including
+case alternatives hidden by duplicate selectors. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree
+    (phases : ScopedLocalCaseCertifiedPhaseLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :=
+  (shadowCode_scopedRelated_of_caseKernel
+    scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws
+    (scopedCaseEndpointCertifiedTraceKernelLaws_of_localPhases phases) run)
+      certificates
+
+/-- End-to-end certified traversal from reachable selection, certified
+singleton classification, and the retained semantic phase law. The retained
+endpoint certificate itself is reconstructed generically. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_components
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (singletonPhases : ScopedCaseCertifiedSingletonPhaseLaws validCase)
+    (retainedPhases : ScopedCaseRetainedPhaseLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree
+    (scopedLocalCaseCertifiedPhaseLaws_of_components selection
+      singletonPhases
+      (scopedCaseCertifiedRetainedPhaseLaws_of_retained retainedPhases))
+    certificates run
 
 theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :
     ScopedCaseBoundarySound

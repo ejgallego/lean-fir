@@ -1790,9 +1790,69 @@ theorem nestedEmptyCaseAlphaTree :
       emptyCaseAlphaBireflexive.backward
   } emptyCaseAlphaTree
 
+/-- Complete source certificate for the empty case, including the vacuous
+selector-normalization and branch-side obligations. -/
+theorem emptyCaseTargetCertificate :
+    ScopedCodeTargetCertificate noCaseTagValid emptyCaseScopeIndex
+      (.cases emptyCaseTable) := by
+  have normalization : CaseTableNormalizationInvariant emptyCaseTable.alts := by
+    constructor
+    constructor
+    · intro tag left right leftHas rightHas
+      simp [HasCtorAlt, emptyCaseTable, LCNF.Cases.alts] at leftHas
+    · intro left right leftHas rightHas
+      simp [HasDefaultAlt, emptyCaseTable, LCNF.Cases.alts] at leftHas
+  refine {
+    structural := ?_
+    alpha := emptyCaseAlphaBireflexive
+    side := ?_
+  }
+  · apply CodeRel.aligned
+    apply HeadRel.cases
+    intro tag valid
+    exact .none
+  · unfold ScopedCodeSideReflexive
+    apply CodeSideConditions.cases
+    · native_decide
+    · native_decide
+    · exact normalization
+    · exact normalization
+    · intro tag left right leftHas rightHas
+      simp [HasCtorAlt, emptyCaseTable, LCNF.Cases.alts] at leftHas
+    · intro left right leftHas rightHas
+      simp [HasDefaultAlt, emptyCaseTable, LCNF.Cases.alts] at leftHas
+
+/-- The enclosing instruction preserves the complete source certificate. -/
+theorem nestedEmptyCaseTargetCertificate :
+    ScopedCodeTargetCertificate noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode := by
+  refine {
+    structural := .aligned (.setTag c 0 emptyCaseTargetCertificate.structural)
+    alpha := nestedEmptyCaseAlphaTree.root
+    side := ?_
+  }
+  exact .setTag (by native_decide) (by native_decide)
+    emptyCaseTargetCertificate.side
+
+theorem nestedEmptyCaseCertificateTree :
+    ScopedCodeTargetCertificateTree noCaseTagValid emptyCaseScopeIndex
+      nestedEmptyCaseCode :=
+  .setTag nestedEmptyCaseTargetCertificate
+    (.cases emptyCaseTargetCertificate .nil)
+
 theorem nestedEmptyCaseShadowRun :
     shadowCode? 2 nestedEmptyCaseCode = some nestedEmptyCaseExpected := by
   rfl
+
+/-- Regression for the certified arbitrary-depth endpoint: every ordinary
+phase round is retained, while the actual transformed target carries the full
+side certificate. -/
+theorem nestedEmptyCaseEndpointCertified
+    (phases : ScopedLocalCaseCertifiedPhaseLaws noCaseTagValid) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace noCaseTagValid
+      emptyCaseScopeIndex nestedEmptyCaseCode nestedEmptyCaseExpected) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree phases
+    nestedEmptyCaseCertificateTree nestedEmptyCaseShadowRun
 
 /-- Regression for the full assembly path: independently supplied case-shape
 laws cross a non-case parent and discharge a recursive shadow run. -/

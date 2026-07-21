@@ -263,3 +263,18 @@ one `ScopedLocalCaseCertifiedPhaseLaws` contract without the former external
 `ScopedCasePhaseTargetIdentityLaws`. The remaining depth obligation is to
 lift certified alternative traces through an arbitrary case root and append
 this certified local round, yielding the invariant-carrying recursive kernel.
+
+The invariant-carrying recursive kernel is now closed at arbitrary depth. A
+subtle distinction is explicit in the final API: independently chosen child
+alpha witnesses can transiently map duplicate source selectors to distinct
+proof intermediates, so normalization is neither assumed nor claimed for
+those tables. `ScopedCodePhaseEndpointCertifiedTrace` retains every ordinary
+phase edge while certifying the actual deterministic endpoint. The executable
+`mapM (shadowCode? ...)` run preserves selector determinism because equal
+source bodies are inputs to the same pure recursive function; this rebuilds
+the transformed case certificate before the certified local round.
+`ScopedCodeTargetCertificateTree` supplies complete source evidence for every
+syntactic child, including selector-shadowed alternatives, and the traversal
+laws preserve the endpoint certificate through every non-case constructor.
+`shadowCode_scopedPhaseEndpointCertifiedTree` is the resulting end-to-end
+theorem, with a recursive empty-case regression crossing a `setTag` parent.
