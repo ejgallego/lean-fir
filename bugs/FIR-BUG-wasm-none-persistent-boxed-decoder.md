@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-persistent-boxed-decoder
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-07-21
 reproduction: Fir/Wasm/Concrete/Examples.lean
-regression: none
+regression: Fir/Wasm/Concrete/Examples.lean
 ---
 
 # Summary
@@ -74,4 +74,9 @@ none
 
 ## Resolution and regression
 
-unresolved
+`readHeapBoxedScalar` now treats persistence as ownership metadata and checks
+the same kind, auxiliary fields, allocation extent, and payload for ordinary
+and persistent boxes. `persistentBoxedUInt64Max` permanently allocates a real
+heap-backed box, marks it persistent through the public recursive operation,
+checks the `persistent = true, rc = 0` header, and decodes the original
+`UInt64.max` value.

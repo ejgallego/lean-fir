@@ -193,13 +193,12 @@ def allocateBoxedScalar (state : MemoryState) (scalar : BoxedScalar) :
 
 /-- Decode one checked heap-backed box. The stored kind, meaningful width,
 reserved auxiliaries, allocation extent, and zero-extended payload must all be
-canonical before the semantic scalar is reconstructed. -/
+canonical before the semantic scalar is reconstructed. Persistence is
+ownership metadata and does not change the boxed representation. -/
 def readHeapBoxedScalar (state : MemoryState) (address : Word32) (header : Header) :
     Except ConcreteError BoxedScalar := do
   let some kind := BoxedScalarKind.ofCode? header.aux0 |
     throw (.target (.unknownBoxedScalarKind header.aux0))
-  unless !header.persistent do
-    throw (.target (.malformedBoxedHeader address.value))
   unless header.aux1 == UInt32.ofNat kind.payloadBytes do
     throw (.target (.malformedBoxedHeader address.value))
   unless header.aux2 == 0 && header.aux3 == 0 do

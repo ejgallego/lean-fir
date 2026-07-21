@@ -339,6 +339,22 @@ def boxedUInt64Max : Except ConcreteError (MemoryState × Word32) :=
               scalar == .uint64 18446744073709551615
         | _, _ => false
 
+/-- Cache publication changes only ownership metadata. A heap-backed scalar
+therefore remains exactly decodable after its header becomes persistent. -/
+def persistentBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← boxedUInt64Max
+  let state ← markPersistent state object
+  return (state, object)
+
+#guard match persistentBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readBoxedScalar state .uint64 object with
+      | .ok header, .ok scalar =>
+          header.kind == .boxed && header.persistent && header.refCount == 0 &&
+            scalar == .uint64 18446744073709551615
+      | _, _ => false
+
 def semanticBoxedUInt64Max :=
   Fir.LeanIR.Impure.box (runtime := {}) LCNF.ImpureType.uint64
     (.scalar (.uint64 18446744073709551615))
