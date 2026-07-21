@@ -151,6 +151,20 @@ theorem deadCtorEvalIgnoresDeadBinding (state : MachineState) :
   exact evalLetValue_eq_of_covered state deadBindingOutsideCtorLiveness
     (collectLetValue_covers {} deadCtorDecl.value)
 
+/- The executable shadow reports precisely the expected live-variable boundary
+on the complete backwards-elimination fixture. -/
+#guard (match shadowCode? 64 {} neutralBefore with
+  | some (code, used) =>
+      code == neutralAfter && used.contains live && !used.contains dead
+  | none => false)
+
+/-- Any successful execution of that fixture inherits the generic syntactic
+coverage guarantee used by the later machine simulation. -/
+theorem neutralShadowCovered
+    (result : shadowCode? 64 {} neutralBefore = some output) :
+    CodeCovered output.2 output.1 :=
+  (shadowCode_spec result).1
+
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
 #guard (match runMain neutralBeforeProgram, runMain neutralAfterProgram with

@@ -182,6 +182,403 @@ theorem collectLetValue_covers
       exact ⟨subset fvarId (by simp), collectArgs_covers _ _⟩
   | proj _ _ _ impossible | const _ _ _ impossible => nomatch impossible
 
+theorem collectLetValue_subset
+    (used : UsedLocals) (value : LCNF.LetValue .impure) :
+    UsedSubset used (collectLetValue used value) := by
+  cases value with
+  | lit _ | erased => exact .refl used
+  | fvar fvarId arguments | reuse fvarId _ _ arguments =>
+      exact (usedSubset_insert used fvarId).trans
+        (collectArgs_subset (used.insert fvarId) arguments)
+  | ctor _ arguments | fap _ arguments | pap _ arguments =>
+      exact collectArgs_subset used arguments
+  | oproj _ fvarId | uproj _ fvarId | sproj _ _ fvarId
+  | reset _ fvarId | box _ fvarId | unbox fvarId | isShared fvarId =>
+      exact usedSubset_insert used fvarId
+  | proj _ _ _ impossible | const _ _ _ impossible => nomatch impossible
+
+/-- Every runtime lookup performed anywhere below a code node is included in
+the supplied used set.  Binder metadata and erased type expressions are
+deliberately absent: the impure interpreter never inspects them. -/
+inductive CodeCovered (used : UsedLocals) : LCNF.Code .impure → Prop where
+  | letE
+      (valueCovered : LetValueCovered used declaration.value)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.let declaration continuation)
+  | join
+      (bodyCovered : CodeCovered used declaration.value)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.jp declaration continuation)
+  | cases
+      (discrMember : used.contains caseInfo.discr = true)
+      (alternativesCovered : ∀ alternative,
+        alternative ∈ caseInfo.alts.toList →
+          CodeCovered used alternative.getCode) :
+      CodeCovered used (.cases caseInfo)
+  | jump
+      (targetMember : used.contains target = true)
+      (argumentsCovered : ArgsCovered used arguments) :
+      CodeCovered used (.jmp target arguments)
+  | ret (resultMember : used.contains result = true) :
+      CodeCovered used (.return result)
+  | unreachable (type : Expr) : CodeCovered used (.unreach type)
+  | objectSet
+      (objectMember : used.contains object = true)
+      (fieldCovered : ArgCovered used field)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.oset object index field continuation)
+  | usizeSet
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.uset object index field continuation)
+  | scalarSet
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.sset object width offset field type continuation)
+  | tagSet
+      (objectMember : used.contains object = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.setTag object tag continuation)
+  | increment
+      (objectMember : used.contains object = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.inc object amount check persistent continuation)
+  | decrement
+      (objectMember : used.contains object = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used
+        (.dec object amount check persistent objects continuation)
+  | delete
+      (objectMember : used.contains object = true)
+      (continuationCovered : CodeCovered used continuation) :
+      CodeCovered used (.del object continuation)
+
+/-- Coverage of an impure case alternative is coverage of its body. -/
+def AltCovered (used : UsedLocals) (alternative : LCNF.Alt .impure) : Prop :=
+  CodeCovered used alternative.getCode
+
+def AltListCovered (used : UsedLocals)
+    (alternatives : List (LCNF.Alt .impure)) : Prop :=
+  ∀ alternative, alternative ∈ alternatives → AltCovered used alternative
+
+theorem CodeCovered.mono
+    (subset : UsedSubset left right)
+    (covered : CodeCovered left code) : CodeCovered right code := by
+  induction covered with
+  | letE value continuation continuationIH =>
+      exact .letE (value.mono subset) continuationIH
+  | join body continuation bodyIH continuationIH =>
+      exact .join bodyIH continuationIH
+  | cases discr alternatives alternativesIH =>
+      exact .cases (subset _ discr) fun alternative member =>
+        alternativesIH alternative member
+  | jump target arguments =>
+      exact .jump (subset _ target) (arguments.mono subset)
+  | ret result => exact .ret (subset _ result)
+  | unreachable type => exact .unreachable type
+  | objectSet object field continuation continuationIH =>
+      exact .objectSet (subset _ object) (field.mono subset)
+        continuationIH
+  | usizeSet object field continuation continuationIH =>
+      exact .usizeSet (subset _ object) (subset _ field) continuationIH
+  | scalarSet object field continuation continuationIH =>
+      exact .scalarSet (subset _ object) (subset _ field) continuationIH
+  | tagSet object continuation continuationIH =>
+      exact .tagSet (subset _ object) continuationIH
+  | increment object continuation continuationIH =>
+      exact .increment (subset _ object) continuationIH
+  | decrement object continuation continuationIH =>
+      exact .decrement (subset _ object) continuationIH
+  | delete object continuation continuationIH =>
+      exact .delete (subset _ object) continuationIH
+
+theorem AltCovered.mono
+    (subset : UsedSubset left right)
+    (covered : AltCovered left alternative) : AltCovered right alternative := by
+  exact CodeCovered.mono subset covered
+
+
+theorem AltListCovered.mono
+    (subset : UsedSubset left right)
+    (covered : AltListCovered left alternatives) :
+    AltListCovered right alternatives := by
+  intro alternative member
+  exact (covered alternative member).mono subset
+
+theorem altCovered_updateCode
+    (alternative : LCNF.Alt .impure)
+    (covered : CodeCovered used code) :
+    AltCovered used (updateAltCode alternative code) := by
+  cases alternative with
+  | ctorAlt info _ => exact covered
+  | default _ => exact covered
+  | alt _ _ _ impossible => nomatch impossible
+
+/-- The transparent alternative loop preserves both semantic coverage and
+monotonic growth of the backwards used set, assuming the same contract for
+each transformed body. -/
+theorem shadowAltList_spec
+    (transformCode : UsedLocals → LCNF.Code .impure → Option ShadowResult)
+    (transformSpec : ∀ (initial : UsedLocals)
+        (source target : LCNF.Code .impure) (final : UsedLocals),
+      transformCode initial source = some (target, final) →
+        CodeCovered final target ∧ UsedSubset initial final)
+    (initial : UsedLocals) (alternatives : List (LCNF.Alt .impure))
+    (transformed : List (LCNF.Alt .impure)) (final : UsedLocals)
+    (result : shadowAltList? transformCode initial alternatives =
+      some (transformed, final)) :
+    AltListCovered final transformed ∧ UsedSubset initial final := by
+  induction alternatives generalizing initial transformed final with
+  | nil =>
+      simp only [shadowAltList?] at result
+      cases result
+      exact ⟨by intro alternative member; simp at member, .refl initial⟩
+  | cons alternative rest ih =>
+      cases bodyResult : transformCode initial alternative.getCode with
+      | none => simp [shadowAltList?, bodyResult] at result
+      | some bodyPair =>
+          obtain ⟨body, middle⟩ := bodyPair
+          cases restResult : shadowAltList? transformCode middle rest with
+          | none => simp [shadowAltList?, bodyResult, restResult] at result
+          | some restPair =>
+              obtain ⟨transformedRest, finalUsed⟩ := restPair
+              have pairEq :
+                  (updateAltCode alternative body :: transformedRest,
+                    finalUsed) = (transformed, final) := by
+                simpa [shadowAltList?, bodyResult, restResult] using result
+              have transformedEq := congrArg Prod.fst pairEq
+              have finalEq := congrArg Prod.snd pairEq
+              simp only [Prod.fst] at transformedEq
+              simp only [Prod.snd] at finalEq
+              subst transformed
+              subst final
+              have bodySpec := transformSpec initial alternative.getCode
+                body middle bodyResult
+              have restSpec := ih middle transformedRest finalUsed restResult
+              constructor
+              · intro candidate member
+                simp only [List.mem_cons] at member
+                cases member with
+                | inl same =>
+                    subst candidate
+                    exact (altCovered_updateCode alternative bodySpec.1).mono
+                      restSpec.2
+                | inr tail => exact restSpec.1 candidate tail
+              · exact bodySpec.2.trans restSpec.2
+
+/-- The shadow pass returns a monotone used set that covers every runtime
+lookup in the transformed code.  This is the central syntactic invariant
+handed to the later environment-insensitive machine simulation. -/
+theorem shadowCode_spec
+    (result : shadowCode? fuel initial source = some output) :
+    CodeCovered output.2 output.1 ∧ UsedSubset initial output.2 := by
+  induction fuel generalizing initial source output with
+  | zero =>
+      cases source with
+      | jmp target arguments =>
+          simp [shadowCode?] at result
+          subst output
+          let growth := collectArgs_subset (initial.insert target) arguments
+          exact ⟨.jump (growth target (by simp))
+              (collectArgs_covers _ _),
+            (usedSubset_insert initial target).trans growth⟩
+      | «return» value =>
+          simp [shadowCode?] at result
+          subst output
+          exact ⟨.ret (by simp), usedSubset_insert initial value⟩
+      | unreach type =>
+          simp [shadowCode?] at result
+          subst output
+          exact ⟨.unreachable type, .refl initial⟩
+      | «let» _ _ | jp _ _ | «cases» _ | oset _ _ _ _ | uset _ _ _ _
+      | sset _ _ _ _ _ _ | setTag _ _ _ | inc _ _ _ _ _
+      | dec _ _ _ _ _ _ | del _ _ | «fun» _ _ _ =>
+          simp [shadowCode?] at result
+  | succ remaining ih =>
+      cases source with
+      | «let» declaration continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              by_cases keep : declaration.fvarId ∈ continuationOutput.2 ∨
+                  safeToElim declaration.value = false
+              · simp [shadowCode?, continuationResult, keep] at result
+                subst output
+                let growth := collectLetValue_subset continuationOutput.2
+                  declaration.value
+                exact ⟨.letE (collectLetValue_covers _ _)
+                    (continuationSpec.1.mono growth),
+                  continuationSpec.2.trans growth⟩
+              · simp [shadowCode?, continuationResult, keep] at result
+                subst output
+                exact continuationSpec
+      | jp declaration continuation =>
+          cases declaration with
+          | mk fvarId binderName params type body =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationSpec := ih continuationResult
+                  by_cases keep : continuationOutput.2.contains fvarId = true
+                  · cases bodyResult :
+                        shadowCode? remaining continuationOutput.2 body with
+                    | none =>
+                        have keepProp : fvarId ∈ continuationOutput.2 := keep
+                        simp [shadowCode?, continuationResult, keepProp, bodyResult]
+                          at result
+                    | some bodyOutput =>
+                        have bodySpec := ih bodyResult
+                        have keepProp : fvarId ∈ continuationOutput.2 := keep
+                        simp [shadowCode?, continuationResult, keepProp,
+                          bodyResult] at result
+                        subst output
+                        exact ⟨.join bodySpec.1
+                            (continuationSpec.1.mono bodySpec.2),
+                          continuationSpec.2.trans bodySpec.2⟩
+                  · have keepProp : ¬fvarId ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    exact continuationSpec
+      | «cases» caseInfo =>
+          cases caseInfo with
+          | mk typeName resultType discr alternatives =>
+              cases alternativesResult :
+                  shadowAltList? (shadowCode? remaining) initial
+                    alternatives.toList with
+              | none => simp [shadowCode?, alternativesResult] at result
+              | some alternativesOutput =>
+                  obtain ⟨transformed, beforeDiscr⟩ := alternativesOutput
+                  simp [shadowCode?, alternativesResult] at result
+                  subst output
+                  have alternativesSpec := shadowAltList_spec
+                    (shadowCode? remaining)
+                    (fun seed before after final transformedBody =>
+                      ih transformedBody)
+                    initial alternatives.toList transformed beforeDiscr
+                    alternativesResult
+                  let growth := usedSubset_insert beforeDiscr discr
+                  constructor
+                  · apply CodeCovered.cases
+                    · change (beforeDiscr.insert discr).contains discr = true
+                      simp
+                    intro alternative member
+                    have sourceMember : alternative ∈ transformed := by
+                      simpa [LCNF.Cases.alts] using member
+                    exact (alternativesSpec.1 alternative sourceMember).mono growth
+                  · exact alternativesSpec.2.trans growth
+      | jmp target arguments =>
+          simp [shadowCode?] at result
+          subst output
+          let growth := collectArgs_subset (initial.insert target) arguments
+          exact ⟨.jump (growth target (by simp))
+              (collectArgs_covers _ _),
+            (usedSubset_insert initial target).trans growth⟩
+      | «return» value =>
+          simp [shadowCode?] at result
+          subst output
+          exact ⟨.ret (by simp), usedSubset_insert initial value⟩
+      | unreach type =>
+          simp [shadowCode?] at result
+          subst output
+          exact ⟨.unreachable type, .refl initial⟩
+      | oset object index field continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              by_cases keep : continuationOutput.2.contains object = true
+              · have keepProp : object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                let growth := collectArg_subset continuationOutput.2 field
+                exact ⟨.objectSet (growth object keep)
+                    (argCovered_collectArg _ _)
+                    (continuationSpec.1.mono growth),
+                  continuationSpec.2.trans growth⟩
+              · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                exact continuationSpec
+      | uset object index field continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              by_cases keep : continuationOutput.2.contains object = true
+              · have keepProp : object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                let growth := usedSubset_insert continuationOutput.2 field
+                exact ⟨.usizeSet (growth object keep) (by simp)
+                    (continuationSpec.1.mono growth),
+                  continuationSpec.2.trans growth⟩
+              · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                exact continuationSpec
+      | sset object width offset field type continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              by_cases keep : continuationOutput.2.contains object = true
+              · have keepProp : object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                let growth := usedSubset_insert continuationOutput.2 field
+                exact ⟨.scalarSet (growth object keep) (by simp)
+                    (continuationSpec.1.mono growth),
+                  continuationSpec.2.trans growth⟩
+              · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                simp [shadowCode?, continuationResult, keepProp] at result
+                subst output
+                exact continuationSpec
+      | setTag object tag continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              simp [shadowCode?, continuationResult] at result
+              subst output
+              let growth := usedSubset_insert continuationOutput.2 object
+              exact ⟨.tagSet (by simp) (continuationSpec.1.mono growth),
+                continuationSpec.2.trans growth⟩
+      | inc object amount check persistent continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              simp [shadowCode?, continuationResult] at result
+              subst output
+              let growth := usedSubset_insert continuationOutput.2 object
+              exact ⟨.increment (by simp) (continuationSpec.1.mono growth),
+                continuationSpec.2.trans growth⟩
+      | dec object amount check persistent objects continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              simp [shadowCode?, continuationResult] at result
+              subst output
+              let growth := usedSubset_insert continuationOutput.2 object
+              exact ⟨.decrement (by simp) (continuationSpec.1.mono growth),
+                continuationSpec.2.trans growth⟩
+      | del object continuation =>
+          cases continuationResult : shadowCode? remaining initial continuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some continuationOutput =>
+              have continuationSpec := ih continuationResult
+              simp [shadowCode?, continuationResult] at result
+              subst output
+              let growth := usedSubset_insert continuationOutput.2 object
+              exact ⟨.delete (by simp) (continuationSpec.1.mono growth),
+                continuationSpec.2.trans growth⟩
+      | «fun» _ _ impossible => nomatch impossible
+
 def EnvsAgreeOn (used : UsedLocals) (left right : Env) : Prop :=
   ∀ fvarId, used.contains fvarId = true →
     lookupValue left fvarId = lookupValue right fvarId

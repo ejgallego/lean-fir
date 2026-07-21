@@ -31,7 +31,10 @@ def safeToElim : LCNF.LetValue .impure → Bool
 def lean432ElimDeadSourceSha256 : String :=
   "af1868ea62e059ce746a05bd96e78727c58d2b0f5a021b42c8149a949b900170"
 
-abbrev UsedLocals := FVarIdHashSet
+/-- Proof-facing spelling of Lean's `FVarIdHashSet`.  The upstream name is an
+exposed opaque wrapper around this exact representation, which prevents its
+standard membership instance from surviving proof elaboration consistently. -/
+abbrev UsedLocals := Std.HashSet FVarId
 
 def collectArg (used : UsedLocals) (argument : LCNF.Arg pu) : UsedLocals :=
   match argument with
@@ -60,6 +63,30 @@ def collectLetValue (used : UsedLocals) (value : LCNF.LetValue pu) :
       collectArgs used arguments
 
 abbrev ShadowResult := LCNF.Code .impure × UsedLocals
+
+/-- Transparent impure specialization of the compiler's opaque
+`LCNF.Alt.updateCode`. -/
+def updateAltCode (alternative : LCNF.Alt .impure)
+    (code : LCNF.Code .impure) : LCNF.Alt .impure :=
+  match alternative with
+  | .ctorAlt info _ => .ctorAlt info code
+  | .default _ => .default code
+  | .alt _ _ _ impossible => nomatch impossible
+
+/-- Transform case alternatives left-to-right while threading the backwards
+used set.  Keeping this list recursion outside `shadowCode?` makes the exact
+case traversal available to the coverage proof. -/
+def shadowAltList?
+    (transformCode : UsedLocals → LCNF.Code .impure → Option ShadowResult)
+    (used : UsedLocals) :
+    List (LCNF.Alt .impure) →
+      Option (List (LCNF.Alt .impure) × UsedLocals)
+  | [] => some ([], used)
+  | alternative :: rest => do
+      let (code, used) ← transformCode used alternative.getCode
+      let alternative := updateAltCode alternative code
+      let (rest, used) ← shadowAltList? transformCode used rest
+      return (alternative :: rest, used)
 
 /-- Fuel-indexed transparent copy of the output-producing part of Lean 4.32's
 private `Code.elimDead`.  The compiler's `eraseLetDecl`/`eraseFunDecl` calls
@@ -90,27 +117,8 @@ def shadowCode? : Nat → UsedLocals → LCNF.Code .impure → Option ShadowResu
           else
             return (continuation, used)
       | .cases (.mk typeName resultType discr alternatives) => do
-          let rec transformAlternatives
-              (used : UsedLocals) :
-              List (LCNF.Alt .impure) →
-                Option (List (LCNF.Alt .impure) × UsedLocals)
-            | [] => some ([], used)
-            | alternative :: rest => do
-                let transformed :
-                    Option (LCNF.Alt .impure × UsedLocals) :=
-                  match alternative with
-                  | .ctorAlt info body => do
-                      let (body, used) ← shadowCode? fuel used body
-                      return ((.ctorAlt info body : LCNF.Alt .impure), used)
-                  | .default body => do
-                      let (body, used) ← shadowCode? fuel used body
-                      return ((.default body : LCNF.Alt .impure), used)
-                  | .alt _ _ _ impossible => nomatch impossible
-                let (alternative, used) ← transformed
-                let (rest, used) ← transformAlternatives used rest
-                return (alternative :: rest, used)
           let (alternatives, used) ←
-            transformAlternatives used alternatives.toList
+            shadowAltList? (shadowCode? fuel) used alternatives.toList
           return (.cases (.mk typeName resultType discr alternatives.toArray),
             used.insert discr)
       | .jmp target arguments =>
