@@ -31,5 +31,6 @@ import Fir.Wasm.Concrete.ObjectMutationCorrectness
 import Fir.Wasm.Concrete.ReuseMemoryCorrectness
 import Fir.Wasm.Concrete.ResetReuseCorrectness
 import Fir.Wasm.Concrete.GlobalCorrectness
+import Fir.Wasm.Concrete.PersistenceCorrectness
 import Fir.Wasm.Concrete.ExternalCorrectness
 import Fir.Wasm.Concrete.FaultCorrectness

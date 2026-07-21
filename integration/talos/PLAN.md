@@ -2207,6 +2207,17 @@ arbitrary-arity host call, result-local write, and an arbitrary continuation.
 Executable guards cover all three paths, including reset-to-reuse identity of
 the retained address. Generated artifact execution remains pending.
 
+W6.6ac begins constructive cache-persistence discharge. The proof boundary is
+now an inductive proposition, allowing representation proofs to expose the
+post-persistence heap without treating proof evidence as runtime data. A new
+`PersistenceCorrectness` layer proves that already-persistent allocations are
+exact no-ops at every concrete fuel budget and derives `CachePersistenceRefines`
+for every non-heap semantic lane: scalar, erased, reuse token, direct tagged,
+and promoted tagged values. Core runtime and Talos cache-set composition rules
+consume that theorem directly, so callers no longer provide a persistence
+premise for those lanes. Recursive mapped heap graphs remain the next cache
+slice; no runtime or shared FIR semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

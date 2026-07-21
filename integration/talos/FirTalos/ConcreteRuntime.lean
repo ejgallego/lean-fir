@@ -1825,6 +1825,34 @@ theorem cacheSetStep_of_refines
   · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
   · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated
 
+/-- Non-heap cache publication discharges persistence from the physical value
+relation itself, so generated clients need no separate persistence premise for
+scalars, erased/reuse lanes, direct tags, or promoted tags. -/
+theorem cacheSetStep_of_refines_nonHeapReference
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value} {slot : ConcreteGlobalSlot}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : PhysicalValueRel witness kind physical semantic)
+    (found : initial.host.runtime.globals.find? declaration = some slot)
+    (kindEq : slot.kind = kind)
+    (nonHeap : IsNonHeapReference semantic) :
+    ∃ after,
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] (replaceRuntime initial after) ∧
+      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
+        (runtime.setGlobal declaration semantic) ∧
+      PhysicalValueRel witness kind physical semantic := by
+  apply cacheSetStep_of_refines runtimeRelated valueRelated found kindEq
+  intro lane decoded
+  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
+    decodePhysicalLane_of_related valueRelated
+  rw [expectedDecoded] at decoded
+  have laneEq := Except.ok.inj decoded
+  subst lane
+  exact .of_nonHeapReference runtimeRelated.heap expectedRelated nonHeap
+
 /-- Executable/refinement boundary for partial-application closure allocation.
 The `.tagged` result admitted by the current validator is deliberately absent;
 see `FIR-BUG-wasm-none-partial-apply-tagged-result`. -/

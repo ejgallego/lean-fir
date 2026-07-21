@@ -451,16 +451,16 @@ theorem ConcreteRuntimeRel.moduleInitial
     rfl rfl rfl declarations
 
 /-- Explicit proof boundary for Lean's recursive cache-persistence transition.
-W6's ordinary-cell heap relation historically covered only nonpersistent mapped
-objects; cache composition now carries this obligation instead of silently
-assuming the heap is unchanged. -/
-structure CachePersistenceRefines (concrete : MemoryState)
+Cache composition carries this obligation instead of silently assuming the
+heap is unchanged; constructive discharge is supplied per representation by
+`PersistenceCorrectness`. -/
+inductive CachePersistenceRefines (concrete : MemoryState)
     (witness : RefinementWitness) (semantic : RuntimeState)
     (kind : AbiKind) (lane : LaneValue) (value : Value)
-    (descriptors : ClosureDescriptorTable) where
-  after : MemoryState
-  operation : persistGlobalValue concrete kind lane descriptors = .ok after
-  heap : LiveHeapRel after witness (semantic.markPersistent value)
+    (descriptors : ClosureDescriptorTable) : Prop where
+  | intro (after : MemoryState)
+      (operation : persistGlobalValue concrete kind lane descriptors = .ok after)
+      (heap : LiveHeapRel after witness (semantic.markPersistent value))
 
 /-- A successful concrete cache write and FIR `setGlobal` remain related at
 the full runtime-state boundary. -/
@@ -478,18 +478,19 @@ theorem ConcreteRuntimeRel.writeGlobal
     ∃ after,
       concrete.writeGlobal name kind lane descriptors = .ok after ∧
         ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
+  obtain ⟨persistentHeap, persistenceOperation, persistentRelated⟩ := persistence
   obtain ⟨globals, operation, globalsRelated⟩ :=
     related.globals.write found kindEq valueRelated
   let after : ConcreteRuntimeState := {
-    concrete with heap := persistence.after, globals }
+    concrete with heap := persistentHeap, globals }
   refine ⟨after, ?_, ?_⟩
   · unfold ConcreteRuntimeState.writeGlobal
-    rw [persistence.operation]
+    rw [persistenceOperation]
     rw [operation]
     rfl
   · exact {
       heap := by
-        apply persistence.heap.auxiliary
+        apply persistentRelated.auxiliary
         · simp [RuntimeState.setGlobal]
         · simp [RuntimeState.setGlobal]
       globals := by
