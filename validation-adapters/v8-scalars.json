@@ -8,6 +8,11 @@
   ],
   "resultDomain": "selected",
   "timeoutSeconds": 120,
+  "executionFileAccessRecorder": {
+    "kind": "execution-file-access-recorder",
+    "name": "strace",
+    "command": "strace"
+  },
   "productProvider": {
     "name": "lean-wasm-semantic",
     "contract": {

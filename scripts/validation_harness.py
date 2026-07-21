@@ -38,6 +38,7 @@ RESERVED_PRODUCT_KIND = "product-manifest"
 RESERVED_BUILD_INPUT_KIND = "build-input-manifest"
 BUILD_INPUT_SCOPE = "reported-loaded"
 BUILD_FILE_ACCESS_RECORDER_KIND = "file-access-recorder"
+EXECUTION_FILE_ACCESS_RECORDER_KIND = "execution-file-access-recorder"
 BUILD_INPUT_REPLAY_ISOLATOR_KIND = "build-input-replay-isolator"
 STRACE_OPEN_SYSCALLS = {"open", "openat", "openat2"}
 STRACE_EXEC_SYSCALLS = {"execve", "execveat"}
@@ -434,6 +435,13 @@ def parse_build_file_access_trace(
         path: tuple(sorted(kinds))
         for path, kinds in sorted(accesses.items())
     }
+
+
+def parse_file_access_trace(
+    content: bytes, context: str
+) -> dict[str, tuple[str, ...]]:
+    """Shared strict parser for build and execution strace evidence."""
+    return parse_build_file_access_trace(content, context)
 
 
 def parse_bwrap_status(content: bytes, context: str) -> tuple[dict, dict]:
@@ -1946,6 +1954,8 @@ VALIDATION_ARTIFACT_KINDS = {
     "build-input-replay-manifest",
     "build-input-replay-status",
     "build-input-replay-trace",
+    "execution-file-access",
+    "execution-file-access-trace",
     "process-stdout",
     "process-stderr",
 }
@@ -2027,6 +2037,22 @@ def validation_artifact_scope(
                 "build-file-access-trace artifact has noncanonical name"
             )
         backend, scope = parts[0], parts[1]
+    elif checked_kind == "execution-file-access":
+        if len(parts) != 2 or parts[1] != "execution-file-access.json":
+            raise ValidationError(
+                "execution-file-access artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "execution-file-access"
+    elif checked_kind == "execution-file-access-trace":
+        if (
+            len(parts) != 3
+            or parts[1] != "execute"
+            or parts[2] != "file-access.strace"
+        ):
+            raise ValidationError(
+                "execution-file-access-trace artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "execute"
     elif checked_kind == "build-determinism":
         if len(parts) != 2 or parts[1] != "build-determinism.json":
             raise ValidationError(
@@ -2640,6 +2666,7 @@ class ExternalCommandAdapter:
     product_manifest: str | None = None
     build_input_manifest: str | None = None
     build_file_access_recorder: ToolDeclaration | None = None
+    execution_file_access_recorder: ToolDeclaration | None = None
     build_input_replay_isolator: ToolDeclaration | None = None
     build_attempts: int = 1
     tool_declarations: tuple[ToolDeclaration, ...] = ()
@@ -2655,6 +2682,9 @@ class ExternalCommandAdapter:
         default=None, init=False, repr=False, compare=False
     )
     _built_build_file_access_recorder: ValidationTool | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _built_execution_file_access_recorder: ValidationTool | None = field(
         default=None, init=False, repr=False, compare=False
     )
     _built_build_input_replay_isolator: ValidationTool | None = field(
@@ -3768,6 +3798,7 @@ class ExternalCommandAdapter:
         self._built_tools = None
         self._built_build_tools = None
         self._built_build_file_access_recorder = None
+        self._built_execution_file_access_recorder = None
         self._built_build_input_replay_isolator = None
         self._built_build_inputs = None
         self._built_build_command = None
@@ -4088,12 +4119,219 @@ class ExternalCommandAdapter:
         self._built_tools = self.collect_tools(
             context.root, self.tool_declarations
         )
+        if self.execution_file_access_recorder is not None:
+            self._built_execution_file_access_recorder = (
+                validation_tool_from_declaration(
+                    self.name,
+                    self.execution_file_access_recorder,
+                    context.root,
+                )
+            )
         self._built_run_command = self.bind_command(
             context.root,
             self.run_command,
             self.tool_declarations,
             self._built_tools,
             "run",
+        )
+
+    def run_execution(
+        self,
+        context: RunContext,
+        environment: dict[str, str],
+    ) -> tuple[
+        subprocess.CompletedProcess[str],
+        tuple[ValidationArtifact, ...],
+        tuple[dict[str, str], dict[str, tuple[str, ...]]] | None,
+    ]:
+        command = list(self._built_run_command or ())
+        recorder = self._built_execution_file_access_recorder
+        if recorder is None:
+            return (
+                run(
+                    command,
+                    context.root,
+                    self.timeout_seconds,
+                    environment,
+                ),
+                (),
+                None,
+            )
+        if recorder.source_path is None:
+            raise ValidationError(
+                f"{self.name} execution file-access recorder has no source path"
+            )
+        trace_root = (
+            context.out_dir.resolve() / "execution-file-access-traces"
+        )
+        if trace_root.is_symlink() or (
+            trace_root.exists() and not trace_root.is_dir()
+        ):
+            raise ValidationError(
+                f"{self.name} execution file-access trace root is not a directory"
+            )
+        trace_root.mkdir(parents=True, exist_ok=True)
+        trace_fd = -1
+        try:
+            trace_fd, raw_trace_path = tempfile.mkstemp(
+                prefix=f"{self.name}-execute-",
+                suffix=".strace",
+                dir=trace_root,
+            )
+            trace_stat = os.fstat(trace_fd)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot create {self.name} execution file-access trace: "
+                f"{error}"
+            ) from error
+        finally:
+            if trace_fd >= 0:
+                close_file_descriptor(trace_fd)
+        trace_path = Path(raw_trace_path)
+        trace_identity = (trace_stat.st_dev, trace_stat.st_ino)
+        trace_name = f"{self.name}/execute/file-access.strace"
+        completed = run(
+            [
+                str(recorder.source_path),
+                "-f",
+                "-qq",
+                "--kill-on-exit",
+                "-s",
+                "0",
+                "-yy",
+                "-X",
+                "raw",
+                "-e",
+                "trace=open,openat,openat2,execve,execveat",
+                "-e",
+                "status=successful",
+                "-e",
+                "signal=none",
+                "-o",
+                str(trace_path),
+                "--",
+                *command,
+            ],
+            context.root,
+            self.timeout_seconds,
+            environment,
+        )
+        if trace_path.is_symlink() or not trace_path.is_file():
+            raise ValidationError(
+                f"{self.name} execution file-access recorder produced no trace"
+            )
+        try:
+            final_trace_stat = trace_path.stat()
+            trace_content = trace_path.read_bytes()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot read {self.name} execution file-access trace: {error}"
+            ) from error
+        if (
+            final_trace_stat.st_dev,
+            final_trace_stat.st_ino,
+        ) != trace_identity:
+            raise ValidationError(
+                f"{self.name} execution file-access trace was replaced"
+            )
+        trace_sha256 = sha256_bytes(trace_content)
+        accesses = parse_file_access_trace(
+            trace_content, f"{self.name} execution file-access trace"
+        )
+        trace_artifact = ValidationArtifact(
+            "execution-file-access-trace",
+            trace_name,
+            trace_sha256,
+            trace_content,
+        )
+        return completed, (trace_artifact,), (
+            {"name": trace_name, "sha256": trace_sha256},
+            accesses,
+        )
+
+    def execution_file_access_artifact(
+        self,
+        context: RunContext,
+        bundle: ProductBundle | None,
+        results: dict[str, dict],
+        recorded_access: (
+            tuple[dict[str, str], dict[str, tuple[str, ...]]] | None
+        ),
+    ) -> tuple[ValidationArtifact, ...]:
+        recorder = self._built_execution_file_access_recorder
+        if recorder is None:
+            if recorded_access is not None:
+                raise ValidationError(
+                    f"{self.name} has undeclared execution file-access evidence"
+                )
+            return ()
+        if bundle is None or recorded_access is None:
+            raise ValidationError(
+                f"{self.name} execution file-access recorder has no provider bundle"
+            )
+        trace, accesses = recorded_access
+        receipts = [
+            checked_product_bundle_receipt(
+                record, self.name, case_id, bundle
+            )
+            for case_id, record in sorted(results.items())
+        ]
+        receipted_products = {
+            (product.backend, product.kind, product.name, product.sha256): product
+            for receipt in receipts
+            for product in receipt.products
+        }
+        product_accesses: list[dict[str, object]] = []
+        for product in sorted(
+            receipted_products.values(),
+            key=lambda item: (item.backend, item.kind, item.name),
+        ):
+            path = os.path.normpath(
+                str(
+                    (
+                        context.out_dir
+                        / product.backend
+                        / product.name
+                    ).resolve()
+                )
+            )
+            observed = accesses.get(path)
+            if observed is None or "read" not in observed:
+                raise ValidationError(
+                    f"{self.name} execution did not open receipted product "
+                    f"{product.kind}:{product.name}"
+                )
+            product_accesses.append(
+                {
+                    **product.to_json(),
+                    "path": path,
+                    "accesses": list(observed),
+                }
+            )
+        report = {
+            "version": PROTOCOL_VERSION,
+            "backend": self.name,
+            "recorder": recorder.to_json(),
+            "provider": bundle.provider,
+            "bundleSha256": bundle.bundle_sha256,
+            "trace": trace,
+            "receiptCount": len(receipts),
+            "products": product_accesses,
+            "productCount": len(product_accesses),
+            "accessCount": len(accesses),
+        }
+        report_content = (
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        report_path = context.out_dir / self.name / "execution-file-access.json"
+        report_path.write_bytes(report_content)
+        return (
+            ValidationArtifact(
+                "execution-file-access",
+                f"{self.name}/execution-file-access.json",
+                sha256_bytes(report_content),
+                report_content,
+            ),
         )
 
     def execute(self, context: RunContext) -> BackendRun:
@@ -4123,8 +4361,17 @@ class ExternalCommandAdapter:
             raise ValidationError(
                 f"{self.name} build inputs changed between build and execution"
             )
+        execution_recorder_tools = (
+            (self._built_execution_file_access_recorder,)
+            if self._built_execution_file_access_recorder is not None
+            else ()
+        )
         self.verify_captured_tools(
-            (*self._built_build_tools, *self._built_tools),
+            (
+                *self._built_build_tools,
+                *self._built_tools,
+                *execution_recorder_tools,
+            ),
             "between build and execution",
         )
         bundle = None
@@ -4177,11 +4424,8 @@ class ExternalCommandAdapter:
             environment["FIR_VALIDATION_PRODUCT_BUNDLE"] = json.dumps(
                 bundle.to_json(), separators=(",", ":"), sort_keys=True
             )
-        completed = run(
-            list(self._built_run_command),
-            context.root,
-            self.timeout_seconds,
-            environment,
+        completed, access_artifacts, recorded_access = self.run_execution(
+            context, environment
         )
         if bundle is not None:
             verify_product_bundle_files(
@@ -4205,7 +4449,11 @@ class ExternalCommandAdapter:
             )
         self.verify_corpus(context, "during execution")
         self.verify_captured_tools(
-            (*self._built_build_tools, *self._built_tools),
+            (
+                *self._built_build_tools,
+                *self._built_tools,
+                *execution_recorder_tools,
+            ),
             "during execution",
         )
         expected_cases = (
@@ -4218,11 +4466,24 @@ class ExternalCommandAdapter:
             list(expected_cases),
             findings=list(self._build_findings),
             products=list(self._built_products),
-            tools=[*self._built_build_tools, *self._built_tools],
+            tools=[
+                *self._built_build_tools,
+                *self._built_tools,
+                *execution_recorder_tools,
+            ],
             build_inputs=list(self._built_build_inputs),
-            artifacts=[*self._build_artifacts, *execution_artifacts],
+            artifacts=[
+                *self._build_artifacts,
+                *execution_artifacts,
+                *access_artifacts,
+            ],
         )
         if completed.returncode != 0:
+            backend_run.artifacts.extend(
+                self.execution_file_access_artifact(
+                    context, bundle, {}, recorded_access
+                )
+            )
             backend_run.findings.append(
                 ValidationFinding(
                     "execution",
@@ -4237,6 +4498,11 @@ class ExternalCommandAdapter:
                 completed.stdout, list(self._built_run_command)
             ),
             self.name,
+        )
+        backend_run.artifacts.extend(
+            self.execution_file_access_artifact(
+                context, bundle, backend_run.results, recorded_access
+            )
         )
         return backend_run
 
@@ -4265,6 +4531,7 @@ def external_adapter_from_config(
         "productManifest",
         "buildInputManifest",
         "buildFileAccessRecorder",
+        "executionFileAccessRecorder",
         "buildInputReplay",
         "tools",
         "buildTools",
@@ -4483,13 +4750,15 @@ def external_adapter_from_config(
             kind = validate_backend_name(tool["kind"], tool_context)
             if kind in {
                 BUILD_FILE_ACCESS_RECORDER_KIND,
+                EXECUTION_FILE_ACCESS_RECORDER_KIND,
                 BUILD_INPUT_REPLAY_ISOLATOR_KIND,
             }:
-                owning_field = (
-                    "buildFileAccessRecorder"
-                    if kind == BUILD_FILE_ACCESS_RECORDER_KIND
-                    else "buildInputReplay"
-                )
+                owning_field = {
+                    BUILD_FILE_ACCESS_RECORDER_KIND: "buildFileAccessRecorder",
+                    EXECUTION_FILE_ACCESS_RECORDER_KIND:
+                        "executionFileAccessRecorder",
+                    BUILD_INPUT_REPLAY_ISOLATOR_KIND: "buildInputReplay",
+                }[kind]
                 raise ValidationError(
                     f"{tool_context}: tool kind is reserved for "
                     f"{owning_field}"
@@ -4642,6 +4911,59 @@ def external_adapter_from_config(
                 "buildCommand"
             )
         build_file_access_recorder = ToolDeclaration(
+            recorder_kind,
+            recorder_name,
+            command=recorder_command,
+        )
+    raw_execution_file_access_recorder = value.get(
+        "executionFileAccessRecorder"
+    )
+    execution_file_access_recorder = None
+    if raw_execution_file_access_recorder is not None:
+        recorder_context = (
+            f"adapter config {path}/executionFileAccessRecorder"
+        )
+        if (
+            not isinstance(raw_execution_file_access_recorder, dict)
+            or set(raw_execution_file_access_recorder)
+            != {"kind", "name", "command"}
+        ):
+            raise ValidationError(
+                f"{recorder_context}: expected kind, name, and command fields"
+            )
+        recorder_kind = validate_backend_name(
+            raw_execution_file_access_recorder["kind"], recorder_context
+        )
+        if recorder_kind != EXECUTION_FILE_ACCESS_RECORDER_KIND:
+            raise ValidationError(
+                f"{recorder_context}: kind must be "
+                f"{EXECUTION_FILE_ACCESS_RECORDER_KIND}"
+            )
+        recorder_name = checked_relative_posix_path(
+            raw_execution_file_access_recorder["name"], recorder_context
+        )
+        recorder_command = raw_execution_file_access_recorder["command"]
+        if (
+            not isinstance(recorder_command, str)
+            or not recorder_command
+            or "\x00" in recorder_command
+            or "/" in recorder_command
+            or "\\" in recorder_command
+        ):
+            raise ValidationError(
+                f"{recorder_context}: command must be a bare PATH command"
+            )
+        if recorder_name != recorder_command:
+            raise ValidationError(
+                f"{recorder_context}: name must equal command to bind the "
+                "retained tool identity"
+            )
+        if product_provider is None:
+            raise ValidationError(
+                f"adapter config {path}: executionFileAccessRecorder "
+                "requires productProvider"
+            )
+        execution_file_access_recorder = ToolDeclaration(
             recorder_kind,
             recorder_name,
             command=recorder_command,
@@ -4805,6 +5127,44 @@ def external_adapter_from_config(
                 f"adapter config {path}: duplicate build-input replay "
                 f"source: {build_input_replay_isolator.command}"
             )
+    if execution_file_access_recorder is not None:
+        existing_declarations = tuple(
+            declaration
+            for declaration in (
+                *tool_declarations,
+                *build_tool_declarations,
+                build_file_access_recorder,
+                build_input_replay_isolator,
+            )
+            if declaration is not None
+        )
+        recorder_key = (
+            execution_file_access_recorder.kind,
+            execution_file_access_recorder.name,
+        )
+        if recorder_key in {
+            (declaration.kind, declaration.name)
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate execution file-access "
+                f"recorder tool: {recorder_key[0]}:{recorder_key[1]}"
+            )
+        if (
+            "command",
+            str(execution_file_access_recorder.command),
+        ) in {
+            (
+                ("path", str(declaration.path))
+                if declaration.path is not None
+                else ("command", str(declaration.command))
+            )
+            for declaration in existing_declarations
+        }:
+            raise ValidationError(
+                f"adapter config {path}: duplicate execution file-access "
+                f"recorder source: {execution_file_access_recorder.command}"
+            )
     return ExternalCommandAdapter(
         name=name,
         run_command=run_command,
@@ -4821,6 +5181,7 @@ def external_adapter_from_config(
         product_manifest=product_manifest,
         build_input_manifest=build_input_manifest,
         build_file_access_recorder=build_file_access_recorder,
+        execution_file_access_recorder=execution_file_access_recorder,
         build_input_replay_isolator=build_input_replay_isolator,
         build_attempts=build_attempts,
         tool_declarations=tool_declarations,
@@ -5105,7 +5466,7 @@ def validate_control_plane_inputs(
     products: list[ValidationProduct],
     bundles: list[ProductBundle],
     consumers: list[ProductConsumer],
-) -> None:
+) -> dict[str, ExternalCommandAdapter]:
     """Close retained configs over the matrix claims they authorized."""
     plan_inputs = [
         item for item in inputs if item.kind == "validation-plan"
@@ -5257,6 +5618,186 @@ def validate_control_plane_inputs(
         ]:
             raise ValidationError(
                 "retained validation plan config paths disagree with inputs"
+            )
+    return adapter_configs
+
+
+def verify_execution_file_access_evidence(
+    reports: dict[str, dict],
+    traces: dict[str, ValidationArtifact],
+    adapters: dict[str, ExternalCommandAdapter],
+    backend_names: list[str],
+    tools: list[ValidationTool],
+    bundles: list[ProductBundle],
+    consumers: list[ProductConsumer],
+    receipts: list[ProductReceipt],
+) -> None:
+    configured = {
+        backend: adapter.execution_file_access_recorder
+        for backend, adapter in adapters.items()
+        if backend in backend_names
+        and adapter.execution_file_access_recorder is not None
+    }
+    recorder_tools = {
+        tool.backend: tool
+        for tool in tools
+        if tool.kind == EXECUTION_FILE_ACCESS_RECORDER_KIND
+    }
+    if (
+        len(recorder_tools)
+        != sum(
+            tool.kind == EXECUTION_FILE_ACCESS_RECORDER_KIND
+            for tool in tools
+        )
+        or set(configured) != set(recorder_tools)
+        or set(configured) != set(reports)
+        or set(configured) != set(traces)
+    ):
+        raise ValidationError(
+            "execution file-access configs, tools, reports, and traces disagree"
+        )
+    bundle_by_provider = {bundle.provider: bundle for bundle in bundles}
+    consumer_by_backend = {
+        consumer.backend: consumer for consumer in consumers
+    }
+    receipts_by_backend: dict[str, list[ProductReceipt]] = {}
+    for receipt in receipts:
+        receipts_by_backend.setdefault(receipt.backend, []).append(receipt)
+
+    for backend, declaration in configured.items():
+        if declaration is None:
+            raise ValidationError(
+                "execution file-access config lost its recorder"
+            )
+        tool = recorder_tools[backend]
+        if (tool.kind, tool.name) != (
+            declaration.kind,
+            declaration.name,
+        ):
+            raise ValidationError(
+                "execution file-access recorder tool disagrees with config"
+            )
+        consumer = consumer_by_backend.get(backend)
+        if consumer is None:
+            raise ValidationError(
+                "execution file-access recorder has no product consumer"
+            )
+        bundle = bundle_by_provider[consumer.provider]
+        report = reports[backend]
+        if not isinstance(report, dict) or set(report) != {
+            "version",
+            "backend",
+            "recorder",
+            "provider",
+            "bundleSha256",
+            "trace",
+            "receiptCount",
+            "products",
+            "productCount",
+            "accessCount",
+        }:
+            raise ValidationError(
+                "execution-file-access artifact is malformed"
+            )
+        trace_artifact = traces[backend]
+        trace_reference = report["trace"]
+        if (
+            report["version"] != PROTOCOL_VERSION
+            or isinstance(report["version"], bool)
+            or report["backend"] != backend
+            or report["recorder"] != tool.to_json()
+            or report["provider"] != consumer.provider
+            or report["bundleSha256"] != bundle.bundle_sha256
+            or not isinstance(trace_reference, dict)
+            or set(trace_reference) != {"name", "sha256"}
+            or trace_reference["name"] != trace_artifact.name
+            or trace_reference["sha256"] != trace_artifact.sha256
+        ):
+            raise ValidationError(
+                "execution-file-access artifact disagrees with evidence"
+            )
+        parsed_accesses = parse_file_access_trace(
+            trace_artifact.content,
+            f"retained {backend} execution file-access trace",
+        )
+        backend_receipts = receipts_by_backend.get(backend, [])
+        expected_products = {
+            (product.backend, product.kind, product.name, product.sha256): product
+            for receipt in backend_receipts
+            for product in receipt.products
+        }
+        raw_products = report["products"]
+        if not isinstance(raw_products, list):
+            raise ValidationError(
+                "execution-file-access products are malformed"
+            )
+        checked_products: list[tuple[str, str, str, str]] = []
+        observed_paths: set[str] = set()
+        for item in raw_products:
+            if not isinstance(item, dict) or set(item) != {
+                "backend",
+                "kind",
+                "name",
+                "sha256",
+                "path",
+                "accesses",
+            }:
+                raise ValidationError(
+                    "execution-file-access product is malformed"
+                )
+            if not all(
+                isinstance(item[field], str)
+                for field in ("backend", "kind", "name", "sha256")
+            ):
+                raise ValidationError(
+                    "execution-file-access product identity is malformed"
+                )
+            key = (
+                item["backend"],
+                item["kind"],
+                item["name"],
+                item["sha256"],
+            )
+            product = expected_products.get(key)
+            path = item["path"]
+            accesses = item["accesses"]
+            if (
+                product is None
+                or not isinstance(path, str)
+                or not Path(path).is_absolute()
+                or os.path.normpath(path) != path
+                or path in observed_paths
+                or not isinstance(accesses, list)
+                or not all(isinstance(access, str) for access in accesses)
+                or accesses != sorted(set(accesses))
+                or "read" not in accesses
+                or list(parsed_accesses.get(path, ())) != accesses
+            ):
+                raise ValidationError(
+                    "execution-file-access product disagrees with trace"
+                )
+            expected_suffix = (
+                consumer.provider,
+                *PurePosixPath(product.name).parts,
+            )
+            if tuple(Path(path).parts[-len(expected_suffix):]) != expected_suffix:
+                raise ValidationError(
+                    "execution-file-access product path disagrees with provider"
+                )
+            observed_paths.add(path)
+            checked_products.append(key)
+        expected_keys = sorted(expected_products)
+        if (
+            checked_products != expected_keys
+            or report["receiptCount"] != len(backend_receipts)
+            or isinstance(report["receiptCount"], bool)
+            or report["productCount"] != len(expected_keys)
+            or isinstance(report["productCount"], bool)
+            or report["accessCount"] != len(parsed_accesses)
+            or isinstance(report["accessCount"], bool)
+        ):
+            raise ValidationError(
+                "execution-file-access counts or product inventory disagree"
             )
 
 
@@ -6136,6 +6677,8 @@ def verify_matrix_artifact(
     file_access_traces: dict[
         tuple[str, str], ValidationArtifact
     ] = {}
+    execution_access_reports: dict[str, dict] = {}
+    execution_access_traces: dict[str, ValidationArtifact] = {}
     replay_reports: dict[str, dict] = {}
     replay_traces: dict[str, ValidationArtifact] = {}
     replay_statuses: dict[str, ValidationArtifact] = {}
@@ -6314,6 +6857,30 @@ def verify_matrix_artifact(
                     "validation matrix has duplicate build file-access traces"
                 )
             file_access_traces[trace_key] = ValidationArtifact(
+                kind, name, digest, content
+            )
+        elif kind == "execution-file-access":
+            if backend in execution_access_reports:
+                raise ValidationError(
+                    "validation matrix has duplicate execution file-access reports"
+                )
+            try:
+                report = json.loads(content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "execution-file-access artifact is not JSON"
+                ) from error
+            if not isinstance(report, dict):
+                raise ValidationError(
+                    "execution-file-access artifact is malformed"
+                )
+            execution_access_reports[backend] = report
+        elif kind == "execution-file-access-trace":
+            if backend in execution_access_traces:
+                raise ValidationError(
+                    "validation matrix has duplicate execution file-access traces"
+                )
+            execution_access_traces[backend] = ValidationArtifact(
                 kind, name, digest, content
             )
         elif kind == "build-input-replay":
@@ -7596,7 +8163,7 @@ def verify_matrix_artifact(
         equal_comparison_count += equal_cases
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("validation matrix has duplicate pairs")
-    validate_control_plane_inputs(
+    retained_adapters = validate_control_plane_inputs(
         inputs,
         checked_backends,
         pair_names,
@@ -7604,6 +8171,23 @@ def verify_matrix_artifact(
         bundles,
         product_consumers,
     )
+    verify_execution_file_access_evidence(
+        execution_access_reports,
+        execution_access_traces,
+        retained_adapters,
+        checked_backends,
+        tools,
+        bundles,
+        product_consumers,
+        product_receipts,
+    )
+    if any(
+        (backend, None, "execute") not in stdout_scopes
+        for backend in execution_access_reports
+    ):
+        raise ValidationError(
+            "execution-file-access evidence has no paired process logs"
+        )
 
     findings = value["findings"]
     if not isinstance(findings, list):

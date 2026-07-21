@@ -2174,6 +2174,274 @@ class HarnessTests(unittest.TestCase):
             ):
                 harness.external_adapter_from_config(path)
 
+    def test_external_adapter_execution_recorder_config_is_strict(self) -> None:
+        contract = harness.ProductContract(
+            "wasm", "wasm32", "fixture-runtime", "fixture-abi"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "v8.json"
+            base = fixture_consumer_config(
+                "v8", "fixture-wasm", contract
+            )
+            base["executionFileAccessRecorder"] = {
+                "kind": "execution-file-access-recorder",
+                "name": "strace",
+                "command": "strace",
+            }
+            path.write_text(json.dumps(base), encoding="utf-8")
+            adapter = harness.external_adapter_from_config(path)
+            self.assertEqual(
+                adapter.execution_file_access_recorder,
+                harness.ToolDeclaration(
+                    "execution-file-access-recorder",
+                    "strace",
+                    command="strace",
+                ),
+            )
+
+            invalid = json.loads(json.dumps(base))
+            invalid["executionFileAccessRecorder"] = {}
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "expected kind, name, and command fields",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            invalid["executionFileAccessRecorder"]["kind"] = (
+                "file-access-recorder"
+            )
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "kind must be execution-file-access-recorder",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            invalid["executionFileAccessRecorder"]["command"] = "./strace"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "bare PATH command"
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            invalid["executionFileAccessRecorder"]["command"] = "trace-tool"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "name must equal command",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            del invalid["productProvider"]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "executionFileAccessRecorder requires productProvider",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            invalid["tools"][0]["kind"] = (
+                "execution-file-access-recorder"
+            )
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "tool kind is reserved for executionFileAccessRecorder",
+            ):
+                harness.external_adapter_from_config(path)
+
+            invalid = json.loads(json.dumps(base))
+            python_command = Path(sys.executable).name
+            invalid["executionFileAccessRecorder"]["name"] = python_command
+            invalid["executionFileAccessRecorder"]["command"] = python_command
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "duplicate execution file-access recorder source",
+            ):
+                harness.external_adapter_from_config(path)
+
+    def test_execution_recorder_closes_receipts_over_opened_products(self) -> None:
+        contract = harness.ProductContract(
+            "wasm", "wasm32", "fixture-runtime", "fixture-abi"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            product_path = out_dir / "fixture-wasm" / "module.wasm"
+            product_path.parent.mkdir(parents=True)
+            product_content = b"fixture-wasm"
+            product_path.write_bytes(product_content)
+            product = harness.ValidationProduct(
+                "fixture-wasm",
+                "wasm-module",
+                "module.wasm",
+                harness.sha256_bytes(product_content),
+            )
+            case_products = (("case", (product,)),)
+            bundle = harness.ProductBundle(
+                "fixture-wasm",
+                contract,
+                core.product_bundle_sha256(
+                    "fixture-wasm",
+                    contract,
+                    (product,),
+                    case_products,
+                ),
+                (product,),
+                case_products,
+            )
+            adapter = harness.ExternalCommandAdapter(
+                "v8",
+                [],
+                "selected",
+                product_provider=harness.ProductProviderRequirement(
+                    bundle.provider, contract
+                ),
+                execution_file_access_recorder=harness.ToolDeclaration(
+                    "execution-file-access-recorder",
+                    "strace",
+                    command="strace",
+                ),
+            )
+            recorder = harness.ValidationTool(
+                "v8",
+                "execution-file-access-recorder",
+                "strace",
+                "1" * 64,
+            )
+            adapter._built_execution_file_access_recorder = recorder
+            (out_dir / "v8").mkdir(parents=True)
+            record = success("case", "v8")
+            record["diagnostics"] = [
+                {
+                    "key": core.PRODUCT_BUNDLE_RECEIPT_DIAGNOSTIC,
+                    "value": harness.product_bundle_receipt_value(
+                        bundle, "case"
+                    ),
+                }
+            ]
+            normalized_product_path = os.path.normpath(
+                str(product_path.resolve())
+            )
+            trace_content = (
+                "1 openat(-100</>, "
+                f"{json.dumps(normalized_product_path)}, 0x80000) = "
+                f"3<{normalized_product_path}>\n"
+            ).encode("utf-8")
+            trace_digest = harness.sha256_bytes(trace_content)
+            trace_name = "v8/execute/file-access.strace"
+            context = harness.RunContext(
+                root,
+                out_dir,
+                [descriptor("case")],
+                ["case"],
+                product_bundles={bundle.provider: bundle},
+            )
+            report_artifacts = adapter.execution_file_access_artifact(
+                context,
+                bundle,
+                {"case": record},
+                (
+                    {"name": trace_name, "sha256": trace_digest},
+                    {normalized_product_path: ("read",)},
+                ),
+            )
+            self.assertEqual(len(report_artifacts), 1)
+            report = json.loads(
+                report_artifacts[0].content.decode("utf-8")
+            )
+            self.assertEqual(report["receiptCount"], 1)
+            self.assertEqual(report["productCount"], 1)
+            trace_artifact = harness.ValidationArtifact(
+                "execution-file-access-trace",
+                trace_name,
+                trace_digest,
+                trace_content,
+            )
+            consumer = harness.ProductConsumer(
+                "v8", bundle.provider, contract, bundle.bundle_sha256
+            )
+            receipt = harness.ProductReceipt(
+                "v8",
+                "case",
+                bundle.provider,
+                bundle.bundle_sha256,
+                (product,),
+            )
+            core.verify_execution_file_access_evidence(
+                {"v8": report},
+                {"v8": trace_artifact},
+                {"v8": adapter},
+                ["v8"],
+                [recorder],
+                [bundle],
+                [consumer],
+                [receipt],
+            )
+
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "execution did not open receipted product",
+            ):
+                adapter.execution_file_access_artifact(
+                    context,
+                    bundle,
+                    {"case": record},
+                    (
+                        {"name": trace_name, "sha256": "2" * 64},
+                        {"/bin/true": ("exec",)},
+                    ),
+                )
+
+            missing_content = b'1 execve("/bin/true", [], 0x0) = 0\n'
+            missing_digest = harness.sha256_bytes(missing_content)
+            missing_report = json.loads(json.dumps(report))
+            missing_report["trace"]["sha256"] = missing_digest
+            missing_report["accessCount"] = 1
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "product disagrees with trace",
+            ):
+                core.verify_execution_file_access_evidence(
+                    {"v8": missing_report},
+                    {
+                        "v8": harness.ValidationArtifact(
+                            "execution-file-access-trace",
+                            trace_name,
+                            missing_digest,
+                            missing_content,
+                        )
+                    },
+                    {"v8": adapter},
+                    ["v8"],
+                    [recorder],
+                    [bundle],
+                    [consumer],
+                    [receipt],
+                )
+
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "configs, tools, reports, and traces disagree",
+            ):
+                core.verify_execution_file_access_evidence(
+                    {"v8": report},
+                    {"v8": trace_artifact},
+                    {},
+                    ["v8"],
+                    [recorder],
+                    [bundle],
+                    [consumer],
+                    [receipt],
+                )
+
     def test_external_adapter_build_input_replay_config_is_strict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "v8.json"
@@ -3320,6 +3588,14 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(adapter.build_tool_declarations, ())
         self.assertIsNone(adapter.build_file_access_recorder)
+        self.assertEqual(
+            adapter.execution_file_access_recorder,
+            harness.ToolDeclaration(
+                "execution-file-access-recorder",
+                "strace",
+                command="strace",
+            ),
+        )
         self.assertIsNone(adapter.build_input_replay_isolator)
         self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],

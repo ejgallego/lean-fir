@@ -666,6 +666,11 @@ adapter-owned build or products:
   "name": "example-v8-engine",
   "runCommand": ["node", "scripts/run-example-v8.mjs"],
   "resultDomain": "selected",
+  "executionFileAccessRecorder": {
+    "kind": "execution-file-access-recorder",
+    "name": "strace",
+    "command": "strace"
+  },
   "productProvider": {
     "name": "example-wasm-provider",
     "contract": {
@@ -697,6 +702,29 @@ JSON value names the provider, `bundleSha256`, and the exact
 module is rejected, not accepted as a declared subset. Unlike the legacy
 adapter-owned subset receipt, a missing, malformed, or inexact shared-bundle
 receipt is a structural validation error, so no unverifiable matrix is written.
+
+A provider consumer may add `executionFileAccessRecorder`. The field is strict,
+uses the reserved `execution-file-access-recorder` kind, requires a bare PATH
+command whose value equals the recorder name, and is currently valid only with
+`productProvider`. Equating name and command binds the retained tool identity to
+the command declared by the retained config. The harness hashes the resolved
+recorder as a separate backend tool but does not expose it through
+`FIR_VALIDATION_TOOLS`. It wraps the bound engine command with the same strict
+strace syscall/status filters used for builds and retains
+`<backend>/execute/file-access.strace` plus
+`<backend>/execution-file-access.json`.
+
+After parsing successful results, the harness takes the union of exact products
+named by their provider receipts and requires a successful read-capable open of
+every corresponding provider path in the traced process tree. The report binds
+the recorder, provider, bundle and trace identities, receipt count, full-trace
+access count, and sorted receipted-product access modes. Offline verification
+reparses the raw trace, reconstructs the product union from retained results,
+and rechecks the retained adapter declaration, recorder tool, path suffixes,
+counts, ordering, and opens. Current V8 validation opts into this evidence.
+This establishes that the traced engine/runner process tree opened every exact
+receipted product. It does not distinguish an open by V8 from one by its runner,
+nor attribute a batched process-tree open to one individual case.
 
 Plans opt in by adding `providerConfigs`; one configured provider is built once
 even when several engines consume it:
