@@ -25,7 +25,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `objectSet` | Yes | Heap theorem | Partial | Missing |
 | `usizeSet` | Yes | Heap theorem | Partial | Missing |
 | `scalarSet` | Four integer widths | Heap theorems | Partial | Missing; floats share the runtime gap |
-| `setTag` | Yes | Heap theorem | Partial | Missing |
+| `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, and continuation compose; explicit wasm32 tag-fit premise retained; artifact pending |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Missing |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
@@ -48,6 +48,9 @@ Cross-cutting W6.5 state:
 - reference-count increment composes through exact object-like local widening,
   the concrete header/tagged operation, generated no-result host call, and
   persistent compiler elision; and
+- constructor-tag mutation composes through the exact object local, live-cell
+  descriptor, concrete header writer, and generated no-result host call while
+  preserving the constructor payload; and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 

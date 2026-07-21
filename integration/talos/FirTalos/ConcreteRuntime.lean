@@ -590,6 +590,32 @@ theorem incrementFn_satisfies_contract (amount check initial args) :
       ((incrementFn amount check).invoke initial args) := by
   rfl
 
+/-- Executable concrete constructor-tag mutation. The checked runtime rewrites
+only the constructor header and rejects nonconstructor or out-of-range tags
+through the structured concrete failure channel. -/
+def setTagStep (tag : Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match writeTag store.host.runtime.heap (Word32.ofUInt32 bits) tag with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def setTagFn (tag : Nat) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := []
+  invoke := setTagStep tag }
+
+def setTagContract (tag : Nat) : Wasm.HostContract Host :=
+  fun initial args result => result = setTagStep tag initial args
+
+theorem setTagFn_satisfies_contract (tag initial args) :
+    setTagContract tag initial args ((setTagFn tag).invoke initial args) := by
+  rfl
+
 def decodePhysicalLanes : Nat → List AbiKind → List Wasm.Value →
     Except HostFailure (List LaneValue)
   | _, [], [] => .ok []
@@ -1442,6 +1468,69 @@ theorem incrementStep_of_refines
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
           · simpa [replaceHeap, clearFailure] using runtimeRelated
 
+/-- Every successful semantic constructor modification is heap-only. This is
+shared by tag, object, USize, and packed-scalar mutation composition. -/
+theorem modifyConstructor_heapOnly
+    {before after : RuntimeState} {value : Value}
+    {modify : ConstructorObject → Except RuntimeFault ConstructorObject}
+    (updated : modifyConstructor before value modify = .ok after) :
+    ∃ heap, after = { before with heap := heap } := by
+  unfold modifyConstructor at updated
+  cases read : getConstructor before value with
+  | error failure =>
+      simp only [read, Bind.bind, Except.bind] at updated
+      cases updated
+  | ok result =>
+      rcases result with ⟨location, cell, object⟩
+      simp only [read, Bind.bind, Except.bind] at updated
+      cases changed : modify object with
+      | error failure =>
+          simp only [changed] at updated
+          cases updated
+      | ok nextObject =>
+          simp only [changed] at updated
+          exact setCell_heapOnly updated
+
+/-- Successful concrete constructor-tag mutation refines the semantic heap
+update and preserves all nonheap runtime components. -/
+theorem setTagStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {word : Word32} {tag : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (updated : setTag runtime (.object (.heap location)) tag = .ok nextRuntime)
+    (tagFits : tag < UInt32.size) :
+    ∃ heap,
+      setTagStep tag initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated⟩ :=
+            runtimeRelated.heap.writeTag_refines mapped found live objectEq tag
+              tagFits
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_⟩
+          · simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setTag] using updated
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -2247,6 +2336,91 @@ theorem effectStepSimulates_inc_persistent
     simp [executeStep, coreStep]
   · exact codeAdapted_inc_persistent continuationAdapted
   · exact initialRelated
+
+/-- Constructor-tag mutation composed through the source evaluator, real
+compiler and adapter, concrete header writer, and exact unary host-call prefix.
+The explicit live-constructor facts are precisely the semantic and concrete
+decoder obligations needed by the complete-heap refinement theorem. -/
+theorem effectStepSimulates_setTag
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (updated : setTag sourceRuntime (.object (.heap location)) tag =
+      .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some .object)
+    (callFound : callIndex? sourceModule (.runtime (.setTag tag)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (setTagContract tag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (tagFits : tag < UInt32.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.setTag objectId tag continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness := by
+  have sourceLookup : lookup sourceEnv objectId =
+      some (.object (.heap location)) := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value foundLookup
+      injection objectLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  cases physicalRelated with
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated⟩ :=
+        setTagStep_of_refines initialRelated.1 objectRelated found live objectEq
+          updated tagFits
+      refine ⟨heap, ?_⟩
+      apply effectStepSimulates_unaryHost (step := setTagStep tag)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_setTag objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
 
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are

@@ -195,6 +195,21 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- Constructor-tag mutation rewrites only the checked header: the new tag is
+-- visible while the existing object payload remains byte-for-byte decodable.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match setTagStep 19 store [.i32 object] with
+      | .Return [] next =>
+          match readTag next.host.runtime.heap (Word32.ofUInt32 object),
+              readObjectField next.host.runtime.heap (Word32.ofUInt32 object) 0 with
+          | .ok tag, .ok field =>
+              tag == 19 && field.value == 23 && next.host.failure?.isNone
+          | _, _ => false
+      | _ => false
+  | _ => false
+
 private def cacheDeclaration : Lean.Name := `FirTalos.Concrete.cachedValue
 
 private def cacheStore : Wasm.Store Host := {

@@ -2055,6 +2055,19 @@ consume it. Executable guards cover an ordinary header update and the
 promoted-tag no-op. The same effect infrastructure is ready for mutation,
 decrement, delete, reset, and reuse.
 
+W6.6q instantiates that no-result path for constructor-tag mutation. The
+concrete Talos host performs the checked header write and reports decoder or
+range failures through the structured failure channel. Its local theorem lifts
+the existing complete-heap `writeTag_refines` result to `ConcreteRuntimeRel`;
+the composed theorem then joins the exact `.object` local, source evaluator,
+real compiler and adapter, unary host contract, and continuation. Successful
+semantic constructor updates are factored through a reusable heap-only frame
+for the remaining object, `USize`, and packed-scalar mutations. The theorem
+retains the exact `tag < UInt32.size` layout premise. An executable guard
+changes a unary constructor's tag and rereads its original payload, confirming
+that the concrete mutation touches only the header. Generated artifact
+execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
