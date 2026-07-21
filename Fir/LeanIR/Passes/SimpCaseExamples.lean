@@ -3122,4 +3122,132 @@ elab "#check_simp_case_fixtures" : command =>
 
 #check_simp_case_fixtures
 
+/-! ## Compiler-facing well-formedness regressions -/
+
+def checkerParamIndex : ScopeIndex :=
+  ScopeIndex.empty.pushParams #[param c]
+
+/-- Duplicate selectors are permitted precisely when they select the same
+body; the normalization invariant remains deterministic. -/
+def deterministicShadowedCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return c),
+    .default (.return c)]
+
+#guard scopedCodeCheck checkerParamIndex (.cases deterministicShadowedCases)
+
+theorem deterministicShadowedNormalization :
+    CaseTableNormalizationInvariant deterministicShadowedCases.alts := by
+  constructor
+  constructor <;>
+    simp_all [HasCtorAlt, HasDefaultAlt,
+      deterministicShadowedCases, LCNF.Cases.alts]
+
+/-- The local checker visits syntactically shadowed alternatives rather than
+only the branch returned by `chooseAlt`. -/
+def malformedShadowedCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return c),
+    .default (.return x)]
+
+#guard !scopedCodeCheck checkerParamIndex (.cases malformedShadowedCases)
+
+def duplicateParamDeclaration : LCNF.Decl .impure :=
+  decl `duplicateParams #[param x, param x] objType (.code (.return x))
+
+#guard !declScopedCheck duplicateParamDeclaration
+#guard !declScopedCheck
+  (decl `duplicateLets #[] objType (.code nonHygienicAlphaLeft))
+#guard !declScopedCheck
+  (decl `outOfScope #[] objType (.code (.return x)))
+
+/-- Repeated constructor selectors with different bodies violate the
+deterministic normalization contract. -/
+def nondeterministicCtorCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .ctorAlt falseInfo (.return c),
+    .ctorAlt falseInfo (.unreach objType)]
+
+theorem nondeterministicCtorCases_rejected :
+    ¬CaseTableNormalizationInvariant nondeterministicCtorCases.alts := by
+  intro normalization
+  have equal := normalization.deterministic.ctor 0
+    (.return c) (.unreach objType)
+    ⟨falseInfo, by
+      simp [nondeterministicCtorCases, LCNF.Cases.alts], by native_decide⟩
+    ⟨falseInfo, by
+      simp [nondeterministicCtorCases, LCNF.Cases.alts], by native_decide⟩
+  cases equal
+
+/-- Repeated defaults with different bodies are rejected for the same
+reason. -/
+def nondeterministicDefaultCases : LCNF.Cases .impure :=
+  .mk ``Bool objType c #[
+    .default (.return c),
+    .default (.unreach objType)]
+
+theorem nondeterministicDefaultCases_rejected :
+    ¬CaseTableNormalizationInvariant nondeterministicDefaultCases.alts := by
+  intro normalization
+  have equal := normalization.deterministic.default
+    (.return c) (.unreach objType)
+    (by simp [HasDefaultAlt, nondeterministicDefaultCases,
+      LCNF.Cases.alts])
+    (by simp [HasDefaultAlt, nondeterministicDefaultCases,
+      LCNF.Cases.alts])
+  cases equal
+
+def noncanonicalRuntimeType : Expr := .fvar x
+
+def noncanonicalRuntimeCode : LCNF.Code .impure :=
+  .let (letDecl x noncanonicalRuntimeType (.lit (.nat 0))) (.return x)
+
+theorem noncanonicalRuntimeCode_rejected :
+    ¬CodeRuntimeTypesCanonical noncanonicalRuntimeCode := by
+  intro canonical
+  cases canonical with
+  | letE declarationTypes _ =>
+      cases declarationTypes.resultType
+
+def wellFormedReturnDeclaration : LCNF.Decl .impure :=
+  decl `wellFormedReturn #[param x] objType (.code (.return x))
+
+def wellFormedReturnProgram : ImpureProgram :=
+  { decls := #[wellFormedReturnDeclaration] }
+
+theorem wellFormedReturnProgram_source :
+    ProgramWellFormed wellFormedReturnProgram := by
+  apply ProgramWellFormed.ofCompilerInvariants
+  · apply WellFormedAt.impure
+    · simp [Program.NamesUnique, wellFormedReturnProgram]
+    · unfold Program.ImpureHygienic
+      native_decide
+  · native_decide
+  · intro declaration member
+    simp [wellFormedReturnProgram] at member
+    subst declaration
+    exact .ret
+  · intro declaration member
+    simp [wellFormedReturnProgram] at member
+    subst declaration
+    exact .ret
+
+noncomputable def wellFormedReturnCertificates :
+    ScopedDeclTargetCertificateList ReachableCaseTag
+      wellFormedReturnProgram.decls.toList :=
+  wellFormedReturnProgram_source.certificates
+
+/-- Positive API check: semantic correctness no longer mentions a source
+certificate list. -/
+theorem wellFormedReturn_preferredApi
+    (bridge : UpstreamBridge)
+    (run : shadowProgram? fuel wellFormedReturnProgram = some after) :
+    ∃ result : ScopedProgramPhaseEndpointCertifiedTrace
+        ReachableCaseTag wellFormedReturnProgram after,
+      SamePhaseCorrectOn (Impure.semantics externals)
+        wellFormedReturnProgram after entries
+        (result.trace.Admissible externals) :=
+  shadowProgram_samePhaseCorrectOn_reachableCaseTag_of_programWellFormed
+    bridge wellFormedReturnProgram_source run
+
 end Fir.LeanIR.Passes.SimpCaseExamples
