@@ -662,18 +662,19 @@ theorem incrementReference_header
   exact ⟨result, updatedHeader, memory, operation, rfl, rfl, headerWrite,
     finalValid, headerReadAfter⟩
 
-/-- Object-independent count replacement at the common-header boundary. It
-exposes the exact header write so each payload decoder can prove its own frame
-once and share that proof between increment and decrement. -/
-theorem writeReferenceCount_header
+/-- Object-independent ownership-metadata replacement at the common-header
+boundary. It exposes the exact header write so payload decoders can share one
+frame across reference-count and persistence transitions. -/
+theorem writeOwnershipMetadata_header
     {state : MemoryState} {address : Word32} {header : Header}
     (valid : state.FrontierInvariant)
     (headerRead : state.readLiveHeader address = .ok header)
     (headerOwned : address.value + headerBytes ≤ state.heapCursor)
-    (nextCount : UInt32) :
+    (nextCount : UInt32) (nextPersistent : Bool) :
     ∃ result updatedHeader memory,
       writeLiveHeader state address updatedHeader = .ok result ∧
-      updatedHeader = { header with refCount := nextCount } ∧
+      updatedHeader = {
+        header with refCount := nextCount, persistent := nextPersistent } ∧
       result = { state with memory } ∧
       updatedHeader.write state.memory address = .ok memory ∧
       result.FrontierInvariant ∧
@@ -682,7 +683,8 @@ theorem writeReferenceCount_header
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans headerOwned valid.cursorInBounds
-  let updatedHeader : Header := { header with refCount := nextCount }
+  let updatedHeader : Header := {
+    header with refCount := nextCount, persistent := nextPersistent }
   obtain ⟨memory, headerWrite, _⟩ :=
     Header.write_spec state.memory address updatedHeader headerInBounds
   let result : MemoryState := { state with memory }
@@ -706,6 +708,28 @@ theorem writeReferenceCount_header
     valid.writeHeader headerOwned headerWrite
   exact ⟨result, updatedHeader, memory, operation, rfl, rfl, headerWrite,
     finalValid, headerReadAfter⟩
+
+/-- Reference-count-only compatibility wrapper for the established ownership
+operations. -/
+theorem writeReferenceCount_header
+    {state : MemoryState} {address : Word32} {header : Header}
+    (valid : state.FrontierInvariant)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor)
+    (nextCount : UInt32) :
+    ∃ result updatedHeader memory,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result = { state with memory } ∧
+      updatedHeader.write state.memory address = .ok memory ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader := by
+  obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+      written, finalValid, headerAfter⟩ :=
+    writeOwnershipMetadata_header valid headerRead headerOwned nextCount
+      header.persistent
+  exact ⟨result, updatedHeader, memory, operation, by simpa using updatedEq,
+    resultEq, written, finalValid, headerAfter⟩
 
 /-- Canonicalize one validated live header as a released allocation while
 preserving the frontier and the checked allocation extent. -/
@@ -904,19 +928,20 @@ theorem Header.readWord32_of_write_eq_ok_payload
   rw [Header.readUInt32_of_write_eq_ok_other before after address updatedHeader other
     headerInBounds written (.inr payload)]
 
-/-- Rewriting only a constructor's reference count frames every representation
+/-- Rewriting a constructor's ownership metadata frames every representation
 region described by its immutable allocation metadata. -/
-theorem ConstructorObjectRel.writeReferenceCount
+theorem ConstructorObjectRel.writeOwnershipMetadata
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject} {header : Header}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
     (headerRead : state.readLiveHeader address = .ok header)
     (valid : state.FrontierInvariant)
-    (nextCount : UInt32) :
+    (nextCount : UInt32) (nextPersistent : Bool) :
     ∃ result updatedHeader,
       writeLiveHeader state address updatedHeader = .ok result ∧
-      updatedHeader = { header with refCount := nextCount } ∧
+      updatedHeader = {
+        header with refCount := nextCount, persistent := nextPersistent } ∧
       result.FrontierInvariant ∧
       result.readLiveHeader address = .ok updatedHeader ∧
       ConstructorObjectRel result witness address info fieldKinds semantic := by
@@ -926,11 +951,12 @@ theorem ConstructorObjectRel.writeReferenceCount
   cases objectHeaderRead
   obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
       headerWrite, finalValid, headerReadAfter⟩ :=
-    writeReferenceCount_header valid headerRead related.headerOwned nextCount
+    writeOwnershipMetadata_header valid headerRead related.headerOwned nextCount
+      nextPersistent
   subst updatedHeader
   subst result
   let updatedHeader : Header :=
-    { header with refCount := nextCount }
+    { header with refCount := nextCount, persistent := nextPersistent }
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans related.headerOwned valid.cursorInBounds
   have heap :=
@@ -1006,7 +1032,7 @@ theorem ConstructorObjectRel.writeReferenceCount
               liftMemory (state.memory.readByte (address.value + headerBytes +
                 target.semanticSlotBytes * field.width + field.offset))
           rw [Header.readByte_of_write_eq_ok_other state.memory memory address
-            { header with refCount := nextCount }
+            { header with refCount := nextCount, persistent := nextPersistent }
             (address.value + headerBytes + target.semanticSlotBytes * field.width +
               field.offset) headerInBounds headerWrite (.inr (by omega))]
         rw [operationEq]
@@ -1041,7 +1067,7 @@ theorem ConstructorObjectRel.writeReferenceCount
               liftMemory (state.memory.readUInt16 (address.value + headerBytes +
                 target.semanticSlotBytes * field.width + field.offset))
           rw [Header.readUInt16_of_write_eq_ok_payload state.memory memory address
-            { header with refCount := nextCount }
+            { header with refCount := nextCount, persistent := nextPersistent }
             (address.value + headerBytes + target.semanticSlotBytes * field.width +
               field.offset) headerInBounds headerWrite (by omega)]
         rw [operationEq]
@@ -1076,7 +1102,7 @@ theorem ConstructorObjectRel.writeReferenceCount
               liftMemory (state.memory.readUInt32 (address.value + headerBytes +
                 target.semanticSlotBytes * field.width + field.offset))
           rw [Header.readUInt32_of_write_eq_ok_other state.memory memory address
-            { header with refCount := nextCount }
+            { header with refCount := nextCount, persistent := nextPersistent }
             (address.value + headerBytes + target.semanticSlotBytes * field.width +
               field.offset) headerInBounds headerWrite (.inr (by omega))]
         rw [operationEq]
@@ -1111,7 +1137,7 @@ theorem ConstructorObjectRel.writeReferenceCount
               liftMemory (state.memory.readUInt64 (address.value + headerBytes +
                 target.semanticSlotBytes * field.width + field.offset))
           rw [Header.readUInt64_of_write_eq_ok_payload state.memory memory address
-            { header with refCount := nextCount }
+            { header with refCount := nextCount, persistent := nextPersistent }
             (address.value + headerBytes + target.semanticSlotBytes * field.width +
               field.offset) headerInBounds headerWrite (by omega)]
         rw [operationEq]
@@ -1145,11 +1171,11 @@ theorem ConstructorObjectRel.writeReferenceCount
       rw [constructorHeaderAfter, constructorHeaderBefore]
       simp only [Bind.bind, Except.bind, updatedHeader]
       rw [Header.readWord32_of_write_eq_ok_payload state.memory memory address
-        { header with refCount := nextCount }
+        { header with refCount := nextCount, persistent := nextPersistent }
         (address.value + headerBytes + target.semanticSlotBytes * index)
         headerInBounds headerWrite (by omega)]
       rw [Header.readUInt32_of_write_eq_ok_other state.memory memory address
-        { header with refCount := nextCount }
+        { header with refCount := nextCount, persistent := nextPersistent }
         (address.value + headerBytes + target.semanticSlotBytes * index + 4)
         headerInBounds headerWrite (.inr (by omega))]
     exact ⟨word, by rw [operationEq]; exact readBefore, valueRelated⟩
@@ -1161,11 +1187,32 @@ theorem ConstructorObjectRel.writeReferenceCount
       rw [constructorHeaderAfter, constructorHeaderBefore]
       simp only [Bind.bind, Except.bind, updatedHeader]
       rw [Header.readUInt64_of_write_eq_ok_payload state.memory memory address
-        { header with refCount := nextCount }
+        { header with refCount := nextCount, persistent := nextPersistent }
         (address.value + headerBytes + target.semanticSlotBytes *
           (header.aux1.toNat + index)) headerInBounds headerWrite (by omega)]
     rw [operationEq]
     exact related.usizeFields index value valueAt
+
+/-- Reference-count-only constructor compatibility wrapper. -/
+theorem ConstructorObjectRel.writeReferenceCount
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject} {header : Header}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (valid : state.FrontierInvariant)
+    (nextCount : UInt32) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      ConstructorObjectRel result witness address info fieldKinds semantic := by
+  obtain ⟨result, updatedHeader, operation, updatedEq, finalValid, headerAfter,
+      objectAfter⟩ :=
+    related.writeOwnershipMetadata headerRead valid nextCount header.persistent
+  exact ⟨result, updatedHeader, operation, by simpa using updatedEq, finalValid,
+    headerAfter, objectAfter⟩
 
 /-- Constructor increment is the ordinary runtime branch followed by the
 shared constructor header-frame theorem. -/
@@ -1364,16 +1411,18 @@ theorem BoxedObjectRel.incrementReference
     extent := related.extent
     decoded := by rw [decoderEq]; exact related.decoded }
 
-/-- Object-independent common-header count replacement, specialized here to
+/-- Object-independent ownership-metadata replacement, specialized here to
 the canonical boxed payload decoder. -/
-theorem BoxedObjectRel.writeReferenceCount
+theorem BoxedObjectRel.writeOwnershipMetadata
     {state : MemoryState} {address : Word32} {kind : BoxedScalarKind}
     {scalar : BoxedScalar} {header : Header}
     (related : BoxedObjectRel state address kind scalar header)
-    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    (valid : state.FrontierInvariant) (nextCount : UInt32)
+    (nextPersistent : Bool) :
     ∃ result updatedHeader,
       writeLiveHeader state address updatedHeader = .ok result ∧
-      updatedHeader = { header with refCount := nextCount } ∧
+      updatedHeader = {
+        header with refCount := nextCount, persistent := nextPersistent } ∧
       result.FrontierInvariant ∧
       result.readLiveHeader address = .ok updatedHeader ∧
       BoxedObjectRel result address kind scalar updatedHeader := by
@@ -1382,7 +1431,8 @@ theorem BoxedObjectRel.writeReferenceCount
       related.headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans related.headerOwned valid.cursorInBounds
-  let updatedHeader : Header := { header with refCount := nextCount }
+  let updatedHeader : Header := {
+    header with refCount := nextCount, persistent := nextPersistent }
   obtain ⟨memory, headerWrite, _⟩ :=
     Header.write_spec state.memory address updatedHeader headerInBounds
   let result : MemoryState := { state with memory }
@@ -1439,6 +1489,24 @@ theorem BoxedObjectRel.writeReferenceCount
     extent := related.extent
     decoded := by rw [decoderEq]; exact related.decoded }
 
+/-- Reference-count-only boxed compatibility wrapper. -/
+theorem BoxedObjectRel.writeReferenceCount
+    {state : MemoryState} {address : Word32} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {header : Header}
+    (related : BoxedObjectRel state address kind scalar header)
+    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      BoxedObjectRel result address kind scalar updatedHeader := by
+  obtain ⟨result, updatedHeader, operation, updatedEq, finalValid, headerAfter,
+      objectAfter⟩ :=
+    related.writeOwnershipMetadata valid nextCount header.persistent
+  exact ⟨result, updatedHeader, operation, by simpa using updatedEq, finalValid,
+    headerAfter, objectAfter⟩
+
 /-- Above one, decrement is precisely a live common-header rewrite. -/
 theorem BoxedObjectRel.decrementReferenceOnce_above_one
     {state : MemoryState} {address : Word32} {kind : BoxedScalarKind}
@@ -1481,9 +1549,9 @@ theorem BoxedObjectRel.decrementReferenceOnce_above_one
   exact ⟨result, updatedHeader, operation, updatedEq, finalValid, headerReadAfter,
     objectAfter⟩
 
-/-- Rewriting only a closure's reference count preserves its immutable module
+/-- Rewriting a closure's ownership metadata preserves its immutable module
 metadata and every typed capture slot. -/
-theorem ClosureObjectRel.writeReferenceCount
+theorem ClosureObjectRel.writeOwnershipMetadata
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
     {captures : Array Value} {header : Header}
@@ -1495,10 +1563,12 @@ theorem ClosureObjectRel.writeReferenceCount
       some captureKinds)
     (fixedCount : header.aux2.toNat = captures.size)
     (headerOwned : address.value + headerBytes ≤ state.heapCursor)
-    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    (valid : state.FrontierInvariant) (nextCount : UInt32)
+    (nextPersistent : Bool) :
     ∃ result updatedHeader,
       writeLiveHeader state address updatedHeader = .ok result ∧
-      updatedHeader = { header with refCount := nextCount } ∧
+      updatedHeader = {
+        header with refCount := nextCount, persistent := nextPersistent } ∧
       result.FrontierInvariant ∧
       result.readLiveHeader address = .ok updatedHeader ∧
       result.heapCursor = state.heapCursor ∧
@@ -1582,10 +1652,12 @@ theorem ClosureObjectRel.writeReferenceCount
       _ = arity := metadataArity
   obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
       headerWrite, finalValid, headerReadAfter⟩ :=
-    writeReferenceCount_header valid headerRead headerOwned nextCount
+    writeOwnershipMetadata_header valid headerRead headerOwned nextCount
+      nextPersistent
   subst updatedHeader
   subst result
-  let updatedHeader : Header := { header with refCount := nextCount }
+  let updatedHeader : Header := {
+    header with refCount := nextCount, persistent := nextPersistent }
   have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
     Nat.le_trans headerOwned valid.cursorInBounds
   have closureHeaderAfter :
@@ -1631,7 +1703,7 @@ theorem ClosureObjectRel.writeReferenceCount
     · exact readBefore
     · intro offset offsetLt
       apply Header.readByte_of_write_eq_ok_other state.memory memory address
-        { header with refCount := nextCount }
+        { header with refCount := nextCount, persistent := nextPersistent }
           (closureCaptureAddress address.value index + offset) headerInBounds
             headerWrite
       right
@@ -1645,6 +1717,35 @@ theorem ClosureObjectRel.writeReferenceCount
     metadata := ⟨metadataAfter, metadataReadAfter, rfl, rfl, rfl, rfl⟩
     captureKindsSize := related.captureKindsSize
     captures := capturesAfter }
+
+/-- Reference-count-only closure compatibility wrapper. -/
+theorem ClosureObjectRel.writeReferenceCount
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {function : Lean.Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {captures : Array Value} {header : Header}
+    (related : ClosureObjectRel state witness witness.closureDispatch
+      witness.closureDescriptors address function arity captureKinds captures)
+    (headerRead : state.readLiveHeader address = .ok header)
+    (headerKind : header.kind = .closure)
+    (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
+      some captureKinds)
+    (fixedCount : header.aux2.toNat = captures.size)
+    (headerOwned : address.value + headerBytes ≤ state.heapCursor)
+    (valid : state.FrontierInvariant) (nextCount : UInt32) :
+    ∃ result updatedHeader,
+      writeLiveHeader state address updatedHeader = .ok result ∧
+      updatedHeader = { header with refCount := nextCount } ∧
+      result.FrontierInvariant ∧
+      result.readLiveHeader address = .ok updatedHeader ∧
+      result.heapCursor = state.heapCursor ∧
+      ClosureObjectRel result witness witness.closureDispatch
+        witness.closureDescriptors address function arity captureKinds captures := by
+  obtain ⟨result, updatedHeader, operation, updatedEq, finalValid, headerAfter,
+      cursor, objectAfter⟩ :=
+    related.writeOwnershipMetadata headerRead headerKind descriptorLookup fixedCount
+      headerOwned valid nextCount header.persistent
+  exact ⟨result, updatedHeader, operation, by simpa using updatedEq, finalValid,
+    headerAfter, cursor, objectAfter⟩
 
 /-- Incrementing an ordinary closure changes only its common-header count;
 module metadata, captures, and the semantic closure stay related. -/

@@ -2218,6 +2218,18 @@ consume that theorem directly, so callers no longer provide a persistence
 premise for those lanes. Recursive mapped heap graphs remain the next cache
 slice; no runtime or shared FIR semantic contract changed.
 
+W6.6ad establishes the first constructive heap-valued cache slice. Common
+header decoder frames now support a joint reference-count/persistence rewrite
+while compatibility wrappers preserve every existing increment/decrement
+theorem. The new persistence layer uses that frame to rewrite any represented
+live cell, rebuild the bidirectional whole-heap relation around the changed
+allocation, and prove positive-fuel persistence for ordinary boxed scalars and
+heap naturals. Their semantic folds contain no heap children, so a fuel-
+independence theorem reconciles the concrete cursor bound with FIR's heap-
+length bound. Core runtime and Talos cache-set rules consume the resulting
+constructive leaf theorem directly. Recursive constructor and closure folds
+remain next; no executable or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

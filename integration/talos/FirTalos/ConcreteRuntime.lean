@@ -1853,6 +1853,42 @@ theorem cacheSetStep_of_refines_nonHeapReference
   subst lane
   exact .of_nonHeapReference runtimeRelated.heap expectedRelated nonHeap
 
+/-- Ordinary boxed scalars and heap naturals likewise compose without a
+caller-supplied persistence premise; their complete cache transition follows
+from `LiveHeapRel`. -/
+theorem cacheSetStep_of_refines_heapLeaf
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
+    {physical : Wasm.Value} {location : Location} {cell : HeapCell}
+    {slot : ConcreteGlobalSlot}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : PhysicalValueRel witness kind physical
+      (.object (.heap location)))
+    (globalFound : initial.host.runtime.globals.find? declaration = some slot)
+    (kindEq : slot.kind = kind)
+    (cellFound : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (leafCell :
+      (∃ (boxedKind : BoxedScalarKind) (scalar : BoxedScalar),
+        cell.object = .boxed boxedKind.semanticType scalar.semanticValue) ∨
+      (∃ value : Nat, cell.object = .natural value)) :
+    ∃ after,
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] (replaceRuntime initial after) ∧
+      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
+        (runtime.setGlobal declaration (.object (.heap location))) ∧
+      PhysicalValueRel witness kind physical (.object (.heap location)) := by
+  apply cacheSetStep_of_refines runtimeRelated valueRelated globalFound kindEq
+  intro lane decoded
+  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
+    decodePhysicalLane_of_related valueRelated
+  rw [expectedDecoded] at decoded
+  have laneEq := Except.ok.inj decoded
+  subst lane
+  exact .of_heapLeaf runtimeRelated.heap expectedRelated cellFound live ordinary
+    leafCell
+
 /-- Executable/refinement boundary for partial-application closure allocation.
 The `.tagged` result admitted by the current validator is deliberately absent;
 see `FIR-BUG-wasm-none-partial-apply-tagged-result`. -/
