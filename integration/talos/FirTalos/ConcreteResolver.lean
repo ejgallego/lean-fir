@@ -103,13 +103,35 @@ def cacheDeclarations (source : Fir.Wasm.Module) :
     let kind ← signature.results[0]?
     return (name, kind)
 
+/-- Closure target ids use the same deterministic generated-function order as
+direct-call indices. Keeping the source names in the host table lets checked
+closure metadata recover the exact semantic declaration without a handle
+table. -/
+def closureDispatch (source : Fir.Wasm.Module) :
+    Fir.Wasm.Concrete.ClosureDispatchTable :=
+  source.functions.map (·.name)
+
+/-- Capture descriptors are allocated in first-use order by the concrete host.
+Every concrete closure allocation originates at a `partialApply` operation,
+so the validated module's runtime-operation list is the complete source of
+descriptor rows. -/
+def closureDescriptors (source : Fir.Wasm.Module) :
+    Fir.Wasm.Concrete.ClosureDescriptorTable :=
+  source.runtimeOperations.foldl (init := #[]) fun descriptors operation =>
+    match operation with
+    | .partialApply _ _ _ fields _ =>
+        if descriptors.contains fields then descriptors else descriptors.push fields
+    | _ => descriptors
+
 /-- Prepare host-owned runtime state for a validated module. Physical Wasm
 globals remain in Talos's store; this table is the typed concrete counterpart
 used by `cacheSet`. -/
 def initialHost (source : Fir.Wasm.Module) : Host :=
   { runtime := {
       globals := Fir.Wasm.Concrete.ConcreteGlobals.declare
-        (cacheDeclarations source) } }
+        (cacheDeclarations source) }
+    closureDispatch := closureDispatch source
+    closureDescriptors := closureDescriptors source }
 
 def initialStore (source : Fir.Wasm.Module) (target : Wasm.Module) :
     Wasm.Store Host :=

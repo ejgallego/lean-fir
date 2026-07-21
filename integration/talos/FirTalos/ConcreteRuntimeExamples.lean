@@ -165,6 +165,24 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? Fir.Wasm.abiDirectCallProgram 23
 
+-- Closure headers use module-derived dispatch and capture-descriptor tables.
+-- This complete call allocates one closure, matches its metadata, projects the
+-- fixed capture, and invokes the lowered declaration directly.
+#guard fixtureReturnsWord? Fir.Wasm.abiClosureCallProgram 43
+
+-- Successive underapplication extends the capture layout from one to two
+-- fields before the final generated trampoline dispatches the three-argument
+-- call. Both descriptor rows are derived from the module's runtime operations.
+#guard fixtureReturnsWord? Fir.Wasm.abiClosureUnderApplyProgram 63
+
+-- Erased captures occupy their canonical physical slot but need no metadata
+-- projection in the generated trampoline.
+#guard fixtureReturnsWord? Fir.Wasm.abiClosureErasedCaptureProgram 47
+
+-- Recursive direct calls share the same generated-function index space used
+-- by closure dispatch and remain executable under the concrete host store.
+#guard fixtureReturnsWord? Fir.Wasm.abiRecursiveCallProgram 41
+
 -- Unsupported runtime families are rejected by resolution rather than
 -- reaching a concrete host that only traps after instantiation.
 #guard (hostFn? (.literal (.str "concrete") .object)).isNone

@@ -2309,6 +2309,19 @@ regression retains its exact structured failure, while a separate index-`2`
 fixture follows Lean 4.32 `ToImpure` and passes concretely. No shared contract
 was weakened or changed.
 
+W6.6al closes whole-module concrete closure execution. Host initialization now
+derives the immutable closure dispatch table from generated-function order and
+deduplicates typed capture descriptors in first-use `partialApply` order, the
+same deterministic identities stored in concrete closure headers. Ordinary
+closure application, erased capture, and successive underapplication fixtures
+now lower, adapt, resolve, allocate, match, project, and directly invoke their
+callees through Talos with host-owned linear memory; a recursive direct-call
+fixture passes through the same initialized store. This crosses the executable
+boundary for `partialApply`, `closureMatches`, `closureProj`, and the generated
+Wasm trampoline while retaining legacy `closureApply` as a resolver gate. The
+complete candidate-fold proof and external-engine artifact switch remain
+separate. No shared contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
