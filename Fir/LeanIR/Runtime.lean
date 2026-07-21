@@ -169,6 +169,71 @@ def alloc (runtime : RuntimeState) (object : HeapObject) (persistent := false) :
       nextLocation := location + 1 },
     .heap location)
 
+def HeapObject.ownedValues : HeapObject → Array Value
+  | .ctor object => object.objectFields
+  | .closure _ _ fixed => fixed
+  | .boxed _ value => #[value]
+  | .string _ | .natural _ | .integer _ | .byteArray _ | .opaque _ => #[]
+
+/-- Mark one live heap object and its reachable object graph persistent.
+
+The cell is marked before its owned fields are traversed, so revisiting a
+cycle is a no-op. The heap length bounds every simple path through live cells;
+the explicit fuel makes that bound proof-visible without changing the total
+runtime operation into a possible fault. -/
+def markPersistentLocationFuel : Nat → Heap → Location → Heap
+  | 0, heap, _ => heap
+  | fuel + 1, heap, location =>
+      match findCell? heap location with
+      | some cell =>
+          if !cell.live || cell.persistent then
+            heap
+          else
+            match replaceCell heap location
+                { cell with rc := 0, persistent := true } with
+            | none => heap
+            | some heap =>
+                cell.object.ownedValues.foldl (init := heap)
+                  fun heap value =>
+                    match value with
+                    | .object (.heap child) =>
+                        markPersistentLocationFuel fuel heap child
+                    | _ => heap
+      | none => heap
+
+/-- Mirror Lean's `lean_mark_persistent`: heap objects reachable from the
+value become live process-lifetime roots with reference count zero. Immediate
+and non-object values require no heap transition. -/
+def RuntimeState.markPersistent (runtime : RuntimeState) : Value → RuntimeState
+  | .object (.heap location) =>
+      { runtime with heap :=
+          markPersistentLocationFuel (runtime.heap.length + 1) runtime.heap location }
+  | _ => runtime
+
+@[simp] theorem RuntimeState.markPersistent_nextLocation
+    (runtime : RuntimeState) (value : Value) :
+    (runtime.markPersistent value).nextLocation = runtime.nextLocation := by
+  cases value <;> try rfl
+  next reference => cases reference <;> rfl
+
+@[simp] theorem RuntimeState.markPersistent_globals
+    (runtime : RuntimeState) (value : Value) :
+    (runtime.markPersistent value).globals = runtime.globals := by
+  cases value <;> try rfl
+  next reference => cases reference <;> rfl
+
+@[simp] theorem RuntimeState.markPersistent_world
+    (runtime : RuntimeState) (value : Value) :
+    (runtime.markPersistent value).world = runtime.world := by
+  cases value <;> try rfl
+  next reference => cases reference <;> rfl
+
+@[simp] theorem RuntimeState.markPersistent_trace
+    (runtime : RuntimeState) (value : Value) :
+    (runtime.markPersistent value).trace = runtime.trace := by
+  cases value <;> try rfl
+  next reference => cases reference <;> rfl
+
 def findGlobal? : Globals → Name → Option Value
   | [], _ => none
   | (candidate, value) :: rest, name =>
@@ -178,6 +243,7 @@ def insertGlobal (globals : Globals) (name : Name) (value : Value) : Globals :=
   (name, value) :: globals.filter fun entry => entry.fst != name
 
 def RuntimeState.setGlobal (runtime : RuntimeState) (name : Name) (value : Value) : RuntimeState :=
+  let runtime := runtime.markPersistent value
   { runtime with globals := insertGlobal runtime.globals name value }
 
 def maxTaggedPayload : Nat := 9223372036854775807
@@ -191,12 +257,6 @@ def ScalarValue.toUInt64 : ScalarValue → UInt64
 def Value.objectReference? : Value → Option ObjectRef
   | .object reference => some reference
   | _ => none
-
-def HeapObject.ownedValues : HeapObject → Array Value
-  | .ctor object => object.objectFields
-  | .closure _ _ fixed => fixed
-  | .boxed _ value => #[value]
-  | .string _ | .natural _ | .integer _ | .byteArray _ | .opaque _ => #[]
 
 def incLocation (runtime : RuntimeState) (location amount : Nat) :
     Except RuntimeFault RuntimeState := do

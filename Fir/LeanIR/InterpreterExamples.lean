@@ -306,6 +306,36 @@ def persistentRcProgram : ImpureProgram :=
 
 #guard returned? (runMain persistentRcProgram) (.scalar (.uint8 0))
 
+def cachedGraphValueCode : LCNF.Code .impure :=
+  .let (letDecl x objType (.lit (.str "cached child"))) <|
+  .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+  .return p
+
+def cachedGraphMainCode : LCNF.Code .impure :=
+  .let (letDecl p objType (.fap `cachedGraphValue #[])) <|
+  .let (letDecl x objType (.oproj 0 p)) <|
+  .let (letDecl r u8Type (.isShared x)) <|
+  .return r
+
+def cachedGraphProgram : ImpureProgram :=
+  { decls := #[
+      decl `cachedGraphValue #[] objType (.code cachedGraphValueCode),
+      decl `main #[] u8Type (.code cachedGraphMainCode)] }
+
+def returnedPersistentGraph? (result : RunResult) : Bool :=
+  match result with
+  | .done observation =>
+      observation.outcome == .returned (.scalar (.uint8 1)) &&
+        observation.heap.length == 2 &&
+        observation.heap.all fun entry =>
+          entry.snd.live && entry.snd.persistent && entry.snd.rc == 0
+  | .outOfFuel _ => false
+
+-- Nullary declarations follow `lean_mark_persistent`: both the returned root
+-- and its reachable child become process-lifetime objects before the caller
+-- observes the cached value.
+#guard returnedPersistentGraph? (runMain cachedGraphProgram)
+
 def isSharedCaseCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.nat 1))) <|
   .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
