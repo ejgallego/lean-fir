@@ -2251,6 +2251,118 @@ theorem nestedPhaseDepthProgramCorrect :
   structuralAlphaStructuralTraceSamePhaseCorrectOn
     nestedPhaseDepthProgramTrace
 
+/-- Root endpoint certificate used to keep the transformed two-round
+declaration fixed while a later declaration takes its own phase round. -/
+theorem nestedPhaseDepthAlphaLeftTargetCertificate :
+    ScopedCodeTargetCertificate nestedPhaseDepthValidCase
+      alphaFoldScopeIndex alphaLeft := {
+  structural := nestedAlphaLeftStructuralRefl
+  alpha := alphaLeftAlphaBireflexiveAtFoldScope
+  side := by
+    apply CodeSideConditions.letE
+    · rfl
+    · rfl
+    · rfl
+    · trivial
+    · exact alphaLeftFreshForParams
+    · exact alphaLeftFreshForParams
+    · exact by
+        intro old oldScoped
+        simp [alphaFoldScopeIndex] at oldScoped
+    · exact by
+        intro old oldScoped
+        simp [alphaFoldScopeIndex] at oldScoped
+    · apply CodeSideConditions.ret <;> native_decide
+  canonical := .letE {
+    resultType := .object
+    boxType := trivial
+  } .ret
+}
+
+def unequalDepthBaseDecl : LCNF.Decl .impure :=
+  alphaFoldDeclWith nestedPhaseDepthCode
+
+def unequalDepthSourceDecl : LCNF.Decl .impure :=
+  { unequalDepthBaseDecl with value := .code nestedPhaseDepthCode }
+
+def unequalDepthTargetDecl : LCNF.Decl .impure :=
+  { unequalDepthBaseDecl with value := .code alphaLeft }
+
+def unequalDepthExternMetadata : ExternAttrData := { entries := [] }
+
+def unequalDepthExternBaseDecl : LCNF.Decl .impure :=
+  decl `unequalDepthExtern #[] objType (.extern unequalDepthExternMetadata)
+
+def unequalDepthExternDecl : LCNF.Decl .impure :=
+  { unequalDepthExternBaseDecl with value := .extern unequalDepthExternMetadata }
+
+def unequalDepthExternEndpoint :
+    ScopedDeclEndpointCertificate nestedPhaseDepthValidCase
+      unequalDepthExternDecl := by
+  exact ScopedDeclEndpointCertificate.extern
+    (validCase := nestedPhaseDepthValidCase)
+    unequalDepthExternBaseDecl unequalDepthExternMetadata
+
+def unequalDepthTargetEndpoint :
+    ScopedDeclEndpointCertificate nestedPhaseDepthValidCase
+      unequalDepthTargetDecl := by
+  apply ScopedDeclEndpointCertificate.code unequalDepthBaseDecl alphaLeft
+  · simpa [unequalDepthBaseDecl, alphaFoldDeclWith, decl,
+      alphaFoldScopeIndex_fromParams] using
+      nestedPhaseDepthAlphaLeftTargetCertificate
+  · simpa [unequalDepthBaseDecl, alphaFoldDeclWith, decl] using
+      alphaLeftParamBodyReflexiveForward
+
+def unequalDepthHeadTrace :
+    StructuralAlphaStructuralDeclTrace nestedPhaseDepthValidCase
+      unequalDepthSourceDecl unequalDepthTargetDecl := by
+  have trace : ScopedCodePhaseTrace nestedPhaseDepthValidCase
+      (ScopeIndex.empty.pushParams unequalDepthBaseDecl.params)
+      nestedPhaseDepthCode alphaLeft := by
+    simpa [unequalDepthBaseDecl, alphaFoldDeclWith, decl,
+      alphaFoldScopeIndex_fromParams] using nestedPhaseDepthTrace
+  exact
+    trace.declarationTrace (by
+      simpa [unequalDepthBaseDecl, alphaFoldDeclWith, decl] using
+        nestedPhaseDepthParamBodyReflexive)
+
+def unequalDepthTailTrace :
+    StructuralAlphaStructuralDeclListTrace nestedPhaseDepthValidCase
+      [unequalDepthExternDecl] [unequalDepthExternDecl] :=
+  .single (.cons unequalDepthExternEndpoint.identityRound .nil)
+
+/-- Unequal-depth multi-declaration regression: the first declaration keeps
+its two genuine nested simpCase rounds, then the external declaration takes
+one identity round under the certified transformed head. -/
+def unequalDepthDeclListTrace :
+    StructuralAlphaStructuralDeclListTrace nestedPhaseDepthValidCase
+      [unequalDepthSourceDecl, unequalDepthExternDecl]
+      [unequalDepthTargetDecl, unequalDepthExternDecl] :=
+  (unequalDepthHeadTrace.withTail
+      (.cons unequalDepthExternEndpoint .nil)).append
+    (unequalDepthTailTrace.withHead unequalDepthTargetEndpoint)
+
+#guard unequalDepthHeadTrace.rounds == 2
+#guard unequalDepthTailTrace.rounds == 1
+#guard unequalDepthDeclListTrace.rounds == 3
+
+def unequalDepthProgramTrace :
+    StructuralAlphaStructuralTrace nestedPhaseDepthValidCase
+      ({ decls := #[unequalDepthSourceDecl, unequalDepthExternDecl] } :
+        ImpureProgram)
+      ({ decls := #[unequalDepthTargetDecl, unequalDepthExternDecl] } :
+        ImpureProgram) := by
+  simpa using unequalDepthDeclListTrace.programTrace
+
+theorem unequalDepthProgramCorrect :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      ({ decls := #[unequalDepthSourceDecl, unequalDepthExternDecl] } :
+        ImpureProgram)
+      ({ decls := #[unequalDepthTargetDecl, unequalDepthExternDecl] } :
+        ImpureProgram)
+      alphaFoldEntries (unequalDepthProgramTrace.Admissible externals) :=
+  structuralAlphaStructuralTraceSamePhaseCorrectOn unequalDepthProgramTrace
+
 theorem alphaFoldAlphaProgramsBirelated :
     ProgramsBirelated alphaFoldIntermediateProgram alphaFoldAfterProgram := {
   forward := alphaFoldProgramsRelatedOfParamBody alphaFoldParamBodyForward

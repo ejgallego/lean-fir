@@ -6926,9 +6926,49 @@ def ScopedCodePhaseResult.declarationRound
     structuralAfter := decl_update_code_related factor.structuralAfter
   }
 
+/-- Refresh the reflexive declaration-parameter body shape at one phase
+endpoint. This declaration-level lemma is also used when chaining code traces. -/
+theorem ScopedCodePhaseResult.targetParameterShape
+    {declaration : LCNF.Decl .impure}
+    (round : ScopedCodePhaseResult validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList target target := by
+  apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+    parameterShape
+  simpa [ScopeIndex.pushParams] using round.targetAlpha.forward
+
+/-- Root endpoint data for one declaration. This is sufficient for identity
+padding after a declaration has completed its local trace. -/
+inductive ScopedDeclEndpointCertificate
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    LCNF.Decl .impure → Type where
+  | code
+      (declaration : LCNF.Decl .impure)
+      (code : LCNF.Code .impure)
+      (certificate : ScopedCodeTargetCertificate validCase
+        (ScopeIndex.empty.pushParams declaration.params) code)
+      (parameterShape : ParamBodyRelated
+        (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) [] []
+        declaration.params.toList declaration.params.toList code code) :
+      ScopedDeclEndpointCertificate validCase
+        { declaration with value := .code code }
+  | extern
+      (declaration : LCNF.Decl .impure)
+      (metadata : ExternAttrData) :
+      ScopedDeclEndpointCertificate validCase
+        { declaration with value := .extern metadata }
+
 /-- Complete proof-facing source data for one declaration. Code declarations
 carry the recursive certificate tree and the top-level parameter shape needed
-to lift every local phase round; external declarations require no code proof. -/
+to run the recursive local theorem; external declarations require no code
+proof. -/
 inductive ScopedDeclTargetCertificate
     (validCase : LCNF.Cases .impure → Nat → Prop) :
     LCNF.Decl .impure → Type where
@@ -6962,16 +7002,45 @@ inductive ScopedDeclTargetCertificateList
       ScopedDeclTargetCertificateList validCase
         (declaration :: declarations)
 
+/-- Pointwise root endpoint certificates in declaration order. -/
+inductive ScopedDeclEndpointCertificateList
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    List (LCNF.Decl .impure) → Type where
+  | nil : ScopedDeclEndpointCertificateList validCase []
+  | cons
+      (head : ScopedDeclEndpointCertificate validCase declaration)
+      (tail : ScopedDeclEndpointCertificateList validCase declarations) :
+      ScopedDeclEndpointCertificateList validCase
+        (declaration :: declarations)
+
+def ScopedDeclTargetCertificate.endpoint
+    (certificate : ScopedDeclTargetCertificate validCase declaration) :
+    ScopedDeclEndpointCertificate validCase declaration :=
+  match certificate with
+  | @ScopedDeclTargetCertificate.code _ declaration codeValue tree
+      parameterShape =>
+      .code declaration codeValue tree.root parameterShape
+  | @ScopedDeclTargetCertificate.extern _ declaration metadata =>
+      .extern declaration metadata
+
+def ScopedDeclTargetCertificateList.endpoints
+    (certificates : ScopedDeclTargetCertificateList validCase declarations) :
+    ScopedDeclEndpointCertificateList validCase declarations :=
+  match certificates with
+  | .nil => .nil
+  | .cons head tail => .cons head.endpoint tail.endpoints
+
 /-- A certified declaration supplies the identity phase round used when a
 different declaration is taking one of its local non-lockstep rounds. -/
-def ScopedDeclTargetCertificate.identityRound
-    (certificate : ScopedDeclTargetCertificate validCase declaration) :
+def ScopedDeclEndpointCertificate.identityRound
+    (certificate : ScopedDeclEndpointCertificate validCase declaration) :
     StructuralAlphaStructuralDecl validCase declaration declaration :=
   match certificate with
-  | @ScopedDeclTargetCertificate.code _ declaration codeValue tree parameterShape =>
-      (ScopedCodeTargetCertificate.identity tree.root).result.declarationRound
+  | @ScopedDeclEndpointCertificate.code _ declaration codeValue root
+      parameterShape =>
+      (ScopedCodeTargetCertificate.identity root).result.declarationRound
         parameterShape
-  | @ScopedDeclTargetCertificate.extern _ declaration metadata =>
+  | @ScopedDeclEndpointCertificate.extern _ declaration metadata =>
       let structural : DeclRelated (CodeRel validCase)
           { declaration with value := .extern metadata }
           { declaration with value := .extern metadata } := {
@@ -6998,14 +7067,304 @@ def ScopedDeclTargetCertificate.identityRound
         structuralAfter := structural
       }
 
+def ScopedDeclTargetCertificate.identityRound
+    (certificate : ScopedDeclTargetCertificate validCase declaration) :
+    StructuralAlphaStructuralDecl validCase declaration declaration :=
+  certificate.endpoint.identityRound
+
 /-- Pointwise source certificates assemble the whole declaration-list
 identity round used to lift a local declaration trace through its context. -/
-def ScopedDeclTargetCertificateList.identityRound
-    (certificates : ScopedDeclTargetCertificateList validCase declarations) :
+def ScopedDeclEndpointCertificateList.identityRound
+    (certificates : ScopedDeclEndpointCertificateList validCase declarations) :
     StructuralAlphaStructuralDeclList validCase declarations declarations :=
   match certificates with
   | .nil => .nil
   | .cons head tail => .cons head.identityRound tail.identityRound
+
+def ScopedDeclTargetCertificateList.identityRound
+    (certificates : ScopedDeclTargetCertificateList validCase declarations) :
+    StructuralAlphaStructuralDeclList validCase declarations declarations :=
+  certificates.endpoints.identityRound
+
+/-- Nonempty declaration-local phase trace. -/
+inductive StructuralAlphaStructuralDeclTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    LCNF.Decl .impure → LCNF.Decl .impure → Type where
+  | single
+      (round : StructuralAlphaStructuralDecl validCase before after) :
+      StructuralAlphaStructuralDeclTrace validCase before after
+  | trans
+      (round : StructuralAlphaStructuralDecl validCase before middle)
+      (rest : StructuralAlphaStructuralDeclTrace validCase middle after) :
+      StructuralAlphaStructuralDeclTrace validCase before after
+
+def StructuralAlphaStructuralDeclTrace.append
+    (left : StructuralAlphaStructuralDeclTrace validCase before middle)
+    (right : StructuralAlphaStructuralDeclTrace validCase middle after) :
+    StructuralAlphaStructuralDeclTrace validCase before after :=
+  match left with
+  | .single round => .trans round right
+  | .trans round rest => .trans round (rest.append right)
+
+def StructuralAlphaStructuralDeclTrace.rounds
+    (trace : StructuralAlphaStructuralDeclTrace validCase before after) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+/-- Nonempty pointwise declaration-list trace. It retains list-shaped
+intermediates until the final whole-program conversion. -/
+inductive StructuralAlphaStructuralDeclListTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    List (LCNF.Decl .impure) → List (LCNF.Decl .impure) → Type where
+  | single
+      (round : StructuralAlphaStructuralDeclList validCase before after) :
+      StructuralAlphaStructuralDeclListTrace validCase before after
+  | trans
+      (round : StructuralAlphaStructuralDeclList validCase before middle)
+      (rest : StructuralAlphaStructuralDeclListTrace validCase middle after) :
+      StructuralAlphaStructuralDeclListTrace validCase before after
+
+def StructuralAlphaStructuralDeclListTrace.append
+    (left : StructuralAlphaStructuralDeclListTrace validCase before middle)
+    (right : StructuralAlphaStructuralDeclListTrace validCase middle after) :
+    StructuralAlphaStructuralDeclListTrace validCase before after :=
+  match left with
+  | .single round => .trans round right
+  | .trans round rest => .trans round (rest.append right)
+
+def StructuralAlphaStructuralDeclListTrace.rounds
+    (trace : StructuralAlphaStructuralDeclListTrace validCase before after) : Nat :=
+  match trace with
+  | .single _ => 1
+  | .trans _ rest => 1 + rest.rounds
+
+/-- Lift every declaration-local round through an unchanged suffix. -/
+def StructuralAlphaStructuralDeclTrace.withTail
+    (trace : StructuralAlphaStructuralDeclTrace validCase beforeHead afterHead)
+    (tail : ScopedDeclEndpointCertificateList validCase declarations) :
+    StructuralAlphaStructuralDeclListTrace validCase
+      (beforeHead :: declarations) (afterHead :: declarations) :=
+  match trace with
+  | .single round => .single (.cons round tail.identityRound)
+  | .trans round rest =>
+      .trans (.cons round tail.identityRound) (rest.withTail tail)
+
+/-- Lift every tail round through an unchanged certified head declaration. -/
+def StructuralAlphaStructuralDeclListTrace.withHead
+    (trace : StructuralAlphaStructuralDeclListTrace validCase before after)
+    (head : ScopedDeclEndpointCertificate validCase declaration) :
+    StructuralAlphaStructuralDeclListTrace validCase
+      (declaration :: before) (declaration :: after) :=
+  match trace with
+  | .single round => .single (.cons head.identityRound round)
+  | .trans round rest =>
+      .trans (.cons head.identityRound round) (rest.withHead head)
+
+/-- Erase the list-level assembly layer only after all declaration rounds have
+been aligned, preserving the exact number and order of program phases. -/
+def StructuralAlphaStructuralDeclListTrace.programTrace
+    (trace : StructuralAlphaStructuralDeclListTrace validCase before after) :
+    StructuralAlphaStructuralTrace validCase
+      ({ decls := before.toArray } : ImpureProgram)
+      ({ decls := after.toArray } : ImpureProgram) :=
+  match trace with
+  | .single round => .single round.programRound
+  | .trans round rest => .trans round.programRound rest.programTrace
+
+/-- Lift an arbitrary scoped code trace to the declaration level. The target
+parameter shape is refreshed after every local phase boundary. -/
+def ScopedCodePhaseTrace.declarationTrace
+    {declaration : LCNF.Decl .impure}
+    (trace : ScopedCodePhaseTrace validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    StructuralAlphaStructuralDeclTrace validCase
+      { declaration with value := .code source }
+      { declaration with value := .code target } :=
+  match trace with
+  | .single round => .single (round.declarationRound parameterShape)
+  | .trans round rest =>
+      .trans (round.declarationRound parameterShape)
+        (rest.declarationTrace
+          (round.targetParameterShape parameterShape))
+
+/-- Declaration-local executable result: every code phase is retained and
+the actual declaration endpoint remains certified for later context padding. -/
+structure ScopedDeclPhaseEndpointCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (source target : LCNF.Decl .impure) where
+  trace : StructuralAlphaStructuralDeclTrace validCase source target
+  endpoint : ScopedDeclEndpointCertificate validCase target
+
+/-- Lift a successful transparent declaration traversal to a certified
+declaration-local non-lockstep trace. -/
+theorem shadowDecl_scopedPhaseEndpointCertified
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificate : ScopedDeclTargetCertificate validCase source)
+    (run : shadowDecl? fuel source = some target) :
+    Nonempty (ScopedDeclPhaseEndpointCertifiedTrace validCase source target) := by
+  cases certificate with
+  | code declaration codeValue tree parameterShape =>
+      cases codeRun : shadowCode? fuel codeValue with
+      | none =>
+          simp [shadowDecl?, LCNF.DeclValue.mapCodeM, codeRun] at run
+      | some transformed =>
+          simp [shadowDecl?, LCNF.DeclValue.mapCodeM, codeRun] at run
+          subst target
+          rcases shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
+              bridge selection tree codeRun with ⟨codeTrace⟩
+          have targetShape : ParamBodyRelated
+              (leftJoins := []) (rightJoins := [])
+              ({} : FVarIdMap FVarId) [] []
+              declaration.params.toList declaration.params.toList
+              transformed transformed := by
+            apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+              parameterShape
+            simpa [ScopeIndex.pushParams] using
+              codeTrace.targetCertificate.alpha.forward
+          exact ⟨{
+            trace := codeTrace.trace.declarationTrace parameterShape
+            endpoint := .code declaration transformed
+              codeTrace.targetCertificate targetShape
+          }⟩
+  | extern declaration metadata =>
+      simp [shadowDecl?, LCNF.DeclValue.mapCodeM] at run
+      subst target
+      let endpoint : ScopedDeclEndpointCertificate validCase
+          { declaration with value := .extern metadata } :=
+        .extern declaration metadata
+      exact ⟨{
+        trace := .single endpoint.identityRound
+        endpoint
+      }⟩
+
+/-- Sequential declaration-list result. Local declaration traces may have
+different depths; head rounds run under an identity suffix, then tail rounds
+run under the certified transformed head. -/
+structure ScopedDeclListPhaseEndpointCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (source target : List (LCNF.Decl .impure)) where
+  trace : StructuralAlphaStructuralDeclListTrace validCase source target
+  endpoints : ScopedDeclEndpointCertificateList validCase target
+
+theorem shadowDecls_scopedPhaseEndpointCertified
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedDeclTargetCertificateList validCase source)
+    (run : shadowDecls? fuel source = some target) :
+    Nonempty (ScopedDeclListPhaseEndpointCertifiedTrace
+      validCase source target) := by
+  induction certificates generalizing target with
+  | nil =>
+      simp [shadowDecls?] at run
+      subst target
+      exact ⟨{
+        trace := .single .nil
+        endpoints := .nil
+      }⟩
+  | cons head tail ih =>
+      rename_i declaration declarations
+      simp only [shadowDecls?] at run
+      cases declarationRun : shadowDecl? fuel declaration with
+      | none => simp [declarationRun] at run
+      | some transformedDeclaration =>
+          cases restRun : shadowDecls? fuel declarations with
+          | none => simp [declarationRun, restRun] at run
+          | some transformedRest =>
+              simp [declarationRun, restRun] at run
+              subst target
+              rcases shadowDecl_scopedPhaseEndpointCertified bridge selection
+                  head declarationRun with ⟨headResult⟩
+              rcases ih restRun with ⟨tailResult⟩
+              exact ⟨{
+                trace := (headResult.trace.withTail tail.endpoints).append
+                  (tailResult.trace.withHead headResult.endpoint)
+                endpoints := .cons headResult.endpoint tailResult.endpoints
+              }⟩
+
+/-- Whole-program certified result for the transparent executable traversal. -/
+structure ScopedProgramPhaseEndpointCertifiedTrace
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (before after : ImpureProgram) where
+  trace : StructuralAlphaStructuralTrace validCase before after
+  endpoints : ScopedDeclEndpointCertificateList validCase after.decls.toList
+
+theorem shadowProgram_scopedPhaseEndpointCertified
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedDeclTargetCertificateList validCase
+      before.decls.toList)
+    (run : shadowProgram? fuel before = some after) :
+    Nonempty (ScopedProgramPhaseEndpointCertifiedTrace validCase before after) := by
+  unfold shadowProgram? at run
+  cases declarationsRun : shadowDecls? fuel before.decls.toList with
+  | none => simp [declarationsRun] at run
+  | some declarations =>
+      simp [declarationsRun] at run
+      subst after
+      rcases shadowDecls_scopedPhaseEndpointCertified bridge selection
+          certificates declarationsRun with ⟨result⟩
+      exact ⟨{
+        trace := result.trace.programTrace
+        endpoints := by simpa using result.endpoints
+      }⟩
+
+/-- The assembled arbitrary-program trace reaches the established semantic
+consumer with one readiness pair for every retained global phase round. -/
+theorem ScopedProgramPhaseEndpointCertifiedTrace.samePhaseCorrectOn
+    (result : ScopedProgramPhaseEndpointCertifiedTrace
+      validCase before after) :
+    SamePhaseCorrectOn (Impure.semantics externals) before after entries
+      (result.trace.Admissible externals) :=
+  structuralAlphaStructuralTraceSamePhaseCorrectOn result.trace
+
+/-- Canonical reachable-tag specialization of the arbitrary-program trace
+theorem. -/
+theorem shadowProgram_scopedPhaseEndpointCertified_reachableCaseTag
+    (bridge : UpstreamBridge)
+    (certificates : ScopedDeclTargetCertificateList ReachableCaseTag
+      before.decls.toList)
+    (run : shadowProgram? fuel before = some after) :
+    Nonempty (ScopedProgramPhaseEndpointCertifiedTrace
+      ReachableCaseTag before after) :=
+  shadowProgram_scopedPhaseEndpointCertified bridge
+    reachableCaseTag_selectionLaws certificates run
+
+/-- Preferred whole-program semantic API for an arbitrary validity predicate
+with its explicit reachable-selection refinement. -/
+theorem shadowProgram_samePhaseCorrectOn_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedDeclTargetCertificateList validCase
+      before.decls.toList)
+    (run : shadowProgram? fuel before = some after) :
+    ∃ result : ScopedProgramPhaseEndpointCertifiedTrace validCase before after,
+      SamePhaseCorrectOn (Impure.semantics externals) before after entries
+        (result.trace.Admissible externals) := by
+  rcases shadowProgram_scopedPhaseEndpointCertified bridge selection
+      certificates run with ⟨result⟩
+  exact ⟨result, result.samePhaseCorrectOn⟩
+
+/-- Fully assembled executable simpCase theorem for arbitrary impure programs.
+Callers provide only the audited upstream bridge, pointwise source
+certificates, and the successful transparent run; selection, non-lockstep
+composition, endpoint certification, and semantics are derived internally. -/
+theorem shadowProgram_samePhaseCorrectOn_reachableCaseTag
+    (bridge : UpstreamBridge)
+    (certificates : ScopedDeclTargetCertificateList ReachableCaseTag
+      before.decls.toList)
+    (run : shadowProgram? fuel before = some after) :
+    ∃ result : ScopedProgramPhaseEndpointCertifiedTrace
+        ReachableCaseTag before after,
+      SamePhaseCorrectOn (Impure.semantics externals) before after entries
+        (result.trace.Admissible externals) :=
+  shadowProgram_samePhaseCorrectOn_of_upstreamBridge bridge
+    reachableCaseTag_selectionLaws certificates run
 
 /-- A one-declaration program wrapper used to lift a scoped code trace to the
 existing whole-program structural/alpha/structural semantics. All declaration
@@ -7080,10 +7439,8 @@ theorem ScopedCodePhaseResult.singletonProgramTargetShape
       declaration.params.toList declaration.params.toList source source) :
     ParamBodyRelated (leftJoins := []) (rightJoins := [])
       ({} : FVarIdMap FVarId) [] []
-      declaration.params.toList declaration.params.toList target target := by
-  apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
-    parameterShape
-  simpa [ScopeIndex.pushParams] using round.targetAlpha.forward
+      declaration.params.toList declaration.params.toList target target :=
+  round.targetParameterShape parameterShape
 
 /-- Arbitrarily many scoped code rounds lift without collapsing their phase
 boundaries. This is the declaration/program bridge consumed by the existing
@@ -7099,13 +7456,9 @@ def ScopedCodePhaseTrace.singletonProgramTrace
     StructuralAlphaStructuralTrace validCase
       (singletonCodeProgram declaration source)
       (singletonCodeProgram declaration target) :=
-  match trace with
-  | .single round =>
-      .single (round.singletonProgramRound parameterShape)
-  | .trans round rest =>
-      .trans (round.singletonProgramRound parameterShape)
-        (rest.singletonProgramTrace
-          (round.singletonProgramTargetShape parameterShape))
+  ((trace.declarationTrace parameterShape).withTail
+      (ScopedDeclEndpointCertificateList.nil
+        (validCase := validCase))).programTrace
 
 /-- Semantic correctness for a lifted arbitrary-depth singleton-declaration
 trace. Readiness remains explicit once per structural leg, exactly as in the
