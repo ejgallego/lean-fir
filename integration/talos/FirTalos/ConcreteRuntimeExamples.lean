@@ -207,6 +207,24 @@ private def boxedScalarFixture (scalar : BoxedScalar) :
       runtime := { emptyHostStore.host.runtime with heap } } }
   return (store, word)
 
+private def boxingHostRoundtrip (scalar : BoxedScalar) : Bool :=
+  match boxStep scalar.kind .tobject emptyHostStore
+      [physicalOfLane scalar.lane] with
+  | .Return [.i32 bits] store =>
+      match unboxStep scalar.kind store [.i32 bits] with
+      | .Return [physical] next =>
+          physical == physicalOfLane scalar.lane && next.host.failure?.isNone
+      | _ => false
+  | _ => false
+
+-- The concrete generated-call boundary accepts every supported integer lane.
+-- Together these cover immediate, promoted-tag, and ordinary boxed results.
+#guard boxingHostRoundtrip (.uint8 255)
+#guard boxingHostRoundtrip (.uint16 65535)
+#guard boxingHostRoundtrip (.uint32 4294967295)
+#guard boxingHostRoundtrip (.uint64 18446744073709551615)
+#guard boxingHostRoundtrip (.usize 18446744073709551615)
+
 -- Typed unboxing preserves each supported direct scalar lane. These cases
 -- jointly exercise immediate, promoted-tag, and ordinary boxed storage.
 #guard match boxedScalarFixture (.uint8 255) with

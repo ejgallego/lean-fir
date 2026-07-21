@@ -292,6 +292,86 @@ theorem ConcreteRuntimeRel.allocateConstructorNonempty
       simpa [semanticConstructorResult] using
         related.trace.witnessExtension extension }
 
+/-- Concrete integer boxing grows the proof witness exactly when its tagged or
+heap representation allocates. The result packages the canonical semantic
+step used by later source/compiler composition. -/
+theorem ConcreteRuntimeRel.boxScalar
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {scalar : BoxedScalar} {word : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (boxed : boxScalar concrete.heap scalar = .ok (result, word)) :
+    ∃ nextRuntime sourceValue nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness
+        nextRuntime ∧
+      ValueRel nextWitness .tobject (.word32 word) sourceValue ∧
+      box runtime scalar.kind.semanticType scalar.semanticValue =
+        .ok (nextRuntime, sourceValue) := by
+  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  · have encoded : encodeTagged concrete.heap scalar.payload =
+        .ok (result, word) := by
+      rw [← boxScalar_of_tagged concrete.heap scalar tagged]
+      exact boxed
+    obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+      encodeTagged_liveHeapRel_extends concrete.heap result witness runtime
+        scalar.payload word related.heap encoded
+    refine ⟨runtime, .object (.tagged scalar.payload), nextWitness,
+      extension, ?_, valueRelated, semanticBox_tagged_eq runtime scalar tagged⟩
+    exact {
+      heap := heapRelated
+      globals := related.globals.witnessExtension extension
+      world := related.world
+      trace := related.trace.witnessExtension extension }
+  · have large : maxTaggedPayload < scalar.payload.toNat :=
+      Nat.lt_of_not_ge tagged
+    have allocated : allocateBoxedScalar concrete.heap scalar =
+        .ok (result, word) := by
+      rw [← boxScalar_of_heap concrete.heap scalar large]
+      exact boxed
+    obtain ⟨_, objectAllocation, _, _⟩ :=
+      allocateBoxedScalar_decompose concrete.heap result scalar word allocated
+    have freshAddress :=
+      related.heap.frontier.allocateObject_address objectAllocation
+    have locationFresh :
+        witness.locations.lookup? runtime.nextLocation = none := by
+      cases found : witness.locations.lookup? runtime.nextLocation with
+      | none => rfl
+      | some oldAddress =>
+          exfalso
+          obtain ⟨cell, semanticFound, _⟩ :=
+            related.heap.concreteToSemantic runtime.nextLocation oldAddress found
+          have beforeNext := related.heap.locationsBeforeNext
+            runtime.nextLocation cell semanticFound
+          exact (Nat.lt_irrefl runtime.nextLocation) beforeNext
+    have descriptorFresh : ∀ old descriptor,
+        witness.descriptors.lookup? old = some descriptor →
+        word.value ≠ old.value := by
+      intro old descriptor found equal
+      have owned := related.heap.descriptorsOwned old descriptor found
+      simp [headerBytes] at owned
+      omega
+    let nextWitness :=
+      witness.bindBoxed runtime.nextLocation word scalar.kind
+    have extension : witness.Extends nextWitness :=
+      witness.bindBoxed_extends runtime.nextLocation word scalar.kind
+        locationFresh descriptorFresh
+    obtain ⟨semanticStep, heapRelated, valueRelated⟩ :=
+      boxScalar_heap_liveHeapRel concrete.heap result witness runtime scalar word
+        related.heap large boxed
+    refine ⟨semanticBoxResult runtime scalar,
+      .object (.heap runtime.nextLocation), nextWitness, extension, ?_,
+      valueRelated, semanticStep⟩
+    exact {
+      heap := heapRelated
+      globals := by
+        simpa [semanticBoxResult] using
+          related.globals.witnessExtension extension
+      world := by simpa [semanticBoxResult] using related.world
+      trace := by
+        simpa [semanticBoxResult] using
+          related.trace.witnessExtension extension }
+
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
 inductive HostFailure where
@@ -885,6 +965,83 @@ theorem physicalOfLane_related
   | uint32 encoded => exact .word32 (.uint32 encoded)
   | uint64 => exact .word64 .uint64
   | usize => exact .word64 .usize
+
+/-- Decode one supported integer/USize operand into the concrete boxing
+vocabulary while retaining ABI-shape failures at the Talos boundary. -/
+def decodeBoxedScalar (kind : BoxedScalarKind) (physical : Wasm.Value) :
+    Except HostFailure BoxedScalar :=
+  match kind, physical with
+  | .uint8, .i32 bits => .ok (.uint8 (UInt8.ofNat bits.toNat))
+  | .uint16, .i32 bits => .ok (.uint16 (UInt16.ofNat bits.toNat))
+  | .uint32, .i32 bits => .ok (.uint32 bits)
+  | .uint64, .i64 value => .ok (.uint64 value)
+  | .usize, .i64 value => .ok (.usize value)
+  | kind, _ => .error (.laneMismatch 0 kind.abiKind.valueType)
+
+@[simp] theorem decodeBoxedScalar_physicalOfLane (scalar : BoxedScalar) :
+    decodeBoxedScalar scalar.kind (physicalOfLane scalar.lane) = .ok scalar := by
+  cases scalar <;>
+    simp [decodeBoxedScalar, physicalOfLane, BoxedScalar.kind,
+      BoxedScalar.lane]
+
+/-- Executable concrete integer boxing. The scalar kind and object-like result
+kind are frozen in the import identity; the host owns all allocated memory. -/
+def boxStep (kind : BoxedScalarKind) (_resultKind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [physical] =>
+      match decodeBoxedScalar kind physical with
+      | .ok scalar =>
+          match boxScalar store.host.runtime.heap scalar with
+          | .ok (heap, word) =>
+              .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap store heap)
+          | .error failure => trap store (.runtime failure.toTrap)
+      | .error failure => trap store failure
+  | args => trap store (.arityMismatch 1 args.length)
+
+def boxFn (kind : BoxedScalarKind) (resultKind : AbiKind) :
+    Wasm.HostFn Host := {
+  params := [FirTalos.abiKind kind.abiKind]
+  results := [FirTalos.abiKind resultKind]
+  invoke := boxStep kind resultKind }
+
+def boxContract (kind : BoxedScalarKind) (resultKind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result => result = boxStep kind resultKind initial args
+
+theorem boxFn_satisfies_contract (kind resultKind initial args) :
+    boxContract kind resultKind initial args
+      ((boxFn kind resultKind).invoke initial args) := by
+  rfl
+
+/-- A successful concrete box host step returns the exact object word together
+with the grown runtime witness and canonical FIR allocation step. -/
+theorem boxStep_of_refines
+    {initial : Wasm.Store Host}
+    {runtime nextHeap : RuntimeState} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {heap : MemoryState} {word : Word32}
+    {sourceValue : Value} {nextWitness : RefinementWitness}
+    (kindEq : scalar.kind = kind)
+    (boxed : boxScalar initial.host.runtime.heap scalar = .ok (heap, word))
+    (semanticStep : box runtime kind.semanticType scalar.semanticValue =
+      .ok (nextHeap, sourceValue))
+    (nextRelated : ConcreteRuntimeRel
+      { initial.host.runtime with heap := heap } nextWitness nextHeap)
+    (valueRelated : ValueRel nextWitness .tobject (.word32 word) sourceValue) :
+    boxStep kind .tobject initial [physicalOfLane scalar.lane] =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime
+        nextWitness nextHeap ∧
+      ValueRel nextWitness .tobject (.word32 word) sourceValue := by
+  subst kind
+  refine ⟨?_, ?_, valueRelated⟩
+  · unfold boxStep
+    simp only [decodeBoxedScalar_physicalOfLane]
+    rw [show (clearFailure initial).host.runtime.heap =
+        initial.host.runtime.heap by rfl, boxed]
+    rfl
+  simpa [replaceHeap, clearFailure] using nextRelated
 
 /-- Representation-specific evidence needed by typed unboxing. Tagged values
 are interpreted at the requested type; heap boxes are intentionally type-erased
@@ -3997,6 +4154,47 @@ theorem effectStepSimulates_scalarSet
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
 
+/-- Concrete-host WP for generated integer boxing and its object destination
+local. -/
+theorem wp_box_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {scalarIndex resultIndex : Nat} {kind : BoxedScalarKind}
+    {scalar : BoxedScalar} {heap : MemoryState} {word : Word32}
+    (tail : List Wasm.Value)
+    (hScalar : locals.get scalarIndex = some (physicalOfLane scalar.lane))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (boxContract kind .tobject))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : boxStep kind .tobject initial
+      [physicalOfLane scalar.lane] =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap))
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : Wasm.wp module rest Q (replaceHeap initial heap)
+      { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet scalarIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  have hScalarTail :
+      ({ locals with values := tail } : Wasm.Locals).get scalarIndex =
+        some (physicalOfLane scalar.lane) := by
+    simpa [Wasm.Locals.get] using hScalar
+  rw [Wasm.wp_localGet_cons, hScalarTail]
+  apply wp_exact_host_call_of_return
+    (step := boxStep kind .tobject)
+    (physicalArgs := [physicalOfLane scalar.lane])
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
 /-- Concrete-host WP for generated typed unboxing and its destination-local
 write. -/
 theorem wp_unbox_let
@@ -4777,6 +4975,163 @@ theorem wp_closureProj
   · simp [hParams]
   · exact operation
   · simpa [hParams, hResults] using continued
+
+/-- Integer-boxing instance of the concrete direct-`let` boundary. Tagged
+results preserve the witness; promoted tags and ordinary boxes extend it with
+the concrete allocation that represents the source result. -/
+theorem letStepSimulates_box
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {scalarId : Lean.FVarId} {kind : BoxedScalarKind}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {scalarIndex resultIndex : Nat} {scalar : BoxedScalar}
+    {heap : MemoryState} {word : Word32}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    (kindEq : scalar.kind = kind)
+    (valueEq : decl.value = .box kind.semanticType scalarId)
+    (sourceLookup : lookup sourceEnv scalarId = some scalar.semanticValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .tobject)
+    (hScalar : locals.get scalarIndex = some (physicalOfLane scalar.lane))
+    (boxed : boxScalar initial.host.runtime.heap scalar = .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (boxContract kind .tobject))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated) :
+    ∃ nextRuntime sourceValue nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        nextRuntime ∧
+      PhysicalValueRel nextWitness .tobject
+        (.i32 (UInt32.ofNat word.value)) sourceValue ∧
+      LetStepSimulates context sourceFunction module hostEnv decl
+        [.localGet scalarIndex, .call id]
+        sourceRuntime nextRuntime sourceEnv sourceValue initial
+        (replaceHeap initial heap) locals updated resultIndex witness
+        nextWitness := by
+  subst kind
+  obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
+      nextRuntimeRelated, valueRelated, semanticStep⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.boxScalar initialRelated.1 boxed
+  obtain ⟨operation, _, _⟩ :=
+    boxStep_of_refines rfl boxed semanticStep nextRuntimeRelated valueRelated
+  have physicalRelated : PhysicalValueRel nextWitness .tobject
+      (.i32 (UInt32.ofNat word.value)) sourceValue :=
+    .word32 valueRelated
+  have failureClear : (replaceHeap initial heap).host.failure? = none := by
+    simp [replaceHeap, clearFailure]
+  have nextState := initialRelated.bindAfter extension nextRuntimeRelated
+    failureClear resultFound resultKindAt physicalRelated targetSet
+  refine ⟨nextRuntime, sourceValue, nextWitness, extension,
+    nextRuntimeRelated, physicalRelated, ?_, initialRelated, nextState, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have scalarLookup : lookupValue sourceEnv scalarId =
+        .ok scalar.semanticValue := by
+      simp [lookupValue, sourceLookup]
+    rw [scalarLookup]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        box sourceRuntime scalar.kind.semanticType scalar.semanticValue) =
+      .ok (nextRuntime, .value sourceValue)
+    rw [semanticStep]
+    rfl
+  · intro rest Q tail continued
+    exact wp_box_let tail hScalar hImp hSat hi hContract hParams hResults
+      operation targetSet continued
+
+/-- W6.6 composition for generated integer boxing through source evaluation,
+compiler output, Talos adaptation, concrete allocation, destination-local
+write, and an arbitrary verified continuation. -/
+theorem codeWP_box_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {scalarId : Lean.FVarId} {kind : BoxedScalarKind}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {scalarIndex resultIndex : Nat} {scalar : BoxedScalar}
+    {heap : MemoryState} {word : Word32}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (kindEq : scalar.kind = kind)
+    (valueEq : decl.value = .box kind.semanticType scalarId)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet scalarId,
+        .call (.runtime (.box kind.abiKind .tobject))])
+    (scalarFound :
+      findFVar? (functionBindings sourceFunction) scalarId = some scalarIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.box kind.abiKind .tobject)) = some id)
+    (sourceLookup : lookup sourceEnv scalarId = some scalar.semanticValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .tobject)
+    (hScalar : locals.get scalarIndex = some (physicalOfLane scalar.lane))
+    (boxed : boxScalar initial.host.runtime.heap scalar = .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (boxContract kind .tobject))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : ∀ nextRuntime sourceValue nextWitness,
+      witness.Extends nextWitness →
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        nextRuntime →
+      PhysicalValueRel nextWitness .tobject
+        (.i32 (UInt32.ofNat word.value)) sourceValue →
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        targetRest (replaceHeap initial heap) updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet scalarIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet scalarId,
+            .call (.runtime (.box kind.abiKind .tobject))] =
+        .ok [.localGet scalarIndex, .call id] := by
+    have scalarFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          scalarId = some scalarIndex := by
+      simpa [functionBindings] using scalarFound
+    simp [instructions, instruction, scalarFound', callFound]
+    rfl
+  obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
+      nextRuntimeRelated, valueRelated, step⟩ :=
+    letStepSimulates_box (context := context) kindEq valueEq sourceLookup
+      initialRelated resultFound resultKindAt hScalar boxed hImp hSat hi
+      hContract hParams hResults targetSet
+  have nextCode := continued nextRuntime sourceValue nextWitness extension
+    nextRuntimeRelated valueRelated
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases nextCode with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
 
 /-- Typed-unboxing instance of the concrete direct-`let` boundary. The
 representation premise records why the generated result kind is valid for a

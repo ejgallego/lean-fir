@@ -2172,6 +2172,17 @@ guards cover all five kinds across immediate, promoted-tag, and ordinary boxed
 storage. Float kinds remain tracked by the shared runtime gap, and generated
 artifact execution remains pending.
 
+W6.6z composes integer boxing for the same five supported kinds. The concrete
+Talos host consumes the exact i32 or i64 scalar lane, selects immediate,
+promoted-tag, or ordinary boxed storage from the payload, and returns the
+resulting object word. Its refinement grows the witness precisely when the
+physical representation allocates, then relates the source runtime/result to
+the replaced concrete heap. The composed rule connects source evaluation,
+compiler and adapter output, the exact unary host call, object destination
+local, and an arbitrary continuation. Executable host round trips cover every
+supported kind across all three storage classes. Float kinds remain tracked
+by the shared runtime gap, and generated artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
