@@ -215,6 +215,162 @@ theorem caseTableDeterministic_filter
     exact Array.mem_def.mp
       (Array.mem_of_mem_filter (Array.mem_def.mpr member)))
 
+/-- Filtering by a body predicate preserves a successful selection whenever
+the selected body satisfies the predicate. Selector determinism ensures every
+duplicate arm selected by the same tag has that same body. -/
+theorem chooseAlt_filter_of_selected_of_keep
+    {predicate : LCNF.Code .impure → Bool}
+    (normalization : CaseTableNormalizationInvariant alts)
+    (selected : chooseAlt tag alts.toList = some branch)
+    (keep : predicate branch = true) :
+    chooseAlt tag
+      (alts.filter fun alt => predicate alt.getCode).toList = some branch := by
+  have filteredDeterministic : CaseTableDeterministic
+      (alts.filter fun alt => predicate alt.getCode).toList :=
+    caseTableDeterministic_filter _ _ normalization.deterministic
+  unfold chooseAlt at selected ⊢
+  cases sourceCtor : findCtorAlt tag alts.toList with
+  | some code =>
+      have codeEq : code = branch := by simpa [sourceCtor] using selected
+      subst branch
+      have sourceHas := hasCtorAlt_of_findCtorAlt_eq_some sourceCtor
+      rcases sourceHas with ⟨info, member, tagEq⟩
+      have filteredMember : (.ctorAlt info code : LCNF.Alt .impure) ∈
+          alts.filter fun alt => predicate alt.getCode := by
+        apply Array.mem_filter.mpr
+        exact ⟨Array.mem_def.mpr member, keep⟩
+      have filteredHas : HasCtorAlt tag code
+          (alts.filter fun alt => predicate alt.getCode).toList :=
+        ⟨info, Array.mem_def.mp filteredMember, tagEq⟩
+      rw [findCtorAlt_eq_some_of_has filteredDeterministic filteredHas]
+      rfl
+  | none =>
+      simp only [sourceCtor, Option.orElse_none] at selected
+      have sourceHas := hasDefaultAlt_of_findDefaultAlt_eq_some selected
+      have filteredDefaultMember : (.default branch : LCNF.Alt .impure) ∈
+          alts.filter fun alt => predicate alt.getCode := by
+        apply Array.mem_filter.mpr
+        exact ⟨Array.mem_def.mpr sourceHas, keep⟩
+      have filteredDefaultHas : HasDefaultAlt branch
+          (alts.filter fun alt => predicate alt.getCode).toList :=
+        Array.mem_def.mp filteredDefaultMember
+      have filteredCtorNone : findCtorAlt tag
+          (alts.filter fun alt => predicate alt.getCode).toList = none := by
+        cases found : findCtorAlt tag
+            (alts.filter fun alt => predicate alt.getCode).toList with
+        | none => rfl
+        | some code =>
+            have filteredHas := hasCtorAlt_of_findCtorAlt_eq_some found
+            rcases filteredHas with ⟨info, member, tagEq⟩
+            have sourceMember : (.ctorAlt info code : LCNF.Alt .impure) ∈
+                alts := Array.mem_of_mem_filter (Array.mem_def.mpr member)
+            exact False.elim
+              (not_hasCtorAlt_of_findCtorAlt_eq_none sourceCtor
+                ⟨info, Array.mem_def.mp sourceMember, tagEq⟩)
+      rw [filteredCtorNone, Option.orElse_none,
+        findDefaultAlt_eq_some_of_has filteredDeterministic filteredDefaultHas]
+
+/-- When the selected constructor body is removed by a body predicate and
+the normalized source has no default, every constructor for that tag is
+removed; appending a new default therefore selects the supplied fallback. -/
+theorem chooseAlt_filter_push_default_of_selected_of_drop
+    {predicate : LCNF.Code .impure → Bool}
+    (normalization : CaseTableNormalizationInvariant alts)
+    (noDefault : ∀ code, ¬HasDefaultAlt code alts.toList)
+    (selected : chooseAlt tag alts.toList = some branch)
+    (drop : predicate branch = false) :
+    chooseAlt tag
+      ((alts.filter fun alt => predicate alt.getCode).push
+        (.default fallback)).toList = some fallback := by
+  have sourceHas : HasCtorAlt tag branch alts.toList := by
+    unfold chooseAlt at selected
+    cases found : findCtorAlt tag alts.toList with
+    | some code =>
+        have codeEq : code = branch := by simpa [found] using selected
+        simpa [codeEq] using hasCtorAlt_of_findCtorAlt_eq_some found
+    | none =>
+        simp only [found, Option.orElse_none] at selected
+        exact False.elim
+          (noDefault branch
+            (hasDefaultAlt_of_findDefaultAlt_eq_some selected))
+  have filteredCtorNone : findCtorAlt tag
+      (alts.filter fun alt => predicate alt.getCode).toList = none := by
+    cases found : findCtorAlt tag
+        (alts.filter fun alt => predicate alt.getCode).toList with
+    | none => rfl
+    | some code =>
+        have filteredHas := hasCtorAlt_of_findCtorAlt_eq_some found
+        rcases filteredHas with ⟨info, member, tagEq⟩
+        have filteredMember : (.ctorAlt info code : LCNF.Alt .impure) ∈
+            alts.filter fun alt => predicate alt.getCode :=
+          Array.mem_def.mpr member
+        have sourceMember : (.ctorAlt info code : LCNF.Alt .impure) ∈ alts :=
+          Array.mem_of_mem_filter filteredMember
+        have codeEq := normalization.deterministic.ctor tag code branch
+          ⟨info, Array.mem_def.mp sourceMember, tagEq⟩ sourceHas
+        have kept : predicate code = true :=
+          (Array.mem_filter.mp filteredMember).2
+        subst code
+        simp [drop] at kept
+  have filteredDefaultNone : findDefaultAlt
+      (alts.filter fun alt => predicate alt.getCode).toList = none := by
+    cases found : findDefaultAlt
+        (alts.filter fun alt => predicate alt.getCode).toList with
+    | none => rfl
+    | some code =>
+        have filteredHas := hasDefaultAlt_of_findDefaultAlt_eq_some found
+        have sourceHas : HasDefaultAlt code alts.toList :=
+          Array.mem_def.mp
+            (Array.mem_of_mem_filter (Array.mem_def.mpr filteredHas))
+        exact False.elim (noDefault code sourceHas)
+  have filteredNone : chooseAlt tag
+      (alts.filter fun alt => predicate alt.getCode).toList = none := by
+    unfold chooseAlt
+    rw [filteredCtorNone]
+    exact filteredDefaultNone
+  simpa [Array.toList_push] using
+    chooseAlt_append_default_of_none (body := fallback) filteredNone
+
+/-- Filtering cannot create a selection that was absent from the source. -/
+theorem chooseAlt_filter_eq_none_of_none
+    {alts : Array (LCNF.Alt .impure)}
+    {predicate : LCNF.Code .impure → Bool}
+    (selected : chooseAlt tag alts.toList = none) :
+    chooseAlt tag
+      (alts.filter fun alt => predicate alt.getCode).toList = none := by
+  unfold chooseAlt at selected ⊢
+  cases sourceCtor : findCtorAlt tag alts.toList with
+  | some code => simp [sourceCtor] at selected
+  | none =>
+      simp only [sourceCtor, Option.orElse_none] at selected
+      have filteredCtorNone : findCtorAlt tag
+          (alts.filter fun alt => predicate alt.getCode).toList = none := by
+        cases found : findCtorAlt tag
+            (alts.filter fun alt => predicate alt.getCode).toList with
+        | none => rfl
+        | some code =>
+            rcases hasCtorAlt_of_findCtorAlt_eq_some found with
+              ⟨info, member, tagEq⟩
+            have sourceMember : (.ctorAlt info code : LCNF.Alt .impure) ∈
+                alts := Array.mem_of_mem_filter (Array.mem_def.mpr member)
+            exact False.elim
+              (not_hasCtorAlt_of_findCtorAlt_eq_none sourceCtor
+                ⟨info, Array.mem_def.mp sourceMember, tagEq⟩)
+      have filteredDefaultNone : findDefaultAlt
+          (alts.filter fun alt => predicate alt.getCode).toList = none := by
+        cases found : findDefaultAlt
+            (alts.filter fun alt => predicate alt.getCode).toList with
+        | none => rfl
+        | some code =>
+            have filteredHas := hasDefaultAlt_of_findDefaultAlt_eq_some found
+            have sourceHas : HasDefaultAlt code alts.toList :=
+              Array.mem_def.mp
+                (Array.mem_of_mem_filter (Array.mem_def.mpr filteredHas))
+            exact False.elim
+              (not_hasDefaultAlt_of_findDefaultAlt_eq_none selected sourceHas)
+      rw [filteredCtorNone]
+      exact filteredDefaultNone
+
 /-- Appending the sole default to a table that had none preserves selector
 determinism. -/
 theorem caseTableDeterministic_pushDefault
@@ -3399,7 +3555,7 @@ structure ScopedCaseCertifiedSingletonPhaseLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   singleton : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
-    ScopedAlphaBireflexive index
+    ScopedCodeTargetCertificate validCase index
       (.cases (.mk typeName resultType discr sourceAlts)) →
     ScopedAltsPhaseCertifiedResult validCase index
       sourceAlts.toList sourceAlts.toList →
@@ -3476,7 +3632,7 @@ structure ScopedCaseFoldedCertifiedSingletonPhaseLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
-    ScopedAlphaBireflexive index
+    ScopedCodeTargetCertificate validCase index
       (.cases (.mk typeName resultType discr sourceAlts)) →
     ScopedAltsPhaseCertifiedResult validCase index
       sourceAlts.toList sourceAlts.toList →
@@ -3895,6 +4051,8 @@ structure ScopedCaseFoldedCertifiedAlphaLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
   folded : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
       {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
     ScopedAltsPhaseCertifiedResult validCase index
       sourceAlts.toList sourceAlts.toList →
     (shadowFilterUnreachable sourceAlts).size ≠ 1 →
@@ -3907,11 +4065,203 @@ pipeline. Unlike the singleton-only folded law, this covers unchanged,
 partially folded retained, and fully folded singleton tables uniformly. -/
 structure ScopedCasePreparedCertifiedAlphaLaws
     (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
-  prepared : ∀ {index : ScopeIndex}
-      {sourceAlts : Array (LCNF.Alt .impure)},
+  prepared : ∀ {index : ScopeIndex} {typeName : Name} {resultType : Expr}
+      {discr : FVarId} {sourceAlts : Array (LCNF.Alt .impure)},
+    ScopedCodeTargetCertificate validCase index
+      (.cases (.mk typeName resultType discr sourceAlts)) →
     ScopedAltsPhaseCertifiedResult validCase index
       sourceAlts.toList sourceAlts.toList →
     Nonempty (ScopedFoldedAlphaEvidence index sourceAlts)
+
+/-- The transparent preparation algorithm satisfies the unified certified
+alpha contract. Unchanged tables use pointwise endpoint alpha identities;
+genuine folds compare only a removed selected body with the occurrence-count
+representative, delegating that exact checker result to certified transport. -/
+theorem scopedCasePreparedCertifiedAlphaLaws_of_transport
+    (transport : ScopedFoldAlphaCertifiedTransportLaws validCase) :
+    ScopedCasePreparedCertifiedAlphaLaws validCase where
+  prepared := by
+    intro index typeName resultType discr sourceAlts root alternatives
+    let filtered : Array (LCNF.Alt .impure) :=
+      shadowFilterUnreachable sourceAlts
+    have sourceNormalization :
+        CaseTableNormalizationInvariant sourceAlts := by
+      cases root.side with
+      | cases leftDiscrScoped rightDiscrScoped leftNormalization
+          rightNormalization ctorBranches defaultBranches =>
+        exact leftNormalization
+    have filteredNormalization :
+        CaseTableNormalizationInvariant filtered := by
+      exact {
+        deterministic := by
+          apply caseTableDeterministic_of_subset
+            sourceNormalization.deterministic
+          intro alt member
+          exact Array.mem_def.mp
+            (Array.mem_of_mem_filter (Array.mem_def.mpr member))
+      }
+    have filteredForward : AltsRelated
+        (leftJoins := index.sourceJoins) (rightJoins := index.targetJoins)
+        index.forwardRho index.sourceScope index.targetScope
+        filtered.toList filtered.toList := by
+      dsimp [filtered]
+      rw [shadowFilterUnreachable_toList]
+      exact altsRelated_removeUnreachable
+        alternatives.forget.materialize.targetAlphaForward
+    have filteredBackward : AltsRelated
+        (leftJoins := index.targetJoins) (rightJoins := index.sourceJoins)
+        index.backwardRho index.targetScope index.sourceScope
+        filtered.toList filtered.toList := by
+      dsimp [filtered]
+      rw [shadowFilterUnreachable_toList]
+      exact altsRelated_removeUnreachable
+        alternatives.forget.materialize.targetAlphaBackward
+    by_cases unchanged : shadowAddDefaultAlt filtered = filtered
+    · exact ⟨{
+        middleAlts := filtered
+        sourceSelection := by
+          intro tag branch selected reachable
+          simpa [filtered] using
+            chooseAlt_shadowFilterUnreachable_of_selected selected reachable
+        folded := scopedAddDefaultSelectionEvidence_of_eq unchanged
+          filteredForward filteredBackward
+      }⟩
+    · have filteredLarge : 1 < filtered.size :=
+        one_lt_size_of_shadowAddDefaultAlt_ne unchanged
+      have filteredNonempty : filtered.size ≠ 0 := by omega
+      let representative : LCNF.Code .impure :=
+        (shadowGetMaxOccs filtered).1.getCode
+      have certificateOfMember : ∀ {alt : LCNF.Alt .impure},
+          alt ∈ filtered →
+          Nonempty (ScopedCodeTargetCertificate
+            validCase index alt.getCode) := by
+        intro alt member
+        have sourceMember : alt ∈ sourceAlts := by
+          change alt ∈ sourceAlts.filter _ at member
+          exact Array.mem_of_mem_filter member
+        exact alternatives.targetBodyCertificate_of_mem
+          (Array.mem_def.mp sourceMember)
+      have representativeCertificate :
+          ScopedCodeTargetCertificate validCase index representative := by
+        rcases certificateOfMember
+            (shadowGetMaxOccs_fst_mem filteredNonempty) with ⟨certificate⟩
+        simpa [representative] using certificate
+      have noDefault : ∀ code, ¬HasDefaultAlt code filtered.toList := by
+        intro code hasDefault
+        have found : filtered.any (· matches .default ..) = true := by
+          apply Array.any_eq_true'.mpr
+          exact ⟨.default code, Array.mem_def.mpr hasDefault, rfl⟩
+        exact unchanged (shadowAddDefaultAlt_eq_of_hasDefault found)
+      have foldedEq : shadowAddDefaultAlt filtered =
+          (filtered.filter fun alt =>
+            !alt.getCode.alphaEqv representative).push
+              (.default representative) := by
+        simpa [representative] using
+          shadowAddDefaultAlt_eq_fold_of_ne unchanged
+      have relatedAt : ∀ tag,
+          CaseSelectionRelated
+              (leftJoins := index.sourceJoins)
+              (rightJoins := index.targetJoins)
+              index.forwardRho index.sourceScope index.targetScope
+              (chooseAlt tag (shadowAddDefaultMiddle filtered).toList)
+              (chooseAlt tag (shadowAddDefaultAlt filtered).toList) ∧
+            CaseSelectionRelated
+              (leftJoins := index.targetJoins)
+              (rightJoins := index.sourceJoins)
+              index.backwardRho index.targetScope index.sourceScope
+              (chooseAlt tag (shadowAddDefaultAlt filtered).toList)
+              (chooseAlt tag (shadowAddDefaultMiddle filtered).toList) := by
+        intro tag
+        cases selected : chooseAlt tag filtered.toList with
+        | none =>
+            have middleSelected : chooseAlt tag
+                (shadowAddDefaultMiddle filtered).toList =
+                  some representative := by
+              simpa [shadowAddDefaultMiddle, representative] using
+                chooseAlt_append_default_of_none
+                  (body := representative) selected
+            have keptNone := chooseAlt_filter_eq_none_of_none
+              (predicate := fun body =>
+                !body.alphaEqv representative) selected
+            have targetSelected : chooseAlt tag
+                (shadowAddDefaultAlt filtered).toList =
+                  some representative := by
+              rw [foldedEq]
+              simpa [Array.toList_push] using
+                chooseAlt_append_default_of_none
+                  (body := representative) keptNone
+            rw [middleSelected, targetSelected]
+            exact ⟨.some representativeCertificate.alpha.forward,
+              .some representativeCertificate.alpha.backward⟩
+        | some branch =>
+            have middleSelected : chooseAlt tag
+                (shadowAddDefaultMiddle filtered).toList = some branch :=
+              chooseAlt_shadowAddDefaultMiddle_of_selected selected
+            rcases exists_mem_getCode_eq_of_chooseAlt selected with
+              ⟨alt, member, bodyEq⟩
+            rcases certificateOfMember (alt := alt)
+                (Array.mem_def.mpr member) with ⟨rawBranchCertificate⟩
+            have branchCertificate :
+                ScopedCodeTargetCertificate validCase index branch := by
+              simpa [bodyEq] using rawBranchCertificate
+            cases accepted : branch.alphaEqv representative with
+            | false =>
+                have keep : (!branch.alphaEqv representative) = true := by
+                  simp [accepted]
+                have keptSelected := chooseAlt_filter_of_selected_of_keep
+                  (predicate := fun body =>
+                    !body.alphaEqv representative)
+                  filteredNormalization selected keep
+                have targetSelected : chooseAlt tag
+                    (shadowAddDefaultAlt filtered).toList = some branch := by
+                  rw [foldedEq]
+                  simpa [Array.toList_push] using
+                    chooseAlt_append_default_of_selected
+                      (body := representative) keptSelected
+                rw [middleSelected, targetSelected]
+                exact ⟨.some branchCertificate.alpha.forward,
+                  .some branchCertificate.alpha.backward⟩
+            | true =>
+                have drop : (!branch.alphaEqv representative) = false := by
+                  simp [accepted]
+                have targetSelected : chooseAlt tag
+                    (shadowAddDefaultAlt filtered).toList =
+                      some representative := by
+                  rw [foldedEq]
+                  exact chooseAlt_filter_push_default_of_selected_of_drop
+                    (predicate := fun body =>
+                      !body.alphaEqv representative)
+                    filteredNormalization noDefault selected drop
+                rcases transport.related branchCertificate
+                    representativeCertificate accepted with
+                  ⟨forward, backward⟩
+                rw [middleSelected, targetSelected]
+                exact ⟨.some forward, .some backward⟩
+      exact ⟨{
+        middleAlts := shadowAddDefaultMiddle filtered
+        sourceSelection := by
+          intro tag branch selected reachable
+          have filteredSelected : chooseAlt tag filtered.toList =
+              some branch := by
+            simpa [filtered] using
+              chooseAlt_shadowFilterUnreachable_of_selected selected reachable
+          exact chooseAlt_shadowAddDefaultMiddle_of_selected filteredSelected
+        folded := {
+          forward := fun tag => (relatedAt tag).1
+          backward := fun tag => (relatedAt tag).2
+        }
+      }⟩
+
+/-- Preferred preparation-alpha constructor. The executable folding proof is
+fully internal; callers supply only endpoint runtime-type compatibility and
+the repository's single audited upstream-alpha bridge. -/
+theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (runtimeTypes : ScopedFoldRuntimeTypeLaws validCase) :
+    ScopedCasePreparedCertifiedAlphaLaws validCase :=
+  scopedCasePreparedCertifiedAlphaLaws_of_transport
+    (scopedFoldAlphaCertifiedTransportLaws_of_upstreamBridge
+      bridge runtimeTypes)
 
 /-- Lift the pure alpha boundary to the fold presentation consumed by the
 three-phase constructor. No additional semantic premise is introduced. -/
@@ -3928,7 +4278,7 @@ theorem scopedCaseFoldedCertifiedAlphaLaws_of_addDefaultAlpha
     (alpha : ScopedCaseAddDefaultCertifiedAlphaLaws validCase) :
     ScopedCaseFoldedCertifiedAlphaLaws validCase where
   folded := by
-    intro index typeName resultType discr sourceAlts alternatives
+    intro index typeName resultType discr sourceAlts root alternatives
       filteredNotSingleton preparedSingleton
     exact ⟨scopedFoldedAlphaEvidence_of_addDefault
       (alpha.folded alternatives filteredNotSingleton preparedSingleton)⟩
@@ -3939,9 +4289,9 @@ theorem scopedCaseFoldedCertifiedAlphaLaws_of_prepared
     (prepared : ScopedCasePreparedCertifiedAlphaLaws validCase) :
     ScopedCaseFoldedCertifiedAlphaLaws validCase where
   folded := by
-    intro index typeName resultType discr sourceAlts alternatives
+    intro index typeName resultType discr sourceAlts root alternatives
       filteredNotSingleton preparedSingleton
-    exact prepared.prepared alternatives
+    exact prepared.prepared root alternatives
 
 /-- Assemble singleton phase classification from the generic direct path and
 the remaining fold-created singleton contract. -/
@@ -4031,7 +4381,7 @@ theorem scopedCaseCertifiedRetainedPhaseLaws_of_prepared
   retained := by
     intro index typeName resultType discr sourceAlts root alternatives
       nonempty nonsingleton
-    rcases prepared.prepared alternatives with ⟨preparation⟩
+    rcases prepared.prepared root alternatives with ⟨preparation⟩
     have certificate := scopedPreparedCaseTargetCertificate root alternatives
     refine ⟨{
       phase := {
@@ -4175,7 +4525,7 @@ theorem scopedCaseFoldedCertifiedSingletonPhaseLaws_of_reachableSelectionAndAlph
       shadowFilterUnreachable sourceAlts
     let prepared : Array (LCNF.Alt .impure) :=
       shadowAddDefaultAlt filtered
-    rcases foldAlpha.folded alternatives filteredNotSingleton
+    rcases foldAlpha.folded root alternatives filteredNotSingleton
         preparedSingleton with ⟨alphaEvidence⟩
     rcases alternatives.preparedSingletonCertificate preparedSingleton with
       ⟨targetCertificate⟩
@@ -4209,7 +4559,7 @@ theorem scopedCaseFoldedCertifiedSingletonPhaseLaws_of_reachableSelectionAndAlph
       rw [selected, selectedMiddle]
       exact .some branchRefl
     · apply CodeRelated.cases
-      · have discrRelated := codeRelated_cases_discr root.forward
+      · have discrRelated := codeRelated_cases_discr root.alpha.forward
         change ScopedFVarRelated index.forwardRho index.sourceScope
           index.targetScope discr discr at discrRelated
         change ScopedFVarRelated index.forwardRho index.sourceScope
@@ -4217,7 +4567,7 @@ theorem scopedCaseFoldedCertifiedSingletonPhaseLaws_of_reachableSelectionAndAlph
         exact discrRelated
       · exact alphaEvidence.folded.forward
     · apply CodeRelated.cases
-      · have discrRelated := codeRelated_cases_discr root.backward
+      · have discrRelated := codeRelated_cases_discr root.alpha.backward
         change ScopedFVarRelated index.backwardRho index.targetScope
           index.sourceScope discr discr at discrRelated
         change ScopedFVarRelated index.backwardRho index.targetScope
@@ -4396,7 +4746,7 @@ theorem scopedCaseCertifiedPhaseShapeLaws_of_components
     }⟩
   singleton := by
     intro index typeName resultType discr sourceAlts root alternatives singleton
-    exact singletonPhases.singleton root.alpha alternatives singleton
+    exact singletonPhases.singleton root alternatives singleton
   retained := by
     intro index typeName resultType discr sourceAlts root alternatives
       nonempty nonsingleton
@@ -6049,6 +6399,23 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared
       validCase index source target) :=
   shadowCode_scopedPhaseEndpointCertifiedTree
     (scopedLocalCaseCertifiedPhaseLaws_of_prepared selection prepared)
+    certificates run
+
+/-- Fully assembled certified traversal theorem. After the executable run and
+source certificate tree, the only semantic inputs are reachable-tag
+selection, runtime-type compatibility for accepted fold pairs, and the one
+audited upstream-alpha bridge. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (runtimeTypes : ScopedFoldRuntimeTypeLaws validCase)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared selection
+    (scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
+      bridge runtimeTypes)
     certificates run
 
 theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :

@@ -69,6 +69,33 @@ def alphaFoldCode : LCNF.Code .impure :=
 def alphaFoldExpected : LCNF.Code .impure :=
   .cases alphaFoldAfterCases
 
+/-- Partial-fold regression: the transparent preparation keeps one distinct
+constructor and replaces the two alpha-equivalent constructors by a default,
+so this exercises the retained-table branch rather than singleton collapse. -/
+theorem alphaFoldPrepared_size_eq_two :
+    (shadowPrepareAlts alphaFoldBeforeCases).size = 2 := by
+  native_decide
+
+theorem alphaFoldPrepared_is_retained :
+    (shadowPrepareAlts alphaFoldBeforeCases).size ≠ 0 ∧
+      (shadowPrepareAlts alphaFoldBeforeCases).size ≠ 1 := by
+  native_decide
+
+theorem alphaFoldDefaultFold_changed :
+    shadowAddDefaultAlt
+        (shadowFilterUnreachable alphaFoldBeforeCases.alts) ≠
+      shadowFilterUnreachable alphaFoldBeforeCases.alts := by
+  intro unchanged
+  have preparedSize :
+      (shadowAddDefaultAlt
+        (shadowFilterUnreachable alphaFoldBeforeCases.alts)).size = 2 := by
+    native_decide
+  have filteredSize :
+      (shadowFilterUnreachable alphaFoldBeforeCases.alts).size = 3 := by
+    native_decide
+  rw [unchanged, filteredSize] at preparedSize
+  omega
+
 /-- Two alpha-equivalent arms exercise the path where `addDefaultAlt` first
 folds the table to one default and `simplifyCases` then eliminates that
 singleton in the same local rewrite. -/

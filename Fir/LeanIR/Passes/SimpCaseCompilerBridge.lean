@@ -251,6 +251,42 @@ theorem shadowAddDefaultAlt_eq_of_hasDefault
   · exact shadowAddDefaultAlt_eq_of_small small
   · simp [shadowAddDefaultAlt, small, hasDefault]
 
+/-- If default folding changes the table, the output is exactly the filtered
+table with the occurrence-count representative reintroduced as default. -/
+theorem shadowAddDefaultAlt_eq_fold_of_ne
+    (changed : shadowAddDefaultAlt alts ≠ alts) :
+    shadowAddDefaultAlt alts =
+      (alts.filter fun alt =>
+        !alt.getCode.alphaEqv (shadowGetMaxOccs alts).1.getCode).push
+          (.default (shadowGetMaxOccs alts).1.getCode) := by
+  unfold shadowAddDefaultAlt at changed ⊢
+  split
+  · simp_all
+  · rename_i active
+    rcases selected : shadowGetMaxOccs alts with ⟨max, occurrences⟩
+    simp only [selected] at changed ⊢
+    split
+    · simp_all
+    · rfl
+
+/-- A changed fold has no pre-existing default arm. -/
+theorem shadowAddDefaultAlt_noDefault_of_ne
+    (changed : shadowAddDefaultAlt alts ≠ alts) :
+    alts.any (· matches .default ..) = false := by
+  cases found : alts.any (· matches .default ..) with
+  | false => rfl
+  | true => exact False.elim (changed
+      (shadowAddDefaultAlt_eq_of_hasDefault found))
+
+/-- A changed fold necessarily starts from at least two alternatives. -/
+theorem one_lt_size_of_shadowAddDefaultAlt_ne
+    (changed : shadowAddDefaultAlt alts ≠ alts) :
+    1 < alts.size := by
+  have notSmall : ¬ alts.size ≤ 1 := by
+    intro small
+    exact changed (shadowAddDefaultAlt_eq_of_small small)
+  omega
+
 /-- Default folding never erases the last surviving alternative. In the fold
 branch the chosen representative is reintroduced as a default alternative. -/
 theorem shadowAddDefaultAlt_size_ne_zero

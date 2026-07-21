@@ -287,7 +287,18 @@ derive the first structural leg; the same prepared-alpha witness then feeds
 both certified singleton classification and retained reconstruction.
 `shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared` therefore needs
 only reachable selection, this one generalized preparation law, the source
-certificate tree, and the executable run. The remaining semantic frontier is
-to derive that generalized law from the transparent default-fold algorithm,
-the endpoint runtime-type compatibility premise, and the single audited
-upstream-alpha bridge.
+certificate tree, and the executable run.
+
+That generalized law is now derived. The transparent proof splits only on
+whether `shadowAddDefaultAlt` changes the filtered table. The unchanged path
+uses pointwise endpoint alpha identities. In a genuine fold, normalized
+selector determinism proves that a retained selected body stays selected,
+while a removed selected body falls through to the occurrence-count
+representative; only that latter path invokes certified alpha transport. This
+covers partial retained folds and fold-created singletons with the same
+witness. `shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge` now
+assembles the arbitrary-depth theorem directly from reachable selection, the
+source certificate tree, the executable run, `ScopedFoldRuntimeTypeLaws`, and
+the single audited upstream bridge. The remaining semantic frontier is thus
+the exact cross-code runtime-type compatibility law itself, not any part of
+the table algorithm or phase reconstruction.
