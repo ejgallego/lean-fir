@@ -2015,6 +2015,19 @@ closure gap is structural assembly of all projected captures, new arguments,
 candidate branches, and the compiler's complete fold; recursive callees must
 still provide the usual well-founded family of body proofs.
 
+W6.6n closes lazy caching's surrounding control and semantic judgment over the
+concrete host. Host-polymorphic Talos rules now prove both populated-flag hits
+and empty-flag misses, including zero-parameter/result block fallthrough and
+the subsequent cached-value load. Witness-indexed `LazyLetStepSimulates` and
+`LazyMissBodySimulates` judgments connect the interpreter's exact three-step
+hit/four-step miss executions to target stores and locals; the recursive
+`CodeWP` rule connects either path to compiler/adapter output and its
+continuation. Together with W6.6g, the typed concrete `cacheSet` call and both
+physical global writes are available inside the miss obligation. The
+remaining cache work is to assemble the declaration call, concrete result
+relation, cache suffix, and miss-block exit into one proof, then switch the
+artifact host.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

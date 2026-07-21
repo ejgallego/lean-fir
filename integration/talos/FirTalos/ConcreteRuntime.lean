@@ -1572,6 +1572,94 @@ theorem codeWP_callLet
       continuationAdapted, initialRelated, ?_⟩
   exact stepWP targetRest Q tail continuedWP
 
+/-- Witness-indexed semantic boundary for either lazy zero-argument cache
+path over the concrete host. -/
+def LazyLetStepSimulates (path : LazyCachePath) (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat)
+    (witness nextWitness : RefinementWitness) : Prop :=
+  SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion Host)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+/-- Miss-only block obligation. Direct-call and `cacheSet` rules discharge it
+without reopening the surrounding flag conditional. -/
+def LazyMissBodySimulates
+    (module : Wasm.Module) (hostEnv : Wasm.HostEnv Host)
+    (missBody : Wasm.Program) (valueIndex resultIndex : Nat)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals nextLocals : Wasm.Locals) : Prop :=
+  ∀ (rest : Wasm.Program) (Q : Wasm.Assertion Host)
+      (tail : List Wasm.Value),
+    Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+    Wasm.wp module missBody
+      (fun continuation => match continuation with
+        | .Fallthrough bodyStore bodyLocals =>
+            Wasm.wp module
+              (.globalGet valueIndex :: .localSet resultIndex :: rest)
+              Q bodyStore { bodyLocals with values := tail } hostEnv
+        | .Break 0 bodyStore bodyLocals =>
+            Wasm.wp module
+              (.globalGet valueIndex :: .localSet resultIndex :: rest)
+              Q bodyStore { bodyLocals with values := tail } hostEnv
+        | .Break (level + 1) bodyStore bodyLocals =>
+            Q (.Break level bodyStore bodyLocals)
+        | other => Q other)
+      targetStore { targetLocals with values := tail } hostEnv
+
+/-- Recursive concrete `CodeWP` rule shared by lazy hit and miss paths. -/
+theorem codeWP_lazyLet
+    {path : LazyCachePath} {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step : LazyLetStepSimulates path context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+      sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+      witness nextWitness)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        targetRest nextStore nextLocals nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals witness tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
 /-- A successful concrete tag read is the exact executable realization of the
 semantic `getTag` result whenever the case tag satisfies the lowerer's checked
 i32 range gate. -/
@@ -1983,6 +2071,124 @@ theorem wp_cacheSet_miss_suffix
     { locals with values := tail } env
   rw [Wasm.wp_const_cons, Wasm.wp_globalSet_cons, hFlag]
   exact continued
+
+/-- Concrete-host lazy-cache hit: skip the miss block and load the populated
+value global without changing host or Wasm state. -/
+theorem wp_lazy_cache_hit
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {missBody rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {flagIndex valueIndex : Nat} {cached : Wasm.Value}
+    {tail : List Wasm.Value}
+    (hFlag : store.globals.globals[flagIndex]? = some (.i32 1))
+    (hValue : store.globals.globals[valueIndex]? = some cached)
+    (continued :
+      Wasm.wp module rest Q store { locals with values := cached :: tail } env) :
+    Wasm.wp module
+      (.globalGet flagIndex :: .iff 0 0 [] missBody ::
+        .globalGet valueIndex :: rest)
+      Q store { locals with values := tail } env := by
+  rw [Wasm.wp_globalGet_cons, hFlag]
+  apply Wasm.wp_iff_cons (c := 1) (vs := tail) rfl
+  simp only [if_pos (by decide : (1 : UInt32) ≠ 0)]
+  simp [hValue, continued]
+
+/-- Concrete-host lazy-cache miss: select a supplied proof for the declaration
+call/cache-write block, then load the newly populated value global. -/
+theorem wp_lazy_cache_miss
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {missBody rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {flagIndex valueIndex : Nat} {tail : List Wasm.Value}
+    (hFlag : store.globals.globals[flagIndex]? = some (.i32 0))
+    (hBody :
+      Wasm.wp module missBody
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module (.globalGet valueIndex :: rest) Q nextStore
+                { nextLocals with values := tail } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module (.globalGet valueIndex :: rest) Q nextStore
+                { nextLocals with values := tail } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := tail } env) :
+    Wasm.wp module
+      (.globalGet flagIndex :: .iff 0 0 [] missBody ::
+        .globalGet valueIndex :: rest)
+      Q store { locals with values := tail } env := by
+  rw [Wasm.wp_globalGet_cons, hFlag]
+  apply Wasm.wp_iff_cons (c := 0) (vs := tail) rfl
+  convert hBody using 1
+  · simp
+  · funext continuation
+    cases continuation with
+    | Break level nextStore nextLocals => cases level <;> rfl
+    | _ => rfl
+
+theorem lazyLetStepSimulates_hit
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {missBody : Wasm.Program} {flagIndex valueIndex resultIndex : Nat}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {cached : Wasm.Value}
+    {witness nextWitness : RefinementWitness}
+    (sourceStep : SourceLazyLetResult .hit context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (hFlag : targetStore.globals.globals[flagIndex]? = some (.i32 1))
+    (hValue : targetStore.globals.globals[valueIndex]? = some cached)
+    (hSet : targetLocals.set? resultIndex cached = some nextLocals)
+    (nextStoreEq : nextStore = targetStore)
+    (nextStateRelated : StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness) :
+    LazyLetStepSimulates .hit context sourceFunction module hostEnv externals
+      decl continuation
+      [.globalGet flagIndex, .iff 0 0 [] missBody, .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+      targetLocals nextLocals resultIndex witness nextWitness := by
+  refine ⟨sourceStep, stateRelated, nextStateRelated, ?_⟩
+  intro rest Q tail continued
+  subst nextStore
+  apply wp_lazy_cache_hit hFlag hValue
+  apply wp_localSet_of_set hSet
+  exact continued
+
+theorem lazyLetStepSimulates_miss
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {missBody : Wasm.Program} {flagIndex valueIndex resultIndex : Nat}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {witness nextWitness : RefinementWitness}
+    (sourceStep : SourceLazyLetResult .miss context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (hFlag : targetStore.globals.globals[flagIndex]? = some (.i32 0))
+    (missStep : LazyMissBodySimulates module hostEnv missBody valueIndex
+      resultIndex targetStore nextStore targetLocals nextLocals)
+    (nextStateRelated : StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness) :
+    LazyLetStepSimulates .miss context sourceFunction module hostEnv externals
+      decl continuation
+      [.globalGet flagIndex, .iff 0 0 [] missBody, .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+      targetLocals nextLocals resultIndex witness nextWitness := by
+  refine ⟨sourceStep, stateRelated, nextStateRelated, ?_⟩
+  intro rest Q tail continued
+  apply wp_lazy_cache_miss (rest := .localSet resultIndex :: rest) hFlag
+  convert missStep rest Q tail continued using 1
 
 /-- Concrete-host WP for the arbitrary-arity partial-application allocation
 and destination-local write emitted by the lowerer. -/
