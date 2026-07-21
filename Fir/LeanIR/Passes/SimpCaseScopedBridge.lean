@@ -962,6 +962,121 @@ theorem shadowCode_scopedRelated_of_caseKernel
               subst target
               exact laws.del (ih continuationRun)
 
+/-- Scope-insensitive traversal relation expressing preservation of the
+unary impure-runtime-type invariant. Keeping this separate from endpoint
+certificates lets existing structural and alpha APIs remain stable. -/
+def RuntimeTypesCanonicalPreserved : ScopedCodeRelation :=
+  fun _ source target =>
+    CodeRuntimeTypesCanonical source → CodeRuntimeTypesCanonical target
+
+theorem runtimeTypesCanonicalTraversalLaws :
+    ScopedTraversalLaws RuntimeTypesCanonicalPreserved where
+  letE related canonical := by
+    cases canonical with
+    | letE declarationTypes continuation =>
+        exact .letE declarationTypes (related continuation)
+  jp body continuation canonical := by
+    cases canonical with
+    | jp sourceBody sourceContinuation =>
+        exact .jp (body sourceBody) (continuation sourceContinuation)
+  jmp _ _ _ _ := .jmp
+  ret _ _ _ := .ret
+  unreach _ _ _ := .unreach
+  oset related canonical := by
+    cases canonical with
+    | oset continuation => exact .oset (related continuation)
+  uset related canonical := by
+    cases canonical with
+    | uset continuation => exact .uset (related continuation)
+  sset related canonical := by
+    cases canonical with
+    | sset continuation => exact .sset (related continuation)
+  setTag related canonical := by
+    cases canonical with
+    | setTag continuation => exact .setTag (related continuation)
+  inc related canonical := by
+    cases canonical with
+    | inc continuation => exact .inc (related continuation)
+  dec related canonical := by
+    cases canonical with
+    | dec continuation => exact .dec (related continuation)
+  del related canonical := by
+    cases canonical with
+    | del continuation => exact .del (related continuation)
+
+/-- Pointwise recursive preservation transfers complete source-branch
+canonicality to every transformed alternative body. -/
+theorem ScopedAltsRelated.targetRuntimeTypesCanonical
+    (related : ScopedAltsRelated RuntimeTypesCanonicalPreserved
+      index source target)
+    (sourceCanonical : ∀ alt, alt ∈ source →
+      CodeRuntimeTypesCanonical alt.getCode) :
+    ∀ alt, alt ∈ target → CodeRuntimeTypesCanonical alt.getCode := by
+  induction related with
+  | nil => simp
+  | cons head rest ih =>
+      intro alt member
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · cases head with
+        | ctor body => exact body (sourceCanonical _ List.mem_cons_self)
+        | default body => exact body (sourceCanonical _ List.mem_cons_self)
+      · exact ih
+          (fun sourceAlt sourceMember =>
+            sourceCanonical sourceAlt
+              (List.mem_cons_of_mem _ sourceMember))
+          alt member
+
+/-- The nonrecursive case simplifier preserves canonical runtime types:
+filtering and default folding retain existing bodies, while empty and
+singleton tables only remove syntax around such bodies. -/
+theorem runtimeTypesCanonicalCaseKernelLaws :
+    ScopedCaseKernelLaws RuntimeTypesCanonicalPreserved where
+  simplify := by
+    intro fuel index typeName resultType discr sourceAlts targetAlts
+      altsRun related sourceCanonical
+    cases sourceCanonical with
+    | cases sourceBranches =>
+        have targetBranches : ∀ alt, alt ∈ targetAlts →
+            CodeRuntimeTypesCanonical alt.getCode :=
+          related.targetRuntimeTypesCanonical sourceBranches
+        let targetCases : LCNF.Cases .impure :=
+          .mk typeName resultType discr targetAlts.toArray
+        have preparedBranches : ∀ alt, alt ∈ shadowPrepareAlts targetCases →
+            CodeRuntimeTypesCanonical alt.getCode := by
+          intro alt member
+          rcases exists_source_alt_of_mem_shadowPrepareAlts member with
+            ⟨sourceAlt, sourceMember, bodyEq⟩
+          simpa [bodyEq] using targetBranches sourceAlt
+            (Array.mem_def.mp sourceMember)
+        by_cases empty : (shadowPrepareAlts targetCases).size = 0
+        · rw [shadowSimplifyCases_eq_unreach empty]
+          exact .unreach
+        · by_cases singleton : (shadowPrepareAlts targetCases).size = 1
+          · rw [shadowSimplifyCases_eq_singleton singleton]
+            rcases exists_source_alt_of_shadowPrepareAlts_singleton singleton with
+              ⟨sourceAlt, sourceMember, bodyEq⟩
+            simpa [bodyEq] using targetBranches sourceAlt
+              (Array.mem_def.mp sourceMember)
+          · rw [shadowSimplifyCases_eq_cases empty singleton]
+            exact .cases (by
+              intro alt member
+              exact preparedBranches alt (Array.mem_def.mpr (by
+                simpa [targetCases, shadowPrepareAlts, LCNF.Cases.updateAlts,
+                  LCNF.Cases.alts]
+                  using member)))
+
+/-- Every successful recursive shadow traversal preserves the complete
+runtime-type canonicality tree, including branches later removed or folded by
+case simplification. -/
+theorem shadowCode_runtimeTypesCanonical
+    (canonical : CodeRuntimeTypesCanonical source)
+    (run : shadowCode? fuel source = some target) :
+    CodeRuntimeTypesCanonical target :=
+  shadowCode_scopedRelated_of_caseKernel
+    (index := ScopeIndex.empty) runtimeTypesCanonicalTraversalLaws
+      runtimeTypesCanonicalCaseKernelLaws run canonical
+
 /-- The old recursive boundary implies the local kernel law. This direction
 does not use the pointwise branch proof; the boundary already hides it. -/
 theorem scopedCaseKernelLaws_of_boundary

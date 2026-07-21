@@ -60,6 +60,49 @@ inductive CodeNormalizationTree : LCNF.Code .impure → Prop where
       (continuationTree : CodeNormalizationTree rest) :
       CodeNormalizationTree (.del object rest)
 
+/-- Every runtime-observed type annotation in an impure-code tree belongs to
+the finite canonical universe produced by LCNF lowering. Only `let`
+declarations contribute such annotations; the remaining constructors recurse
+through every code position so no hidden branch can escape the invariant. -/
+inductive CodeRuntimeTypesCanonical : LCNF.Code .impure → Prop where
+  | letE
+      (declarationTypes : LetDeclRuntimeTypesCanonical declaration)
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.let declaration rest)
+  | jp
+      (body : CodeRuntimeTypesCanonical declaration.value)
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.jp declaration rest)
+  | jmp : CodeRuntimeTypesCanonical (.jmp target args)
+  | cases
+      (branches : ∀ alt, alt ∈ cases.alts.toList →
+        CodeRuntimeTypesCanonical alt.getCode) :
+      CodeRuntimeTypesCanonical (.cases cases)
+  | ret : CodeRuntimeTypesCanonical (.return fvarId)
+  | unreach : CodeRuntimeTypesCanonical (.unreach type)
+  | oset
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.oset object index field rest)
+  | uset
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.uset object index field rest)
+  | sset
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.sset object width offset field type rest)
+  | setTag
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.setTag object tag rest)
+  | inc
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.inc object amount check persistent rest)
+  | dec
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical
+        (.dec object amount check persistent objects rest)
+  | del
+      (continuation : CodeRuntimeTypesCanonical rest) :
+      CodeRuntimeTypesCanonical (.del object rest)
+
 /-- Determinism turns constructor membership into the concrete constructor
 lookup used by `chooseAlt`. -/
 theorem findCtorAlt_eq_some_of_has
