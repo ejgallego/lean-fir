@@ -58,18 +58,59 @@ def fixtureDecl (name : Name) (code : LCNF.Code .impure) :
 
 def checkActualElimDead (name : Name) (before expected : LCNF.Code .impure) :
     CoreM Unit := do
+  let some (shadow, _) := shadowCode? 64 {} before |
+    throwError "elimDeadVars shadow fixture {name} exhausted its fuel"
+  unless shadow == expected do
+    throwError "elimDeadVars shadow fixture {name} did not produce the expected code"
   let actual ← LCNF.CompilerM.run
     (fixtureDecl name before).elimDeadVars (phase := .impure)
   let .code actualCode := actual.value |
     throwError "elimDeadVars fixture {name} ceased to be code"
-  unless actualCode == expected do
-    throwError "elimDeadVars fixture {name} did not produce the expected code"
+  unless actualCode == shadow do
+    throwError "elimDeadVars fixture {name} disagreed with the transparent shadow"
+
+def traversalCodes : Array (LCNF.Code .impure) := #[
+  literalCode,
+  erasedCode,
+  ctorProjectionCode,
+  caseCode,
+  directCallCode,
+  closureCallCode,
+  joinCode,
+  scalarBoxCode,
+  mutationCode,
+  usizeProjectionCode,
+  objectMutationCode,
+  tagMutationCode,
+  defaultCaseCode,
+  rcCode,
+  persistentRcCode,
+  isSharedCaseCode,
+  resetReuseCode,
+  sharedResetCode,
+  deletedCode,
+  externalCode,
+  .unreach objType
+]
+
+def traversalCorpus : ImpureProgram :=
+  { decls := traversalCodes.mapIdx fun index code =>
+      fixtureDecl (Name.mkSimple s!"elimDeadShadow{index}") code }
+
+def checkActualAgreement (fuel : Nat) (program : ImpureProgram) : CoreM Unit := do
+  let some shadow := shadowProgram? fuel program |
+    throwError "elimDeadVars program shadow exhausted its fuel"
+  let actual ← program.decls.mapM fun declaration =>
+    LCNF.CompilerM.run declaration.elimDeadVars (phase := .impure)
+  unless actual == shadow.decls do
+    throwError "elimDeadVars program disagreed with the transparent shadow"
 
 def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadNeutral neutralBefore neutralAfter
   checkActualElimDead `elimDeadUsed usedBefore usedBefore
   checkActualElimDead `elimDeadUnsafe unsafeBefore unsafeBefore
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
+  checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
   liftCoreM checkFixtures

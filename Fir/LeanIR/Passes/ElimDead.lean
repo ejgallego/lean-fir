@@ -25,6 +25,150 @@ def safeToElim : LCNF.LetValue .impure → Bool
   | .fap _ args => args.isEmpty
   | .fvar .. => false
 
+/-! ## Transparent backwards liveness traversal -/
+
+/-- SHA-256 of `Lean/Compiler/LCNF/ElimDead.lean` in Lean 4.32.0. -/
+def lean432ElimDeadSourceSha256 : String :=
+  "af1868ea62e059ce746a05bd96e78727c58d2b0f5a021b42c8149a949b900170"
+
+abbrev UsedLocals := FVarIdHashSet
+
+def collectArg (used : UsedLocals) (argument : LCNF.Arg pu) : UsedLocals :=
+  match argument with
+  | .fvar fvarId => used.insert fvarId
+  | .type _ _ | .erased => used
+
+def collectArgs (used : UsedLocals) (arguments : Array (LCNF.Arg pu)) :
+    UsedLocals :=
+  arguments.foldl (init := used) collectArg
+
+def collectLetValue (used : UsedLocals) (value : LCNF.LetValue pu) :
+    UsedLocals :=
+  match value with
+  | .erased | .lit .. => used
+  | .proj _ _ fvarId _ | .reset _ fvarId _ | .sproj _ _ fvarId _
+  | .uproj _ fvarId _ | .oproj _ fvarId _ | .box _ fvarId _
+  | .unbox fvarId _ | .isShared fvarId _ => used.insert fvarId
+  | .const _ _ arguments _ => collectArgs used arguments
+  | .fvar fvarId arguments | .reuse fvarId _ _ arguments _ =>
+      collectArgs (used.insert fvarId) arguments
+  | .fap _ arguments _ | .pap _ arguments _ | .ctor _ arguments _ =>
+      collectArgs used arguments
+
+abbrev ShadowResult := LCNF.Code .impure × UsedLocals
+
+/-- Fuel-indexed transparent copy of the output-producing part of Lean 4.32's
+private `Code.elimDead`.  The compiler's `eraseLetDecl`/`eraseFunDecl` calls
+update only its local context and are intentionally absent.  Every recursive
+code call consumes fuel; terminal nodes remain available at zero fuel. -/
+def shadowCode? : Nat → UsedLocals → LCNF.Code .impure → Option ShadowResult
+  | 0, used, .jmp target arguments =>
+      some (.jmp target arguments,
+        collectArgs (used.insert target) arguments)
+  | 0, used, .return result => some (.return result, used.insert result)
+  | 0, used, .unreach type => some (.unreach type, used)
+  | 0, _, _ => none
+  | fuel + 1, used, code =>
+      match code with
+      | .let declaration continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          if used.contains declaration.fvarId || !safeToElim declaration.value then
+            return (.let declaration continuation,
+              collectLetValue used declaration.value)
+          else
+            return (continuation, used)
+      | .jp (.mk fvarId binderName params type body) continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          if used.contains fvarId then
+            let (body, used) ← shadowCode? fuel used body
+            return (.jp (.mk fvarId binderName params type body) continuation,
+              used)
+          else
+            return (continuation, used)
+      | .cases (.mk typeName resultType discr alternatives) => do
+          let rec transformAlternatives
+              (used : UsedLocals) :
+              List (LCNF.Alt .impure) →
+                Option (List (LCNF.Alt .impure) × UsedLocals)
+            | [] => some ([], used)
+            | alternative :: rest => do
+                let transformed :
+                    Option (LCNF.Alt .impure × UsedLocals) :=
+                  match alternative with
+                  | .ctorAlt info body => do
+                      let (body, used) ← shadowCode? fuel used body
+                      return ((.ctorAlt info body : LCNF.Alt .impure), used)
+                  | .default body => do
+                      let (body, used) ← shadowCode? fuel used body
+                      return ((.default body : LCNF.Alt .impure), used)
+                  | .alt _ _ _ impossible => nomatch impossible
+                let (alternative, used) ← transformed
+                let (rest, used) ← transformAlternatives used rest
+                return (alternative :: rest, used)
+          let (alternatives, used) ←
+            transformAlternatives used alternatives.toList
+          return (.cases (.mk typeName resultType discr alternatives.toArray),
+            used.insert discr)
+      | .jmp target arguments =>
+          some (.jmp target arguments,
+            collectArgs (used.insert target) arguments)
+      | .return result => some (.return result, used.insert result)
+      | .unreach type => some (.unreach type, used)
+      | .oset object index field continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          if used.contains object then
+            return (.oset object index field continuation,
+              collectArg used field)
+          else
+            return (continuation, used)
+      | .uset object index field continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          if used.contains object then
+            return (.uset object index field continuation, used.insert field)
+          else
+            return (continuation, used)
+      | .sset object width offset field type continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          if used.contains object then
+            return (.sset object width offset field type continuation,
+              used.insert field)
+          else
+            return (continuation, used)
+      | .setTag object tag continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          return (.setTag object tag continuation, used.insert object)
+      | .inc object amount check persistent continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          return (.inc object amount check persistent continuation,
+            used.insert object)
+      | .dec object amount check persistent objects continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          return (.dec object amount check persistent objects continuation,
+            used.insert object)
+      | .del object continuation => do
+          let (continuation, used) ← shadowCode? fuel used continuation
+          return (.del object continuation, used.insert object)
+      | .fun _ _ impossible => nomatch impossible
+
+def shadowDecl? (fuel : Nat) (declaration : LCNF.Decl .impure) :
+    Option (LCNF.Decl .impure) :=
+  match declaration.value with
+  | .extern _ => some declaration
+  | .code code => do
+      let (code, _) ← shadowCode? fuel {} code
+      return { declaration with value := .code code }
+
+def shadowDecls? (fuel : Nat) :
+    List (LCNF.Decl .impure) → Option (List (LCNF.Decl .impure))
+  | [] => some []
+  | declaration :: rest => do
+      return (← shadowDecl? fuel declaration) :: (← shadowDecls? fuel rest)
+
+def shadowProgram? (fuel : Nat) (program : ImpureProgram) :
+    Option ImpureProgram := do
+  let declarations ← shadowDecls? fuel program.decls.toList
+  return { decls := declarations.toArray }
+
 /-- State-indexed semantic kernel for an eliminable value whose evaluation is
 successful, returns an ordinary value, and leaves the runtime unchanged.  This
 is the exact subset compatible with FIR's current raw-observation equality. -/
