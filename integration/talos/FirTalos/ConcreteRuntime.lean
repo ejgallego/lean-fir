@@ -346,6 +346,31 @@ theorem getTagFn_satisfies_contract (initial args) :
     getTagContract initial args (getTagFn.invoke initial args) := by
   rfl
 
+/-- Executable concrete sharing observation. The returned UInt8 is represented
+directly in an i32 lane, matching Lean 4.32's final-impure ABI. -/
+def isSharedStep (store : Wasm.Store Host) (args : List Wasm.Value) :
+    Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match readIsShared store.host.runtime.heap (Word32.ofUInt32 bits) with
+      | .ok shared => .Return [.i32 (UInt32.ofNat shared.toNat)] store
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def isSharedFn : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [.i32]
+  invoke := isSharedStep }
+
+def isSharedContract : Wasm.HostContract Host :=
+  fun initial args result => result = isSharedStep initial args
+
+theorem isSharedFn_satisfies_contract (initial args) :
+    isSharedContract initial args (isSharedFn.invoke initial args) := by
+  rfl
+
 /-- Executable concrete implementation of an object-field projection import.
 The field index and result ABI are frozen in the import; the runtime reads one
 full semantic slot and returns its exact wasm32 word. -/
@@ -925,6 +950,35 @@ theorem closureProjFn_satisfies_contract
       ((closureProjFn function arity fixed index resultKind).invoke
         initial args) := by
   rfl
+
+/-- A successful concrete sharing observation returns the exact direct UInt8
+lane related to FIR's semantic result, for ordinary, immediate, and promoted
+object representations. -/
+theorem isSharedStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {shared : UInt8}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (evaluated : isShared runtime sourceObject =
+      .ok (.scalar (.uint8 shared))) :
+    isSharedStep initial [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [.i32 (UInt32.ofNat shared.toNat)] (clearFailure initial) ∧
+      ValueRel witness .uint8 (.word32 (Word32.ofUInt8 shared))
+        (.scalar (.uint8 shared)) := by
+  obtain ⟨actual, read, semanticOperation, valueRelated⟩ :=
+    runtimeRelated.heap.readIsShared_refines objectRelated ⟨_, evaluated⟩
+  have scalarEq :
+      (.scalar (.uint8 shared) : Value) = .scalar (.uint8 actual) :=
+    Except.ok.inj (evaluated.symm.trans semanticOperation)
+  have sharedEq : shared = actual := by
+    injection scalarEq with scalarValueEq
+    injection scalarValueEq
+  subst actual
+  exact ⟨by simp [isSharedStep, clearFailure,
+      Word32.ofUInt32_ofNat_value, read], valueRelated⟩
 
 /-- Successful semantic projection identifies a mapped constructor and the
 checked concrete read returns a field related at its static descriptor kind. -/
@@ -3861,6 +3915,53 @@ theorem effectStepSimulates_scalarSet
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
 
+/-- Concrete-host WP for the generated sharing observation and direct UInt8
+destination write. -/
+theorem wp_isShared_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {witness : RefinementWitness} {runtime : RuntimeState}
+    {sourceObject : Value} {shared : UInt8}
+    (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some isSharedContract)
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (evaluated : isShared runtime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat shared.toNat)) = some updated)
+    (continued : Wasm.wp module rest Q (clearFailure initial)
+      { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  obtain ⟨operation, _⟩ :=
+    isSharedStep_of_refines runtimeRelated objectRelated evaluated
+  have hObjectTail :
+      ({ locals with values := tail } : Wasm.Locals).get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)) := by
+    simpa [Wasm.Locals.get] using hObject
+  rw [Wasm.wp_localGet_cons, hObjectTail]
+  apply wp_exact_host_call_of_return
+    (step := isSharedStep)
+    (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
+    (results := [.i32 (UInt32.ofNat shared.toNat)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are
 established only by `ValueRel` and the constructor descriptor. -/
@@ -4544,6 +4645,139 @@ theorem wp_closureProj
   · simp [hParams]
   · exact operation
   · simpa [hParams, hResults] using continued
+
+/-- Concrete `isShared` instance of the direct-`let` boundary. It connects
+the source read-only step to the concrete object representation, direct UInt8
+result lane, destination local, and arbitrary Talos continuation. -/
+theorem letStepSimulates_isShared
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {sourceObject : Value} {shared : UInt8}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    (valueEq : decl.value = .isShared objectId)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (evaluated : isShared sourceRuntime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .uint8)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some isSharedContract)
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat shared.toNat)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      sourceRuntime sourceRuntime sourceEnv (.scalar (.uint8 shared)) initial
+      (clearFailure initial) locals updated resultIndex witness witness := by
+  obtain ⟨_, valueRelated⟩ :=
+    isSharedStep_of_refines initialRelated.1 objectRelated evaluated
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have objectLookup : lookupValue sourceEnv objectId = .ok sourceObject := by
+      simp [lookupValue, sourceLookup]
+    rw [objectLookup]
+    change ((fun result : Value =>
+      (sourceRuntime, LetAction.value result)) <$>
+        isShared sourceRuntime sourceObject) =
+      .ok (sourceRuntime, .value (.scalar (.uint8 shared)))
+    rw [evaluated]
+    rfl
+  · simpa using initialRelated.bindWord32 resultFound resultKindAt
+      valueRelated targetSet
+  · intro rest Q tail continued
+    exact wp_isShared_let tail hObject hImp hSat hi hContract hParams hResults
+      initialRelated.1 objectRelated evaluated targetSet continued
+
+/-- W6.6 composition for the generated `isShared` code emitted by the FIR
+lowerer and Talos adapter, followed by any already-composed continuation. -/
+theorem codeWP_isShared_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord : Word32}
+    {sourceObject : Value} {shared : UInt8}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .isShared objectId)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet objectId, .call (.runtime .isShared)])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime .isShared) = some id)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (evaluated : isShared sourceRuntime sourceObject =
+      .ok (.scalar (.uint8 shared)))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .uint8)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some isSharedContract)
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat shared.toNat)) = some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime
+        (bind sourceEnv decl.fvarId (.scalar (.uint8 shared))) continuation
+        targetRest (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime .isShared)] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_isShared (context := context)
+    valueEq sourceLookup evaluated initialRelated resultFound resultKindAt
+    hObject objectRelated hImp hSat hi hContract hParams hResults targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
 
 /-- Object-projection instance of the concrete direct-`let` boundary. It
 proves the source interpreter step, the result-local refinement, and a Talos

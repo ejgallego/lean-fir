@@ -21,7 +21,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Partial | Missing |
 | `box` | Five integer/USize kinds | Tagged and heap theorems | Partial | Missing; floats share the runtime gap |
 | `unbox` | Five integer/USize kinds | Tagged and heap theorems | Partial | Missing; floats share the runtime gap |
-| `isShared` | Yes | Tagged and ordinary heap theorem | Partial | Missing |
+| `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Partial | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, and continuation compose; artifact pending |
 | `objectSet` | Yes | Heap theorem | Partial | Concrete two-i32 host, FVar source step, compiler/adapter, generated binary call, and continuation compose for supported object-field kinds; artifact and non-FVar arguments pending |
 | `usizeSet` | Yes | Heap theorem | Partial | Concrete i32/i64 host, source step, compiler/adapter, generated binary call, and continuation compose; artifact pending |
 | `scalarSet` | Four integer widths | Heap theorems | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, and continuation compose for initially empty semantic packed fields; repeated/disjoint field frame pending; floats share the runtime gap; artifact pending |
@@ -57,6 +57,9 @@ Cross-cutting W6.5 state:
   canonical nonrecursive header release, and generated no-result host call;
   erased word zero remains an operation-specific no-op rather than an object;
   and
+- `isShared` composes through immediate, promoted, and ordinary object
+  representations, the exact direct UInt8 result lane, generated unary host
+  call, destination-local write, and continuation; and
 - constructor-tag mutation composes through the exact object local, live-cell
   descriptor, concrete header writer, and generated no-result host call while
   preserving the constructor payload; and

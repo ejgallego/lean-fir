@@ -2149,6 +2149,17 @@ guards distinguish nonrecursive parent deletion from recursive decrement and
 confirm that erased zero preserves the complete concrete heap. Generated
 artifact execution remains pending.
 
+W6.6x composes the concrete sharing query. The Talos host decodes the exact
+object-like wasm32 lane and returns Lean 4.32's direct UInt8 result in an i32
+lane. The existing whole-heap theorem covers immediate tags, promoted tags,
+and ordinary live allocations, distinguishing a unique header from persistent
+or multiply referenced objects without changing the runtime witness. The
+composed rule connects source evaluation, compiler and adapter output, the
+exact unary result-producing host call, destination-local refinement, and an
+arbitrary continuation. Executable guards cover a unique ordinary object, the
+same object after a reference-count increment, an immediate tag, and a
+promoted tag. Generated artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

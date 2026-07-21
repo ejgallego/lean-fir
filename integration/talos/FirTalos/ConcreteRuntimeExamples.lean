@@ -246,6 +246,31 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- The concrete sharing query distinguishes a unique ordinary allocation
+-- from the same allocation after one checked reference-count increment.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] uniqueStore =>
+      match isSharedStep uniqueStore [.i32 object] with
+      | .Return [.i32 unique] observedUnique =>
+          match incrementStep 1 true observedUnique [.i32 object] with
+          | .Return [] sharedStore =>
+              match isSharedStep sharedStore [.i32 object] with
+              | .Return [.i32 shared] observedShared =>
+                  unique == 0 && shared == 1 &&
+                    observedShared.host.failure?.isNone
+              | _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+-- Immediate objects are intrinsically shared and do not require a heap
+-- header or semantic-handle lookup.
+#guard match isSharedStep emptyHostStore [.i32 23] with
+  | .Return [.i32 shared] store =>
+      shared == 1 && store.host.failure?.isNone
+  | _ => false
+
 -- A tagged value promoted past wasm32's immediate range remains a checked
 -- no-op even though its concrete word is a heap address.
 #guard match naturalLiteralStep 2147483648 emptyHostStore [] with
@@ -259,6 +284,16 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
                 next.host.runtime.heap.heapCursor == cursor &&
                 next.host.failure?.isNone
           | .error _ => false
+      | _ => false
+  | _ => false
+
+-- Promoted tags are also intrinsically shared even though their physical
+-- representation occupies a checked heap allocation.
+#guard match naturalLiteralStep 2147483648 emptyHostStore [] with
+  | .Return [.i32 object] store =>
+      match isSharedStep store [.i32 object] with
+      | .Return [.i32 shared] next =>
+          shared == 1 && next.host.failure?.isNone
       | _ => false
   | _ => false
 
