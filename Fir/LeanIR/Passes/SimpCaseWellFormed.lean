@@ -8,6 +8,7 @@ open Lean.Compiler
 open Fir.LeanIR.ImpureHygiene
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.NonLockstep.Structural
+open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseRelation
 open Fir.LeanIR.Passes.SimpCaseScopedBridge
 
@@ -1197,6 +1198,53 @@ mutual
 
 end
 
+/-! ## Declaration and program certificate synthesis -/
+
+noncomputable def DeclWellFormed.certificate
+    (wellFormed : DeclWellFormed declaration) :
+    ScopedDeclTargetCertificate validCase declaration := by
+  cases declaration with
+  | mk signature value recursive inlineAttr =>
+      cases value with
+      | extern metadata =>
+          exact .extern {
+            toSignature := signature
+            value := .extern metadata
+            recursive
+            inlineAttr? := inlineAttr
+          } metadata
+      | code code =>
+          have checked := wellFormed.localCheck
+          simp only [declScopedCheck, Bool.and_eq_true] at checked
+          have paramsWellFormed : ScopedParamsWellFormed ScopeIndex.empty
+              signature.params.toList :=
+            ScopedParamsWellFormed.ofCheck checked.1
+          have codeWellFormed : ScopedCodeWellFormedTree
+              (ScopeIndex.empty.pushParams signature.params) code :=
+            ScopedCodeWellFormedTree.ofCheck checked.2
+              wellFormed.normalization wellFormed.canonical
+          have tree := codeWellFormed.certificateTree
+            (validCase := validCase)
+          exact .code {
+            toSignature := signature
+            value := .code code
+            recursive
+            inlineAttr? := inlineAttr
+          } code tree
+            (paramsWellFormed.paramBodyRelated tree.root.alpha.forward)
+
+noncomputable def scopedDeclTargetCertificates_of_forall
+    (wellFormed : ∀ declaration, declaration ∈ declarations →
+      DeclWellFormed declaration) :
+    ScopedDeclTargetCertificateList validCase declarations := by
+  induction declarations with
+  | nil => exact .nil
+  | cons declaration declarations ih =>
+      exact .cons
+        ((wellFormed declaration List.mem_cons_self).certificate)
+        (ih (fun item member => wellFormed item
+          (List.mem_cons_of_mem declaration member)))
+
 theorem ProgramWellFormed.namesUnique
     (wellFormed : ProgramWellFormed program) : program.NamesUnique := by
   cases wellFormed.phase with
@@ -1238,6 +1286,14 @@ theorem ProgramWellFormed.declaration
   canonical := wellFormed.canonical declaration member
 }
 
+/-- Preferred proof-facing source data, synthesized for every declaration in
+compiler order from the program well-formedness premise. -/
+noncomputable def ProgramWellFormed.certificates
+    (wellFormed : ProgramWellFormed program) :
+    ScopedDeclTargetCertificateList validCase program.decls.toList :=
+  scopedDeclTargetCertificates_of_forall
+    (fun _ member => wellFormed.declaration member)
+
 /-- Assemble the public premise from the shared phase checker and the two
 pass-specific compiler-output invariants. -/
 theorem ProgramWellFormed.ofCompilerInvariants
@@ -1251,5 +1307,45 @@ theorem ProgramWellFormed.ofCompilerInvariants
   normalization
   canonical
 }
+
+/-- The complete non-lockstep compiler trace without a hand-built source
+certificate list. -/
+theorem shadowProgram_scopedPhaseEndpointCertified_of_programWellFormed
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (wellFormed : ProgramWellFormed before)
+    (run : shadowProgram? fuel before = some after) :
+    Nonempty (ScopedProgramPhaseEndpointCertifiedTrace
+      validCase before after) :=
+  shadowProgram_scopedPhaseEndpointCertified bridge selection
+    wellFormed.certificates run
+
+/-- Preferred arbitrary-validity semantic API.  The caller supplies compiler
+well-formedness and a successful transparent run; recursive source
+certificates are synthesized internally. -/
+theorem shadowProgram_samePhaseCorrectOn_of_programWellFormed
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (wellFormed : ProgramWellFormed before)
+    (run : shadowProgram? fuel before = some after) :
+    ∃ result : ScopedProgramPhaseEndpointCertifiedTrace
+        validCase before after,
+      SamePhaseCorrectOn (Impure.semantics externals) before after entries
+        (result.trace.Admissible externals) :=
+  shadowProgram_samePhaseCorrectOn_of_upstreamBridge bridge selection
+    wellFormed.certificates run
+
+/-- Lean 4.32 `simpCase` specialization using the established reachable-tag
+selection laws. -/
+theorem shadowProgram_samePhaseCorrectOn_reachableCaseTag_of_programWellFormed
+    (bridge : UpstreamBridge)
+    (wellFormed : ProgramWellFormed before)
+    (run : shadowProgram? fuel before = some after) :
+    ∃ result : ScopedProgramPhaseEndpointCertifiedTrace
+        ReachableCaseTag before after,
+      SamePhaseCorrectOn (Impure.semantics externals) before after entries
+        (result.trace.Admissible externals) :=
+  shadowProgram_samePhaseCorrectOn_reachableCaseTag bridge
+    wellFormed.certificates run
 
 end Fir.LeanIR.Passes.SimpCaseWellFormed
