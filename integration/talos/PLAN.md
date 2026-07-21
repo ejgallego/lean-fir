@@ -1977,6 +1977,16 @@ mismatch, and maximum-`UInt64` capture readback. The surrounding candidate
 chain, underapplication/direct-call branch, source call execution, and
 artifact switch remain open.
 
+W6.6k composes the next generated control boundary without assuming which
+candidate matches. A host-polymorphic Talos rule runs the concrete matcher,
+consumes its direct i32 result in the generated zero-parameter/result `if`,
+selects either the candidate body or remaining dispatch chain, and reconnects
+both normal fallthrough and `break 0` to the surrounding instruction suffix
+with the original operand tail. This rule is recursive-ready but deliberately
+stops short of claiming the compiler's complete candidate fold: the selected
+body still needs capture/argument assembly followed by concrete
+underapplication or an interprocedural direct call.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

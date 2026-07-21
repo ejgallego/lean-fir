@@ -1906,6 +1906,56 @@ theorem wp_closureMatches
   · exact operation
   · simpa [hParams, hResults] using continued
 
+/-- One generated closure-dispatch candidate: execute the concrete matcher,
+select the candidate body or remaining chain from its direct i32 result, and
+reconnect normal block exit to the surrounding instruction suffix. -/
+theorem wp_closureCandidate
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {closureIndex : Nat} {address : Word32} {matched : UInt32}
+    {function : Lean.Name} {arity fixed : Nat} {tail : List Wasm.Value}
+    (hClosure : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (closureMatchesContract function arity fixed))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : closureMatchesStep function arity fixed initial
+        [.i32 (UInt32.ofNat address.value)] =
+      .Return [.i32 matched] (clearFailure initial))
+    (selected :
+      Wasm.wp module (if matched != 0 then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := tail } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        (clearFailure initial) { locals with values := tail } env) :
+    Wasm.wp module
+      (.localGet closureIndex :: .call id ::
+        .iff 0 0 thenBody elseBody :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_closureMatches hClosure hImp hSat hi hContract hParams hResults
+    operation
+  apply Wasm.wp_iff_cons (c := matched) (vs := tail) rfl
+  convert selected using 1
+  all_goals simp
+  all_goals
+    funext continuation
+    cases continuation with
+    | Break level nextStore nextLocals => cases level <;> rfl
+    | _ => rfl
+
 /-- Exact generated typed-capture projection prefix. It leaves the projected
 lane on the operand stack for the subsequent argument sequence/direct call. -/
 theorem wp_closureProj
