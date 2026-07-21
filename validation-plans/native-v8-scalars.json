@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "providerConfigs": [
+    "../validation-providers/lean-wasm-semantic-scalars.json"
+  ],
   "adapterConfigs": [
     "../validation-adapters/v8-scalars.json"
   ],

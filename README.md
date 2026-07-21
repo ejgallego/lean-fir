@@ -73,8 +73,8 @@ baseline are not re-exported.
 - `Fir/LeanIR/Legacy.lean` and `LegacyExamples.lean`: the original small
   evaluator, isolated as a differential fixture.
 - `Inspect`: legacy coverage and real `simpCase` checkpoint diagnostics.
-- `docs/validation.md`: corpus, artifacts, comparison contract, and the
-  deferred V8/Talos backend handoff.
+- `docs/validation.md`: corpus, artifacts, comparison contract, the active
+  shared-provider V8 path, and the planned Talos backend handoff.
 - `docs/research.md`: Lean IR and Wasm formalization research notes.
 - `docs/lcnf-to-c.md`: pass-by-pass guide from Lean expressions through LCNF
   to direct C emission.

@@ -224,85 +224,123 @@ const corpus = JSON.parse(
 assert.equal(corpus.version, PROTOCOL_VERSION, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
-const buildInputManifest = JSON.parse(
-  await readFile(
-    `${requiredEnvironment("FIR_VALIDATION_OUT_DIR")}/build-inputs.json`,
-    "utf8",
-  ),
+const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
+assert.ok(Array.isArray(products) && products.length > 0,
+  "the V8 adapter requires a nonempty provider product inventory");
+
+const productBundle = JSON.parse(
+  requiredEnvironment("FIR_VALIDATION_PRODUCT_BUNDLE"),
 );
-assert.equal(buildInputManifest.version, PROTOCOL_VERSION,
-  "unsupported build input manifest version");
-assert.equal(buildInputManifest.scope, "reported-loaded",
-  "unsupported build input manifest scope");
-assert.ok(Array.isArray(buildInputManifest.inputs)
-  && buildInputManifest.inputs.length > 5,
-  "the Lean build input manifest must report a transitive closure");
-const buildInputNames = new Set(
-  buildInputManifest.inputs.map((input) => input.name),
-);
-for (const name of [
-  "bin/lean",
-  "Init.olean",
-  "Lean/Elab/Command.olean",
-  "Fir/Validation/Corpus.olean",
-  "Fir/Validation/LCNF.olean",
-  "Fir/Wasm/Emit/Source.olean",
-]) {
-  assert.ok(buildInputNames.has(name),
-    `the Lean build input manifest is missing ${name}`);
+assert.deepStrictEqual(Object.keys(productBundle).sort(), [
+  "version", "provider", "contract", "bundleSha256", "products", "cases",
+].sort(), "malformed semantic Wasm product bundle");
+assert.equal(productBundle.version, PROTOCOL_VERSION,
+  "unsupported semantic Wasm product bundle version");
+assert.equal(productBundle.provider, "lean-wasm-semantic",
+  "the V8 adapter received the wrong semantic Wasm provider");
+assert.deepStrictEqual(productBundle.contract, SEMANTIC_WASM_CONTRACT,
+  "the V8 adapter received the wrong semantic Wasm contract");
+assert.match(productBundle.bundleSha256, /^[0-9a-f]{64}$/,
+  "malformed semantic Wasm bundle identity");
+assert.ok(Array.isArray(productBundle.products) && productBundle.products.length > 0,
+  "the semantic Wasm bundle must contain products");
+assert.ok(Array.isArray(productBundle.cases),
+  "the semantic Wasm bundle cases must be an array");
+
+function checkedProduct(product, context, withPath) {
+  const fields = ["backend", "kind", "name", "sha256"];
+  if (withPath) {
+    fields.push("path");
+  }
+  assert.ok(product && typeof product === "object" && !Array.isArray(product),
+    `${context} must be an object`);
+  assert.deepStrictEqual(Object.keys(product).sort(), fields.sort(),
+    `${context} has malformed fields`);
+  assert.equal(product.backend, productBundle.provider,
+    `${context} has the wrong provider`);
+  assert.ok(typeof product.kind === "string" && product.kind.length > 0,
+    `${context} has a malformed kind`);
+  assert.ok(typeof product.name === "string" && product.name.length > 0,
+    `${context} has a malformed name`);
+  assert.match(product.sha256, /^[0-9a-f]{64}$/,
+    `${context} has a malformed digest`);
+  if (withPath) {
+    assert.ok(typeof product.path === "string" && product.path.length > 0,
+      `${context} has a malformed path`);
+  }
+  return product;
 }
 
-const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
-assert.equal(products.length, selectedCases.length * 2 + 1,
-  "the V8 adapter requires its product inventory and two products per case");
-
-const inventoryMatches = products.filter((product) =>
-  product.kind === "product-manifest" && product.name === "products.json");
-assert.equal(inventoryMatches.length, 1, "missing or duplicate product inventory");
-const inventoryProduct = inventoryMatches[0];
-assert.equal(inventoryProduct.backend, "v8");
-assert.match(inventoryProduct.sha256, /^[0-9a-f]{64}$/);
-const inventoryBytes = await readFile(inventoryProduct.path);
-const consumedInventorySha256 = sha256(inventoryBytes);
-assert.equal(consumedInventorySha256, inventoryProduct.sha256,
-  "loaded product inventory disagrees with the captured product");
-const inventory = JSON.parse(inventoryBytes.toString("utf8"));
-const expectedInventoryProducts = products
-  .filter((product) => product !== inventoryProduct)
-  .map((product) => ({ kind: product.kind, path: product.name }))
-  .sort((left, right) =>
-    compareProtocolStrings(left.kind, right.kind)
-      || compareProtocolStrings(left.path, right.path));
-const expectedInventoryCases = [...selectedCases]
-  .sort(compareProtocolStrings)
-  .map((caseId) => ({
-    caseId,
-    products: [
-      { kind: "wasm-manifest", path: `modules/${caseId}.wasm.json` },
-      { kind: "wasm-module", path: `modules/${caseId}.wasm` },
-    ],
-  }));
-assert.equal(inventory.version, PROTOCOL_VERSION,
-  "unsupported product inventory version");
-assert.deepStrictEqual(inventory.contract, SEMANTIC_WASM_CONTRACT,
-  "product inventory uses the wrong semantic Wasm contract");
+const exposedProducts = products.map((product, index) =>
+  checkedProduct(product, `provider product ${index}`, true));
+const bundleProducts = productBundle.products.map((product, index) =>
+  checkedProduct(product, `bundle product ${index}`, false));
 assert.deepStrictEqual(
-  inventory.products,
-  expectedInventoryProducts,
-  "product inventory must be sorted and agree with captured products",
+  bundleProducts,
+  exposedProducts.map(({ path: _path, ...product }) => product),
+  "the exposed products disagree with the semantic Wasm bundle",
 );
-assert.deepStrictEqual(inventory.cases, expectedInventoryCases,
-  "product inventory case bindings disagree with selected cases");
 
-function caseProduct(caseId, kind, suffix) {
-  const name = `modules/${caseId}.wasm${suffix}`;
-  const matches = products.filter((product) =>
-    product.kind === kind && product.name === name);
+function productKey(product) {
+  return JSON.stringify([
+    product.backend, product.kind, product.name, product.sha256,
+  ]);
+}
+
+const productByKey = new Map(
+  exposedProducts.map((product) => [productKey(product), product]),
+);
+assert.equal(productByKey.size, exposedProducts.length,
+  "the exposed provider product inventory contains duplicates");
+const expectedCaseIds = [...selectedCases].sort(compareProtocolStrings);
+const referencedProductKeys = new Set();
+const productsByCase = new Map();
+const bundleCaseIds = [];
+for (const [index, binding] of productBundle.cases.entries()) {
+  assert.ok(binding && typeof binding === "object" && !Array.isArray(binding),
+    `bundle case ${index} must be an object`);
+  assert.deepStrictEqual(Object.keys(binding).sort(), ["caseId", "products"],
+    `bundle case ${index} has malformed fields`);
+  assert.ok(typeof binding.caseId === "string" && binding.caseId.length > 0,
+    `bundle case ${index} has a malformed case ID`);
+  assert.ok(Array.isArray(binding.products) && binding.products.length > 0,
+    `bundle case ${binding.caseId} must contain products`);
+  const caseProducts = binding.products.map((product, productIndex) => {
+    checkedProduct(
+      product,
+      `bundle case ${binding.caseId} product ${productIndex}`,
+      false,
+    );
+    const key = productKey(product);
+    const exposed = productByKey.get(key);
+    assert.ok(exposed,
+      `bundle case ${binding.caseId} references an unexposed product`);
+    referencedProductKeys.add(key);
+    return exposed;
+  });
+  assert.equal(new Set(caseProducts.map(productKey)).size, caseProducts.length,
+    `bundle case ${binding.caseId} contains duplicate products`);
+  assert.deepStrictEqual(
+    caseProducts.map((product) => product.kind),
+    ["wasm-manifest", "wasm-module"],
+    `bundle case ${binding.caseId} must bind one manifest and one module`,
+  );
+  bundleCaseIds.push(binding.caseId);
+  productsByCase.set(binding.caseId, caseProducts);
+}
+assert.deepStrictEqual(bundleCaseIds, expectedCaseIds,
+  "the product bundle case IDs disagree with the V8 selection");
+assert.deepStrictEqual(
+  [...referencedProductKeys].sort(compareProtocolStrings),
+  [...productByKey.keys()].sort(compareProtocolStrings),
+  "the semantic Wasm bundle contains unbound products",
+);
+
+function caseProduct(caseId, kind) {
+  const matches = productsByCase.get(caseId).filter((product) =>
+    product.kind === kind);
   assert.equal(matches.length, 1, `missing or duplicate ${kind} product for ${caseId}`);
-  const product = matches[0];
-  assert.equal(product.backend, "v8");
-  assert.match(product.sha256, /^[0-9a-f]{64}$/);
-  return product;
+  return matches[0];
 }
 
 for (const caseId of selectedCases) {
@@ -315,9 +353,8 @@ for (const caseId of selectedCases) {
   assert.ok(Array.isArray(descriptor.effectProjections),
     `${caseId} effect projections must be an array`);
 
-  const manifestProduct = caseProduct(
-    caseId, "wasm-manifest", ".json");
-  const moduleProduct = caseProduct(caseId, "wasm-module", "");
+  const manifestProduct = caseProduct(caseId, "wasm-manifest");
+  const moduleProduct = caseProduct(caseId, "wasm-module");
   const manifestBytes = await readFile(manifestProduct.path);
   const consumedManifestSha256 = sha256(manifestBytes);
   assert.equal(consumedManifestSha256, manifestProduct.sha256,
@@ -375,9 +412,14 @@ for (const caseId of selectedCases) {
     })),
     `${caseId} binary/manifest import mismatch`,
   );
-  assert.deepStrictEqual(WebAssembly.Module.exports(wasmModule), [
-    { name: descriptor.entry, kind: "function" },
-  ]);
+  const moduleExports = WebAssembly.Module.exports(wasmModule);
+  assert.ok(moduleExports.every((item) => item.kind === "function"),
+    `${caseId} binary exports a non-function ABI object`);
+  assert.deepStrictEqual(
+    moduleExports.filter((item) => item.name === descriptor.entry),
+    [{ name: descriptor.entry, kind: "function" }],
+    `${caseId} binary must export its selected entry exactly once`,
+  );
   const instance = await WebAssembly.instantiate(
     wasmModule,
     host.imports(compilerManifest.imports),
@@ -398,28 +440,24 @@ for (const caseId of selectedCases) {
     descriptor.effectProjections,
     host.externalSnapshots,
   );
-  const receipt = JSON.stringify([
-    {
-      kind: inventoryProduct.kind,
-      name: inventoryProduct.name,
-      sha256: consumedInventorySha256,
-    },
-    {
-      kind: manifestProduct.kind,
-      name: manifestProduct.name,
-      sha256: consumedManifestSha256,
-    },
-    {
-      kind: moduleProduct.kind,
-      name: moduleProduct.name,
-      sha256: consumedModuleSha256,
-    },
+  const consumedSha256 = new Map([
+    [productKey(manifestProduct), consumedManifestSha256],
+    [productKey(moduleProduct), consumedModuleSha256],
   ]);
+  const receipt = JSON.stringify({
+    provider: productBundle.provider,
+    bundleSha256: productBundle.bundleSha256,
+    products: productsByCase.get(caseId).map((product) => ({
+      kind: product.kind,
+      name: product.name,
+      sha256: consumedSha256.get(productKey(product)),
+    })),
+  });
   const result = {
     version: PROTOCOL_VERSION,
     caseId,
     backend: "v8",
-    diagnostics: [{ key: "validation-products", value: receipt }],
+    diagnostics: [{ key: "validation-product-bundle", value: receipt }],
     outcome: {
       success: {
         observation: {

@@ -6980,9 +6980,11 @@ def verify_matrix_artifact(
                 "build-input replay tool environment is malformed"
             )
 
-        matching_configs: list[tuple[str, dict[str, object]]] = []
+        matching_configs: list[
+            tuple[str, str, dict[str, object]]
+        ] = []
         for (input_kind, input_name), input_content in input_contents.items():
-            if input_kind != "adapter-config":
+            if input_kind not in {"adapter-config", "provider-config"}:
                 continue
             try:
                 config_value = json.loads(input_content.decode("utf-8"))
@@ -6994,14 +6996,16 @@ def verify_matrix_artifact(
                 isinstance(config_value, dict)
                 and config_value.get("name") == backend
             ):
-                matching_configs.append((input_name, config_value))
+                matching_configs.append(
+                    (input_kind, input_name, config_value)
+                )
         if len(matching_configs) != 1:
             raise ValidationError(
-                "build-input replay has no unique retained adapter config"
+                "build-input replay has no unique retained producer config"
             )
-        config_name, adapter_config = matching_configs[0]
-        raw_replay_command = adapter_config.get("buildReplayCommand")
-        raw_build_tools = adapter_config.get("buildTools")
+        _, config_name, producer_config = matching_configs[0]
+        raw_replay_command = producer_config.get("buildReplayCommand")
+        raw_build_tools = producer_config.get("buildTools")
         if (
             not isinstance(raw_replay_command, list)
             or not raw_replay_command

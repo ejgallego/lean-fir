@@ -59,13 +59,14 @@ different adapter objects claiming the same name are rejected before execution.
 run: it lists selected cases, participating backends, directed pair-report
 paths, de-duplicated global findings, and aggregate backend/pair/comparison
 counts.  Automation can start there and open only the detailed pair reports it
-needs.  Its `inputs` array content-addresses the exact canonical `corpus.json`,
-the validation plan when present, and every external adapter config with
-SHA-256.  Paths inside the checkout use stable root-relative names.  Inputs
+needs. Its `inputs` array content-addresses the exact canonical `corpus.json`,
+the validation plan when present, and every external provider and adapter
+config with SHA-256. Paths inside the checkout use stable root-relative names.
+Inputs
 outside it use `external/<sha256>/<basename>`, avoiding both machine paths and
 same-basename collisions.  The corpus hash is computed from the same canonical
-bytes written to disk.  Plan and adapter JSON are read once: those exact parsed
-bytes are hashed and retained, closing a parse/provenance race.
+bytes written to disk. Plan, provider, and adapter JSON are read once: those
+exact parsed bytes are hashed and retained, closing a parse/provenance race.
 Compiler-produced files are kept separately in the matrix's `products` array,
 so configuration inputs and executable semantic products cannot be confused.
 The matrix also derives two full SHA-256 identities from compact canonical JSON.
@@ -87,9 +88,9 @@ before and after execution.  External adapters likewise bind the exact
 PATH-resolved engine and every config-relative runner argument.  The current
 LCNF module hash relies on Lean's
 embedded import fingerprints for its transitive closure; inventorying every
-loaded olean and host dynamic library remains future hardening.  The V8 adapter
-registers Node and its runner as tools while keeping the compiler-produced
-`.wasm` and ABI manifest as products.
+loaded olean and host dynamic library remains future hardening. The V8 adapter
+registers Node and its runner as tools, while the semantic-Wasm provider owns
+the compiler-produced `.wasm` and ABI manifests as products.
 
 Every input, backend tool, reported build input, backend product, backend
 result/process artifact, and pair comparison is copied into
@@ -181,6 +182,7 @@ Talos without changing this comparison model:
 ```json
 {
   "version": 2,
+  "providerConfigs": ["../validation-providers/lean-wasm-semantic.json"],
   "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
   "pairs": [
     {"reference": "native", "candidate": "lcnf"},
@@ -197,10 +199,11 @@ self-comparisons, malformed backend names, and an empty graph are rejected.
 `--plan` is exclusive with the pair/adapter flags; `--case`, `--tag`,
 `--out-dir`, and `--no-build` remain valid runtime controls.
 
-The driver discovers the corpus from the native executable, then composes two
-named backend adapters.  Each adapter owns its build and execution strategy and
-an optional backend-specific audit; the shared driver owns protocol result
-domains, result artifacts, semantic comparison, and the comparison artifact.
+The driver discovers the corpus from the native executable, then composes named
+backend adapters and optional build-only product providers. Each adapter owns
+its execution strategy and optional backend-specific audit; a build may belong
+to that adapter or to one shared provider. The shared driver owns protocol
+result domains, result artifacts, semantic comparison, and the comparison artifact.
 Native therefore remains the corpus and source-semantics provider without
 forcing a future V8 or Talos adapter to imitate native's one-process-per-case
 execution strategy.
@@ -560,11 +563,12 @@ The run command receives `FIR_VALIDATION_PRODUCTS`, a compact JSON array with
 each verified product's backend, kind, stable output-relative name, SHA-256,
 and absolute local path.  `matrix.json` records the same entries without the
 machine-local path under `products`, sorted deterministically and counted as
-`productCount`.  The V8 adapter executes the exact compiler-produced `.wasm`
-bytes and consumes the build-produced product inventory.  This generic handoff
-does not assume how V8 and Talos will later share one module.
+`productCount`. The semantic-Wasm provider owns the compiler-produced `.wasm`
+bytes and manifests; the V8 adapter executes the exact provider bundle selected
+for each case. This handoff does not assume one module per case, so later module
+sharing does not require another adapter contract.
 
-Handoff is not, by itself, consumption evidence.  When products are declared,
+Handoff is not, by itself, consumption evidence. When an adapter owns products,
 each protocol result from the external engine must include exactly one
 `validation-products` diagnostic.  Its string value is a JSON array of the
 products that case actually loaded, with `kind`, stable `name`, and the SHA-256
@@ -572,17 +576,17 @@ recomputed from the loaded bytes.  Every returned result must report a nonempty
 subset of the declared products.  This permits a selected case to load only its
 own module without falsely claiming the other retained corpus products.
 Missing, empty, malformed, duplicate, or undeclared receipts become structured
-`audit` findings.  Thus the future V8 evidence will distinguish “the harness
-produced this module” from “the engine reports consuming this exact module.”
+`audit` findings. Provider consumers instead use the exact bundle receipt
+described below; current V8 evidence therefore distinguishes “the provider
+produced this module” from “V8 reports consuming this case's exact binding.”
 
 ## Shared compiler products
 
-The generic harness also has an opt-in provider/consumer path for running more
-than one engine against exactly one compiler output. No checked production plan
-uses this path yet: the existing V8 adapter continues to own its build while the
-compiler and engine lanes rebase on the shared contract. This separation lets
-provider infrastructure land without changing compiler, semantic-host, Talos,
-or runtime behavior.
+The generic harness has an opt-in provider/consumer path for running more than
+one engine against exactly one compiler output. The checked V8 plans use this
+path: `lean-wasm-semantic` owns the build once and `v8` consumes its verified
+bundle. This separation changes no compiler, semantic-host, Talos, or runtime
+behavior and leaves a second engine free to consume the same bytes later.
 
 A provider is a build-only component. Its strict config declares an opaque
 four-field product contract and reuses the same tool capture, repeated-build,
@@ -606,13 +610,15 @@ reported-input, strace, and sealed-replay machinery as an external adapter:
 }
 ```
 
-The example values above are illustrative. FIR's checked but not yet
-plan-referenced provider config selects the current semantic-host contract as
+The example values above are illustrative. FIR's checked, plan-referenced
+provider config selects the current semantic-host contract as
 `wasm` / `wasm32` / `fir-semantic-runtime-v1` /
 `fir-semantic-abi-v1`. `FirValidationWasm.lean` emits that contract together
-with a sorted product inventory and exact sorted per-case bindings, and the
-legacy V8 runner checks all three fields while it still owns the build. These
-identifiers describe the frozen semantic runtime used for native-oracle
+with a sorted product inventory and exact sorted per-case bindings. The V8
+consumer checks the provider, contract, complete exposed inventory, bundle
+identity, and exact case bindings without reading the provider's private bundle
+manifest or assuming case-derived filenames. These identifiers describe the
+frozen semantic runtime used for native-oracle
 validation; they deliberately do not claim the future concrete Talos
 `wasm32-lean64` runtime. Changing either real contract remains a shared-contract
 change that must land separately before compiler or engine wiring depends on
@@ -683,9 +689,10 @@ adapter-owned build or products:
 Every consumer receives the whole verified inventory through
 `FIR_VALIDATION_PRODUCTS` and the contract, bundle identity, and exact case
 bindings through `FIR_VALIDATION_PRODUCT_BUNDLE`. Before and after each engine
-execution, the harness rehashes the provider's products, including its bundle
-manifest. The consumer returns one `validation-product-bundle` diagnostic per
-result. Its JSON value names the provider, `bundleSha256`, and the exact
+execution, the harness rehashes every exposed bundle product. The private
+provider manifest is retained and re-parsed when the evidence is published.
+The consumer returns one `validation-product-bundle` diagnostic per result. Its
+JSON value names the provider, `bundleSha256`, and the exact
 `kind`/`name`/`sha256` products bound to that case. A valid but wrong case's
 module is rejected, not accepted as a declared subset. Unlike the legacy
 adapter-owned subset receipt, a missing, malformed, or inexact shared-bundle
@@ -720,12 +727,12 @@ manifest data, and checks each retained result receipt against its exact case
 binding. The provider staging directory is therefore unnecessary for offline
 verification.
 
-The intended production sequence is to activate the checked Lean-Wasm provider
-after both feature lanes have rebased on its contract, then attach the real V8
-consumer. A Talos runner can subsequently consume that unchanged semantic
-bundle as a second engine, or declare a distinct concrete-runtime contract when
-validating Talos's own interpreter. Talos-owned runner wiring remains in the
-Wasm lane; the generic layer embeds neither Talos nor concrete runtime details.
+The checked production plans now build the Lean-Wasm provider once and attach
+the real V8 consumer. A Talos runner can subsequently consume that unchanged
+semantic bundle as a second engine, or declare a distinct concrete-runtime
+contract when validating Talos's own interpreter. Talos-owned runner wiring
+remains in the Wasm lane; the generic layer embeds neither Talos nor concrete
+runtime details.
 
 ## Case and observation contract
 
@@ -936,8 +943,8 @@ lane conversion, and imports.  Schema-directed decoding cross-checks each
 manifest argument against the corpus datum before invocation and converts the
 semantic result back into the shared backend protocol; unsupported schemas
 fail closed.  The binary's imports must exactly match the compiler manifest.
-The runner receipts the shared host, build inventory, and both per-case
-products.  The checked suite includes all five scalar maxima, parameterized
+The runner receipts the provider bundle identity and both per-case products.
+The checked suite includes all five scalar maxima, parameterized
 maximum-value round trips for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and
 `USize`, plus a nonempty `List Nat` containing a heap natural.  That last case
 reconstructs the initial constructor graph and executes the compiler-produced

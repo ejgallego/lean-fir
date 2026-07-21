@@ -3276,24 +3276,23 @@ class HarnessTests(unittest.TestCase):
         adapter_path = (
             harness.ROOT / "validation-adapters" / "v8-scalars.json"
         )
+        provider_path = (
+            harness.ROOT
+            / "validation-providers"
+            / "lean-wasm-semantic-scalars.json"
+        )
         plan = harness.validation_plan_from_config(
             harness.ROOT
             / "validation-plans"
             / "native-v8-scalars.json"
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
-        self.assertEqual(plan.provider_configs, ())
+        self.assertEqual(plan.provider_configs, (provider_path.resolve(),))
         self.assertEqual(plan.pairs, (("native", "v8"),))
         adapter = harness.external_adapter_from_config(adapter_path)
         self.assertEqual(adapter.name, "v8")
-        self.assertEqual(
-            adapter.build_command,
-            ["lake", "lean", "FirValidationWasm.lean"],
-        )
-        self.assertEqual(
-            adapter.build_replay_command,
-            ["lake", "env", "lean", "FirValidationWasm.lean"],
-        )
+        self.assertEqual(adapter.build_command, [])
+        self.assertEqual(adapter.build_replay_command, [])
         self.assertEqual(
             adapter.run_command,
             [
@@ -3304,23 +3303,24 @@ class HarnessTests(unittest.TestCase):
             ],
         )
         self.assertEqual(adapter.product_declarations, ())
-        self.assertEqual(adapter.product_manifest, "products.json")
-        self.assertEqual(adapter.build_input_manifest, "build-inputs.json")
-        self.assertEqual(adapter.build_attempts, 2)
+        self.assertIsNone(adapter.product_manifest)
+        self.assertIsNone(adapter.build_input_manifest)
+        self.assertEqual(adapter.build_attempts, 1)
         self.assertEqual(
-            adapter.build_file_access_recorder,
-            harness.ToolDeclaration(
-                "file-access-recorder", "strace", command="strace"
+            adapter.product_provider,
+            harness.ProductProviderRequirement(
+                "lean-wasm-semantic",
+                harness.ProductContract(
+                    "wasm",
+                    "wasm32",
+                    "fir-semantic-runtime-v1",
+                    "fir-semantic-abi-v1",
+                ),
             ),
         )
-        self.assertEqual(
-            adapter.build_input_replay_isolator,
-            harness.ToolDeclaration(
-                "build-input-replay-isolator",
-                "bwrap",
-                command="bwrap",
-            ),
-        )
+        self.assertEqual(adapter.build_tool_declarations, ())
+        self.assertIsNone(adapter.build_file_access_recorder)
+        self.assertIsNone(adapter.build_input_replay_isolator)
         self.assertEqual(
             [(tool.kind, tool.name) for tool in adapter.tool_declarations],
             [
@@ -3329,19 +3329,6 @@ class HarnessTests(unittest.TestCase):
                 ("runner", "scripts/run_validation_v8.mjs"),
                 ("runtime", "scripts/wasm_semantic_host.mjs"),
             ],
-        )
-        self.assertEqual(
-            next(
-                tool
-                for tool in adapter.build_tool_declarations
-                if tool.kind == "build-launcher"
-            ),
-            harness.ToolDeclaration(
-                "build-launcher",
-                "lake",
-                command="lake",
-                resolve_command=("lake", "env", "which", "lake"),
-            ),
         )
 
     def test_checked_semantic_wasm_provider_declares_frozen_contract(self) -> None:
@@ -3402,13 +3389,18 @@ class HarnessTests(unittest.TestCase):
         adapter_path = (
             harness.ROOT / "validation-adapters" / "v8-scalars.json"
         )
+        provider_path = (
+            harness.ROOT
+            / "validation-providers"
+            / "lean-wasm-semantic-scalars.json"
+        )
         plan = harness.validation_plan_from_config(
             harness.ROOT
             / "validation-plans"
             / "native-lcnf-v8-scalars.json"
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
-        self.assertEqual(plan.provider_configs, ())
+        self.assertEqual(plan.provider_configs, (provider_path.resolve(),))
         self.assertEqual(
             plan.pairs,
             (
