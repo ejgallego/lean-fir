@@ -1370,6 +1370,7 @@ structure ScopedCodeTargetCertificate
     (target : LCNF.Code .impure) : Prop
     extends ScopedCodeTargetIdentities validCase index target where
   side : ScopedCodeSideReflexive index target
+  canonical : CodeRuntimeTypesCanonical target
 
 theorem ScopedCodePhaseResult.identities
     (result : ScopedCodePhaseResult validCase index source target) :
@@ -1385,6 +1386,7 @@ structure ScopedCodePhaseCertifiedResult
     (source target : LCNF.Code .impure) where
   result : ScopedCodePhaseResult validCase index source target
   targetSide : ScopedCodeSideReflexive index target
+  targetCanonical : CodeRuntimeTypesCanonical target
 
 theorem ScopedCodePhaseCertifiedResult.certificate
     (result : ScopedCodePhaseCertifiedResult validCase index source target) :
@@ -1392,14 +1394,17 @@ theorem ScopedCodePhaseCertifiedResult.certificate
   structural := result.result.targetRefl
   alpha := result.result.targetAlpha
   side := result.targetSide
+  canonical := result.targetCanonical
 }
 
 def ScopedCodePhaseResult.certify
     (result : ScopedCodePhaseResult validCase index source target)
-    (side : ScopedCodeSideReflexive index target) :
+    (side : ScopedCodeSideReflexive index target)
+    (canonical : CodeRuntimeTypesCanonical target) :
     ScopedCodePhaseCertifiedResult validCase index source target := {
   result
   targetSide := side
+  targetCanonical := canonical
 }
 
 def ScopedCodeBifactor.phaseResult
@@ -1461,6 +1466,7 @@ def ScopedCodeTargetCertificate.identity
     ScopedCodePhaseCertifiedResult validCase index code code := {
   result := .identity certificate.structural certificate.alpha
   targetSide := certificate.side
+  targetCanonical := certificate.canonical
 }
 
 theorem scopedUnreachTargetIdentities
@@ -1484,6 +1490,7 @@ theorem scopedUnreachTargetCertificate
     backward := .terminal .unreachable
   }
   side := .unreachable
+  canonical := .unreach
 }
 
 /-- Nonempty sequence of local phase rounds. Nested case simplifiers append
@@ -1586,6 +1593,7 @@ structure ScopedCodePhaseEndpointCertifiedTrace
     (source target : LCNF.Code .impure) : Type where
   trace : ScopedCodePhaseTrace validCase index source target
   targetSide : ScopedCodeSideReflexive index target
+  targetCanonical : CodeRuntimeTypesCanonical target
 
 theorem ScopedCodePhaseEndpointCertifiedTrace.targetCertificate
     (trace : ScopedCodePhaseEndpointCertifiedTrace
@@ -1594,6 +1602,7 @@ theorem ScopedCodePhaseEndpointCertifiedTrace.targetCertificate
   structural := trace.trace.targetRefl
   alpha := trace.trace.targetAlpha
   side := trace.targetSide
+  canonical := trace.targetCanonical
 }
 
 /-- Append a certified local round while retaining every ordinary phase edge
@@ -1605,6 +1614,7 @@ def ScopedCodePhaseEndpointCertifiedTrace.append
     ScopedCodePhaseEndpointCertifiedTrace validCase index source target := {
   trace := left.trace.append (.single right.result)
   targetSide := right.targetSide
+  targetCanonical := right.targetCanonical
 }
 
 def ScopedCodePhaseCertifiedTrace.rounds
@@ -2031,6 +2041,14 @@ theorem scopedPreparedCaseTargetCertificate
       backward := by simpa [prepared, source] using alphaBackward
     }
     side := by simpa [prepared, source] using side
+    canonical := by
+      apply CodeRuntimeTypesCanonical.cases
+      intro alt member
+      rcases alternativesSource.preparedBodyCertificate_of_mem
+          (Array.mem_def.mpr (by
+            simpa [source, LCNF.Cases.alts] using member)) with
+        ⟨certificate⟩
+      exact certificate.canonical
   }
 
 /-- Rebuild a case certificate from normalized selector metadata and complete
@@ -2138,6 +2156,10 @@ theorem scopedCaseTargetCertificate_of_normalized
       backward := alphaBackward
     }
     side := side
+    canonical := .cases (by
+      intro alt member
+      rcases bodies alt (Array.mem_def.mpr member) with ⟨certificate⟩
+      exact certificate.canonical)
   }
 
 /-- The actual deterministic recursive alternative run has a certified case
@@ -3461,6 +3483,7 @@ def ScopedSingletonPhaseCertifiedResultEvidence.result
     alpha := evidence.certificate.alpha
   }
   targetSide := evidence.certificate.side
+  targetCanonical := evidence.certificate.canonical
 }
 
 /-- Empty prepared tables need no branch intermediate: once the phase rules
@@ -3587,6 +3610,7 @@ def ScopedRetainedPhaseCertifiedResultEvidence.result
     alpha := evidence.certificate.alpha
   }
   targetSide := evidence.certificate.side
+  targetCanonical := evidence.certificate.canonical
 }
 
 /-- Output-shape classification for one admissible nonrecursive case-kernel
@@ -3957,6 +3981,11 @@ structure ScopedFoldRuntimeTypeCanonicalLaws
   canonical : ∀ {index : ScopeIndex} {code : LCNF.Code .impure},
     ScopedCodeTargetCertificate validCase index code →
     CodeRuntimeTypesCanonical code
+
+/-- Canonical endpoint evidence is now intrinsic to every certified endpoint. -/
+theorem scopedFoldRuntimeTypeCanonicalLaws :
+    ScopedFoldRuntimeTypeCanonicalLaws validCase where
+  canonical := fun certificate => certificate.canonical
 
 /-- Canonical endpoint metadata, endpoint self certificates, and the audited
 upstream/local correspondence jointly discharge every pairwise runtime-type
@@ -4464,9 +4493,8 @@ theorem scopedCasePreparedCertifiedAlphaLaws_of_transport
         }
       }⟩
 
-/-- Preferred preparation-alpha constructor. The executable folding proof is
-fully internal; callers supply only endpoint runtime-type compatibility and
-the repository's single audited upstream-alpha bridge. -/
+/-- Compatibility preparation-alpha constructor retaining the older explicit
+pairwise runtime-type input. -/
 theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
     (bridge : UpstreamBridge)
     (runtimeTypes : ScopedFoldRuntimeTypeLaws validCase) :
@@ -4475,14 +4503,14 @@ theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
     (scopedFoldAlphaCertifiedTransportLaws_of_upstreamBridge
       bridge runtimeTypes)
 
-/-- Preferred canonical preparation-alpha constructor. Pairwise runtime-type
-compatibility is derived internally from the unary compiler-output invariant. -/
+/-- Preferred preparation-alpha constructor. Pairwise runtime-type
+compatibility is derived internally from canonical endpoint certificates. -/
 theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridgeCanonical
-    (bridge : UpstreamBridge)
-    (canonical : ScopedFoldRuntimeTypeCanonicalLaws validCase) :
+    (bridge : UpstreamBridge) :
     ScopedCasePreparedCertifiedAlphaLaws validCase :=
   scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge bridge
-    (scopedFoldRuntimeTypeLaws_of_canonical bridge canonical)
+    (scopedFoldRuntimeTypeLaws_of_canonical bridge
+      scopedFoldRuntimeTypeCanonicalLaws)
 
 /-- Lift the pure alpha boundary to the fold presentation consumed by the
 three-phase constructor. No additional semantic premise is introduced. -/
@@ -4964,6 +4992,7 @@ theorem scopedCaseCertifiedPhaseShapeLaws_of_components
         alpha := certificate.alpha
       }
       targetSide := certificate.side
+      targetCanonical := certificate.canonical
     }⟩
   singleton := by
     intro index typeName resultType discr sourceAlts root alternatives singleton
@@ -5269,6 +5298,7 @@ theorem scopedCaseEndpointCertifiedTraceKernelLaws_of_localPhases
             (.cases (.mk typeName resultType discr targetAlts.toArray)) := {
           trace := recursiveTrace
           targetSide := recursiveCertificate.side
+          targetCanonical := recursiveCertificate.canonical
         }
         exact ⟨recursiveCertified.append parentRound⟩
 
@@ -6410,7 +6440,14 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
             exact .letE typeEq leftValueScoped rightValueScoped boxTypesEq
               leftFresh rightFresh leftJoinFresh rightJoinFresh
               childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := by
+            cases root.canonical with
+            | letE declarationTypes _ =>
+                exact .letE declarationTypes childTrace.targetCanonical
+        }⟩
   jp := by
     intro index fvarId binderName params type leftBody rightBody
       leftContinuation rightContinuation body continuation tree
@@ -6438,24 +6475,35 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
               (show ScopedCodeSideReflexive
                 (index.pushJoin fvarId) rightContinuation from
                   continuationTrace.targetSide)
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := by
+            cases root.canonical with
+            | jp _ _ =>
+                exact .jp bodyTrace.targetCanonical
+                  continuationTrace.targetCanonical
+        }⟩
   jmp := by
     intro index fvarId args tree
     exact ⟨{
       trace := .single (.identity tree.root.structural tree.root.alpha)
       targetSide := tree.root.side
+      targetCanonical := tree.root.canonical
     }⟩
   ret := by
     intro index fvarId tree
     exact ⟨{
       trace := .single (.identity tree.root.structural tree.root.alpha)
       targetSide := tree.root.side
+      targetCanonical := tree.root.canonical
     }⟩
   unreach := by
     intro index type tree
     exact ⟨{
       trace := .single (.identity tree.root.structural tree.root.alpha)
       targetSide := tree.root.side
+      targetCanonical := tree.root.canonical
     }⟩
   oset := by
     intro index fvarId fieldIndex value left right child tree
@@ -6471,7 +6519,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
               rightFieldScoped continuation =>
             exact .oset leftObjectScoped rightObjectScoped leftFieldScoped
               rightFieldScoped childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .oset childTrace.targetCanonical
+        }⟩
   uset := by
     intro index fvarId fieldIndex value left right child tree
     cases tree with
@@ -6486,7 +6538,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
               rightFieldScoped continuation =>
             exact .uset leftObjectScoped rightObjectScoped leftFieldScoped
               rightFieldScoped childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .uset childTrace.targetCanonical
+        }⟩
   sset := by
     intro index fvarId width offset value type left right child tree
     cases tree with
@@ -6501,7 +6557,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
               rightFieldScoped continuation =>
             exact .sset leftObjectScoped rightObjectScoped leftFieldScoped
               rightFieldScoped childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .sset childTrace.targetCanonical
+        }⟩
   setTag := by
     intro index fvarId tag left right child tree
     cases tree with
@@ -6515,7 +6575,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
           | setTag leftObjectScoped rightObjectScoped continuation =>
             exact .setTag leftObjectScoped rightObjectScoped
               childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .setTag childTrace.targetCanonical
+        }⟩
   inc := by
     intro index fvarId amount check persistent left right child tree
     cases tree with
@@ -6529,7 +6593,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
           | inc leftObjectScoped rightObjectScoped continuation =>
             exact .inc leftObjectScoped rightObjectScoped
               childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .inc childTrace.targetCanonical
+        }⟩
   dec := by
     intro index fvarId amount check persistent objects left right child tree
     cases tree with
@@ -6543,7 +6611,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
           | dec leftObjectScoped rightObjectScoped continuation =>
             exact .dec leftObjectScoped rightObjectScoped
               childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .dec childTrace.targetCanonical
+        }⟩
   del := by
     intro index fvarId left right child tree
     cases tree with
@@ -6557,7 +6629,11 @@ theorem scopedCodePhaseEndpointCertifiedOnCertificateTree_traversalLaws :
           | del leftObjectScoped rightObjectScoped continuation =>
             exact .del leftObjectScoped rightObjectScoped
               childTrace.targetSide
-        exact ⟨{ trace := trace, targetSide := targetSide }⟩
+        exact ⟨{
+          trace := trace
+          targetSide := targetSide
+          targetCanonical := .del childTrace.targetCanonical
+        }⟩
 
 theorem scopedCodePhaseEndpointCertifiedTree_caseBoundary_iff_kernel :
     ScopedCaseBoundarySound
@@ -6639,11 +6715,10 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridgeRuntimeType
 
 /-- Fully assembled preferred certified traversal theorem. After the
 executable run and source certificate tree, callers supply only reachable-tag
-selection, unary canonical endpoint metadata, and the one audited upstream
-alpha bridge; pairwise runtime-type equality is kernel-derived. -/
+selection and the one audited upstream alpha bridge; canonical endpoint
+metadata is intrinsic and pairwise runtime-type equality is kernel-derived. -/
 theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
     (bridge : UpstreamBridge)
-    (canonical : ScopedFoldRuntimeTypeCanonicalLaws validCase)
     (selection : ScopedCaseReachableSelectionLaws validCase)
     (certificates : ScopedCodeTargetCertificateTree validCase index source)
     (run : shadowCode? fuel source = some target) :
@@ -6651,7 +6726,7 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
       validCase index source target) :=
   shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared selection
     (scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridgeCanonical
-      bridge canonical)
+      bridge)
     certificates run
 
 /-- A one-declaration program wrapper used to lift a scoped code trace to the

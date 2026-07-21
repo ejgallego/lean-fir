@@ -1833,6 +1833,9 @@ theorem emptyCaseTargetCertificate :
     structural := ?_
     alpha := emptyCaseAlphaBireflexive
     side := ?_
+    canonical := .cases (by
+      intro alt member
+      simp [emptyCaseTable, LCNF.Cases.alts] at member)
   }
   · apply CodeRel.aligned
     apply HeadRel.cases
@@ -1857,6 +1860,7 @@ theorem nestedEmptyCaseTargetCertificate :
     structural := .aligned (.setTag c 0 emptyCaseTargetCertificate.structural)
     alpha := nestedEmptyCaseAlphaTree.root
     side := ?_
+    canonical := .setTag emptyCaseTargetCertificate.canonical
   }
   exact .setTag (by native_decide) (by native_decide)
     emptyCaseTargetCertificate.side
