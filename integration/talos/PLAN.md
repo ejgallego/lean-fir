@@ -2253,6 +2253,15 @@ live parent owning a mapped dead child, which FIR skips but concrete
 the refinement invariant or operation-specific dead handling. No shared FIR
 semantic contract changed.
 
+W6.6ag closes that recorded dead-child discrepancy with an operation-specific
+canonical released-header branch. Persistence rereads a dead target and
+returns unchanged only when every frozen freed-header field and retained extent
+is valid; ordinary decoders and malformed dead headers keep their existing
+structured failure. Runtime guards cover the accepted and rejected cases, and
+`DeadCellRel.markPersistentFuel_eq` plus the whole-heap dead-location theorem
+provide the exact recursive induction branch. No shared FIR semantic contract
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

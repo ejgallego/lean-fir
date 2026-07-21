@@ -12,7 +12,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
-| `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for all non-heap lanes and ordinary boxed/natural leaf roots; constructor and closure recursive-step theorems proved; explicit `CachePersistenceRefines` remains for complete recursive graphs | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, and local write compose; global fuel/reachability closure, per-declaration body proofs, and artifact switch pending; dead-child gap tracked by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
+| `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for all non-heap lanes and ordinary boxed/natural leaf roots; dead targets are exact no-ops; constructor and closure recursive-step theorems proved; explicit `CachePersistenceRefines` remains for complete recursive graphs | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, and local write compose; global fuel closure, per-declaration body proofs, and artifact switch pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, and continuation compose; artifact pending; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Concrete interprocedural judgment, body-WP-to-termination bridge, candidate and direct-call/local-write rules; complete compiler fold and artifact pending |
 | `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | Generated matcher plus one candidate `if`/fallthrough WP; complete compiler candidate fold, direct call, and artifact pending |
@@ -47,9 +47,9 @@ Cross-cutting W6.5 state:
   result-local write; scalar, erased/reuse, direct-tag, promoted-tag, and
   ordinary boxed/natural leaf roots discharge cache persistence constructively;
   ordered ownership folds and recursive constructor/closure steps are proved,
-  while the global fuel/reachability closure keeps the explicit proof premise
-  rather than the former heap-unchanged assumption; the admitted dead-child
-  discrepancy is tracked explicitly; and
+  while the global fuel closure keeps the explicit proof premise rather than
+  the former heap-unchanged assumption; canonical dead children are proved
+  all-fuel no-ops and malformed dead headers remain target faults; and
 - reference-count increment composes through exact object-like local widening,
   the concrete header/tagged operation, generated no-result host call, and
   persistent compiler elision; and

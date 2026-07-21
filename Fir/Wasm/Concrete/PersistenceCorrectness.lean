@@ -19,13 +19,13 @@ theorem markPersistentFuel_eq_of_persistent
   | zero =>
       simp only [markPersistentFuel]
       rw [heap]
-      simp only [headerRead, liftMemory, Bind.bind, Except.bind]
+      simp only [headerRead]
       rw [if_pos persistent]
       rfl
   | succ fuel =>
       simp only [markPersistentFuel]
       rw [heap]
-      simp only [headerRead, liftMemory, Bind.bind, Except.bind]
+      simp only [headerRead, Bind.bind, Except.bind]
       rw [if_pos persistent]
       rfl
 
@@ -38,6 +38,80 @@ theorem markPersistent_eq_of_persistent
     (descriptors : ClosureDescriptorTable := #[]) :
     markPersistent state object descriptors = .ok state := by
   exact markPersistentFuel_eq_of_persistent headerRead persistent _ descriptors
+
+/-- A canonical concrete released cell takes the operation-specific dead
+recovery path and is an exact persistence no-op at every fuel budget. -/
+theorem DeadCellRel.markPersistentFuel_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (fuel : Nat)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    markPersistentFuel fuel state address descriptors = .ok state := by
+  obtain ⟨header, headerRead, addressHeap, headerKind, ordinary, dead, refCount,
+      aux0, aux1, aux2, aux3, minimum, aligned, extent⟩ := related.header
+  have deadRead : state.readLiveHeader address = .error (.deadObject address) := by
+    unfold MemoryState.readLiveHeader
+    rw [addressHeap]
+    simp only [headerRead, Bind.bind, Except.bind]
+    rw [dead]
+    rfl
+  have freedSelf : (ObjectKind.freed == ObjectKind.freed) = true := by
+    decide
+  have canonical : header.isCanonicalFreedAt state address = true := by
+    simp [Header.isCanonicalFreedAt, headerKind, ordinary, dead, refCount,
+      aux0, aux1, aux2, aux3, minimum, aligned, extent, freedSelf]
+  have recovered : persistenceDeadNoOp state address = .ok state := by
+    unfold persistenceDeadNoOp
+    rw [headerRead]
+    simp only [liftMemory, Bind.bind, Except.bind]
+    rw [canonical]
+    simp
+    rfl
+  cases fuel <;> simp [markPersistentFuel, addressHeap, deadRead, recovered]
+
+/-- FIR's fuel-indexed persistence likewise leaves a represented dead
+semantic cell unchanged at every depth. -/
+theorem markPersistentLocationFuel_eq_of_dead
+    {heap : Heap} {location : Location} {cell : HeapCell}
+    (found : findCell? heap location = some cell) (dead : cell.live = false)
+    (fuel : Nat) :
+    markPersistentLocationFuel fuel heap location = heap := by
+  cases fuel with
+  | zero => rfl
+  | succ fuel => simp [markPersistentLocationFuel, found, dead]
+
+/-- The canonical released-cell equation rebuilds the whole heap relation and
+supplies the dead-target branch required by recursive persistence. -/
+theorem LiveHeapRel.markPersistentFuel_refines_dead
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {fuel : Nat} {descriptors : ClosureDescriptorTable}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    ∃ result,
+      markPersistentFuel fuel state address descriptors = .ok result ∧
+      LiveHeapRel result witness {
+        runtime with heap :=
+          markPersistentLocationFuel fuel runtime.heap location } := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  cases cellRelation with
+  | live liveRelated =>
+      cases liveRelated with
+      | constructor _ _ _ _ _ _ _ cellLive => simp_all
+      | boxed _ _ _ _ _ cellLive => simp_all
+      | natural _ _ _ _ _ _ _ _ _ _ cellLive => simp_all
+      | closure closureRelated =>
+          cases closureRelated with
+          | closure _ _ _ _ _ _ _ _ _ cellLive => simp_all
+  | dead semanticCount semanticDead descriptor deadRelated =>
+      refine ⟨state, deadRelated.markPersistentFuel_eq fuel descriptors, ?_⟩
+      rw [markPersistentLocationFuel_eq_of_dead found dead fuel]
+      exact related
 
 /-- Marking one represented live cell persistent rewrites only its common
 ownership metadata. The returned raw header write is the spatial input needed
@@ -306,7 +380,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
               simp [readOwnedReferences, objectRelated.headerKind]
             simp only [markPersistentFuel]
             rw [heap, objectRelated.headerRead]
-            simp only [liftMemory, Bind.bind, Except.bind]
+            simp only [Bind.bind, Except.bind]
             rw [if_neg (by simp [headerOrdinary])]
             rw [owned]
             rw [operation]
@@ -326,7 +400,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
               simp [readOwnedReferences, headerKind]
             simp only [markPersistentFuel]
             rw [heap, targetHeaderRead]
-            simp only [liftMemory, Bind.bind, Except.bind]
+            simp only [Bind.bind, Except.bind]
             rw [if_neg (by simp [headerOrdinary])]
             rw [owned]
             rw [operation]
@@ -636,7 +710,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
                 .ok result := by
             simp only [markPersistentFuel]
             rw [addressHeap, headerRead]
-            simp only [liftMemory, Bind.bind, Except.bind]
+            simp only [Bind.bind, Except.bind]
             rw [if_neg (by simp [headerOrdinary])]
             rw [ownedWithDescriptors, parentWrite]
             exact concreteFold
@@ -845,7 +919,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
                     .ok result := by
                 simp only [markPersistentFuel]
                 rw [addressHeap, headerRead]
-                simp only [liftMemory, Bind.bind, Except.bind]
+                simp only [Bind.bind, Except.bind]
                 rw [if_neg (by simp [headerOrdinary])]
                 rw [ownedRead, parentWrite]
                 exact concreteFold

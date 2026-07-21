@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-persistence-dead-child-refinement
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 66cc217
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-21
 reproduction: Fir/Wasm/Concrete/PersistenceCorrectness.lean
-regression: none
+regression: Fir/Wasm/Concrete/Examples.lean
 ---
 
 # Summary
@@ -78,6 +78,9 @@ none
 
 ## Resolution and regression
 
-Open. Prefer a reusable owned-reference liveness invariant preserved by
-allocation, mutation, reset/reuse, release, and persistence; then consume it
-once in the global persistence induction.
+Resolved in W6.6ag without weakening the shared heap relation or ordinary
+object decoding. Concrete persistence recovers a `deadObject` result only long
+enough to reread and validate the complete canonical freed header installed by
+release. That exact case is an all-fuel no-op matching FIR; malformed dead
+headers retain the structured target failure. Permanent guards cover both
+paths, and `DeadCellRel.markPersistentFuel_eq` exposes the refinement equation.

@@ -579,31 +579,62 @@ def readOwnedReferences (state : MemoryState) (object : Word32) (header : Header
   | .freed => throw (.target (.unsupportedOwnershipKind .freed))
   | .boxed | .string | .natural | .integer | .byteArray | .opaque => .ok []
 
+/-- A released allocation is a persistence no-op only when its complete
+retained header has the canonical shape installed by ownership release. This
+check is intentionally local to persistence: ordinary object decoders keep
+rejecting every dead header through `readLiveHeader`. -/
+def Header.isCanonicalFreedAt (header : Header) (state : MemoryState)
+    (address : Word32) : Bool :=
+  header.kind == .freed && !header.persistent && !header.live &&
+    header.refCount == 0 && header.aux0 == 0 && header.aux1 == 0 &&
+    header.aux2 == 0 && header.aux3 == 0 &&
+    headerBytes ≤ header.allocationBytes.toNat &&
+    header.allocationBytes.toNat % target.heapAlignment == 0 &&
+    address.value + header.allocationBytes.toNat ≤ state.memory.size
+
+/-- Recover the canonical released-header case after `readLiveHeader` has
+classified it as dead. Noncanonical dead headers retain the exact structured
+`deadObject` target failure. -/
+def persistenceDeadNoOp (state : MemoryState) (object : Word32) :
+    Except ConcreteError MemoryState := do
+  let header ← liftMemory <| Header.read state.memory object
+  if header.isCanonicalFreedAt state object then
+    return state
+  else
+    throw (.target (.deadObject object))
+
 /-- Fuel-indexed mirror of Lean's `lean_mark_persistent`. The current object
 is rewritten before its owned references are visited, so cycles terminate at
-the newly persistent header. Immediate and sentinel lanes contain no heap
-graph and are exact no-ops. -/
+the newly persistent header. Immediate and sentinel lanes, plus canonical
+released allocations reached through stale semantic ownership, contain no
+live heap graph and are exact no-ops. -/
 def markPersistentFuel : Nat → MemoryState → Word32 →
     (descriptors : ClosureDescriptorTable := #[]) → Except ConcreteError MemoryState
   | 0, state, object, _ => do
       match object.classify with
       | .heap =>
-          let header ← liftMemory <| state.readLiveHeader object
-          if header.persistent then return state
-          else throw (.target .releaseFuelExhausted)
+          match state.readLiveHeader object with
+          | .error (.deadObject _) => persistenceDeadNoOp state object
+          | .error failure => throw (.target failure)
+          | .ok header =>
+              if header.persistent then return state
+              else throw (.target .releaseFuelExhausted)
       | .immediate | .sentinel => return state
       | .invalid => throw (.source .expectedObject)
   | fuel + 1, state, object, descriptors => do
       match object.classify with
       | .heap =>
-          let header ← liftMemory <| state.readLiveHeader object
-          if header.persistent then
-            return state
-          let owned ← readOwnedReferences state object header descriptors
-          let state ← writeLiveHeader state object
-            { header with persistent := true, refCount := 0 }
-          owned.foldlM (init := state) fun state child =>
-            markPersistentFuel fuel state child descriptors
+          match state.readLiveHeader object with
+          | .error (.deadObject _) => persistenceDeadNoOp state object
+          | .error failure => throw (.target failure)
+          | .ok header =>
+              if header.persistent then
+                return state
+              let owned ← readOwnedReferences state object header descriptors
+              let state ← writeLiveHeader state object
+                { header with persistent := true, refCount := 0 }
+              owned.foldlM (init := state) fun state child =>
+                markPersistentFuel fuel state child descriptors
       | .immediate | .sentinel => return state
       | .invalid => throw (.source .expectedObject)
 

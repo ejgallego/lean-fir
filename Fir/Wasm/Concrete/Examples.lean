@@ -434,6 +434,36 @@ def releasedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
             header.aux2 == 0 && header.aux3 == 0
       | _, _ => false
 
+/- Persistence deliberately treats a canonical released allocation as an
+exact no-op at both zero fuel and the public cursor-derived budget. -/
+#guard match releasedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match markPersistentFuel 0 state object, markPersistent state object with
+      | .ok zeroFuel, .ok publicResult =>
+          zeroFuel.heapCursor == state.heapCursor &&
+            zeroFuel.memory == state.memory &&
+            publicResult.heapCursor == state.heapCursor &&
+            publicResult.memory == state.memory
+      | _, _ => false
+
+/- The persistence exception is exact: corrupting any frozen released-header
+metadata keeps the ordinary structured dead-object failure. -/
+def malformedReleasedBoxedUInt64Max :
+    Except ConcreteError (MemoryState × Word32) := do
+  let (state, object) ← releasedBoxedUInt64Max
+  let header ← liftMemory <| Header.read state.memory object
+  let memory ← liftMemory <|
+    { header with aux0 := 1 }.write state.memory object
+  return ({ state with memory }, object)
+
+#guard match malformedReleasedBoxedUInt64Max with
+  | .error _ => false
+  | .ok (state, object) =>
+      match markPersistent state object with
+      | .error (.target (.deadObject failed)) => failed == object
+      | _ => false
+
 /-- Explicit deletion uses the same canonical freed header but does not run
 the recursive ownership fold. -/
 def deletedBoxedUInt64Max : Except ConcreteError (MemoryState × Word32) := do
