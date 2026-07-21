@@ -647,6 +647,33 @@ theorem objectSetFn_satisfies_contract (index fieldKind initial args) :
       ((objectSetFn index fieldKind).invoke initial args) := by
   rfl
 
+/-- Executable concrete `USize`-slot mutation. The Lean64 field remains an
+exact i64 lane while the constructor address remains a wasm32 word. -/
+def usizeSetStep (index : Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 objectBits, .i64 field] =>
+      match writeUSizeField store.host.runtime.heap
+          (Word32.ofUInt32 objectBits) index field with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [.i32 _, _] => trap store (.laneMismatch 1 .i64)
+  | [_, _] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 2 args.length)
+
+def usizeSetFn (index : Nat) : Wasm.HostFn Host := {
+  params := [.i32, .i64]
+  results := []
+  invoke := usizeSetStep index }
+
+def usizeSetContract (index : Nat) : Wasm.HostContract Host :=
+  fun initial args result => result = usizeSetStep index initial args
+
+theorem usizeSetFn_satisfies_contract (index initial args) :
+    usizeSetContract index initial args ((usizeSetFn index).invoke initial args) := by
+  rfl
+
 def decodePhysicalLanes : Nat → List AbiKind → List Wasm.Value →
     Except HostFailure (List LaneValue)
   | _, [], [] => .ok []
@@ -1611,6 +1638,48 @@ theorem objectSetStep_of_refines
               finalHeapRelated
             apply modifyConstructor_heapOnly
             simpa [setObjectField] using updated
+
+/-- Successful concrete `USize` mutation refines the matching semantic
+constructor update and preserves all nonheap runtime components. -/
+theorem usizeSetStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {field : UInt64} {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (indexValid : index < semantic.usizeFields.size)
+    (updated : setUSizeField runtime (.object (.heap location)) index
+      (.usize field) = .ok nextRuntime) :
+    ∃ heap,
+      usizeSetStep index initial
+          [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated⟩ :=
+            runtimeRelated.heap.writeUSizeField_refines mapped found live
+              objectEq index field indexValid
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_⟩
+          · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setUSizeField] using updated
 
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
@@ -2656,6 +2725,115 @@ theorem effectStepSimulates_objectSet
       cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
+
+/-- `USize`-field mutation composed through exact compiler-assigned i32/i64
+locals, the real compiler and adapter, checked concrete slot writer, and the
+generated binary host-call prefix. -/
+theorem effectStepSimulates_usizeSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject} {field : UInt64}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize field))
+    (updated : setUSizeField sourceRuntime (.object (.heap location)) index
+      (.usize field) = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, .usize))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (objectKindAt :
+      (functionBindings sourceFunction)[objectIndex]?.map Prod.snd = some .object)
+    (fieldKindAt :
+      (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd = some .usize)
+    (callFound : callIndex? sourceModule (.runtime (.usizeSet index)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (usizeSetContract index))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (indexValid : index < semantic.usizeFields.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.uset objectId index fieldId continuation) continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness := by
+  have objectSourceLookup : lookup sourceEnv objectId =
+      some (.object (.heap location)) := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value foundLookup
+      injection objectLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  have fieldSourceLookup : lookup sourceEnv fieldId = some (.usize field) := by
+    unfold lookupValue at fieldLookup
+    split at fieldLookup
+    · rename_i value foundLookup
+      injection fieldLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  obtain ⟨physicalObject, hObject, physicalObjectRelated⟩ :=
+    initialRelated.resolve objectSourceLookup objectFound objectKindAt
+  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
+    initialRelated.resolve fieldSourceLookup fieldFound fieldKindAt
+  cases physicalObjectRelated with
+  | word32 objectRelated =>
+      cases physicalFieldRelated with
+      | word64 fieldRelated =>
+          cases fieldRelated with
+          | usize =>
+              obtain ⟨heap, operation, runtimeRelated⟩ :=
+                usizeSetStep_of_refines initialRelated.1 objectRelated found live
+                  objectEq indexValid updated
+              refine ⟨heap, ?_⟩
+              apply effectStepSimulates_binaryHost (step := usizeSetStep index)
+              · intro externals
+                simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+              · exact codeAdapted_uset objectCompiled fieldCompiled objectFound
+                  fieldFound callFound continuationAdapted
+              · exact initialRelated
+              · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+                  initialRelated.2.2⟩
+              · exact hObject
+              · exact hField
+              · exact hImp
+              · exact hSat
+              · exact hi
+              · exact hContract
+              · exact hParams
+              · exact hResults
+              · exact operation
+      | word32 fieldRelated => cases fieldRelated
+      | float32Bits fieldRelated => cases fieldRelated
+      | float64Bits fieldRelated => cases fieldRelated
+  | word64 objectRelated => cases objectRelated
+  | float32Bits objectRelated => cases objectRelated
+  | float64Bits objectRelated => cases objectRelated
 
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are

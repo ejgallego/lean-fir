@@ -23,7 +23,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `unbox` | Five integer/USize kinds | Tagged and heap theorems | Partial | Missing; floats share the runtime gap |
 | `isShared` | Yes | Tagged and ordinary heap theorem | Partial | Missing |
 | `objectSet` | Yes | Heap theorem | Partial | Concrete two-i32 host, FVar source step, compiler/adapter, generated binary call, and continuation compose for supported object-field kinds; artifact and non-FVar arguments pending |
-| `usizeSet` | Yes | Heap theorem | Partial | Missing |
+| `usizeSet` | Yes | Heap theorem | Partial | Concrete i32/i64 host, source step, compiler/adapter, generated binary call, and continuation compose; artifact pending |
 | `scalarSet` | Four integer widths | Heap theorems | Partial | Missing; floats share the runtime gap |
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, and continuation compose; explicit wasm32 tag-fit premise retained; artifact pending |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
@@ -54,6 +54,9 @@ Cross-cutting W6.5 state:
 - one-field object mutation composes through exact object/field locals, the
   constructor descriptor, checked concrete slot writer, and generated binary
   host call for the supported wasm32 object-field fragment; and
+- `USize` mutation composes through the exact wasm32 object and Lean64 i64
+  field lanes, checked concrete slot writer, and generated binary host call;
+  and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 

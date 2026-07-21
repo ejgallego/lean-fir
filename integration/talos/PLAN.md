@@ -2082,6 +2082,17 @@ executable guard changes a unary constructor field from 23 to 47 and confirms
 that its tag remains 8. Literal/non-FVar argument composition and generated
 artifact execution remain pending.
 
+W6.6s composes `USize`-field mutation through the same lane-polymorphic binary
+effect rule. The concrete host takes a wasm32 constructor address and an exact
+Lean64 i64 payload, checks the constructor and semantic `USize` index, and
+updates only the selected eight-byte slot. Its refinement instantiates the
+existing whole-heap `writeUSizeField_refines` theorem, while the composed rule
+derives both physical locals from `StateRelated` and connects the source
+evaluator, compiler, adapter, exact host contract, and continuation. The
+semantic index bound stays explicit. An executable guard overwrites the
+maximum `UInt64` fixture with 37, rereads all 64 bits, and confirms that the
+constructor tag is unchanged. Generated artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

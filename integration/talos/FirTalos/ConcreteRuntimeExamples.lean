@@ -81,6 +81,21 @@ private def usizeProjectionFixture :
       | _ => false
   | .error _ => false
 
+-- USize mutation consumes and stores the full i64 lane while preserving the
+-- constructor header used to locate the semantic slot.
+#guard match usizeProjectionFixture with
+  | .ok (store, object) =>
+      match usizeSetStep 0 store
+          [.i32 (UInt32.ofNat object.value), .i64 37] with
+      | .Return [] next =>
+          match readTag next.host.runtime.heap object,
+              readUSizeField next.host.runtime.heap object 0 with
+          | .ok tag, .ok field =>
+              tag == 4 && field == 37 && next.host.failure?.isNone
+          | _, _ => false
+      | _ => false
+  | .error _ => false
+
 private def scalarProjectionInfo : Lean.Compiler.LCNF.CtorInfo := {
   name := `FirTalos.Concrete.scalarProjection
   cidx := 5
