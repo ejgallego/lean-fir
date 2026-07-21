@@ -210,6 +210,21 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- Object-slot mutation preserves constructor metadata while replacing the
+-- exact wasm32 field lane selected by the generated import.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match objectSetStep 0 .tagged store [.i32 object, .i32 47] with
+      | .Return [] next =>
+          match readTag next.host.runtime.heap (Word32.ofUInt32 object),
+              readObjectField next.host.runtime.heap (Word32.ofUInt32 object) 0 with
+          | .ok tag, .ok field =>
+              tag == 8 && field.value == 47 && next.host.failure?.isNone
+          | _, _ => false
+      | _ => false
+  | _ => false
+
 private def cacheDeclaration : Lean.Name := `FirTalos.Concrete.cachedValue
 
 private def cacheStore : Wasm.Store Host := {

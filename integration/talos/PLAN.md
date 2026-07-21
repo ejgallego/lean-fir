@@ -2068,6 +2068,20 @@ changes a unary constructor's tag and rereads its original payload, confirming
 that the concrete mutation touches only the header. Generated artifact
 execution remains pending.
 
+W6.6r composes one-field object mutation. A concrete binary Talos host accepts
+the exact object and field wasm32 lanes, validates the live constructor, slot
+bounds, and canonical padding, and replaces only the selected slot's low word.
+The local refinement instantiates the existing complete-heap
+`writeObjectField_refines` theorem and reuses the heap-only semantic frame from
+W6.6q. A generic binary no-result effect rule then connects an FVar field
+argument through the source evaluator, compiler, adapter, exact host contract,
+and continuation. The proof retains the constructor descriptor, semantic index
+bound, descriptor field-kind equality, and `AbiKind.isObjectField` fragment
+premises; it does not reinterpret wider scalar lanes as object words. An
+executable guard changes a unary constructor field from 23 to 47 and confirms
+that its tag remains 8. Literal/non-FVar argument composition and generated
+artifact execution remain pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

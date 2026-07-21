@@ -616,6 +616,37 @@ theorem setTagFn_satisfies_contract (tag initial args) :
     setTagContract tag initial args ((setTagFn tag).invoke initial args) := by
   rfl
 
+/-- Executable concrete object-slot mutation. Supported object fields are
+wasm32 lanes; the checked writer validates the constructor, slot bounds, and
+canonical padding before replacing only the low word of that semantic slot. -/
+def objectSetStep (index : Nat) (_fieldKind : AbiKind)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 objectBits, .i32 fieldBits] =>
+      match writeObjectField store.host.runtime.heap
+          (Word32.ofUInt32 objectBits) index (Word32.ofUInt32 fieldBits) with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [.i32 _, _] => trap store (.laneMismatch 1 .i32)
+  | [_, _] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 2 args.length)
+
+def objectSetFn (index : Nat) (fieldKind : AbiKind) : Wasm.HostFn Host := {
+  params := [.i32, FirTalos.abiKind fieldKind]
+  results := []
+  invoke := objectSetStep index fieldKind }
+
+def objectSetContract (index : Nat) (fieldKind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result =>
+    result = objectSetStep index fieldKind initial args
+
+theorem objectSetFn_satisfies_contract (index fieldKind initial args) :
+    objectSetContract index fieldKind initial args
+      ((objectSetFn index fieldKind).invoke initial args) := by
+  rfl
+
 def decodePhysicalLanes : Nat → List AbiKind → List Wasm.Value →
     Except HostFailure (List LaneValue)
   | _, [], [] => .ok []
@@ -1531,6 +1562,56 @@ theorem setTagStep_of_refines
             apply modifyConstructor_heapOnly
             simpa [setTag] using updated
 
+/-- Successful concrete object-slot mutation refines the matching semantic
+constructor update and preserves all nonheap runtime components. -/
+theorem objectSetStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord fieldWord : Word32} {fieldKind : AbiKind} {field : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness fieldKind (.word32 fieldWord) field)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (indexValid : index < semantic.objectFields.size)
+    (kindAt : fieldKinds[index]? = some fieldKind)
+    (updated : setObjectField runtime (.object (.heap location)) index field =
+      .ok nextRuntime) :
+    ∃ heap,
+      objectSetStep index fieldKind initial
+          [.i32 (UInt32.ofNat objectWord.value),
+            .i32 (UInt32.ofNat fieldWord.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated⟩ :=
+            runtimeRelated.heap.writeObjectField_refines mapped found live
+              objectEq descriptorFound index fieldKind field fieldWord indexValid
+              kindAt fieldRelated
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_⟩
+          · simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setObjectField] using updated
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -2208,6 +2289,50 @@ theorem effectStepSimulates_unaryHost
     (tail := tail) (.cons hObject .nil) hImp hSat hi hContract hParams
     hResults operation continued
 
+/-- Generic binary concrete-host instance of the no-result effect boundary. -/
+theorem effectStepSimulates_binaryHost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial final : Wasm.Store Host} {locals : Wasm.Locals}
+    {firstIndex secondIndex : Nat} {physicalFirst physicalSecond : Wasm.Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness nextWitness : RefinementWitness}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    (sourceStep : SourceEffectResult context sourceRuntime nextRuntime sourceEnv
+      code continuation)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels code
+      ([.localGet firstIndex, .localGet secondIndex, .call id] ++ targetRest))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (finalRelated : StateRelated sourceFunction nextRuntime sourceEnv final
+      locals nextWitness)
+    (hFirst : locals.get firstIndex = some physicalFirst)
+    (hSecond : locals.get secondIndex = some physicalSecond)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (operation : step initial [physicalFirst, physicalSecond] =
+      .Return [] final) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime nextRuntime sourceEnv code continuation
+      ([.localGet firstIndex, .localGet secondIndex, .call id] ++ targetRest)
+      targetRest initial final locals witness nextWitness := by
+  refine ⟨sourceStep, adapted, initialRelated, finalRelated, ?_⟩
+  intro Q tail continued
+  simpa using wp_effect_localGets
+    (indices := [firstIndex, secondIndex])
+    (physicalArgs := [physicalFirst, physicalSecond]) (tail := tail)
+    (.cons hFirst (.cons hSecond .nil)) hImp hSat hi hContract hParams
+    hResults operation continued
+
 /-- A compiler-elided concrete source effect advances only source control. -/
 theorem effectStepSimulates_elided
     {context : Fir.Wasm.Context}
@@ -2421,6 +2546,116 @@ theorem effectStepSimulates_setTag
   | word64 valueRelated => cases valueRelated
   | float32Bits valueRelated => cases valueRelated
   | float64Bits valueRelated => cases valueRelated
+
+/-- FVar object-field mutation composed through exact compiler-assigned i32
+locals, the real compiler and adapter, the checked concrete slot writer, and
+the generated binary host-call prefix. -/
+theorem effectStepSimulates_objectSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {location : Location} {cell : HeapCell}
+    {objectWord : Word32}
+    {semantic : ConstructorObject} {field : Value} {fieldKind : AbiKind}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok field)
+    (updated : setObjectField sourceRuntime (.object (.heap location)) index
+      field = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.compileArg context (.fvar fieldId) =
+      .ok ([.localGet fieldId], fieldKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (fieldLocalKindAt :
+      (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd = some fieldKind)
+    (fieldObjectKind : fieldKind.isObjectField = true)
+    (callFound : callIndex? sourceModule
+      (.runtime (.objectSet index fieldKind)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (objectSetContract index fieldKind))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (indexValid : index < semantic.objectFields.size)
+    (fieldDescriptorKindAt : fieldKinds[index]? = some fieldKind) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.oset objectId index (.fvar fieldId) continuation) continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness := by
+  have fieldSourceLookup : lookup sourceEnv fieldId = some field := by
+    unfold lookupValue at fieldLookup
+    split at fieldLookup
+    · rename_i value foundLookup
+      injection fieldLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
+    initialRelated.resolve fieldSourceLookup fieldFound fieldLocalKindAt
+  cases physicalFieldRelated with
+  | word32 fieldRelated =>
+      obtain ⟨heap, operation, runtimeRelated⟩ :=
+        objectSetStep_of_refines initialRelated.1 objectRelated fieldRelated
+          found live objectEq descriptorFound indexValid fieldDescriptorKindAt
+          updated
+      refine ⟨heap, ?_⟩
+      apply effectStepSimulates_binaryHost
+        (step := objectSetStep index fieldKind)
+      · intro externals
+        change evalArg sourceEnv (.fvar fieldId) = .ok field at fieldLookup
+        simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+      · apply codeAdapted_oset (targetField := [.localGet fieldIndex])
+          objectCompiled fieldCompiled objectFound
+        · apply instructions_localGets (fvarIds := [fieldId])
+            (indices := [fieldIndex])
+          exact .cons (by simpa [functionBindings] using fieldFound) .nil
+        · exact callFound
+        · exact continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hField
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 fieldRelated =>
+      cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
+  | float32Bits fieldRelated => cases fieldRelated
+  | float64Bits fieldRelated => cases fieldRelated
 
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are
