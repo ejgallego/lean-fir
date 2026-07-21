@@ -2028,6 +2028,18 @@ remaining cache work is to assemble the declaration call, concrete result
 relation, cache suffix, and miss-block exit into one proof, then switch the
 artifact host.
 
+W6.6o closes that lazy-miss assembly. A tail-polymorphic, store-specific
+`TerminatesWith` theorem for the zero-argument declaration now feeds the exact
+generated `call; cacheSet; global.set; i32.const 1; global.set` miss body. The
+proof reconnects normal block exit to the cached-value reload and destination
+local write used by W6.6n. Small global-write frame lemmas derive, from the
+generated value/flag indices being distinct, that the result remains readable
+after the flag is populated; downstream proofs do not assume that store fact.
+Together W6.6g, W6.6m, W6.6n, and this slice provide the complete compositional
+lazy-cache proof boundary. Supplying each declaration body's concrete
+termination/refinement proof and switching the emitted artifact to the
+concrete host remain integration work.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

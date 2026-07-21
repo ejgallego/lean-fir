@@ -2033,6 +2033,24 @@ def writeWasmGlobal (store : Wasm.Store Host) (index : Nat)
     (value : Wasm.Value) : Wasm.Store Host :=
   { store with globals := { globals := store.globals.globals.set index value } }
 
+/-- A generated `global.set` writes the selected, already allocated global. -/
+theorem writeWasmGlobal_get_self
+    {store : Wasm.Store Host} {index : Nat}
+    {old value : Wasm.Value}
+    (found : store.globals.globals[index]? = some old) :
+    (writeWasmGlobal store index value).globals.globals[index]? = some value := by
+  simp only [writeWasmGlobal]
+  exact List.getElem?_set_self (List.getElem?_eq_some_iff.mp found).1
+
+/-- A generated `global.set` preserves every distinct global. -/
+theorem writeWasmGlobal_get_ne
+    {store : Wasm.Store Host} {written read : Nat} {value : Wasm.Value}
+    (different : written ≠ read) :
+    (writeWasmGlobal store written value).globals.globals[read]? =
+      store.globals.globals[read]? := by
+  simp only [writeWasmGlobal]
+  rw [List.getElem?_set_ne different]
+
 /-- Exact generated cache-write suffix after a lazy declaration has left its
 result on the operand stack. The host cache and the two physical Wasm globals
 are updated in their distinct stores. -/
@@ -2071,6 +2089,67 @@ theorem wp_cacheSet_miss_suffix
     { locals with values := tail } env
   rw [Wasm.wp_const_cons, Wasm.wp_globalSet_cons, hFlag]
   exact continued
+
+/-- Assemble the exact generated lazy-miss block from a terminating
+zero-argument declaration call, the concrete cache host call, and the two
+physical Wasm global writes. The result-global write is preserved across the
+distinct flag-global write before the surrounding cache path reloads it. -/
+theorem lazyMissBodySimulates_of_call_cacheSet
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {declarationId cacheSetId : Nat} {imp : Wasm.ImportDecl}
+    {declaration : Lean.Name} {kind : AbiKind}
+    {targetStore afterCall afterCache valueStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {physical oldValue oldFlag : Wasm.Value}
+    {valueIndex flagIndex resultIndex : Nat}
+    (declarationCall : ∀ tail,
+      Wasm.TerminatesWith env module declarationId targetStore tail
+        (fun final results =>
+          final = afterCall ∧ results = physical :: tail))
+    (hImp : module.imports[cacheSetId]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : cacheSetId < module.imports.length)
+    (hContract : spec.contracts[cacheSetId]? =
+      some (cacheSetContract declaration kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : cacheSetStep declaration kind afterCall [physical] =
+      .Return [physical] afterCache)
+    (hValue : afterCache.globals.globals[valueIndex]? = some oldValue)
+    (valueStoreEq : valueStore =
+      writeWasmGlobal afterCache valueIndex physical)
+    (hFlag : valueStore.globals.globals[flagIndex]? = some oldFlag)
+    (different : valueIndex ≠ flagIndex)
+    (hSet : targetLocals.set? resultIndex physical = some nextLocals) :
+    LazyMissBodySimulates module env
+      [.call declarationId, .call cacheSetId, .globalSet valueIndex,
+        .const 1, .globalSet flagIndex]
+      valueIndex resultIndex targetStore
+      (writeWasmGlobal valueStore flagIndex (.i32 1))
+      targetLocals nextLocals := by
+  intro rest Q tail continued
+  apply Wasm.wp_call_tw (declarationCall tail)
+  intro final results callPost
+  rcases callPost with ⟨rfl, rfl⟩
+  apply wp_cacheSet_miss_suffix hImp hSat hi hContract hParams hResults
+    operation hValue valueStoreEq hFlag
+  rw [Wasm.wp_nil]
+  have valueAtValueStore :
+      valueStore.globals.globals[valueIndex]? = some physical := by
+    rw [valueStoreEq]
+    exact writeWasmGlobal_get_self hValue
+  have valueAtFinal :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).globals.globals[valueIndex]? =
+        some physical := by
+    rw [writeWasmGlobal_get_ne different.symm]
+    exact valueAtValueStore
+  change Wasm.wp module
+    (.globalGet valueIndex :: .localSet resultIndex :: rest) Q
+    (writeWasmGlobal valueStore flagIndex (.i32 1))
+    { targetLocals with values := tail } env
+  rw [Wasm.wp_globalGet_cons, valueAtFinal]
+  simpa using wp_localSet_of_set hSet continued
 
 /-- Concrete-host lazy-cache hit: skip the miss block and load the populated
 value global without changing host or Wasm state. -/

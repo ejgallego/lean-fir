@@ -12,7 +12,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
-| `cacheSet` | Typed concrete globals and Talos host | Runtime theorem | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, host call, and cache-write suffix WP; miss-body declaration assembly and artifact pending |
+| `cacheSet` | Typed concrete globals and Talos host | Runtime theorem | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, and local write compose; per-declaration body proofs and artifact switch pending |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, and continuation compose; artifact pending; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Concrete interprocedural judgment, body-WP-to-termination bridge, candidate and direct-call/local-write rules; complete compiler fold and artifact pending |
 | `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | Generated matcher plus one candidate `if`/fallthrough WP; complete compiler candidate fold, direct call, and artifact pending |
@@ -42,6 +42,9 @@ Cross-cutting W6.5 state:
   `usizeProj`, and all four supported integer `scalarProj` variants are
   composed with their W5/W2 generated case and `let` theorems using
   representation-aware concrete locals and host-owned memory; and
+- lazy-cache hits and misses compose through the declaration-call termination
+  boundary, typed host cache update, physical flag/value globals, and generated
+  result-local write; and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 
