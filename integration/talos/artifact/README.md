@@ -135,12 +135,22 @@ with:
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
-`module-client.mjs` factors only the reusable loading boundary: it validates
-the invocation-free descriptor, creates (or accepts) a `SemanticHost`,
-instantiates the module, and returns its raw exported function. It deliberately
-does not create source-language values or adapt a function-specific API. The
-caller continues to allocate runtime values in the host and use
-`host.encode`/`host.decode` with the descriptor's ABI kinds.
+`module-client.mjs` is the transport-neutral loading boundary. Its core entry
+accepts Wasm bytes, the parsed invocation-free descriptor, and a caller-owned
+semantic ABI host; `fetchModuleArtifact` obtains the first two inputs through
+the web-standard Fetch API. `node-module-client.mjs` is the small filesystem
+wrapper that creates the repository's `SemanticHost`. Both return the raw
+exported function and deliberately avoid creating source-language values or a
+function-specific API. The caller continues to allocate runtime values in the
+host and use `host.encode`/`host.decode` with the descriptor's ABI kinds.
+
+For a fetch-capable JavaScript environment with a compatible semantic host:
+
+```js
+const { manifest, entry } = await fetchModuleArtifact("pretty.wasm", { host });
+const physicalResult = entry(...physicalArguments);
+const result = host.decode(manifest.result, physicalResult);
+```
 
 The client also retains the focused expected-failure regression for
 `FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads

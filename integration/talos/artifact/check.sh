@@ -146,6 +146,7 @@ node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
   _build/source-usize-id.wasm
+node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"

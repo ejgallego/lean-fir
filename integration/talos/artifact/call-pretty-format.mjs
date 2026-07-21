@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
 import { formatExternalRegistry } from "../../../scripts/wasm_format_externals.mjs";
-import { instantiateModuleArtifact } from "./module-client.mjs";
+import { loadModuleArtifact } from "./node-module-client.mjs";
 
 const artifactPath = process.argv[2];
 assert.ok(artifactPath, "usage: node call-pretty-format.mjs ARTIFACT.wasm");
 
-const { manifest, host, entry: prettyM } = await instantiateModuleArtifact(
+const { manifest, host, entry: prettyM } = await loadModuleArtifact(
   artifactPath,
   { externalRegistry: formatExternalRegistry },
 );

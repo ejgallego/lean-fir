@@ -1,53 +1,78 @@
-import assert from "node:assert/strict";
-import fs from "node:fs";
-
-import { SemanticHost } from "../../../scripts/wasm_semantic_host.mjs";
-
 const INVOCATION_FIELDS = ["fixture", "arguments", "initialRuntime"];
 
-function readModuleDescriptor(artifactPath) {
-  const manifest = JSON.parse(fs.readFileSync(`${artifactPath}.json`, "utf8"));
-  assert.ok(manifest && typeof manifest === "object" && !Array.isArray(manifest),
+function requireCondition(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+export function validateModuleDescriptor(manifest) {
+  requireCondition(manifest && typeof manifest === "object" && !Array.isArray(manifest),
     "module descriptor must be a JSON object");
-  assert.equal(typeof manifest.sourceEntry, "string",
+  requireCondition(typeof manifest.sourceEntry === "string",
     "module descriptor sourceEntry must be a string");
-  assert.equal(typeof manifest.entry, "string",
+  requireCondition(typeof manifest.entry === "string",
     "module descriptor entry must be a string");
-  assert.equal(typeof manifest.result, "string",
+  requireCondition(typeof manifest.result === "string",
     "module descriptor result must be a string");
-  assert.ok(Array.isArray(manifest.params),
+  requireCondition(Array.isArray(manifest.params),
     "module descriptor params must be an array");
-  assert.ok(manifest.params.every((kind) => typeof kind === "string"),
+  requireCondition(manifest.params.every((kind) => typeof kind === "string"),
     "module descriptor params must contain ABI kind names");
-  assert.ok(Array.isArray(manifest.imports),
+  requireCondition(Array.isArray(manifest.imports),
     "module descriptor imports must be an array");
   for (const field of INVOCATION_FIELDS) {
-    assert.ok(!Object.hasOwn(manifest, field),
+    requireCondition(!Object.hasOwn(manifest, field),
       `module-only descriptor must not contain ${field}`);
   }
   return manifest;
 }
 
 /**
- * Instantiate an invocation-free FIR Wasm artifact.
+ * Instantiate an invocation-free FIR Wasm artifact from transport-neutral
+ * inputs. The caller owns both the bytes and the semantic ABI host.
  *
- * This intentionally exposes the raw exported WebAssembly function and the
- * semantic host. Callers allocate Lean runtime values in `host`, encode them
- * with the descriptor's ABI kinds, and decode the physical result themselves.
+ * This intentionally exposes the raw exported WebAssembly function. Callers
+ * allocate Lean runtime values in `host`, encode them with the descriptor's
+ * ABI kinds, and decode the physical result themselves.
  */
-export async function instantiateModuleArtifact(artifactPath, options = {}) {
-  const bytes = fs.readFileSync(artifactPath);
-  const manifest = readModuleDescriptor(artifactPath);
-  assert.ok(WebAssembly.validate(bytes), `${artifactPath} failed WebAssembly validation`);
-
-  assert.ok(!(options.host && options.externalRegistry),
-    "pass either an existing host or an external registry, not both");
-  const host = options.host ?? new SemanticHost(undefined, options.externalRegistry);
-  assert.ok(host instanceof SemanticHost, "module artifact host must be a SemanticHost");
+export async function instantiateModuleArtifact({ bytes, manifest, host }) {
+  requireCondition(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes),
+    "module bytes must be an ArrayBuffer or an ArrayBuffer view");
+  validateModuleDescriptor(manifest);
+  requireCondition(host && typeof host.imports === "function",
+    "module artifact host must provide imports(operations)");
+  requireCondition(WebAssembly.validate(bytes), "module failed WebAssembly validation");
 
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
-  assert.equal(typeof entry, "function",
+  requireCondition(typeof entry === "function",
     `module export ${manifest.entry} must be a function`);
   return { manifest, host, instance, entry };
+}
+
+/** Load the same low-level boundary through the web-standard Fetch API. */
+export async function fetchModuleArtifact(artifactUrl, options) {
+  const {
+    descriptorUrl = `${artifactUrl}.json`,
+    host,
+    fetchImpl = globalThis.fetch,
+  } = options ?? {};
+  requireCondition(typeof fetchImpl === "function",
+    "fetchModuleArtifact requires a Fetch API implementation");
+
+  const [moduleResponse, descriptorResponse] = await Promise.all([
+    fetchImpl(artifactUrl),
+    fetchImpl(descriptorUrl),
+  ]);
+  requireCondition(moduleResponse.ok,
+    `failed to fetch module ${artifactUrl}: HTTP ${moduleResponse.status}`);
+  requireCondition(descriptorResponse.ok,
+    `failed to fetch module descriptor ${descriptorUrl}: HTTP ${descriptorResponse.status}`);
+
+  return instantiateModuleArtifact({
+    bytes: await moduleResponse.arrayBuffer(),
+    manifest: await descriptorResponse.json(),
+    host,
+  });
 }
