@@ -1077,6 +1077,76 @@ theorem shadowCode_runtimeTypesCanonical
     (index := ScopeIndex.empty) runtimeTypesCanonicalTraversalLaws
       runtimeTypesCanonicalCaseKernelLaws run canonical
 
+/-- Declaration-level lifting of recursive runtime-type canonicality. -/
+theorem shadowDecl_runtimeTypesCanonical
+    (canonical : DeclRuntimeTypesCanonical source)
+    (run : shadowDecl? fuel source = some target) :
+    DeclRuntimeTypesCanonical target := by
+  rcases source with ⟨signature, value, recursive, inlineAttr⟩
+  cases value with
+  | code code =>
+      change CodeRuntimeTypesCanonical code at canonical
+      cases codeRun : shadowCode? fuel code with
+      | none =>
+          simp [shadowDecl?, LCNF.DeclValue.mapCodeM, codeRun] at run
+      | some transformed =>
+          simp [shadowDecl?, LCNF.DeclValue.mapCodeM, codeRun] at run
+          subst target
+          exact shadowCode_runtimeTypesCanonical canonical codeRun
+  | extern metadata =>
+      simp [shadowDecl?, LCNF.DeclValue.mapCodeM] at run
+      subst target
+      trivial
+
+/-- Pointwise declaration canonicality survives the complete declaration-list
+traversal. -/
+theorem shadowDecls_runtimeTypesCanonical
+    (canonical : DeclListRuntimeTypesCanonical source)
+    (run : shadowDecls? fuel source = some target) :
+    DeclListRuntimeTypesCanonical target := by
+  induction source generalizing target with
+  | nil =>
+      simp [shadowDecls?] at run
+      subst target
+      intro declaration member
+      simp at member
+  | cons declaration rest ih =>
+      have declarationCanonical : DeclRuntimeTypesCanonical declaration :=
+        canonical declaration List.mem_cons_self
+      have restCanonical : DeclListRuntimeTypesCanonical rest := by
+        intro restDeclaration member
+        exact canonical restDeclaration (List.mem_cons_of_mem _ member)
+      simp only [shadowDecls?] at run
+      cases declarationRun : shadowDecl? fuel declaration with
+      | none => simp [declarationRun] at run
+      | some transformedDeclaration =>
+          cases restRun : shadowDecls? fuel rest with
+          | none => simp [declarationRun, restRun] at run
+          | some transformedRest =>
+              simp [declarationRun, restRun] at run
+              subst target
+              intro targetDeclaration member
+              simp only [List.mem_cons] at member
+              rcases member with rfl | member
+              · exact shadowDecl_runtimeTypesCanonical
+                  declarationCanonical declarationRun
+              · exact ih restCanonical restRun targetDeclaration member
+
+/-- Successful whole-program shadow traversal preserves the compiler-output
+runtime-type invariant. -/
+theorem shadowProgram_runtimeTypesCanonical
+    (canonical : ProgramRuntimeTypesCanonical before)
+    (run : shadowProgram? fuel before = some after) :
+    ProgramRuntimeTypesCanonical after := by
+  unfold shadowProgram? at run
+  cases declarationsRun : shadowDecls? fuel before.decls.toList with
+  | none => simp [declarationsRun] at run
+  | some declarations =>
+      simp [declarationsRun] at run
+      subst after
+      change DeclListRuntimeTypesCanonical declarations.toArray.toList
+      simpa using shadowDecls_runtimeTypesCanonical canonical declarationsRun
+
 /-- The old recursive boundary implies the local kernel law. This direction
 does not use the pointwise branch proof; the boundary already hides it. -/
 theorem scopedCaseKernelLaws_of_boundary

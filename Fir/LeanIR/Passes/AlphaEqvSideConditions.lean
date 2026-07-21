@@ -103,6 +103,24 @@ inductive CodeRuntimeTypesCanonical : LCNF.Code .impure → Prop where
       (continuation : CodeRuntimeTypesCanonical rest) :
       CodeRuntimeTypesCanonical (.del object rest)
 
+/-- Declaration values are canonical when their executable body is; extern
+declarations contain no impure runtime-type annotations. -/
+def DeclValueRuntimeTypesCanonical : LCNF.DeclValue .impure → Prop
+  | .code code => CodeRuntimeTypesCanonical code
+  | .extern _ => True
+
+def DeclRuntimeTypesCanonical (declaration : LCNF.Decl .impure) : Prop :=
+  DeclValueRuntimeTypesCanonical declaration.value
+
+def DeclListRuntimeTypesCanonical
+    (declarations : List (LCNF.Decl .impure)) : Prop :=
+  ∀ declaration, declaration ∈ declarations →
+    DeclRuntimeTypesCanonical declaration
+
+/-- Whole-program presentation of the compiler-output runtime-type invariant. -/
+def ProgramRuntimeTypesCanonical (program : ImpureProgram) : Prop :=
+  DeclListRuntimeTypesCanonical program.decls.toList
+
 /-- Determinism turns constructor membership into the concrete constructor
 lookup used by `chooseAlt`. -/
 theorem findCtorAlt_eq_some_of_has
