@@ -1,5 +1,5 @@
 import Fir.LeanIR.Passes.SimpCase
-import Fir.LeanIR.Passes.SimpCaseScopedBridge
+import Fir.LeanIR.Passes.SimpCaseWellFormed
 import Fir.LeanIR.Passes.SimpCaseCorrectness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Elab.Command
@@ -17,6 +17,7 @@ open Fir.LeanIR.Passes.SimpCaseAlphaBridge
 open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseCorrectness
 open Fir.LeanIR.Passes.SimpCaseScopedBridge
+open Fir.LeanIR.Passes.SimpCaseWellFormed
 open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCaseRelation
 
