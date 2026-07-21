@@ -15,8 +15,8 @@ failure correspondence. The matrix is intentionally conservative.
 | `cacheSet` | Typed concrete globals and Talos host | Runtime theorem | Partial | Concrete host-call and generated cache-write suffix WP; interprocedural lazy-`let` and artifact pending |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, and continuation compose; artifact pending; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Excluded legacy callback; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Explicit supported-fragment exclusion |
-| `closureMatches` | Yes | Exact match/nonmatch heap theorem | Partial | Missing |
-| `closureProj` | Yes | Typed heap theorem | Partial | Missing |
+| `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | Generated `local.get; closureMatches` discriminator WP; full trampoline/direct-call and artifact pending |
+| `closureProj` | Concrete Talos typed-capture host | Typed heap theorem | Partial | Generated `local.get; closureProj` capture-stack WP; full trampoline/direct-call and artifact pending |
 | `reset` | Yes | Tagged, nonunique, and unique protocol theorems | Partial | Missing |
 | `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Partial | Missing |
 | `box` | Five integer/USize kinds | Tagged and heap theorems | Partial | Missing; floats share the runtime gap |

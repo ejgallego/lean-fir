@@ -1964,6 +1964,19 @@ assuming captures are all local variables. The generated artifact still uses
 the semantic host; closure match/projection and trampoline/direct-call
 composition remain the next proof slices.
 
+W6.6j installs the two read-only concrete operations required by that
+trampoline. `closureMatches` reads checked target/arity/fixed metadata and
+returns the exact direct i32 discriminator, including the nonmatching zero
+case. `closureProj` checks the same metadata and capture descriptor, then
+returns the selected `i32`, `i64`, `f32`, or `f64` lane without semantic
+handles. Complete-runtime refinements connect both hosts to the mapped live
+semantic closure and preserve its typed capture relation; exact Talos rules
+compose each generated `local.get; call` prefix with its operand-stack
+continuation. An executable regression covers a successful match, a target
+mismatch, and maximum-`UInt64` capture readback. The surrounding candidate
+chain, underapplication/direct-call branch, source call execution, and
+artifact switch remain open.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

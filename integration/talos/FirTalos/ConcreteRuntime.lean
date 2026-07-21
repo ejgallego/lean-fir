@@ -584,6 +584,96 @@ theorem partialApplyFn_satisfies_contract
         initial args) := by
   rfl
 
+/-- Bit-preserving conversion from W6's concrete lane vocabulary to Talos's
+operand-stack values. -/
+def physicalOfLane : LaneValue → Wasm.Value
+  | .word32 word => .i32 (UInt32.ofNat word.value)
+  | .word64 word => .i64 word
+  | .float32Bits bits => .f32 bits
+  | .float64Bits bits => .f64 bits
+
+theorem physicalOfLane_related
+    {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
+    {semantic : Value} (related : ValueRel witness kind lane semantic) :
+    PhysicalValueRel witness kind (physicalOfLane lane) semantic := by
+  cases related with
+  | object related => exact .word32 (.object related)
+  | tagged related => exact .word32 (.tagged related)
+  | tobject related => exact .word32 (.tobject related)
+  | erased => exact .word32 .erased
+  | reuseNone => exact .word32 .reuseNone
+  | reuseSome related => exact .word32 (.reuseSome related)
+  | uint8 encoded => exact .word32 (.uint8 encoded)
+  | uint16 encoded => exact .word32 (.uint16 encoded)
+  | uint32 encoded => exact .word32 (.uint32 encoded)
+  | uint64 => exact .word64 .uint64
+  | usize => exact .word64 .usize
+
+/-- Concrete trampoline metadata test. It reads only the closure header and
+returns the direct i32 Boolean consumed by generated `if` control flow. -/
+def closureMatchesStep (function : Lean.Name) (arity fixed : Nat)
+    (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match closureMatches store.host.runtime.heap store.host.closureDispatch
+          store.host.closureDescriptors (Word32.ofUInt32 bits) function arity
+          fixed with
+      | .ok matched => .Return [.i32 matched] store
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def closureMatchesFn (function : Lean.Name) (arity fixed : Nat) :
+    Wasm.HostFn Host := {
+  params := [.i32]
+  results := [.i32]
+  invoke := closureMatchesStep function arity fixed }
+
+def closureMatchesContract (function : Lean.Name) (arity fixed : Nat) :
+    Wasm.HostContract Host :=
+  fun initial args result =>
+    result = closureMatchesStep function arity fixed initial args
+
+theorem closureMatchesFn_satisfies_contract
+    (function arity fixed initial args) :
+    closureMatchesContract function arity fixed initial args
+      ((closureMatchesFn function arity fixed).invoke initial args) := by
+  rfl
+
+/-- Concrete typed capture projection used by the generated trampoline. -/
+def closureProjStep (function : Lean.Name) (arity fixed index : Nat)
+    (resultKind : AbiKind) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match projectClosureCapture store.host.runtime.heap
+          store.host.closureDispatch store.host.closureDescriptors
+          (Word32.ofUInt32 bits) function arity fixed index resultKind with
+      | .ok lane => .Return [physicalOfLane lane] store
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def closureProjFn (function : Lean.Name) (arity fixed index : Nat)
+    (resultKind : AbiKind) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [FirTalos.abiKind resultKind]
+  invoke := closureProjStep function arity fixed index resultKind }
+
+def closureProjContract (function : Lean.Name) (arity fixed index : Nat)
+    (resultKind : AbiKind) : Wasm.HostContract Host :=
+  fun initial args result =>
+    result = closureProjStep function arity fixed index resultKind initial args
+
+theorem closureProjFn_satisfies_contract
+    (function arity fixed index resultKind initial args) :
+    closureProjContract function arity fixed index resultKind initial args
+      ((closureProjFn function arity fixed index resultKind).invoke
+        initial args) := by
+  rfl
+
 /-- Successful semantic projection identifies a mapped constructor and the
 checked concrete read returns a field related at its static descriptor kind. -/
 theorem ConcreteRuntimeRel.readObjectField_refines
@@ -1082,6 +1172,86 @@ theorem partialApplyStep_of_refines
       trace := by
         simpa [replaceHeap, clearFailure, semanticClosureResult] using
           runtimeRelated.trace.witnessExtension extension }
+
+/-- Executable trampoline metadata matching agrees with the exact semantic
+closure identity predicate and leaves the concrete runtime unchanged. -/
+theorem closureMatchesStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {function : Lean.Name} {arity : Nat}
+    {captures : Array Value} {expectedFunction : Lean.Name}
+    {expectedArity expectedFixed : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures) :
+    closureMatchesStep expectedFunction expectedArity expectedFixed initial
+        [.i32 (UInt32.ofNat address.value)] =
+      .Return [
+        .i32 (if function == expectedFunction && arity == expectedArity &&
+          captures.size == expectedFixed then 1 else 0)]
+        (clearFailure initial) ∧
+      closureData runtime (.object (.heap location)) =
+        .ok (function, arity, captures) := by
+  have concreteMatch := runtimeRelated.heap.closureMatches_refines mapped found live
+    objectEq expectedFunction expectedArity expectedFixed
+  constructor
+  · unfold closureMatchesStep
+    simp only [clearFailure]
+    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
+      concreteMatch]
+  · unfold closureData
+    simp only [getLiveCell, found, live, if_true, Bind.bind, Except.bind]
+    rw [objectEq]
+    rfl
+
+/-- Executable typed capture projection returns the exact Talos lane related
+to the selected semantic capture and preserves the runtime state. -/
+theorem closureProjStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {function : Lean.Name} {arity fixed index : Nat}
+    {captures : Array Value} {captureKinds : Array AbiKind}
+    {kind : AbiKind} {value : Value}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.closure function arity captureKinds))
+    (fixedSize : captures.size = fixed)
+    (kindAt : captureKinds[index]? = some kind)
+    (valueAt : captures[index]? = some value) :
+    ∃ lane,
+      closureProjStep function arity fixed index kind initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [physicalOfLane lane] (clearFailure initial) ∧
+      PhysicalValueRel witness kind (physicalOfLane lane) value ∧
+      closureData runtime (.object (.heap location)) =
+        .ok (function, arity, captures) := by
+  obtain ⟨lane, projected, valueRelated⟩ :=
+    runtimeRelated.heap.projectClosureCapture_refines mapped found live objectEq
+      descriptorFound kindAt valueAt
+  rw [fixedSize] at projected
+  refine ⟨lane, ?_, physicalOfLane_related valueRelated, ?_⟩
+  · unfold closureProjStep
+    simp only [clearFailure]
+    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
+      projected]
+  · unfold closureData
+    simp only [getLiveCell, found, live, if_true, Bind.bind, Except.bind]
+    rw [objectEq]
+    rfl
 
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
@@ -1697,6 +1867,83 @@ theorem wp_partialApply_let
   · exact operation
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+/-- Exact generated closure-matcher prefix. The returned i32 discriminator is
+left on the operand stack for the following generated `if`. -/
+theorem wp_closureMatches
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {closureIndex : Nat} {address : Word32} {matched : UInt32}
+    {function : Lean.Name} {arity fixed : Nat} {tail : List Wasm.Value}
+    (hClosure : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (closureMatchesContract function arity fixed))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : closureMatchesStep function arity fixed initial
+        [.i32 (UInt32.ofNat address.value)] =
+      .Return [.i32 matched] (clearFailure initial))
+    (continued : Wasm.wp module rest Q (clearFailure initial)
+      { locals with values := .i32 matched :: tail } env) :
+    Wasm.wp module (.localGet closureIndex :: .call id :: rest) Q initial
+      { locals with values := tail } env := by
+  have hClosureTail :
+      ({ locals with values := tail } : Wasm.Locals).get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)) := by
+    simpa [Wasm.Locals.get] using hClosure
+  rw [Wasm.wp_localGet_cons, hClosureTail]
+  apply wp_exact_host_call_of_return
+    (step := closureMatchesStep function arity fixed)
+    (physicalArgs := [.i32 (UInt32.ofNat address.value)])
+    (results := [.i32 matched]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using continued
+
+/-- Exact generated typed-capture projection prefix. It leaves the projected
+lane on the operand stack for the subsequent argument sequence/direct call. -/
+theorem wp_closureProj
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {closureIndex : Nat} {address : Word32} {physical : Wasm.Value}
+    {function : Lean.Name} {arity fixed index : Nat} {kind : AbiKind}
+    {tail : List Wasm.Value}
+    (hClosure : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (closureProjContract function arity fixed index kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : closureProjStep function arity fixed index kind initial
+        [.i32 (UInt32.ofNat address.value)] =
+      .Return [physical] (clearFailure initial))
+    (continued : Wasm.wp module rest Q (clearFailure initial)
+      { locals with values := physical :: tail } env) :
+    Wasm.wp module (.localGet closureIndex :: .call id :: rest) Q initial
+      { locals with values := tail } env := by
+  have hClosureTail :
+      ({ locals with values := tail } : Wasm.Locals).get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)) := by
+    simpa [Wasm.Locals.get] using hClosure
+  rw [Wasm.wp_localGet_cons, hClosureTail]
+  apply wp_exact_host_call_of_return
+    (step := closureProjStep function arity fixed index kind)
+    (physicalArgs := [.i32 (UInt32.ofNat address.value)])
+    (results := [physical]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using continued
 
 /-- Object-projection instance of the concrete direct-`let` boundary. It
 proves the source interpreter step, the result-local refinement, and a Talos

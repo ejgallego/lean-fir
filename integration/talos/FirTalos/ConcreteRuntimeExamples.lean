@@ -208,4 +208,24 @@ private def closureStore : Wasm.Store Host := {
       | _ => false
   | _ => false
 
+-- The generated trampoline's concrete metadata test and typed projection
+-- recover the just-allocated closure without consulting semantic handles.
+#guard match partialApplyStep closureTarget 2 1 #[.uint64] .object closureStore
+    [.i64 18446744073709551615] with
+  | .Return [.i32 object] store =>
+      match closureMatchesStep closureTarget 2 1 store [.i32 object],
+          closureMatchesStep `FirTalos.Concrete.otherTarget 2 1 store
+            [.i32 object],
+          closureProjStep closureTarget 2 1 0 .uint64 store [.i32 object] with
+      | .Return [.i32 matched] matchedStore,
+          .Return [.i32 mismatch] mismatchedStore,
+          .Return [.i64 captured] projectedStore =>
+          matched == 1 && mismatch == 0 &&
+            captured == 18446744073709551615 &&
+            matchedStore.host.failure?.isNone &&
+            mismatchedStore.host.failure?.isNone &&
+            projectedStore.host.failure?.isNone
+      | _, _, _ => false
+  | _ => false
+
 end FirTalos.Concrete
