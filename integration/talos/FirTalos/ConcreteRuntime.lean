@@ -51,6 +51,99 @@ theorem PhysicalValueRel.witnessExtension
   | float64Bits valueRelated =>
       exact .float64Bits (valueRelated.witnessExtension extension)
 
+/-- A representation-witness transition transports every already-related
+value without changing its physical lane or semantic identity. Extensions and
+reset/reuse descriptor rebindings are the two concrete instances used by W6. -/
+def WitnessTransport (before after : RefinementWitness) : Prop :=
+  ∀ {kind : AbiKind} {lane : LaneValue} {semantic : Value},
+    ValueRel before kind lane semantic → ValueRel after kind lane semantic
+
+theorem WitnessTransport.refl (witness : RefinementWitness) :
+    WitnessTransport witness witness := by
+  intro kind lane semantic related
+  exact related
+
+theorem WitnessTransport.ofExtension
+    {before after : RefinementWitness} (extension : before.Extends after) :
+    WitnessTransport before after := by
+  intro kind lane semantic related
+  exact related.witnessExtension extension
+
+theorem WitnessTransport.rebindConstructor
+    (witness : RefinementWitness) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    WitnessTransport witness
+      (witness.rebindConstructor address info fieldKinds) := by
+  intro kind lane semantic related
+  exact related.rebindConstructor address info fieldKinds
+
+theorem PhysicalValueRel.witnessTransport
+    {before after : RefinementWitness}
+    (transport : WitnessTransport before after)
+    {kind : AbiKind} {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel before kind physical semantic) :
+    PhysicalValueRel after kind physical semantic := by
+  cases related with
+  | word32 valueRelated => exact .word32 (transport valueRelated)
+  | word64 valueRelated => exact .word64 (transport valueRelated)
+  | float32Bits valueRelated => exact .float32Bits (transport valueRelated)
+  | float64Bits valueRelated => exact .float64Bits (transport valueRelated)
+
+theorem EnvLocalsRelated.witnessTransport
+    {before after : RefinementWitness}
+    {bindings : List (Lean.FVarId × AbiKind)} {source : Env}
+    {target : Wasm.Locals}
+    (transport : WitnessTransport before after)
+    (related : EnvLocalsRelated before bindings source target) :
+    EnvLocalsRelated after bindings source target := by
+  intro fvar value sourceLookup
+  obtain ⟨index, kind, physical, found, kindAt, targetLookup, valueRelated⟩ :=
+    related sourceLookup
+  exact ⟨index, kind, physical, found, kindAt, targetLookup,
+    valueRelated.witnessTransport transport⟩
+
+theorem ConcreteGlobalsRel.witnessTransport
+    {before after : RefinementWitness} {concrete : ConcreteGlobals}
+    {semantic : Globals} (transport : WitnessTransport before after)
+    (related : ConcreteGlobalsRel before concrete semantic) :
+    ConcreteGlobalsRel after concrete semantic := by
+  constructor
+  · intro name value found
+    obtain ⟨slot, lane, slotFound, initialized, valueRelated⟩ :=
+      related.semanticToConcrete name value found
+    exact ⟨slot, lane, slotFound, initialized, transport valueRelated⟩
+  · intro name slot lane slotFound initialized
+    obtain ⟨value, found, valueRelated⟩ :=
+      related.concreteToSemantic name slot lane slotFound initialized
+    exact ⟨value, found, transport valueRelated⟩
+
+theorem ConcreteExternalEventRel.witnessTransport
+    {before after : RefinementWitness}
+    {concrete : ConcreteExternalEvent} {semantic : ExternalEvent}
+    (transport : WitnessTransport before after)
+    (related : ConcreteExternalEventRel before concrete semantic) :
+    ConcreteExternalEventRel after concrete semantic := {
+  name := related.name
+  paramKindsSize := related.paramKindsSize
+  argsSize := related.argsSize
+  arguments := by
+    intro index kind lane value kindFound laneFound valueFound
+    exact transport
+      (related.arguments index kind lane value kindFound laneFound valueFound)
+  result := transport related.result }
+
+theorem ConcreteTraceRel.witnessTransport
+    {before after : RefinementWitness}
+    {concrete : Array ConcreteExternalEvent} {semantic : Array ExternalEvent}
+    (transport : WitnessTransport before after)
+    (related : ConcreteTraceRel before concrete semantic) :
+    ConcreteTraceRel after concrete semantic := {
+  size := related.size
+  events := by
+    intro index concreteEvent semanticEvent concreteFound semanticFound
+    exact ConcreteExternalEventRel.witnessTransport transport
+      (related.events index concreteEvent semanticEvent concreteFound semanticFound) }
+
 /-- Any exact object-like ABI lane accepted by the compiler widens to the
 runtime's representation-polymorphic `tobject` input without changing bits. -/
 theorem PhysicalValueRel.toTObject
@@ -119,6 +212,28 @@ theorem EnvLocalsRelated.bind
     exact ⟨index, oldKind, oldPhysical, found, oldKindAt,
       (localUpdate.2 different.symm).trans targetLookup,
       oldRelated.witnessExtension extension⟩
+
+/-- Bind one result while transporting every pre-existing local through a
+possibly non-monotone representation-witness transition such as constructor
+descriptor rebinding after a successful unique reset. -/
+theorem EnvLocalsRelated.bindTransport
+    {before after : RefinementWitness}
+    {bindings : List (Lean.FVarId × AbiKind)} {source : Env}
+    {target updated : Wasm.Locals} {result : Lean.FVarId}
+    {resultIndex : Nat} {kind : AbiKind} {semantic : Value}
+    {physical : Wasm.Value}
+    (related : EnvLocalsRelated before bindings source target)
+    (resultFound : findFVar? bindings result = some resultIndex)
+    (kindAt : bindings[resultIndex]?.map Prod.snd = some kind)
+    (localUpdate : FirTalos.Correctness.LocalUpdate target updated resultIndex
+      physical)
+    (transport : WitnessTransport before after)
+    (physicalRelated : PhysicalValueRel after kind physical semantic) :
+    EnvLocalsRelated after bindings
+      (Fir.LeanIR.Impure.bind source result semantic) updated := by
+  exact EnvLocalsRelated.bind
+    (related.witnessTransport transport) resultFound kindAt localUpdate
+      (.refl after) physicalRelated
 
 /-- Unified natural-literal refinement assembled after both the natural and
 promoted-tag proof modules are available. -/
@@ -753,6 +868,34 @@ def deleteContract : Wasm.HostContract Host :=
 
 theorem deleteFn_satisfies_contract (initial args) :
     deleteContract initial args (deleteFn.invoke initial args) := by
+  rfl
+
+/-- Executable concrete reset. Tagged values and fallback heap objects return
+the empty token; a unique ordinary constructor returns its address after
+clearing the requested ownership prefix. -/
+def resetStep (count : Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match resetObject store.host.runtime.heap count (Word32.ofUInt32 bits)
+          store.host.closureDescriptors with
+      | .ok (heap, token) =>
+          .Return [.i32 (UInt32.ofNat token.value)] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def resetFn (count : Nat) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [.i32]
+  invoke := resetStep count }
+
+def resetContract (count : Nat) : Wasm.HostContract Host :=
+  fun initial args result => result = resetStep count initial args
+
+theorem resetFn_satisfies_contract (count initial args) :
+    resetContract count initial args ((resetFn count).invoke initial args) := by
   rfl
 
 /-- Executable concrete constructor-tag mutation. The checked runtime rewrites
@@ -2016,6 +2159,28 @@ theorem ConcreteRuntimeRel.replaceHeap_of_heapOnly
     world := by simpa [replaceHeap, clearFailure] using related.world
     trace := by simpa [replaceHeap, clearFailure] using related.trace }
 
+/-- Replace concrete memory after a heap-only source update while transporting
+all auxiliary value relations through an arbitrary witness transition. -/
+theorem ConcreteRuntimeRel.replaceHeap_of_transport
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {before after : RuntimeState}
+    (related : ConcreteRuntimeRel initial.host.runtime beforeWitness before)
+    (transport : WitnessTransport beforeWitness afterWitness)
+    (heapRelated : LiveHeapRel heap afterWitness after)
+    (heapOnly : ∃ semanticHeap, after = { before with heap := semanticHeap }) :
+    ConcreteRuntimeRel (replaceHeap initial heap).host.runtime afterWitness after := by
+  rcases heapOnly with ⟨semanticHeap, rfl⟩
+  exact {
+    heap := by simpa [replaceHeap, clearFailure] using heapRelated
+    globals := by
+      simpa [replaceHeap, clearFailure] using
+        ConcreteGlobalsRel.witnessTransport transport related.globals
+    world := by simpa [replaceHeap, clearFailure] using related.world
+    trace := by
+      simpa [replaceHeap, clearFailure] using
+        ConcreteTraceRel.witnessTransport transport related.trace }
+
 /-- Lift a recursively changed heap while reusing the explicitly framed
 semantic runtime components. -/
 theorem ConcreteRuntimeRel.replaceHeap_of_runtimeAux
@@ -2036,6 +2201,31 @@ theorem ConcreteRuntimeRel.replaceHeap_of_runtimeAux
     trace := by
       rw [aux.trace]
       simpa [replaceHeap, clearFailure] using related.trace }
+
+/-- Lift a recursively changed heap while transporting the auxiliary value
+relations through a descriptor rebind. -/
+theorem ConcreteRuntimeRel.replaceHeap_of_transportAux
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {before after : RuntimeState}
+    (related : ConcreteRuntimeRel initial.host.runtime beforeWitness before)
+    (transport : WitnessTransport beforeWitness afterWitness)
+    (heapRelated : LiveHeapRel heap afterWitness after)
+    (aux : RuntimeAuxEq before after) :
+    ConcreteRuntimeRel (replaceHeap initial heap).host.runtime afterWitness after := by
+  exact {
+    heap := by simpa [replaceHeap, clearFailure] using heapRelated
+    globals := by
+      rw [aux.globals]
+      simpa [replaceHeap, clearFailure] using
+        ConcreteGlobalsRel.witnessTransport transport related.globals
+    world := by
+      rw [aux.world]
+      simpa [replaceHeap, clearFailure] using related.world
+    trace := by
+      rw [aux.trace]
+      simpa [replaceHeap, clearFailure] using
+        ConcreteTraceRel.witnessTransport transport related.trace }
 
 /-- Successful concrete reference-count increment refines the exact semantic
 operation for both ordinary heap objects and checked tagged/promoted-tag
@@ -2265,6 +2455,170 @@ theorem deleteStep_of_refines
   | uint8 encoded => simp [deleteValue] at updated
   | uint16 encoded => simp [deleteValue] at updated
   | uint32 encoded => simp [deleteValue] at updated
+
+/-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
+theorem resetStep_tagged_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {payload : UInt64} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (tagged : TaggedReferenceRel witness word payload) (count : Nat) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+          (replaceHeap initial initial.host.runtime.heap) ∧
+      ConcreteRuntimeRel
+        (replaceHeap initial initial.host.runtime.heap).host.runtime witness
+          runtime ∧
+      ValueRel witness .reuseToken (.word32 Word32.zero)
+        (.reuseToken none) := by
+  obtain ⟨concreteReset, _, tokenRelated⟩ :=
+    runtimeRelated.heap.resetObject_refines_tagged tagged count
+  refine ⟨?_, ?_, tokenRelated⟩
+  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      ← descriptorsEq, concreteReset, replaceHeap]
+  · simpa [replaceHeap, clearFailure] using runtimeRelated
+
+/-- A nonunique mapped heap object follows reset's decrement-and-empty-token
+path in both runtimes. Persistent reachable cells are included because their
+canonical zero reference count is nonunique. -/
+theorem resetStep_nonunique_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken none)) :
+    ∃ heap,
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+            (replaceHeap initial heap) ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+          nextRuntime ∧
+        ValueRel witness .reuseToken (.word32 Word32.zero)
+          (.reuseToken none) := by
+  have semanticDec : decLocation runtime location = .ok nextRuntime := by
+    unfold reset at updated
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at updated
+    rw [if_pos (by simp [notUnique])] at updated
+    cases decEq : decLocation runtime location with
+    | error fault =>
+        rw [decEq] at updated
+        contradiction
+    | ok middleRuntime =>
+        rw [decEq] at updated
+        have pairEq := Except.ok.inj updated
+        have runtimeEq : middleRuntime = nextRuntime := congrArg Prod.fst pairEq
+        subst middleRuntime
+        rfl
+  obtain ⟨heap, concreteReset, heapRelated, tokenRelated⟩ :=
+    runtimeRelated.heap.resetObject_refines_nonunique mapped found live
+      notUnique updated
+  refine ⟨heap, ?_, ?_, tokenRelated⟩
+  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      ← descriptorsEq, concreteReset, replaceHeap]
+  · exact FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+      runtimeRelated heapRelated (decLocation_runtimeAux semanticDec)
+
+/-- A unique ordinary constructor reset returns a nonempty token, rebinds the
+active descriptor to the reset protocol, and transports every auxiliary
+runtime value through that exact witness transition. -/
+theorem resetStep_unique_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {object : ConstructorObject}
+    {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (countFits : count ≤ object.objectFields.size)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken (some location))) :
+    ∃ heap info fieldKinds,
+      let nextWitness :=
+        witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat address.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        ValueRel nextWitness .reuseToken (.word32 address)
+          (.reuseToken (some location)) ∧
+        ResetReuseProtocolRel initial.host.runtime.heap heap witness runtime
+          nextRuntime location address cell object count := by
+  let replacement : HeapCell :=
+    { cell with object := .ctor (resetProtocolObject object count) }
+  obtain ⟨middleRuntime, semanticSet, _, _, _, _⟩ :=
+    Fir.LeanIR.Impure.setCell_spec_of_find runtime location cell replacement found
+  have semanticFold :
+      (object.objectFields.extract 0 count).foldlM
+          (fun next value => decValueOnce next value true) middleRuntime =
+        .ok nextRuntime := by
+    unfold reset at updated
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at updated
+    rw [if_neg (by simp [ordinary, unique])] at updated
+    rw [constructor] at updated
+    simp only at updated
+    rw [if_neg (Nat.not_lt.mpr countFits)] at updated
+    have updated' : (do
+        let next ← setCell runtime location replacement
+        let next ← (object.objectFields.extract 0 count).foldlM
+          (fun next value => decValueOnce next value true) next
+        return (next, Value.reuseToken (some location))) =
+          .ok (nextRuntime, Value.reuseToken (some location)) := by
+      simpa only [replacement, resetProtocolObject, live, Bind.bind, Except.bind]
+        using updated
+    rw [semanticSet] at updated'
+    simp only [Bind.bind, Except.bind] at updated'
+    cases foldEq : (object.objectFields.extract 0 count).foldlM
+        (fun next value => decValueOnce next value true) middleRuntime with
+    | error fault =>
+        rw [foldEq] at updated'
+        contradiction
+    | ok finalRuntime =>
+        rw [foldEq] at updated'
+        have pairEq := Except.ok.inj updated'
+        have runtimeEq : finalRuntime = nextRuntime := congrArg Prod.fst pairEq
+        subst finalRuntime
+        rfl
+  have aux : RuntimeAuxEq runtime nextRuntime :=
+    (setCell_runtimeAux semanticSet).trans
+      (Array.foldlM_runtimeAux
+        (fun operation => decValueOnce_runtimeAux operation) semanticFold)
+  obtain ⟨heap, info, fieldKinds, concreteReset, heapRelated, protocol,
+      tokenRelated⟩ :=
+    runtimeRelated.heap.resetObject_refines_unique mapped found live ordinary
+      unique constructor countFits updated
+  let nextWitness :=
+    witness.rebindConstructor address info
+      (resetProtocolFieldKinds fieldKinds count)
+  have transport : WitnessTransport witness nextWitness :=
+    WitnessTransport.rebindConstructor witness address info
+      (resetProtocolFieldKinds fieldKinds count)
+  have nextRelated : ConcreteRuntimeRel
+      (replaceHeap initial heap).host.runtime nextWitness nextRuntime :=
+    FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_transportAux
+      runtimeRelated transport heapRelated aux
+  refine ⟨heap, info, fieldKinds, ?_, transport, nextRelated, tokenRelated,
+    protocol⟩
+  simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+    ← descriptorsEq, concreteReset, replaceHeap]
 
 /-- Every successful semantic constructor modification is heap-only. This is
 shared by tag, object, USize, and packed-scalar mutation composition. -/
@@ -2775,6 +3129,35 @@ theorem StateRelated.bindAfter
   exact ⟨runtimeRelated, failureClear,
     EnvLocalsRelated.bind related.2.2 resultFound kindAt
       (localUpdate_of_set? targetSet) extension valueRelated⟩
+
+/-- Result binding after a general representation-witness transition. This is
+the reset/reuse counterpart of `bindAfter`, whose monotone-extension premise
+cannot express rebinding an already allocated constructor descriptor. -/
+theorem StateRelated.bindAfterTransport
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals updated : Wasm.Locals}
+    {witness nextWitness : RefinementWitness}
+    {result : Lean.FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (transport : WitnessTransport witness nextWitness)
+    (runtimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (valueRelated : PhysicalValueRel nextWitness kind physical semantic)
+    (targetSet : targetLocals.set? resultIndex physical = some updated) :
+    StateRelated sourceFunction nextRuntime (bind sourceEnv result semantic)
+      nextStore updated nextWitness := by
+  exact ⟨runtimeRelated, failureClear,
+    EnvLocalsRelated.bindTransport related.2.2 resultFound kindAt
+      (localUpdate_of_set? targetSet) transport valueRelated⟩
 
 /-- W6 proof judgment for generated code over the concrete host. It mirrors
 W5's structural boundary while indexing both the target runtime and locals by
@@ -4154,6 +4537,48 @@ theorem effectStepSimulates_scalarSet
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
 
+/-- Concrete-host WP for generated reset and its reuse-token destination
+local. The result word is zero on tagged/fallback paths and the original heap
+address on the unique constructor path. -/
+theorem wp_reset_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {count : Nat}
+    {objectWord token : Word32} (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (resetContract count))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : resetStep count initial
+      [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [.i32 (UInt32.ofNat token.value)] nextStore)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat token.value)) = some updated)
+    (continued : Wasm.wp module rest Q nextStore
+      { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  have hObjectTail :
+      ({ locals with values := tail } : Wasm.Locals).get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)) := by
+    simpa [Wasm.Locals.get] using hObject
+  rw [Wasm.wp_localGet_cons, hObjectTail]
+  apply wp_exact_host_call_of_return
+    (step := resetStep count)
+    (physicalArgs := [.i32 (UInt32.ofNat objectWord.value)])
+    (results := [.i32 (UInt32.ofNat token.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
 /-- Concrete-host WP for generated integer boxing and its object destination
 local. -/
 theorem wp_box_let
@@ -4976,6 +5401,73 @@ theorem wp_closureProj
   · exact operation
   · simpa [hParams, hResults] using continued
 
+/-- Branch-independent reset instance of the concrete direct-`let` boundary.
+The operation-specific tagged, fallback, and unique theorems provide the
+result store and witness transport consumed here. -/
+theorem letStepSimulates_reset
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {count : Nat}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord token : Word32}
+    {sourceObject sourceToken : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .reset count objectId)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (updatedSource : reset sourceRuntime count sourceObject =
+      .ok (nextRuntime, sourceToken))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (transport : WitnessTransport witness nextWitness)
+    (nextRelated : ConcreteRuntimeRel nextStore.host.runtime nextWitness
+      nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .reuseToken)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (tokenRelated : ValueRel nextWitness .reuseToken (.word32 token) sourceToken)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (resetContract count))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : resetStep count initial
+      [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [.i32 (UInt32.ofNat token.value)] nextStore)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat token.value)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      sourceRuntime nextRuntime sourceEnv sourceToken initial nextStore locals
+      updated resultIndex witness nextWitness := by
+  have physicalRelated : PhysicalValueRel nextWitness .reuseToken
+      (.i32 (UInt32.ofNat token.value)) sourceToken := .word32 tokenRelated
+  have nextState := initialRelated.bindAfterTransport transport nextRelated
+    failureClear resultFound resultKindAt physicalRelated targetSet
+  refine ⟨?_, initialRelated, nextState, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have objectLookup : lookupValue sourceEnv objectId = .ok sourceObject := by
+      simp [lookupValue, sourceLookup]
+    rw [objectLookup]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        reset sourceRuntime count sourceObject) =
+      .ok (nextRuntime, .value sourceToken)
+    rw [updatedSource]
+    rfl
+  · intro rest Q tail continued
+    exact wp_reset_let tail hObject hImp hSat hi hContract hParams hResults
+      operation targetSet continued
+
 /-- Integer-boxing instance of the concrete direct-`let` boundary. Tagged
 results preserve the witness; promoted tags and ordinary boxes extend it with
 the concrete allocation that represents the source result. -/
@@ -5050,6 +5542,86 @@ theorem letStepSimulates_box
   · intro rest Q tail continued
     exact wp_box_let tail hScalar hImp hSat hi hContract hParams hResults
       operation targetSet continued
+
+/-- W6.6 composition for generated reset through source evaluation, compiler
+output, Talos adaptation, one of the three concrete reset branches,
+reuse-token local write, and an arbitrary verified continuation. -/
+theorem codeWP_reset_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {count : Nat}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {objectWord token : Word32}
+    {sourceObject sourceToken : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {witness nextWitness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .reset count objectId)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet objectId, .call (.runtime (.reset count))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.reset count)) = some id)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (updatedSource : reset sourceRuntime count sourceObject =
+      .ok (nextRuntime, sourceToken))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (transport : WitnessTransport witness nextWitness)
+    (nextRelated : ConcreteRuntimeRel nextStore.host.runtime nextWitness
+      nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .reuseToken)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (tokenRelated : ValueRel nextWitness .reuseToken (.word32 token) sourceToken)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (resetContract count))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (operation : resetStep count initial
+      [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [.i32 (UInt32.ofNat token.value)] nextStore)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat token.value)) = some updated)
+    (continued : CodeWP context sourceModule sourceFunction labels module hostEnv
+      nextRuntime (bind sourceEnv decl.fvarId sourceToken) continuation
+      targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.reset count))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_reset (context := context) valueEq sourceLookup
+    updatedSource initialRelated transport nextRelated failureClear resultFound
+    resultKindAt hObject tokenRelated hImp hSat hi hContract hParams hResults
+    operation targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
 
 /-- W6.6 composition for generated integer boxing through source evaluation,
 compiler output, Talos adaptation, concrete allocation, destination-local

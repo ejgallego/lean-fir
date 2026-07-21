@@ -2183,6 +2183,18 @@ local, and an arbitrary continuation. Executable host round trips cover every
 supported kind across all three storage classes. Float kinds remain tracked
 by the shared runtime gap, and generated artifact execution remains pending.
 
+W6.6aa composes reset across all three successful runtime branches. The
+concrete Talos host returns the physical empty token for immediate values,
+performs the checked semantic decrement for nonunique objects, and returns the
+original address after a unique constructor enters the cleared reuse protocol.
+A witness-transport boundary carries locals, globals, external events, traces,
+and both shallow and recursive runtime relations across ordinary heap changes
+or the unique descriptor rebind. The composed rule connects source evaluation,
+compiler and adapter output, the exact unary host call, reuse-token destination
+local, and an arbitrary continuation independently of which reset branch ran.
+Executable guards cover immediate, nonunique, and unique behavior. Consuming
+the protocol through generated `reuse` and artifact execution remain pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

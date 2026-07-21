@@ -302,6 +302,54 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _, _ => false
   | _ => false
 
+-- Resetting an immediate returns the physical empty reuse token without
+-- touching the concrete heap.
+#guard match resetStep 1 emptyHostStore [.i32 23] with
+  | .Return [.i32 token] store =>
+      token == UInt32.ofNat Word32.zero.value &&
+        store.host.runtime.heap.heapCursor == heapBase &&
+        store.host.runtime.heap.memory == emptyHostStore.host.runtime.heap.memory &&
+        store.host.failure?.isNone
+  | _ => false
+
+-- A unique constructor enters the reset protocol: its address becomes the
+-- reuse token and the cleared ownership slot contains semantic tagged zero.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match resetStep 1 store [.i32 object] with
+      | .Return [.i32 token] next =>
+          match readObjectField next.host.runtime.heap
+              (Word32.ofUInt32 object) 0 with
+          | .ok field =>
+              token == object && field == taggedZero &&
+                next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | _ => false
+
+-- A nonunique constructor takes the fallback path: reset consumes one
+-- reference, preserves the payload, and returns the empty reuse token.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match incrementStep 1 true store [.i32 object] with
+      | .Return [] shared =>
+          match resetStep 1 shared [.i32 object] with
+          | .Return [.i32 token] next =>
+              match next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 object),
+                  readObjectField next.host.runtime.heap
+                    (Word32.ofUInt32 object) 0 with
+              | .ok header, .ok field =>
+                  token == UInt32.ofNat Word32.zero.value &&
+                    header.refCount == 1 && field.value == 23 &&
+                    next.host.failure?.isNone
+              | _, _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
 -- Ordinary objects update only their checked header reference count.
 #guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
     [.i32 23] with
