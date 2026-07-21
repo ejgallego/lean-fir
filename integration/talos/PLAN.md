@@ -2274,6 +2274,16 @@ for an ordinary live object remains intact; lifting successful semantic heap
 fuel to the larger cursor-derived public fuel is the next slice. No executable
 or shared FIR semantic contract changed.
 
+W6.6ai lifts that theorem to the public runtime and closes the recursive cache
+boundary. Successful `markPersistentFuel` execution is proved monotone in
+fuel, so the semantic heap-length result lifts unchanged to the no-smaller
+concrete cursor-derived budget while preserving zero-fuel exhaustion on real
+ordinary work. `LiveHeapRel.markPersistent_refines` now covers every mapped
+constructor, closure, box, and natural graph; `CachePersistenceRefines`, core
+global writes, and Talos `cacheSetStep` obtain that proof constructively with
+explicit host/witness closure-descriptor identity. No executable or shared FIR
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

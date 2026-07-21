@@ -39,6 +39,102 @@ theorem markPersistent_eq_of_persistent
     markPersistent state object descriptors = .ok state := by
   exact markPersistentFuel_eq_of_persistent headerRead persistent _ descriptors
 
+/-- Successful concrete persistence is monotone in fuel: extra recursion
+depth cannot change the final memory because every visited parent is marked
+before its children and therefore becomes an exact no-op on revisit. -/
+theorem markPersistentFuel_ok_mono
+    {fuel more : Nat} {state result : MemoryState} {object : Word32}
+    {descriptors : ClosureDescriptorTable} (fuelLe : fuel ≤ more)
+    (operation :
+      markPersistentFuel fuel state object descriptors = .ok result) :
+    markPersistentFuel more state object descriptors = .ok result := by
+  induction fuel generalizing more state result object descriptors with
+  | zero =>
+      cases more with
+      | zero => exact operation
+      | succ more =>
+          cases classEq : object.classify with
+          | immediate | sentinel | invalid =>
+              simp_all [markPersistentFuel]
+          | heap =>
+              cases headerEq : state.readLiveHeader object with
+              | error failure =>
+                  cases failure <;> simp_all [markPersistentFuel]
+              | ok header =>
+                  by_cases persistent : header.persistent = true
+                  · simpa [markPersistentFuel, classEq, headerEq, persistent]
+                      using operation
+                  · simp [markPersistentFuel, classEq, headerEq, persistent] at operation
+  | succ fuel ih =>
+      cases more with
+      | zero => omega
+      | succ more =>
+          have smaller : fuel ≤ more := by omega
+          cases classEq : object.classify with
+          | immediate | sentinel | invalid =>
+              simp_all [markPersistentFuel]
+          | heap =>
+              cases headerEq : state.readLiveHeader object with
+              | error failure =>
+                  cases failure <;> simp_all [markPersistentFuel]
+              | ok header =>
+                  by_cases persistent : header.persistent = true
+                  · simpa [markPersistentFuel, classEq, headerEq, persistent]
+                      using operation
+                  · cases ownedEq : readOwnedReferences state object header descriptors with
+                    | error failure =>
+                        simp only [markPersistentFuel, classEq, headerEq] at operation
+                        rw [if_neg persistent, ownedEq] at operation
+                        simp only [Bind.bind, Except.bind] at operation
+                        contradiction
+                    | ok owned =>
+                        cases parentEq : writeLiveHeader state object
+                            { header with persistent := true, refCount := 0 } with
+                        | error failure =>
+                            simp only [markPersistentFuel, classEq, headerEq] at operation
+                            rw [if_neg persistent, ownedEq, parentEq] at operation
+                            simp only [Bind.bind, Except.bind] at operation
+                            contradiction
+                        | ok parent =>
+                            have foldMono : ∀ (children : List Word32)
+                                (before after : MemoryState),
+                                children.foldlM (init := before) (fun next child =>
+                                  markPersistentFuel fuel next child descriptors) =
+                                    .ok after →
+                                children.foldlM (init := before) (fun next child =>
+                                  markPersistentFuel more next child descriptors) =
+                                    .ok after := by
+                              intro children
+                              induction children with
+                              | nil =>
+                                  intro before after folded
+                                  simpa using folded
+                              | cons child children tailIH =>
+                                  intro before after folded
+                                  simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                                    at folded ⊢
+                                  cases childEq : markPersistentFuel fuel before child
+                                      descriptors with
+                                  | error failure =>
+                                      rw [childEq] at folded
+                                      contradiction
+                                  | ok middle =>
+                                      rw [childEq] at folded
+                                      have childMore := ih smaller childEq
+                                      rw [childMore]
+                                      exact tailIH middle after folded
+                            have folded : owned.foldlM (init := parent)
+                                (fun next child =>
+                                  markPersistentFuel fuel next child descriptors) =
+                                .ok result := by
+                              simp only [markPersistentFuel, classEq, headerEq] at operation
+                              rw [if_neg persistent, ownedEq, parentEq] at operation
+                              simpa only [Bind.bind, Except.bind] using operation
+                            have foldedMore := foldMono owned parent result folded
+                            simp only [markPersistentFuel, classEq, headerEq]
+                            rw [if_neg persistent, ownedEq, parentEq]
+                            simpa only [Bind.bind, Except.bind] using foldedMore
+
 /-- A canonical concrete released cell takes the operation-specific dead
 recovery path and is an exact persistence no-op at every fuel budget. -/
 theorem DeadCellRel.markPersistentFuel_eq
@@ -1185,6 +1281,56 @@ theorem LiveHeapRel.markPersistentFuel_refines
                 exact related.markPersistentFuel_refines_closure_step mapped found liveEq
                   ordinary objectEq rfl bound recurse
 
+/-- The public cursor-derived concrete operation refines FIR's public
+heap-length-derived persistence operation for every mapped heap graph. The
+same-fuel theorem runs first at semantic fuel; successful-fuel monotonicity
+then lifts that exact result to the no-smaller concrete budget. -/
+theorem LiveHeapRel.markPersistent_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address) :
+    ∃ result,
+      markPersistent state address witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness
+        (runtime.markPersistent (.object (.heap location))) := by
+  have countBound : ordinaryLiveCount runtime.heap ≤ runtime.heap.length + 1 :=
+    Nat.le_trans (ordinaryLiveCount_le_length runtime.heap) (Nat.le_succ _)
+  obtain ⟨result, semanticFuelOperation, finalRelated⟩ :=
+    related.markPersistentFuel_refines mapped countBound
+  have publicOperation := markPersistentFuel_ok_mono
+    related.semanticFuel_le_concreteFuel semanticFuelOperation
+  refine ⟨result, ?_, ?_⟩
+  · exact publicOperation
+  · simpa [RuntimeState.markPersistent] using finalRelated
+
+/-- Every represented semantic heap reference now discharges recursive cache
+persistence constructively. Closure graphs use the immutable descriptor table
+carried by the refinement witness. -/
+theorem CachePersistenceRefines.of_heapReference
+    {concrete : MemoryState} {witness : RefinementWitness}
+    {semantic : RuntimeState} {kind : AbiKind} {lane : LaneValue}
+    {location : Location}
+    (heapRelated : LiveHeapRel concrete witness semantic)
+    (valueRelated : ValueRel witness kind lane (.object (.heap location))) :
+    CachePersistenceRefines concrete witness semantic kind lane
+      (.object (.heap location)) witness.closureDescriptors := by
+  cases valueRelated with
+  | object related =>
+      cases related with
+      | mapped mapped =>
+          obtain ⟨result, operation, finalRelated⟩ :=
+            heapRelated.markPersistent_refines mapped
+          exact ⟨result, operation, finalRelated⟩
+  | tobject related =>
+      cases related with
+      | heap related =>
+          cases related with
+          | mapped mapped =>
+              obtain ⟨result, operation, finalRelated⟩ :=
+                heapRelated.markPersistent_refines mapped
+              exact ⟨result, operation, finalRelated⟩
+
 /-- Syntactic classification used by cache composition: only a semantic heap
 reference requires the recursive persistence simulation. -/
 def IsNonHeapReference : Value → Prop
@@ -1305,5 +1451,24 @@ theorem ConcreteRuntimeRel.writeGlobal_heapLeaf
           (semantic.setGlobal name (.object (.heap location))) := by
   exact related.writeGlobal globalFound kindEq valueRelated
     (.of_heapLeaf related.heap valueRelated cellFound live ordinary leafCell)
+
+/-- Cache writes of arbitrary mapped constructor, closure, boxed, or natural
+graphs obtain complete recursive persistence directly from the runtime
+relation. -/
+theorem ConcreteRuntimeRel.writeGlobal_heapReference
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {semantic : RuntimeState} {name : Lean.Name} {slot : ConcreteGlobalSlot}
+    {kind : AbiKind} {lane : LaneValue} {location : Location}
+    (related : ConcreteRuntimeRel concrete witness semantic)
+    (globalFound : concrete.globals.find? name = some slot)
+    (kindEq : slot.kind = kind)
+    (valueRelated :
+      ValueRel witness kind lane (.object (.heap location))) :
+    ∃ after,
+      concrete.writeGlobal name kind lane witness.closureDescriptors = .ok after ∧
+        ConcreteRuntimeRel after witness
+          (semantic.setGlobal name (.object (.heap location))) := by
+  exact related.writeGlobal globalFound kindEq valueRelated
+    (.of_heapReference related.heap valueRelated)
 
 end Fir.Wasm.Concrete

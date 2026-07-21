@@ -1889,6 +1889,37 @@ theorem cacheSetStep_of_refines_heapLeaf
   exact .of_heapLeaf runtimeRelated.heap expectedRelated cellFound live ordinary
     leafCell
 
+/-- Arbitrary mapped constructor, closure, boxed, or natural graphs compose
+through cache publication once the concrete host and refinement witness use
+the same immutable closure descriptor table. -/
+theorem cacheSetStep_of_refines_heapReference
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
+    {physical : Wasm.Value} {location : Location} {slot : ConcreteGlobalSlot}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : PhysicalValueRel witness kind physical
+      (.object (.heap location)))
+    (globalFound : initial.host.runtime.globals.find? declaration = some slot)
+    (kindEq : slot.kind = kind)
+    (descriptorsEq : initial.host.closureDescriptors =
+      witness.closureDescriptors) :
+    ∃ after,
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] (replaceRuntime initial after) ∧
+      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
+        (runtime.setGlobal declaration (.object (.heap location))) ∧
+      PhysicalValueRel witness kind physical (.object (.heap location)) := by
+  apply cacheSetStep_of_refines runtimeRelated valueRelated globalFound kindEq
+  intro lane decoded
+  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
+    decodePhysicalLane_of_related valueRelated
+  rw [expectedDecoded] at decoded
+  have laneEq := Except.ok.inj decoded
+  subst lane
+  rw [descriptorsEq]
+  exact .of_heapReference runtimeRelated.heap expectedRelated
+
 /-- Executable/refinement boundary for partial-application closure allocation.
 The `.tagged` result admitted by the current validator is deliberately absent;
 see `FIR-BUG-wasm-none-partial-apply-tagged-result`. -/
