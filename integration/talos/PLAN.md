@@ -2093,6 +2093,20 @@ semantic index bound stays explicit. An executable guard overwrites the
 maximum `UInt64` fixture with 37, rereads all 64 bits, and confirms that the
 constructor tag is unchanged. Generated artifact execution remains pending.
 
+W6.6t composes the complete supported packed-integer mutation dispatcher.
+`UInt8`, `UInt16`, and `UInt32` consume exact i32 lanes; `UInt64` consumes its
+full i64 lane. Each branch selects the width-specific checked concrete writer,
+instantiates its whole-heap refinement theorem, and joins the FVar source step,
+compiler, adapter, binary host contract, and continuation. Descriptor identity,
+the packed-slot equation, width-specific capacity, and the existing
+`semantic.scalarFields = []` premise remain explicit. The last premise means
+this slice proves first-field installation, not repeated or mutually disjoint
+updates; closing that gap requires a byte-disjoint scalar frame theorem rather
+than weakening the state relation. Executable guards cover all four maximum
+integer values and the structured float-kind rejection. Float execution stays
+tracked by `FIR-BUG-wasm-none-float-runtime-gap`; generated artifact execution
+also remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

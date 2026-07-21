@@ -124,8 +124,60 @@ private def scalarProjectionFixture :
       | _ => false
   | .error _ => false
 
+-- Each supported packed-integer mutation preserves its exact physical lane
+-- and is immediately observable through the matching checked reader.
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .uint8 store
+          [.i32 (UInt32.ofNat object.value), .i32 255] with
+      | .Return [] next =>
+          match readScalarUInt8Field next.host.runtime.heap object 0 0 with
+          | .ok value => value == 255 && next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | .error _ => false
+
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .uint16 store
+          [.i32 (UInt32.ofNat object.value), .i32 65535] with
+      | .Return [] next =>
+          match readScalarUInt16Field next.host.runtime.heap object 0 0 with
+          | .ok value => value == 65535 && next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | .error _ => false
+
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .uint32 store
+          [.i32 (UInt32.ofNat object.value), .i32 4294967295] with
+      | .Return [] next =>
+          match readScalarUInt32Field next.host.runtime.heap object 0 0 with
+          | .ok value => value == 4294967295 && next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | .error _ => false
+
+#guard match scalarProjectionFixture with
+  | .ok (store, object) =>
+      match scalarSetStep 0 0 .uint64 store
+          [.i32 (UInt32.ofNat object.value), .i64 18446744073709551615] with
+      | .Return [] next =>
+          match readScalarUInt64Field next.host.runtime.heap object 0 0 with
+          | .ok value =>
+              value == 18446744073709551615 && next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | .error _ => false
+
 -- Float scalar kinds remain an explicit structured fragment gate.
 #guard match scalarProjStep 0 0 .float32 emptyHostStore [.i32 1] with
+  | .Trap store _ =>
+      store.host.failure? == some (.unsupportedScalarKind .float32)
+  | _ => false
+
+#guard match scalarSetStep 0 0 .float32 emptyHostStore [.i32 1, .f32 0] with
   | .Trap store _ =>
       store.host.failure? == some (.unsupportedScalarKind .float32)
   | _ => false
