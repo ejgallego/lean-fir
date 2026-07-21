@@ -3462,6 +3462,250 @@ class HarnessTests(unittest.TestCase):
                     json.dumps(provider_value).encode("utf-8"),
                 )
 
+    def test_plan_drives_one_provider_and_two_consumers_through_cli(self) -> None:
+        contract = harness.ProductContract(
+            "wasm", "wasm32", "fixture-runtime", "fixture-abi"
+        )
+
+        class FakeNativeAdapter:
+            name = "native"
+
+            def __init__(self) -> None:
+                self.build_count = 0
+
+            def build(self, context: harness.BuildContext) -> None:
+                self.build_count += 1
+
+        class FakeProvider:
+            name = "fixture-wasm"
+
+            def __init__(self) -> None:
+                self.build_count = 0
+
+            def build(
+                self, context: harness.BuildContext
+            ) -> harness.ProductProviderRun:
+                self.build_count += 1
+                assert context.run_context is not None
+                provider_dir = context.out_dir / self.name
+                provider_dir.mkdir(parents=True)
+                module_content = b"\0asm\x01\0\0\0cli-fixture"
+                module_path = provider_dir / "module.wasm"
+                module_path.write_bytes(module_content)
+                module = harness.ValidationProduct(
+                    self.name,
+                    "wasm-module",
+                    "module.wasm",
+                    harness.sha256_bytes(module_content),
+                )
+                manifest_value = {
+                    "version": 2,
+                    "contract": contract.to_json(),
+                    "products": [
+                        {"kind": module.kind, "path": module.name}
+                    ],
+                    "cases": [
+                        {
+                            "caseId": "case",
+                            "products": [
+                                {"kind": module.kind, "path": module.name}
+                            ],
+                        }
+                    ],
+                }
+                manifest_content = (
+                    json.dumps(manifest_value, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                (provider_dir / "bundle.json").write_bytes(manifest_content)
+                manifest = harness.ValidationProduct(
+                    self.name,
+                    core.RESERVED_PRODUCT_KIND,
+                    "bundle.json",
+                    harness.sha256_bytes(manifest_content),
+                )
+                products = tuple(
+                    sorted(
+                        (manifest, module),
+                        key=lambda product: (product.kind, product.name),
+                    )
+                )
+                bundle = core.product_bundle_from_manifest(
+                    self.name,
+                    contract,
+                    manifest_content,
+                    products,
+                    context.run_context.selected,
+                    "CLI fixture provider",
+                )
+                return harness.ProductProviderRun(
+                    self.name, bundle, products=list(products)
+                )
+
+        class FakeConsumer:
+            def __init__(self, name: str, provider: FakeProvider) -> None:
+                self.name = name
+                self.provider = provider
+                self.product_provider = harness.ProductProviderRequirement(
+                    provider.name, contract
+                )
+                self.build_count = 0
+                self.execute_count = 0
+                self.audit_count = 0
+
+            def prepare_manifest(self, descriptors: list[dict]) -> list[dict]:
+                return descriptors
+
+            def build(self, context: harness.BuildContext) -> None:
+                self.build_count += 1
+                self.assert_provider_built()
+
+            def execute(
+                self, context: harness.RunContext
+            ) -> harness.BackendRun:
+                self.execute_count += 1
+                self.assert_provider_built()
+                bundle = context.product_bundles[self.provider.name]
+                record = success("case", self.name)
+                record["diagnostics"] = [
+                    {
+                        "key": core.PRODUCT_BUNDLE_RECEIPT_DIAGNOSTIC,
+                        "value": harness.product_bundle_receipt_value(
+                            bundle, "case"
+                        ),
+                    }
+                ]
+                return harness.BackendRun(
+                    self.name,
+                    ["case"],
+                    results={"case": record},
+                )
+
+            def audit(
+                self,
+                context: harness.RunContext,
+                backend_run: harness.BackendRun,
+            ) -> harness.BackendAudit:
+                self.audit_count += 1
+                return harness.BackendAudit()
+
+            def assert_provider_built(self) -> None:
+                if self.provider.build_count != 1:
+                    raise AssertionError(
+                        "consumer did not observe exactly one provider build"
+                    )
+
+        with tempfile.TemporaryDirectory(dir=harness.ROOT) as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            provider_path = root / "provider.json"
+            v8_path = root / "v8.json"
+            talos_path = root / "talos.json"
+            provider_path.write_bytes(b"provider config bytes\n")
+            v8_path.write_bytes(b"v8 config bytes\n")
+            talos_path.write_bytes(b"talos config bytes\n")
+            plan_path = root / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "providerConfigs": ["provider.json"],
+                        "adapterConfigs": ["v8.json", "talos.json"],
+                        "pairs": [
+                            {"reference": "v8", "candidate": "talos"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            native = FakeNativeAdapter()
+            provider = FakeProvider()
+            v8 = FakeConsumer("v8", provider)
+            talos = FakeConsumer("talos", provider)
+
+            def provider_from_config(
+                path: Path, content: bytes | None = None
+            ) -> FakeProvider:
+                self.assertEqual(path, provider_path.resolve())
+                self.assertEqual(content, b"provider config bytes\n")
+                return provider
+
+            def adapter_from_config(
+                path: Path, content: bytes | None = None
+            ) -> FakeConsumer:
+                self.assertIsNotNone(content)
+                return {"v8.json": v8, "talos.json": talos}[path.name]
+
+            argv = [
+                "validate_interpreters.py",
+                "--plan",
+                str(plan_path),
+                "--out-dir",
+                str(out_dir),
+            ]
+            with (
+                mock.patch.object(
+                    harness, "BACKEND_ADAPTERS", {"native": native}
+                ),
+                mock.patch.object(
+                    harness,
+                    "corpus_manifest",
+                    return_value=[descriptor("case")],
+                ),
+                mock.patch.object(
+                    harness,
+                    "external_product_provider_from_config",
+                    side_effect=provider_from_config,
+                ),
+                mock.patch.object(
+                    harness,
+                    "external_adapter_from_config",
+                    side_effect=adapter_from_config,
+                ),
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(harness.main(), 0)
+
+            self.assertIn("v8 == talos", stdout.getvalue())
+            self.assertEqual(native.build_count, 1)
+            self.assertEqual(provider.build_count, 1)
+            for consumer in (v8, talos):
+                self.assertEqual(consumer.build_count, 1)
+                self.assertEqual(consumer.execute_count, 1)
+                self.assertEqual(consumer.audit_count, 1)
+
+            matrix_path = out_dir / "matrix.json"
+            matrix_content = matrix_path.read_bytes()
+            matrix = json.loads(matrix_content)
+            self.assertEqual(matrix["providers"], [provider.name])
+            self.assertEqual(matrix["backends"], ["v8", "talos"])
+            self.assertEqual(
+                [item["kind"] for item in matrix["inputs"]],
+                [
+                    "corpus",
+                    "validation-plan",
+                    "provider-config",
+                    "adapter-config",
+                    "adapter-config",
+                ],
+            )
+            self.assertEqual(matrix["summary"]["comparisonCount"], 1)
+            self.assertEqual(matrix["summary"]["productReceiptCount"], 2)
+            self.assertEqual(
+                [
+                    (receipt["backend"], receipt["caseId"])
+                    for receipt in matrix["productReceipts"]
+                ],
+                [("talos", "case"), ("v8", "case")],
+            )
+            evidence_path = harness.validation_evidence_manifest_path(
+                out_dir,
+                matrix["identity"]["run"],
+                harness.sha256_bytes(matrix_content),
+            )
+            shutil.rmtree(out_dir / provider.name)
+            harness.verify_evidence_manifest(evidence_path)
+
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
         class FakeNativeAdapter:
             name = "native"
