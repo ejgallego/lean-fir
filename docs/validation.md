@@ -147,8 +147,18 @@ native/LCNF/V8 matrix.
 
 The verifier strictly checks schema, names and paths, every retained byte,
 ordering and uniqueness, stdout/stderr pairing, summary counts, and both
-identities.  It reparses retained raw file-access traces when present and
-reconstructs their canonical reports.  It parses retained backend results,
+identities. Retained control-plane inputs are semantic evidence rather than
+opaque hashed blobs: the same pure check runs before matrix publication and
+during offline verification, strictly reparses every provider and adapter
+config, closes provider names/contracts/bundle-manifest paths over the retained
+bundles, and closes consumer declarations over the matrix assignments. When a
+plan is retained, its ordered pair graph and ordered provider/adapter config
+lists must agree with the matrix inputs. Retained plans are parsed lexically;
+offline verification never resolves their original config paths against the
+current filesystem. Rehashing a self-consistent matrix after changing one of
+those declarations therefore still fails verification.
+The verifier also reparses retained raw file-access traces when present and
+reconstructs their canonical reports. It parses retained backend results,
 checks their case/backend
 labels, requires both results used by every comparison, and recomputes each
 reported equality from those retained observations.  Results and logs remain

@@ -44,6 +44,70 @@ def finding_messages(findings: list[harness.ValidationFinding]) -> list[str]:
     ]
 
 
+def json_bytes(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True) + "\n").encode("utf-8")
+
+
+def config_input(
+    kind: str, name: str, value: dict
+) -> harness.ValidationInput:
+    content = json_bytes(value)
+    return harness.ValidationInput(
+        kind, name, harness.sha256_bytes(content), content
+    )
+
+
+def fixture_provider_config(
+    name: str,
+    contract: harness.ProductContract,
+    bundle_manifest: str = "bundle.json",
+) -> dict:
+    python = Path(sys.executable).name
+    return {
+        "version": 2,
+        "name": name,
+        "contract": contract.to_json(),
+        "buildCommand": [python, "-c", "pass"],
+        "bundleManifest": bundle_manifest,
+        "buildTools": [
+            {
+                "kind": "build-launcher",
+                "name": "python",
+                "command": python,
+            }
+        ],
+    }
+
+
+def fixture_consumer_config(
+    name: str,
+    provider: str,
+    contract: harness.ProductContract,
+) -> dict:
+    value = fixture_adapter_config(name)
+    value["productProvider"] = {
+        "name": provider,
+        "contract": contract.to_json(),
+    }
+    return value
+
+
+def fixture_adapter_config(name: str) -> dict:
+    python = Path(sys.executable).name
+    return {
+        "name": name,
+        "runCommand": [python, "-c", "pass"],
+        "resultDomain": "selected",
+        "tools": [
+            {
+                "kind": "engine",
+                "name": "python",
+                "command": python,
+            }
+        ],
+    }
+
+
 def descriptor(
     case_id: str,
     *,
@@ -1120,11 +1184,33 @@ class HarnessTests(unittest.TestCase):
             out_dir = Path(directory)
             descriptors = [descriptor("first"), descriptor("second")]
             harness.write_corpus_manifest(out_dir, descriptors)
+            control_inputs = (
+                config_input(
+                    "provider-config",
+                    "provider.json",
+                    fixture_provider_config("fixture-wasm", contract),
+                ),
+                config_input(
+                    "adapter-config",
+                    "v8.json",
+                    fixture_consumer_config(
+                        "v8", "fixture-wasm", contract
+                    ),
+                ),
+                config_input(
+                    "adapter-config",
+                    "talos.json",
+                    fixture_consumer_config(
+                        "talos", "fixture-wasm", contract
+                    ),
+                ),
+            )
             base_context = harness.RunContext(
                 harness.ROOT,
                 out_dir,
                 descriptors,
                 ["first", "second"],
+                control_inputs,
             )
             provider = CountingProvider()
             provider_runs = harness.build_product_providers(
@@ -1138,6 +1224,7 @@ class HarnessTests(unittest.TestCase):
                 base_context.out_dir,
                 base_context.descriptors,
                 base_context.selected,
+                base_context.inputs,
                 product_bundles={
                     run.provider: run.bundle for run in provider_runs
                 },
@@ -3108,6 +3195,29 @@ class HarnessTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            with mock.patch.object(
+                Path,
+                "resolve",
+                side_effect=AssertionError(
+                    "retained plan parsing consulted the filesystem"
+                ),
+            ):
+                declaration = core.validation_plan_declaration_from_config(
+                    Path("relocated/plans/wasm-matrix.json"),
+                    path.read_bytes(),
+                )
+            self.assertEqual(
+                declaration.adapter_configs,
+                ("../adapters/v8.json", "../adapters/talos.json"),
+            )
+            self.assertEqual(
+                declaration.pairs,
+                (
+                    ("native", "lcnf"),
+                    ("native", "v8"),
+                    ("v8", "talos"),
+                ),
+            )
             plan = harness.validation_plan_from_config(path)
             self.assertEqual(
                 plan.adapter_configs,
@@ -3132,6 +3242,28 @@ class HarnessTests(unittest.TestCase):
                 harness.ValidationError, "duplicate comparison pairs"
             ):
                 harness.validation_plan_from_config(path)
+
+    def test_control_plane_allows_unused_adapter_without_a_plan(self) -> None:
+        inputs = [
+            config_input(
+                "adapter-config",
+                "v8.json",
+                fixture_adapter_config("v8"),
+            ),
+            config_input(
+                "adapter-config",
+                "unused.json",
+                fixture_adapter_config("unused"),
+            ),
+        ]
+        core.validate_control_plane_inputs(
+            inputs,
+            ["native", "v8"],
+            [("native", "v8")],
+            [],
+            [],
+            [],
+        )
 
     def test_checked_native_lcnf_plan_matches_default_matrix(self) -> None:
         plan = harness.validation_plan_from_config(
@@ -3410,11 +3542,28 @@ class HarnessTests(unittest.TestCase):
                     "fixture-wasm", provider.contract
                 ),
             )
+            talos_value = {**adapter_value, "name": "talos"}
+            talos_path = root / "talos.json"
+            talos_path.write_text(
+                json.dumps(talos_value), encoding="utf-8"
+            )
+            talos = harness.external_adapter_from_config(talos_path)
             consumer_context = harness.RunContext(
                 root,
                 out_dir,
                 descriptors,
                 ["case"],
+                (
+                    harness.validation_input_from_file(
+                        "provider-config", provider_path, root
+                    ),
+                    harness.validation_input_from_file(
+                        "adapter-config", adapter_path, root
+                    ),
+                    harness.validation_input_from_file(
+                        "adapter-config", talos_path, root
+                    ),
+                ),
                 product_bundles={
                     "fixture-wasm": provider_runs[0].bundle
                 },
@@ -3431,11 +3580,6 @@ class HarnessTests(unittest.TestCase):
                     backend_run, provider_runs[0].bundle
                 ),
                 [],
-            )
-            talos_value = {**adapter_value, "name": "talos"}
-            talos = harness.external_adapter_from_config(
-                root / "talos.json",
-                json.dumps(talos_value).encode("utf-8"),
             )
             talos.build(
                 harness.BuildContext(
@@ -3656,9 +3800,20 @@ class HarnessTests(unittest.TestCase):
             provider_path = root / "provider.json"
             v8_path = root / "v8.json"
             talos_path = root / "talos.json"
-            provider_path.write_bytes(b"provider config bytes\n")
-            v8_path.write_bytes(b"v8 config bytes\n")
-            talos_path.write_bytes(b"talos config bytes\n")
+            provider_content = json_bytes(
+                fixture_provider_config("fixture-wasm", contract)
+            )
+            v8_content = json_bytes(
+                fixture_consumer_config("v8", "fixture-wasm", contract)
+            )
+            talos_content = json_bytes(
+                fixture_consumer_config(
+                    "talos", "fixture-wasm", contract
+                )
+            )
+            provider_path.write_bytes(provider_content)
+            v8_path.write_bytes(v8_content)
+            talos_path.write_bytes(talos_content)
             plan_path = root / "plan.json"
             plan_path.write_text(
                 json.dumps(
@@ -3682,13 +3837,18 @@ class HarnessTests(unittest.TestCase):
                 path: Path, content: bytes | None = None
             ) -> FakeProvider:
                 self.assertEqual(path, provider_path.resolve())
-                self.assertEqual(content, b"provider config bytes\n")
+                self.assertEqual(content, provider_content)
                 return provider
 
             def adapter_from_config(
                 path: Path, content: bytes | None = None
             ) -> FakeConsumer:
-                self.assertIsNotNone(content)
+                self.assertEqual(
+                    content,
+                    {"v8.json": v8_content, "talos.json": talos_content}[
+                        path.name
+                    ],
+                )
                 return {"v8.json": v8, "talos.json": talos}[path.name]
 
             argv = [
@@ -3761,6 +3921,167 @@ class HarnessTests(unittest.TestCase):
             )
             shutil.rmtree(out_dir / provider.name)
             harness.verify_evidence_manifest(evidence_path)
+            relocated = root / "relocated-report"
+            shutil.copytree(out_dir, relocated)
+            relocated_evidence = (
+                relocated / evidence_path.relative_to(out_dir)
+            )
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                harness.verify_evidence_manifest(relocated_evidence)
+            finally:
+                os.chdir(original_cwd)
+
+            def rewrite_control_input(
+                base: dict,
+                kind: str,
+                filename: str,
+                value: dict,
+            ) -> dict:
+                tampered = json.loads(json.dumps(base))
+                item = next(
+                    candidate
+                    for candidate in tampered["inputs"]
+                    if candidate["kind"] == kind
+                    and Path(candidate["name"]).name == filename
+                )
+                content = json_bytes(value)
+                digest = harness.sha256_bytes(content)
+                item["sha256"] = digest
+                item["artifact"] = harness.retain_evidence_blob(
+                    out_dir, "inputs", digest, content
+                )
+                run_value = {
+                    "version": 2,
+                    "selectionSha256": tampered["identity"]["selection"],
+                    "backends": tampered["backends"],
+                    "pairs": [
+                        {
+                            "reference": pair["reference"],
+                            "candidate": pair["candidate"],
+                        }
+                        for pair in tampered["pairs"]
+                    ],
+                    "inputs": [
+                        {
+                            key: entry[key]
+                            for key in ("kind", "name", "sha256")
+                        }
+                        for entry in tampered["inputs"]
+                    ],
+                    "products": [
+                        {
+                            key: entry[key]
+                            for key in (
+                                "backend",
+                                "kind",
+                                "name",
+                                "sha256",
+                            )
+                        }
+                        for entry in tampered["products"]
+                    ],
+                    "tools": [
+                        {
+                            key: entry[key]
+                            for key in (
+                                "backend",
+                                "kind",
+                                "name",
+                                "sha256",
+                            )
+                        }
+                        for entry in tampered["tools"]
+                    ],
+                    "buildInputs": [
+                        {
+                            key: entry[key]
+                            for key in (
+                                "backend",
+                                "kind",
+                                "name",
+                                "sha256",
+                            )
+                        }
+                        for entry in tampered["buildInputs"]
+                    ],
+                    "productBundles": tampered["productBundles"],
+                    "productConsumers": tampered["productConsumers"],
+                    "productReceipts": tampered["productReceipts"],
+                }
+                tampered["identity"]["run"] = (
+                    harness.canonical_json_sha256(run_value)
+                )
+                matrix_path.write_text(
+                    json.dumps(tampered, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                return tampered
+
+            provider_contract_drift = json.loads(
+                provider_content.decode("utf-8")
+            )
+            provider_contract_drift["contract"]["abi"] = "fixture-abi-drift"
+            provider_manifest_drift = json.loads(
+                provider_content.decode("utf-8")
+            )
+            provider_manifest_drift["bundleManifest"] = "other.json"
+            consumer_provider_drift = json.loads(v8_content.decode("utf-8"))
+            consumer_provider_drift["productProvider"]["name"] = "other-provider"
+            consumer_contract_drift = json.loads(v8_content.decode("utf-8"))
+            consumer_contract_drift["productProvider"]["contract"]["abi"] = (
+                "fixture-abi-drift"
+            )
+            plan_pair_drift = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan_pair_drift["pairs"] = [
+                {"reference": "talos", "candidate": "v8"}
+            ]
+            drift_cases = [
+                (
+                    "provider contract",
+                    "provider-config",
+                    "provider.json",
+                    provider_contract_drift,
+                    "provider config contract disagrees with bundle",
+                ),
+                (
+                    "provider manifest",
+                    "provider-config",
+                    "provider.json",
+                    provider_manifest_drift,
+                    "provider config bundle manifest disagrees with products",
+                ),
+                (
+                    "consumer provider",
+                    "adapter-config",
+                    "v8.json",
+                    consumer_provider_drift,
+                    "adapter config product provider disagrees with matrix consumer",
+                ),
+                (
+                    "consumer contract",
+                    "adapter-config",
+                    "v8.json",
+                    consumer_contract_drift,
+                    "adapter config product provider disagrees with matrix consumer",
+                ),
+                (
+                    "plan pair",
+                    "validation-plan",
+                    "plan.json",
+                    plan_pair_drift,
+                    "validation plan pairs disagree with matrix",
+                ),
+            ]
+            for label, kind, filename, value, message in drift_cases:
+                with self.subTest(control_plane_drift=label):
+                    rewrite_control_input(matrix, kind, filename, value)
+                    with self.assertRaisesRegex(
+                        harness.ValidationError, message
+                    ):
+                        harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(matrix_content)
 
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
         class FakeNativeAdapter:

@@ -4974,10 +4974,17 @@ class ValidationPlan:
     provider_configs: tuple[Path, ...] = ()
 
 
-def validation_plan_from_config(
+@dataclass(frozen=True)
+class ValidationPlanDeclaration:
+    adapter_configs: tuple[str, ...]
+    pairs: tuple[tuple[str, str], ...]
+    provider_configs: tuple[str, ...] = ()
+
+
+def validation_plan_declaration_from_config(
     path: Path, content: bytes | None = None
-) -> ValidationPlan:
-    """Load a strict matrix plan, resolving adapter paths beside the plan."""
+) -> ValidationPlanDeclaration:
+    """Parse a strict matrix plan without consulting the surrounding tree."""
     try:
         source = path.read_bytes() if content is None else content
         value = json.loads(source.decode("utf-8"))
@@ -5015,15 +5022,7 @@ def validation_plan_from_config(
         raise ValidationError(
             f"validation plan {path}: adapterConfigs must be a path array"
         )
-    adapter_configs = tuple(
-        (
-            Path(config)
-            if Path(config).is_absolute()
-            else path.parent / config
-        ).resolve()
-        for config in raw_configs
-    )
-    if len(set(adapter_configs)) != len(adapter_configs):
+    if len(set(raw_configs)) != len(raw_configs):
         raise ValidationError(
             f"validation plan {path}: duplicate adapterConfigs"
         )
@@ -5035,15 +5034,7 @@ def validation_plan_from_config(
         raise ValidationError(
             f"validation plan {path}: providerConfigs must be a path array"
         )
-    provider_configs = tuple(
-        (
-            Path(config)
-            if Path(config).is_absolute()
-            else path.parent / config
-        ).resolve()
-        for config in raw_provider_configs
-    )
-    if len(set(provider_configs)) != len(provider_configs):
+    if len(set(raw_provider_configs)) != len(raw_provider_configs):
         raise ValidationError(
             f"validation plan {path}: duplicate providerConfigs"
         )
@@ -5071,7 +5062,202 @@ def validation_plan_from_config(
         raise ValidationError(
             f"validation plan {path}: duplicate comparison pairs"
         )
-    return ValidationPlan(adapter_configs, tuple(pairs), provider_configs)
+    return ValidationPlanDeclaration(
+        tuple(raw_configs), tuple(pairs), tuple(raw_provider_configs)
+    )
+
+
+def validation_plan_from_config(
+    path: Path, content: bytes | None = None
+) -> ValidationPlan:
+    """Load a strict matrix plan, resolving config paths beside the plan."""
+    declaration = validation_plan_declaration_from_config(path, content)
+
+    def resolve(config: str) -> Path:
+        candidate = Path(config)
+        return (
+            candidate if candidate.is_absolute() else path.parent / candidate
+        ).resolve()
+
+    adapter_configs = tuple(
+        resolve(config) for config in declaration.adapter_configs
+    )
+    if len(set(adapter_configs)) != len(adapter_configs):
+        raise ValidationError(
+            f"validation plan {path}: duplicate adapterConfigs"
+        )
+    provider_configs = tuple(
+        resolve(config) for config in declaration.provider_configs
+    )
+    if len(set(provider_configs)) != len(provider_configs):
+        raise ValidationError(
+            f"validation plan {path}: duplicate providerConfigs"
+        )
+    return ValidationPlan(
+        adapter_configs, declaration.pairs, provider_configs
+    )
+
+
+def validate_control_plane_inputs(
+    inputs: tuple[ValidationInput, ...] | list[ValidationInput],
+    backend_names: list[str],
+    pair_names: list[tuple[str, str]],
+    products: list[ValidationProduct],
+    bundles: list[ProductBundle],
+    consumers: list[ProductConsumer],
+) -> None:
+    """Close retained configs over the matrix claims they authorized."""
+    plan_inputs = [
+        item for item in inputs if item.kind == "validation-plan"
+    ]
+    provider_inputs = [
+        item for item in inputs if item.kind == "provider-config"
+    ]
+    adapter_inputs = [
+        item for item in inputs if item.kind == "adapter-config"
+    ]
+    control_inputs = [
+        item
+        for item in inputs
+        if item.kind
+        in {"validation-plan", "provider-config", "adapter-config"}
+    ]
+    if len(plan_inputs) > 1:
+        raise ValidationError(
+            "validation control plane contains multiple plans"
+        )
+    expected_kinds = (
+        (["validation-plan"] if plan_inputs else [])
+        + ["provider-config"] * len(provider_inputs)
+        + ["adapter-config"] * len(adapter_inputs)
+    )
+    if [item.kind for item in control_inputs] != expected_kinds:
+        raise ValidationError(
+            "validation control-plane inputs are not in canonical order"
+        )
+    control_contents: dict[tuple[str, str], bytes] = {}
+    for item in control_inputs:
+        content = item.content
+        if content is None:
+            raise ValidationError(
+                f"validation control-plane input has no retained content: "
+                f"{item.kind}:{item.name}"
+            )
+        if sha256_bytes(content) != item.sha256:
+            raise ValidationError(
+                f"validation control-plane input content disagrees with "
+                f"SHA-256: {item.kind}:{item.name}"
+            )
+        control_contents[(item.kind, item.name)] = content
+
+    provider_configs: dict[str, ExternalProductProvider] = {}
+    for item in provider_inputs:
+        provider = external_product_provider_from_config(
+            Path(item.name),
+            control_contents[(item.kind, item.name)],
+        )
+        if provider.name in provider_configs:
+            raise ValidationError(
+                "validation control plane contains duplicate provider config: "
+                f"{provider.name}"
+            )
+        provider_configs[provider.name] = provider
+    bundle_by_provider = {bundle.provider: bundle for bundle in bundles}
+    if set(provider_configs) != set(bundle_by_provider):
+        raise ValidationError(
+            "retained provider configs disagree with product bundles"
+        )
+    for provider_name, provider in provider_configs.items():
+        bundle = bundle_by_provider[provider_name]
+        manifests = [
+            product
+            for product in products
+            if product.backend == provider_name
+            and product.kind == RESERVED_PRODUCT_KIND
+        ]
+        if provider.contract != bundle.contract:
+            raise ValidationError(
+                f"retained provider config contract disagrees with bundle: "
+                f"{provider_name}"
+            )
+        if (
+            len(manifests) != 1
+            or manifests[0].name != provider.bundle_manifest
+        ):
+            raise ValidationError(
+                f"retained provider config bundle manifest disagrees with "
+                f"products: {provider_name}"
+            )
+
+    adapter_configs: dict[str, ExternalCommandAdapter] = {}
+    for item in adapter_inputs:
+        adapter = external_adapter_from_config(
+            Path(item.name),
+            control_contents[(item.kind, item.name)],
+        )
+        if adapter.name in adapter_configs:
+            raise ValidationError(
+                "validation control plane contains duplicate adapter config: "
+                f"{adapter.name}"
+            )
+        adapter_configs[adapter.name] = adapter
+    consumer_by_backend = {
+        consumer.backend: consumer for consumer in consumers
+    }
+    if len(consumer_by_backend) != len(consumers):
+        raise ValidationError(
+            "validation control plane contains duplicate product consumers"
+        )
+    if not set(consumer_by_backend) <= set(adapter_configs):
+        raise ValidationError(
+            "retained adapter configs omit a product consumer"
+        )
+    for backend, adapter in adapter_configs.items():
+        if backend not in backend_names:
+            continue
+        requirement = adapter.product_provider
+        consumer = consumer_by_backend.get(backend)
+        if requirement is None:
+            if consumer is not None:
+                raise ValidationError(
+                    f"retained adapter config omits product provider: {backend}"
+                )
+            continue
+        if (
+            consumer is None
+            or requirement.provider != consumer.provider
+            or requirement.contract != consumer.contract
+        ):
+            raise ValidationError(
+                f"retained adapter config product provider disagrees with "
+                f"matrix consumer: {backend}"
+            )
+
+    if plan_inputs:
+        plan_input = plan_inputs[0]
+        plan = validation_plan_declaration_from_config(
+            Path(plan_input.name),
+            control_contents[(plan_input.kind, plan_input.name)],
+        )
+        if list(plan.pairs) != pair_names:
+            raise ValidationError(
+                "retained validation plan pairs disagree with matrix"
+            )
+        if (
+            len(plan.provider_configs) != len(provider_inputs)
+            or len(plan.adapter_configs) != len(adapter_inputs)
+        ):
+            raise ValidationError(
+                "retained validation plan config counts disagree with inputs"
+            )
+        if [PurePosixPath(path).name for path in plan.provider_configs] != [
+            PurePosixPath(item.name).name for item in provider_inputs
+        ] or [PurePosixPath(path).name for path in plan.adapter_configs] != [
+            PurePosixPath(item.name).name for item in adapter_inputs
+        ]:
+            raise ValidationError(
+                "retained validation plan config paths disagree with inputs"
+            )
 
 
 @dataclass
@@ -5190,7 +5376,6 @@ def write_matrix_artifact(
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
         raise ValidationError("validation matrix contains duplicate provenance inputs")
-    retained_inputs = retain_validation_inputs(context, inputs)
     sorted_products = sorted(
         products,
         key=lambda product: (product.backend, product.kind, product.name),
@@ -5210,6 +5395,18 @@ def write_matrix_artifact(
     ]
     if len(set(product_keys)) != len(product_keys):
         raise ValidationError("validation matrix contains duplicate backend products")
+    validate_control_plane_inputs(
+        inputs,
+        backend_names,
+        [
+            (result.reference, result.candidate)
+            for result in pair_results
+        ],
+        sorted_products,
+        bundles,
+        sorted_consumers,
+    )
+    retained_inputs = retain_validation_inputs(context, inputs)
     retained_products = retain_validation_products(context, sorted_products)
     sorted_tools = sorted(
         tools,
@@ -5561,7 +5758,7 @@ def verify_matrix_artifact(
         if index == 0:
             corpus_content = input_content
         input_contents[(kind, name)] = input_content
-        inputs.append(ValidationInput(kind, name, digest))
+        inputs.append(ValidationInput(kind, name, digest, input_content))
     input_keys = [(item.kind, item.name) for item in inputs]
     if len(set(input_keys)) != len(input_keys):
         raise ValidationError("validation matrix has duplicate inputs")
@@ -7395,6 +7592,14 @@ def verify_matrix_artifact(
         equal_comparison_count += equal_cases
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("validation matrix has duplicate pairs")
+    validate_control_plane_inputs(
+        inputs,
+        checked_backends,
+        pair_names,
+        products,
+        bundles,
+        product_consumers,
+    )
 
     findings = value["findings"]
     if not isinstance(findings, list):
