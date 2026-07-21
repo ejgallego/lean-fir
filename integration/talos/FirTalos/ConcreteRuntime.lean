@@ -1415,6 +1415,70 @@ def LetStepSimulates (context : Fir.Wasm.Context)
       Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
         targetStore { targetLocals with values := tail } hostEnv
 
+/-- Witness-indexed interprocedural boundary for ordinary declaration calls
+and generated closure trampolines over the concrete host. -/
+def CallLetStepSimulates (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat)
+    (witness nextWitness : RefinementWitness) : Prop :=
+  FirTalos.Correctness.SourceCallLetResult context externals sourceRuntime
+      sourceEnv decl continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion Host)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+/-- Recursive concrete `CodeWP` rule for a terminating interprocedural call
+prefix. The operation-specific proof may grow the representation witness. -/
+theorem codeWP_callLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step : CallLetStepSimulates context sourceFunction module hostEnv externals
+      decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+      sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+      witness nextWitness)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        targetRest nextStore nextLocals nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals witness tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
 /-- A successful concrete tag read is the exact executable realization of the
 semantic `getTag` result whenever the case tag satisfies the lowerer's checked
 i32 range gate. -/
@@ -1955,6 +2019,33 @@ theorem wp_closureCandidate
     cases continuation with
     | Break level nextStore nextLocals => cases level <;> rfl
     | _ => rfl
+
+/-- Exact ordinary-Wasm direct-call and destination-local boundary. The
+callee proof is fuel-free and store-specific, so recursive proofs may supply
+their own well-founded specification without a semantic host callback. -/
+theorem wp_directCall_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {functionIndex resultIndex : Nat} {rest : Wasm.Program}
+    {Q : Wasm.Assertion Host} {initial nextStore : Wasm.Store Host}
+    {locals updated : Wasm.Locals} {physicalArgs : List Wasm.Value}
+    {physicalResult : Wasm.Value} {tail : List Wasm.Value}
+    (called : Wasm.TerminatesWith env module functionIndex initial
+      (physicalArgs.reverse ++ tail)
+      (fun final results =>
+        final = nextStore ∧ results = physicalResult :: tail))
+    (targetSet : locals.set? resultIndex physicalResult = some updated)
+    (continued : Wasm.wp module rest Q nextStore
+      { updated with values := tail } env) :
+    Wasm.wp module (.call functionIndex :: .localSet resultIndex :: rest) Q
+      initial { locals with values := physicalArgs.reverse ++ tail } env := by
+  apply Wasm.wp_call_tw called
+  intro final results post
+  rcases post with ⟨finalEq, resultsEq⟩
+  subst final
+  subst results
+  change Wasm.wp module (.localSet resultIndex :: rest) Q nextStore
+    { locals with values := physicalResult :: tail } env
+  exact wp_localSet_of_set targetSet continued
 
 /-- Exact generated typed-capture projection prefix. It leaves the projected
 lane on the operand stack for the subsequent argument sequence/direct call. -/

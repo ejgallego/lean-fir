@@ -1987,6 +1987,19 @@ stops short of claiming the compiler's complete candidate fold: the selected
 body still needs capture/argument assembly followed by concrete
 underapplication or an interprocedural direct call.
 
+W6.6l establishes the concrete interprocedural boundary used by both direct
+LCNF calls and the saturated trampoline branch. `CallLetStepSimulates` now
+tracks pre/post concrete runtimes, locals, and potentially grown
+representation witnesses alongside the source interpreter's exact finite call
+execution. Its recursive `CodeWP` rule connects that judgment to compiler and
+adapter output. At the instruction level, a fuel-free store-specific Talos
+`TerminatesWith` proof for an ordinary Wasm function composes with the exact
+caller operand remainder and destination-local write. This keeps recursion in
+ordinary Wasm calls and never reintroduces the excluded semantic
+`closureApply` callback. Constructing the callee termination proof from a
+concrete function-body `CodeWP`, and assembling the whole compiler candidate
+fold, remain follow-ups.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
