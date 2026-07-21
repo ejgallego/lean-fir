@@ -110,6 +110,24 @@ A companion invocation of the same Wasm module exercises all eight `Format`
 constructors, both flattened and real line breaks, Unicode text, and a newline
 embedded inside `Format.text`; V8 again compares with a native Lean oracle.
 
+`call-pretty-format.mjs` demonstrates the consumer boundary without using the
+attached fixture invocation. It creates an empty `SemanticHost`, instantiates
+the module once, allocates the eight ordinary Lean 4.32 `Format` layouts
+directly in that heap, encodes their raw `tobject` handles, and calls the same
+export repeatedly. The small constructor helpers describe only runtime layout;
+they do not form a second AST. Run it after artifact generation with:
+
+```text
+node call-pretty-format.mjs _build/source-pretty-format.wasm
+```
+
+The client also retains the focused expected-failure regression for
+`FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads
+a cached heap `SpaceResult` after shared FIR cache semantics have allowed it to
+be reused and released. Fixing that requires one coordinated persistence
+transition in the FIR interpreter, semantic host, and W6 refinement; this lane
+does not hide the discrepancy with a V8-only repair.
+
 Lean 4.32 initially exposes 23 helper declarations outside the raw local
 closure because primitives and compiler-generated specializations are emitted
 as external LCNF declarations. Recursive source internalization leaves 20

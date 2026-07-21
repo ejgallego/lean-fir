@@ -136,6 +136,7 @@ node --input-type=module -e '
   _build/source-nat-list-case.wasm \
   _build/source-pretty-format.wasm \
   _build/source-pretty-format-coverage.wasm
+node call-pretty-format.mjs _build/source-pretty-format.wasm
 node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"
