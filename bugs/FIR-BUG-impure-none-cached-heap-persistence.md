@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-cached-heap-persistence
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -100,7 +100,17 @@ none
 
 ## Resolution and regression
 
-Unresolved. The checked JavaScript client retains an explicit expected-failure
-assertion for the standalone group. Once the shared cache transition and both
-runtime implementations are updated together, that assertion should become a
-successful rendering check for both width 80 and width 5.
+Shared commit `bf9b9da` mirrors Lean 4.32's `lean_mark_persistent`: cache
+publication marks the complete reachable live object graph before descending,
+sets every visited cell to `persistent = true, rc = 0`, and treats revisits as
+traversal barriers. The interpreter regression checks a cached constructor and
+its string child.
+
+Wasm commit `df6873d` applies the same transition in the JavaScript semantic
+host and the concrete linear-memory runtime. Permanent regressions cover a
+nested cached graph in both hosts, and the reusable `prettyM` client now renders
+the original standalone group as `"left right"` at width 80 and
+`"left\nright"` at width 5. The full artifact check passes. W6 keeps the
+remaining constructive `LiveHeapRel` proof visible as
+`CachePersistenceRefines`; it no longer claims that a cache write leaves the
+heap unchanged.

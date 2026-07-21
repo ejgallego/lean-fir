@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-export-entry-cache-mismatch
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -76,6 +76,10 @@ none
 
 ## Resolution and regression
 
-Unresolved. The differential harness should execute the selected code export
-with exact parameter binding, matching `sourceCodeState` and the generated
-function entry. The full artifact check is the permanent regression.
+Commit `9067434` adds the explicit source-export boundary: it resolves the
+selected code declaration, binds its parameters exactly, and starts at the
+body's `.code` control without an internal declaration-cache frame. This is the
+same source boundary used by the W4 program proofs. Existing
+`DifferentialExamples` guards and the full artifact check now retain identical
+ordinary ownership metadata for `string-heap`, `natural-heap`, and
+`nested-heap`.
