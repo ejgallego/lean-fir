@@ -886,6 +886,88 @@ theorem physicalOfLane_related
   | uint64 => exact .word64 .uint64
   | usize => exact .word64 .usize
 
+/-- Representation-specific evidence needed by typed unboxing. Tagged values
+are interpreted at the requested type; heap boxes are intentionally type-erased
+by FIR, so their frozen descriptor must match the generated result kind. -/
+inductive UnboxObjectRel (witness : RefinementWitness) (word : Word32)
+    (kind : BoxedScalarKind) : Value → Prop where
+  | heap (related : HeapReferenceRel witness word location)
+      (descriptor : witness.descriptors.lookup? word = some (.boxed kind)) :
+      UnboxObjectRel witness word kind (.object (.heap location))
+  | tagged (related : TaggedReferenceRel witness word payload) :
+      UnboxObjectRel witness word kind (.object (.tagged payload))
+
+/-- Executable concrete typed unboxing. The requested kind fixes the import's
+result lane; successful heap refinement separately proves that the stored box
+descriptor agrees with it. -/
+def unboxStep (kind : BoxedScalarKind) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match readBoxedScalar store.host.runtime.heap kind
+          (Word32.ofUInt32 bits) with
+      | .ok scalar => .Return [physicalOfLane scalar.lane] store
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def unboxFn (kind : BoxedScalarKind) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := [FirTalos.abiKind kind.abiKind]
+  invoke := unboxStep kind }
+
+def unboxContract (kind : BoxedScalarKind) : Wasm.HostContract Host :=
+  fun initial args result => result = unboxStep kind initial args
+
+theorem unboxFn_satisfies_contract (kind initial args) :
+    unboxContract kind initial args ((unboxFn kind).invoke initial args) := by
+  rfl
+
+/-- A successful checked unbox call returns the exact Talos lane related to
+the FIR scalar, for either a typed live heap box or a tagged representation. -/
+theorem unboxStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {kind : BoxedScalarKind}
+    {sourceObject sourceValue : Value} {scalar : BoxedScalar}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : UnboxObjectRel witness word kind sourceObject)
+    (unboxed : unbox runtime kind.semanticType sourceObject = .ok sourceValue)
+    (concreteRead : readBoxedScalar initial.host.runtime.heap kind word =
+      .ok scalar) :
+    unboxStep kind initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [physicalOfLane scalar.lane] (clearFailure initial) ∧
+      sourceValue = scalar.semanticValue ∧
+      PhysicalValueRel witness kind.abiKind
+        (physicalOfLane scalar.lane) sourceValue := by
+  cases objectRelated with
+  | heap heapRelated descriptor =>
+      obtain ⟨actual, actualRead, valueEq, valueRelated⟩ :=
+        runtimeRelated.heap.readBoxedScalar_heap_refines
+          (by cases heapRelated with | mapped found => exact found)
+          descriptor unboxed
+      rw [concreteRead] at actualRead
+      have scalarEq : scalar = actual := Except.ok.inj actualRead
+      subst actual
+      refine ⟨by simp [unboxStep, clearFailure,
+          Word32.ofUInt32_ofNat_value, concreteRead], valueEq, ?_⟩
+      exact physicalOfLane_related valueRelated
+  | tagged taggedRelated =>
+      obtain ⟨actualRead, semantic, valueRelated⟩ :=
+        runtimeRelated.heap.readBoxedScalar_tagged_refines taggedRelated kind
+      rw [concreteRead] at actualRead
+      have scalarEq : scalar = BoxedScalar.ofPayload kind _ :=
+        Except.ok.inj actualRead
+      subst scalar
+      have valueEq : sourceValue =
+          (BoxedScalar.ofPayload kind _).semanticValue :=
+        Except.ok.inj (unboxed.symm.trans semantic)
+      subst sourceValue
+      refine ⟨by simp [unboxStep, clearFailure,
+          Word32.ofUInt32_ofNat_value, concreteRead], rfl, ?_⟩
+      exact physicalOfLane_related valueRelated
+
 /-- Concrete trampoline metadata test. It reads only the closure header and
 returns the direct i32 Boolean consumed by generated `if` control flow. -/
 def closureMatchesStep (function : Lean.Name) (arity fixed : Nat)
@@ -3915,6 +3997,56 @@ theorem effectStepSimulates_scalarSet
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
 
+/-- Concrete-host WP for generated typed unboxing and its destination-local
+write. -/
+theorem wp_unbox_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {word : Word32}
+    {kind : BoxedScalarKind} {scalar : BoxedScalar}
+    {sourceObject : Value} {runtime : RuntimeState}
+    {witness : RefinementWitness}
+    (tail : List Wasm.Value)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat word.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (unboxContract kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      UnboxObjectRel witness word kind sourceObject)
+    (unboxed : unbox runtime kind.semanticType sourceObject =
+      .ok scalar.semanticValue)
+    (concreteRead : readBoxedScalar initial.host.runtime.heap kind word =
+      .ok scalar)
+    (targetSet : locals.set? resultIndex (physicalOfLane scalar.lane) =
+      some updated)
+    (continued : Wasm.wp module rest Q (clearFailure initial)
+      { updated with values := tail } env) :
+    Wasm.wp module
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  obtain ⟨operation, _, _⟩ :=
+    unboxStep_of_refines runtimeRelated objectRelated unboxed concreteRead
+  have hObjectTail :
+      ({ locals with values := tail } : Wasm.Locals).get objectIndex =
+        some (.i32 (UInt32.ofNat word.value)) := by
+    simpa [Wasm.Locals.get] using hObject
+  rw [Wasm.wp_localGet_cons, hObjectTail]
+  apply wp_exact_host_call_of_return
+    (step := unboxStep kind)
+    (physicalArgs := [.i32 (UInt32.ofNat word.value)])
+    (results := [physicalOfLane scalar.lane]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
 /-- Concrete-host WP for the generated sharing observation and direct UInt8
 destination write. -/
 theorem wp_isShared_let
@@ -4645,6 +4777,144 @@ theorem wp_closureProj
   · simp [hParams]
   · exact operation
   · simpa [hParams, hResults] using continued
+
+/-- Typed-unboxing instance of the concrete direct-`let` boundary. The
+representation premise records why the generated result kind is valid for a
+type-erased heap box while remaining automatic for tagged objects. -/
+theorem letStepSimulates_unbox
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {kind : BoxedScalarKind}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {word : Word32}
+    {sourceObject : Value} {scalar : BoxedScalar}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = kind.semanticType)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (unboxed : unbox sourceRuntime kind.semanticType sourceObject =
+      .ok scalar.semanticValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some kind.abiKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat word.value)))
+    (objectRelated : UnboxObjectRel witness word kind sourceObject)
+    (concreteRead : readBoxedScalar initial.host.runtime.heap kind word =
+      .ok scalar)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (unboxContract kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex (physicalOfLane scalar.lane) =
+      some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet objectIndex, .call id]
+      sourceRuntime sourceRuntime sourceEnv scalar.semanticValue initial
+      (clearFailure initial) locals updated resultIndex witness witness := by
+  obtain ⟨_, _, physicalRelated⟩ :=
+    unboxStep_of_refines initialRelated.1 objectRelated unboxed concreteRead
+  refine ⟨?_, initialRelated, ?_, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have objectLookup : lookupValue sourceEnv objectId = .ok sourceObject := by
+      simp [lookupValue, sourceLookup]
+    rw [objectLookup, resultTypeEq]
+    change ((fun result : Value =>
+      (sourceRuntime, LetAction.value result)) <$>
+        unbox sourceRuntime kind.semanticType sourceObject) =
+      .ok (sourceRuntime, .value scalar.semanticValue)
+    rw [unboxed]
+    rfl
+  · exact initialRelated.bindPhysical resultFound resultKindAt
+      physicalRelated targetSet
+  · intro rest Q tail continued
+    exact wp_unbox_let tail hObject hImp hSat hi hContract hParams hResults
+      initialRelated.1 objectRelated unboxed concreteRead targetSet continued
+
+/-- W6.6 composition for generated unboxing through source evaluation,
+compiler output, Talos adaptation, the concrete typed host, and continuation. -/
+theorem codeWP_unbox_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {kind : BoxedScalarKind}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {objectIndex resultIndex : Nat} {word : Word32}
+    {sourceObject : Value} {scalar : BoxedScalar}
+    {sourceRuntime : RuntimeState} {witness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = kind.semanticType)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.localGet objectId, .call (.runtime (.unbox kind.abiKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound : callIndex? sourceModule (.runtime (.unbox kind.abiKind)) =
+      some id)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (unboxed : unbox sourceRuntime kind.semanticType sourceObject =
+      .ok scalar.semanticValue)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some kind.abiKind)
+    (hObject :
+      locals.get objectIndex = some (.i32 (UInt32.ofNat word.value)))
+    (objectRelated : UnboxObjectRel witness word kind sourceObject)
+    (concreteRead : readBoxedScalar initial.host.runtime.heap kind word =
+      .ok scalar)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (unboxContract kind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (targetSet : locals.set? resultIndex (physicalOfLane scalar.lane) =
+      some updated)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime (bind sourceEnv decl.fvarId scalar.semanticValue)
+        continuation targetRest (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.unbox kind.abiKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          objectId = some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have step := letStepSimulates_unbox (context := context)
+    valueEq resultTypeEq sourceLookup unboxed initialRelated resultFound
+    resultKindAt hObject objectRelated concreteRead hImp hSat hi hContract
+    hParams hResults targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, stepInitial, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
 
 /-- Concrete `isShared` instance of the direct-`let` boundary. It connects
 the source read-only step to the concrete object representation, direct UInt8

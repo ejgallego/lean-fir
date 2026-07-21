@@ -2160,6 +2160,18 @@ arbitrary continuation. Executable guards cover a unique ordinary object, the
 same object after a reference-count increment, an immediate tag, and a
 promoted tag. Generated artifact execution remains pending.
 
+W6.6y composes typed unboxing for the five integer and `USize` kinds supported
+by the concrete runtime. An ABI-indexed Talos host returns the exact i32 or i64
+lane produced by checked linear-memory decoding. A representation-indexed
+premise records the crucial FIR invariant: tagged values are interpreted at
+the requested type, while the frozen descriptor of a type-erased heap box
+must match the generated result kind. The composed rule connects source
+evaluation, compiler and adapter output, the exact unary host call,
+destination-local refinement, and an arbitrary continuation. Executable
+guards cover all five kinds across immediate, promoted-tag, and ordinary boxed
+storage. Float kinds remain tracked by the shared runtime gap, and generated
+artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -198,6 +198,57 @@ private def scalarProjectionFixture :
       | .error _ => false
   | _ => false
 
+private def boxedScalarFixture (scalar : BoxedScalar) :
+    Except ConcreteError (Wasm.Store Host × Word32) := do
+  let (heap, word) ← boxScalar MemoryState.initial scalar
+  let store : Wasm.Store Host := {
+    emptyHostStore with
+    host := { emptyHostStore.host with
+      runtime := { emptyHostStore.host.runtime with heap } } }
+  return (store, word)
+
+-- Typed unboxing preserves each supported direct scalar lane. These cases
+-- jointly exercise immediate, promoted-tag, and ordinary boxed storage.
+#guard match boxedScalarFixture (.uint8 255) with
+  | .ok (store, word) =>
+      match unboxStep .uint8 store [.i32 (UInt32.ofNat word.value)] with
+      | .Return [.i32 value] next =>
+          value == 255 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+#guard match boxedScalarFixture (.uint16 65535) with
+  | .ok (store, word) =>
+      match unboxStep .uint16 store [.i32 (UInt32.ofNat word.value)] with
+      | .Return [.i32 value] next =>
+          value == 65535 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+#guard match boxedScalarFixture (.uint32 4294967295) with
+  | .ok (store, word) =>
+      match unboxStep .uint32 store [.i32 (UInt32.ofNat word.value)] with
+      | .Return [.i32 value] next =>
+          value == 4294967295 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+#guard match boxedScalarFixture (.uint64 18446744073709551615) with
+  | .ok (store, word) =>
+      match unboxStep .uint64 store [.i32 (UInt32.ofNat word.value)] with
+      | .Return [.i64 value] next =>
+          value == 18446744073709551615 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+#guard match boxedScalarFixture (.usize 18446744073709551615) with
+  | .ok (store, word) =>
+      match unboxStep .usize store [.i32 (UInt32.ofNat word.value)] with
+      | .Return [.i64 value] next =>
+          value == 18446744073709551615 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
 private def emptyConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
   name := `FirTalos.Concrete.emptyConstructor
   cidx := 7
