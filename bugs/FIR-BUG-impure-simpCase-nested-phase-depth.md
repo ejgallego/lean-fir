@@ -302,3 +302,14 @@ source certificate tree, the executable run, `ScopedFoldRuntimeTypeLaws`, and
 the single audited upstream bridge. The remaining semantic frontier is thus
 the exact cross-code runtime-type compatibility law itself, not any part of
 the table algorithm or phase reconstruction.
+
+The arbitrary-depth scoped trace now also reaches the established program
+semantics generically. `ScopedCodePhaseTrace.singletonProgramTrace` threads
+the endpoint alpha certificate through unchanged declaration parameters and
+lifts every local round to `StructuralAlphaStructuralTrace` without collapsing
+phase boundaries. `singletonProgramSamePhaseCorrectOn` then applies the
+existing whole-program semantic composition theorem. The original nested
+fixture exercises this route with two genuine compiler rounds and a round-count
+guard. Program lifting is therefore closed modulo the trace's explicit
+structural-readiness admissibility; the exact runtime-type law above remains
+the only missing input to assemble the executable certified trace itself.

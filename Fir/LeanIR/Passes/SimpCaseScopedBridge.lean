@@ -7,6 +7,8 @@ open Lean
 open Lean.Compiler
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.AlphaEqv
+open Fir.LeanIR.Passes.NonLockstep.Structural
+open Fir.LeanIR.Passes.SimpCaseAlphaBridge
 open Fir.LeanIR.Passes.SimpCaseCompilerBridge
 open Fir.LeanIR.Passes.SimpCaseRelation
 
@@ -6417,6 +6419,150 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
     (scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
       bridge runtimeTypes)
     certificates run
+
+/-- A one-declaration program wrapper used to lift a scoped code trace to the
+existing whole-program structural/alpha/structural semantics. All declaration
+identity and ABI fields are retained definitionally. -/
+def singletonCodeProgram (declaration : LCNF.Decl .impure)
+    (code : LCNF.Code .impure) : ImpureProgram :=
+  { decls := #[{ declaration with value := .code code }] }
+
+theorem singletonCodeProgram_structural
+    (related : CodeRel validCase left right) :
+    ProgramRelated (CodeRel validCase)
+      (singletonCodeProgram declaration left)
+      (singletonCodeProgram declaration right) := by
+  exact .cons {
+    name_eq := rfl
+    levelParams_eq := rfl
+    type_eq := rfl
+    params_eq := rfl
+    safe_eq := rfl
+    value := .code related
+    recursive_eq := rfl
+    inlineAttr_eq := rfl
+  } .nil
+
+/-- A parameter-body alpha relation supplies the named-declaration lookup
+relation for two singleton wrappers of the same declaration. -/
+theorem singletonCodeProgram_alpha
+    (body : ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList left right) :
+    ProgramsRelated (singletonCodeProgram declaration left)
+      (singletonCodeProgram declaration right) := by
+  intro name
+  by_cases same : name = declaration.name
+  · subst name
+    simpa [singletonCodeProgram, Program.findDecl?] using
+      OptionalProgramDeclRelated.some
+        (ProgramDeclRelated.code
+          { declaration with value := .code left }
+          { declaration with value := .code right }
+          left right body)
+  · simpa [singletonCodeProgram, Program.findDecl?, same,
+      Ne.symm same] using OptionalProgramDeclRelated.none
+
+/-- Lift one normalized scoped code round through unchanged top-level
+parameters and declaration metadata. The parameter reflexivity witness carries
+exactly the freshness facts needed to expose the inner scoped alpha edge. -/
+def ScopedCodePhaseResult.singletonProgramRound
+    {declaration : LCNF.Decl .impure}
+    (round : ScopedCodePhaseResult validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    StructuralAlphaStructuralPrograms validCase
+      (singletonCodeProgram declaration source)
+      (singletonCodeProgram declaration target) := by
+  let factor := round.trifactor
+  have alphaForward : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList
+      factor.structuralMiddle factor.alphaMiddle := by
+    apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+      parameterShape
+    simpa [ScopeIndex.pushParams] using factor.alphaForward
+  have alphaBackward : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList
+      factor.alphaMiddle factor.structuralMiddle := by
+    exact paramBodyRelated_replaceCode_backward
+      (index := ScopeIndex.empty)
+      (by simpa [ScopeIndex.empty] using parameterShape)
+      (by simpa [ScopeIndex.pushParams] using factor.alphaBackward)
+  exact {
+    structuralMiddle := singletonCodeProgram declaration
+      factor.structuralMiddle
+    alphaMiddle := singletonCodeProgram declaration factor.alphaMiddle
+    structuralBefore := singletonCodeProgram_structural factor.structuralBefore
+    alpha := {
+      forward := singletonCodeProgram_alpha alphaForward
+      backward := singletonCodeProgram_alpha alphaBackward
+    }
+    structuralAfter := singletonCodeProgram_structural factor.structuralAfter
+  }
+
+/-- The endpoint alpha identity of one round refreshes the parameter-body
+shape needed to lift the following round. -/
+theorem ScopedCodePhaseResult.singletonProgramTargetShape
+    {declaration : LCNF.Decl .impure}
+    (round : ScopedCodePhaseResult validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList target target := by
+  apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+    parameterShape
+  simpa [ScopeIndex.pushParams] using round.targetAlpha.forward
+
+/-- Arbitrarily many scoped code rounds lift without collapsing their phase
+boundaries. This is the declaration/program bridge consumed by the existing
+semantic composition theorem. -/
+def ScopedCodePhaseTrace.singletonProgramTrace
+    {declaration : LCNF.Decl .impure}
+    (trace : ScopedCodePhaseTrace validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    StructuralAlphaStructuralTrace validCase
+      (singletonCodeProgram declaration source)
+      (singletonCodeProgram declaration target) :=
+  match trace with
+  | .single round =>
+      .single (round.singletonProgramRound parameterShape)
+  | .trans round rest =>
+      .trans (round.singletonProgramRound parameterShape)
+        (rest.singletonProgramTrace
+          (round.singletonProgramTargetShape parameterShape))
+
+/-- Semantic correctness for a lifted arbitrary-depth singleton-declaration
+trace. Readiness remains explicit once per structural leg, exactly as in the
+established whole-program phase-trace theorem. -/
+theorem ScopedCodePhaseTrace.singletonProgramSamePhaseCorrectOn
+    {declaration : LCNF.Decl .impure}
+    (trace : ScopedCodePhaseTrace validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      (singletonCodeProgram declaration source)
+      (singletonCodeProgram declaration target) entries
+      ((trace.singletonProgramTrace parameterShape).Admissible externals) :=
+  structuralAlphaStructuralTraceSamePhaseCorrectOn
+    (trace.singletonProgramTrace parameterShape)
 
 theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :
     ScopedCaseBoundarySound

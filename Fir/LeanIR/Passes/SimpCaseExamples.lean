@@ -2202,6 +2202,51 @@ theorem alphaSingletonTwoRoundCorrect :
   structuralAlphaStructuralTraceSamePhaseCorrectOn
     alphaSingletonTwoRoundTrace
 
+/-- The unchanged declaration parameters expose the nested source's scoped
+alpha identity at the final body position. -/
+theorem nestedPhaseDepthParamBodyReflexive :
+    ParamBodyRelated (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      #[param c, param x].toList #[param c, param x].toList
+      nestedPhaseDepthCode nestedPhaseDepthCode := by
+  apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+    alphaLeftParamBodyReflexiveForward
+  simpa only [← alphaFoldScopeIndex_fromParams, ScopeIndex.pushParams] using
+    nestedPhaseDepthAlphaBireflexive.forward
+
+/-- Concrete arbitrary-depth program lift. Both genuine scoped simplifier
+rounds survive as distinct structural/alpha/structural program rounds. -/
+def nestedPhaseDepthProgramTrace :
+    StructuralAlphaStructuralTrace nestedPhaseDepthValidCase
+      (singletonCodeProgram (alphaFoldDeclWith nestedPhaseDepthCode)
+        nestedPhaseDepthCode)
+      (singletonCodeProgram (alphaFoldDeclWith nestedPhaseDepthCode)
+        alphaLeft) := by
+  have trace : ScopedCodePhaseTrace nestedPhaseDepthValidCase
+      (ScopeIndex.empty.pushParams
+        (alphaFoldDeclWith nestedPhaseDepthCode).params)
+      nestedPhaseDepthCode alphaLeft := by
+    simpa [alphaFoldDeclWith, decl, alphaFoldScopeIndex_fromParams] using
+      nestedPhaseDepthTrace
+  exact trace.singletonProgramTrace
+    (by simpa [alphaFoldDeclWith, decl] using
+      nestedPhaseDepthParamBodyReflexive)
+
+#guard nestedPhaseDepthProgramTrace.rounds == 2
+
+/-- The automatically lifted two-round trace reaches the whole-program
+semantic consumer without a fixture-specific phase reconstruction. -/
+theorem nestedPhaseDepthProgramCorrect :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      (singletonCodeProgram (alphaFoldDeclWith nestedPhaseDepthCode)
+        nestedPhaseDepthCode)
+      (singletonCodeProgram (alphaFoldDeclWith nestedPhaseDepthCode)
+        alphaLeft)
+      alphaFoldEntries
+      (nestedPhaseDepthProgramTrace.Admissible externals) :=
+  structuralAlphaStructuralTraceSamePhaseCorrectOn
+    nestedPhaseDepthProgramTrace
+
 theorem alphaFoldAlphaProgramsBirelated :
     ProgramsBirelated alphaFoldIntermediateProgram alphaFoldAfterProgram := {
   forward := alphaFoldProgramsRelatedOfParamBody alphaFoldParamBodyForward
