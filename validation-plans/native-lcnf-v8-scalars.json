@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "adapterConfigs": [
+    "../validation-adapters/v8-scalars.json"
+  ],
+  "pairs": [
+    {
+      "reference": "native",
+      "candidate": "lcnf"
+    },
+    {
+      "reference": "native",
+      "candidate": "v8"
+    },
+    {
+      "reference": "lcnf",
+      "candidate": "v8"
+    }
+  ]
+}

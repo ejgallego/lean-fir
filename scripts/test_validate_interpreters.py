@@ -2943,6 +2943,25 @@ class HarnessTests(unittest.TestCase):
             ),
         )
 
+    def test_checked_native_lcnf_v8_plan_is_complete_triangle(self) -> None:
+        adapter_path = (
+            harness.ROOT / "validation-adapters" / "v8-scalars.json"
+        )
+        plan = harness.validation_plan_from_config(
+            harness.ROOT
+            / "validation-plans"
+            / "native-lcnf-v8-scalars.json"
+        )
+        self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
+        self.assertEqual(
+            plan.pairs,
+            (
+                ("native", "lcnf"),
+                ("native", "v8"),
+                ("lcnf", "v8"),
+            ),
+        )
+
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
         class FakeNativeAdapter:
             name = "native"

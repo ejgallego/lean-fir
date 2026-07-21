@@ -18,7 +18,7 @@ Run the quick corpus with:
 make validate
 ```
 
-Run the scalar source-to-real-V8 cases with:
+Run the explicitly selected 64-case native/LCNF/real-V8 triangle with:
 
 ```sh
 make validate-v8
@@ -142,7 +142,8 @@ then the complete matrix evidence graph.  The report tree remains relocatable
 because all manifest and matrix references are report-relative.
 
 `make validate` performs this verification immediately after the normal
-native–LCNF matrix run.
+native–LCNF matrix run. `make validate-v8` does the same for the three-way
+native/LCNF/V8 matrix.
 
 The verifier strictly checks schema, names and paths, every retained byte,
 ordering and uniqueness, stdout/stderr pairing, summary counts, and both
@@ -162,9 +163,10 @@ immutable manifest preserves multiple executions with the same run identity.
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
 `validation-plans/native-lcnf.json`, while `make validate-v8` uses
-`validation-plans/native-v8-scalars.json` (the stable path now also selects one
-heap-backed constructor case).  A later combined plan can add Talos without
-changing the harness:
+`validation-plans/native-lcnf-v8-scalars.json`. The latter preserves an
+explicit compiler-admission fence while running each of native, LCNF, and V8
+once and retaining all three directed consistency edges. A later plan can add
+Talos without changing this comparison model:
 
 ```json
 {
@@ -173,6 +175,7 @@ changing the harness:
   "pairs": [
     {"reference": "native", "candidate": "lcnf"},
     {"reference": "native", "candidate": "v8"},
+    {"reference": "lcnf", "candidate": "v8"},
     {"reference": "v8", "candidate": "talos"}
   ]
 }

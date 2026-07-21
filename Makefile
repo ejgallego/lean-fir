@@ -47,7 +47,7 @@ validate-v8:
 		--case packed-preserve --case tuple-rotate --case reuse-assoc \
 		--case reuse-change-tag --case reuse-grow-delete \
 		--case reuse-grow-delete-shared \
-		--plan validation-plans/native-v8-scalars.json \
+		--plan validation-plans/native-lcnf-v8-scalars.json \
 		--out-dir _build/validation-v8
 	python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json
