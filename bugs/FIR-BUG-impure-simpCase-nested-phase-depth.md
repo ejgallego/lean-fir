@@ -313,3 +313,15 @@ fixture exercises this route with two genuine compiler rounds and a round-count
 guard. Program lifting is therefore closed modulo the trace's explicit
 structural-readiness admissibility; the exact runtime-type law above remains
 the only missing input to assemble the executable certified trace itself.
+
+The exact-type frontier is now reduced to a unary impure-phase invariant.
+`RuntimeTypeCanonical` enumerates the finite runtime-type universe emitted by
+impure LCNF lowering. For two canonical types, an accepted `eqvType` check
+implies literal `Expr` equality even though the general expression `BEq` is an
+opaque alpha-equivalence operation. The proof covers all concrete pairs
+without a new axiom. `LetDeclRuntimeTypesCanonical` and
+`letDeclValueRelated_of_canonical_eqv_true` apply the result simultaneously to
+let result types and `.box` metadata. The next slice is the recursive code/tree
+carrier and its preservation through `shadowCode?`; this will replace the
+binary `ScopedFoldRuntimeTypeLaws` premise with canonicality evidence supplied
+at the checked impure-program boundary.

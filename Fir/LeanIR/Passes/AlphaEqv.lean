@@ -339,6 +339,54 @@ def LetValueBoxTypesEq : LCNF.LetValue .impure → LCNF.LetValue .impure → Pro
   | .box leftType _, .box rightType _ => leftType = rightType
   | _, _ => True
 
+/-- The finite runtime-type universe produced by impure LCNF lowering. Keeping
+this unary invariant explicit lets proofs reduce each executable type check
+without assuming that `Expr`'s opaque alpha-equivalence `BEq` is lawful. -/
+inductive RuntimeTypeCanonical : Expr → Prop where
+  | float : RuntimeTypeCanonical LCNF.ImpureType.float
+  | float32 : RuntimeTypeCanonical LCNF.ImpureType.float32
+  | uint8 : RuntimeTypeCanonical LCNF.ImpureType.uint8
+  | uint16 : RuntimeTypeCanonical LCNF.ImpureType.uint16
+  | uint32 : RuntimeTypeCanonical LCNF.ImpureType.uint32
+  | uint64 : RuntimeTypeCanonical LCNF.ImpureType.uint64
+  | usize : RuntimeTypeCanonical LCNF.ImpureType.usize
+  | erased : RuntimeTypeCanonical LCNF.ImpureType.erased
+  | object : RuntimeTypeCanonical LCNF.ImpureType.object
+  | tobject : RuntimeTypeCanonical LCNF.ImpureType.tobject
+  | tagged : RuntimeTypeCanonical LCNF.ImpureType.tagged
+  | void : RuntimeTypeCanonical LCNF.ImpureType.void
+
+/-- Unary constant-shape evidence for the type stored by `.box`. -/
+def LetValueBoxTypesCanonical : LCNF.LetValue .impure → Prop
+  | .box type _ => RuntimeTypeCanonical type
+  | _ => True
+
+/-- Unary impure-runtime-type evidence for all type metadata observed while
+evaluating a let declaration. -/
+structure LetDeclRuntimeTypesCanonical
+    (declaration : LCNF.LetDecl .impure) : Prop where
+  resultType : RuntimeTypeCanonical declaration.type
+  boxType : LetValueBoxTypesCanonical declaration.value
+
+/-- Alpha-equivalent constant runtime types are literally equal, independently
+of the surrounding free-variable resolver. -/
+theorem runtimeType_eq_of_eqvType_true
+    (leftCanonical : RuntimeTypeCanonical left)
+    (rightCanonical : RuntimeTypeCanonical right)
+    (accepted : (LCNF.AlphaEqv.eqvType left right).run rho = true) :
+    left = right := by
+  let leftType := left
+  let rightType := right
+  cases leftCanonical <;> cases rightCanonical
+  all_goals
+    simp only [LCNF.AlphaEqv.eqvType, ReaderT.run, Pure.pure,
+      ReaderT.pure] at accepted
+  all_goals try rfl
+  all_goals
+    have rejected : (leftType == rightType) = false := by native_decide
+    rw [rejected] at accepted
+    cases accepted
+
 private theorem reader_andM_run_eq_true_iff
     (left right : ReaderM ρ Bool) (env : ρ) :
     (left <&&> right).run env = true ↔
@@ -346,6 +394,20 @@ private theorem reader_andM_run_eq_true_iff
   unfold andM
   simp only [ReaderT.run, ReaderT.bind, Bind.bind, Pure.pure]
   cases h : left env <;> simp [ToBool.toBool, ReaderT.pure]
+
+/-- Successful executable comparison plus unary constant-shape evidence
+recovers the exact box-type premise used by the semantic relation. -/
+theorem letValueBoxTypesEq_of_eqvLetValue_true
+    (leftCanonical : LetValueBoxTypesCanonical left)
+    (rightCanonical : LetValueBoxTypesCanonical right)
+    (accepted : (LCNF.AlphaEqv.eqvLetValue left right).run rho = true) :
+    LetValueBoxTypesEq left right := by
+  cases left <;> cases right <;>
+    simp [LetValueBoxTypesCanonical, LetValueBoxTypesEq,
+      LCNF.AlphaEqv.eqvLetValue, reader_andM_run_eq_true_iff] at *
+  case box.box =>
+    exact runtimeType_eq_of_eqvType_true
+      leftCanonical rightCanonical accepted.1
 
 private theorem litValue_eq_of_beq {left right : LCNF.LitValue}
     (equal : (left == right) = true) : left = right := by
@@ -529,6 +591,26 @@ theorem letDeclValueRelated_of_eqvLetValue_true
     LetDeclValueRelated rho leftScope rightScope left right :=
   ⟨typeEq, letValueRelated_of_eqvLetValue_true
     leftScoped rightScoped boxTypesEq accepted⟩
+
+/-- Canonical impure runtime types turn the executable type/value checks into
+the exact metadata premises required by `LetDeclValueRelated`. -/
+theorem letDeclValueRelated_of_canonical_eqv_true
+    (leftCanonical : LetDeclRuntimeTypesCanonical left)
+    (rightCanonical : LetDeclRuntimeTypesCanonical right)
+    (leftScoped : letValueScoped leftScope left.value = true)
+    (rightScoped : letValueScoped rightScope right.value = true)
+    (typeAccepted :
+      (LCNF.AlphaEqv.eqvType left.type right.type).run rho = true)
+    (valueAccepted :
+      (LCNF.AlphaEqv.eqvLetValue left.value right.value).run rho = true) :
+    LetDeclValueRelated rho leftScope rightScope left right :=
+  letDeclValueRelated_of_eqvLetValue_true
+    (runtimeType_eq_of_eqvType_true
+      leftCanonical.resultType rightCanonical.resultType typeAccepted)
+    leftScoped rightScoped
+    (letValueBoxTypesEq_of_eqvLetValue_true
+      leftCanonical.boxType rightCanonical.boxType valueAccepted)
+    valueAccepted
 
 /-- A fresh binder does not reuse the runtime lookup name of an older scope entry. -/
 def FreshForScope (fvarId : FVarId) (scope : List FVarId) : Prop :=
