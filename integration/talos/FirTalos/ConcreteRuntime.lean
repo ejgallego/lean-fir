@@ -624,6 +624,32 @@ theorem decrementFn_satisfies_contract
       ((decrementFn amount check objectFields?).invoke initial args) := by
   rfl
 
+/-- Executable concrete explicit deletion. Physical word zero is the shared
+failed-reset erased sentinel and is an operation-specific no-op; ordinary heap
+addresses receive the canonical freed header without releasing children. -/
+def deleteStep (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match deleteObject store.host.runtime.heap (Word32.ofUInt32 bits) with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def deleteFn : Wasm.HostFn Host := {
+  params := [.i32]
+  results := []
+  invoke := deleteStep }
+
+def deleteContract : Wasm.HostContract Host :=
+  fun initial args result => result = deleteStep initial args
+
+theorem deleteFn_satisfies_contract (initial args) :
+    deleteContract initial args (deleteFn.invoke initial args) := by
+  rfl
+
 /-- Executable concrete constructor-tag mutation. The checked runtime rewrites
 only the constructor header and rejects nonconstructor or out-of-range tags
 through the structured concrete failure channel. -/
@@ -1864,6 +1890,88 @@ theorem decrementStep_of_refines
           · simp [decrementStep, clearFailure,
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
           · simpa [replaceHeap, clearFailure] using runtimeRelated
+
+/-- Successful semantic deletion is heap-only for both the ordinary-object
+transition and the erased failed-reset no-op. -/
+theorem deleteValue_heapOnly
+    {before after : RuntimeState} {value : Value}
+    (updated : deleteValue before value = .ok after) :
+    ∃ heap, after = { before with heap := heap } := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload => simp [deleteValue] at updated
+      | heap location =>
+          simp only [deleteValue] at updated
+          cases read : getLiveCell before location with
+          | error failure =>
+              simp only [read, Bind.bind, Except.bind] at updated
+              contradiction
+          | ok cell =>
+              simp only [read, Bind.bind, Except.bind] at updated
+              exact setCell_heapOnly updated
+  | erased =>
+      simp [deleteValue] at updated
+      exact ⟨before.heap, by simpa using updated.symm⟩
+  | usize value | scalar value | reuseToken value =>
+      simp [deleteValue] at updated
+
+/-- Concrete explicit deletion refines every semantically successful physical
+lane. This includes the operation-specific erased/zero no-op without creating
+an ordinary object relation for zero. -/
+theorem deleteStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {kind : AbiKind}
+    {sourceObject : Value} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : ValueRel witness kind (.word32 word) sourceObject)
+    (updated : deleteValue runtime sourceObject = .ok nextRuntime) :
+    ∃ heap,
+      deleteStep initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases valueRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
+            runtimeRelated.heap.deleteObject_refines mapped updated
+          refine ⟨heap, ?_, ?_⟩
+          · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated (deleteValue_heapOnly updated)
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
+                runtimeRelated.heap.deleteObject_refines mapped updated
+              refine ⟨heap, ?_, ?_⟩
+              · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+                  concreteOperation, replaceHeap]
+              · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+                  finalHeapRelated (deleteValue_heapOnly updated)
+      | tagged taggedRelated => simp [deleteValue] at updated
+  | erased =>
+      obtain ⟨heap, concreteOperation, semanticOperation, finalHeapRelated⟩ :=
+        runtimeRelated.heap.deleteObject_erased_refines
+      have runtimeEq := Except.ok.inj (semanticOperation.symm.trans updated)
+      subst nextRuntime
+      refine ⟨heap, ?_, ?_⟩
+      · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+          concreteOperation, replaceHeap]
+      · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+          finalHeapRelated (deleteValue_heapOnly updated)
+  | tagged taggedRelated => simp [deleteValue] at updated
+  | reuseNone => simp [deleteValue] at updated
+  | reuseSome heapRelated => simp [deleteValue] at updated
+  | uint8 encoded => simp [deleteValue] at updated
+  | uint16 encoded => simp [deleteValue] at updated
+  | uint32 encoded => simp [deleteValue] at updated
 
 /-- Every successful semantic constructor modification is heap-only. This is
 shared by tag, object, USize, and packed-scalar mutation composition. -/
@@ -3187,6 +3295,82 @@ theorem effectStepSimulates_dec_persistent
     simp [executeStep, coreStep]
   · exact codeAdapted_dec_persistent continuationAdapted
   · exact initialRelated
+
+/-- Explicit deletion composed through the source evaluator, compiler and
+adapter, concrete canonical-header update, and generated unary host call. The
+same theorem admits the erased/zero no-op only through its exact `.erased`
+value relation. -/
+theorem effectStepSimulates_delete
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : deleteValue sourceRuntime sourceObject = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (callFound : callIndex? sourceModule (.runtime .delete) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some deleteContract)
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv (.del objectId continuation)
+        continuation ([.localGet objectIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  cases physicalRelated with
+  | word32 valueRelated =>
+      obtain ⟨heap, operation, runtimeRelated⟩ :=
+        deleteStep_of_refines initialRelated.1 valueRelated updated
+      refine ⟨heap, ?_⟩
+      apply effectStepSimulates_unaryHost (step := deleteStep)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_delete objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated =>
+      cases valueRelated <;> simp [deleteValue] at updated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
 
 /-- Constructor-tag mutation composed through the source evaluator, real
 compiler and adapter, concrete header writer, and exact unary host-call prefix.

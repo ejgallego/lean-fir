@@ -323,6 +323,39 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- Explicit deletion frees only the selected parent; unlike decrement it does
+-- not recursively release the still-live owned child.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 child] childStore =>
+      match allocCtorStep unaryConstructorInfo #[.object] .object childStore
+          [.i32 child] with
+      | .Return [.i32 parent] parentStore =>
+          match deleteStep parentStore [.i32 parent] with
+          | .Return [] next =>
+              match next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 child),
+                  next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 parent) with
+              | .ok childHeader, .error (.deadObject parentAddress) =>
+                  childHeader.refCount == 1 &&
+                    parentAddress == Word32.ofUInt32 parent &&
+                    next.host.failure?.isNone
+              | _, _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+-- The shared erased failed-reset encoding is an operation-specific delete
+-- no-op; physical zero does not become an ordinary object address.
+#guard match deleteStep emptyHostStore [.i32 0] with
+  | .Return [] next =>
+      next.host.runtime.heap.heapCursor ==
+          emptyHostStore.host.runtime.heap.heapCursor &&
+        next.host.runtime.heap.memory == emptyHostStore.host.runtime.heap.memory &&
+        next.host.failure?.isNone
+  | _ => false
+
 -- Constructor-tag mutation rewrites only the checked header: the new tag is
 -- visible while the existing object payload remains byte-for-byte decodable.
 #guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore

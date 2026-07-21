@@ -2137,6 +2137,18 @@ Constructing that boundary from recursive persistent-cell relations remains a
 proof-lane follow-up; the executable transition and its failure behavior are
 already exact.
 
+W6.6w composes explicit deletion. The concrete Talos host installs the
+canonical freed header for an ordinary object without recursively releasing
+its fields, matching FIR's distinct `del` semantics. Physical word zero is
+accepted only through the shared failed-reset `.erased` relation and remains
+an exact no-op; ordinary object decoding is unchanged. A representation-
+indexed local theorem eliminates every other lane from semantic success, and
+the composed rule connects source evaluation, compiler and adapter output,
+the exact unary host call, final runtime relation, and continuation. Executable
+guards distinguish nonrecursive parent deletion from recursive decrement and
+confirm that erased zero preserves the complete concrete heap. Generated
+artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

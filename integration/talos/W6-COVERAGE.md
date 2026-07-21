@@ -28,7 +28,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, and continuation compose; explicit wasm32 tag-fit premise retained; artifact pending |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Concrete checked ordinary/tagged/promoted recursive host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose with explicit closure-descriptor identity; unchecked nonpersistent composition and artifact pending |
-| `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
+| `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, and continuation compose without weakening ordinary object decoding; artifact pending |
 | `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP; artifact pending |
 
 Cross-cutting W6.5 state:
@@ -53,6 +53,10 @@ Cross-cutting W6.5 state:
   widening, the complete recursive ownership theorem, generated no-result host
   call, and persistent compiler elision; closure descriptor identity remains
   explicit and unchecked nonpersistent composition remains open; and
+- explicit deletion composes through its exact physical value relation,
+  canonical nonrecursive header release, and generated no-result host call;
+  erased word zero remains an operation-specific no-op rather than an object;
+  and
 - constructor-tag mutation composes through the exact object local, live-cell
   descriptor, concrete header writer, and generated no-result host call while
   preserving the constructor payload; and
