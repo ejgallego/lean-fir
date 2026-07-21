@@ -27,7 +27,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `scalarSet` | Four integer widths | Heap theorems | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, and continuation compose for initially empty semantic packed fields; repeated/disjoint field frame pending; floats share the runtime gap; artifact pending |
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, and continuation compose; explicit wasm32 tag-fit premise retained; artifact pending |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
-| `dec` | Yes | Complete checked recursive heap theorem | Partial | Missing |
+| `dec` | Yes | Complete checked recursive heap theorem | Partial | Concrete checked ordinary/tagged/promoted recursive host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose with explicit closure-descriptor identity; unchecked nonpersistent composition and artifact pending |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
 | `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP; artifact pending |
 
@@ -48,6 +48,10 @@ Cross-cutting W6.5 state:
 - reference-count increment composes through exact object-like local widening,
   the concrete header/tagged operation, generated no-result host call, and
   persistent compiler elision; and
+- checked reference-count decrement composes through exact object-like local
+  widening, the complete recursive ownership theorem, generated no-result host
+  call, and persistent compiler elision; closure descriptor identity remains
+  explicit and unchecked nonpersistent composition remains open; and
 - constructor-tag mutation composes through the exact object local, live-cell
   descriptor, concrete header writer, and generated no-result host call while
   preserving the constructor payload; and

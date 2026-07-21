@@ -2107,6 +2107,22 @@ integer values and the structured float-kind rejection. Float execution stays
 tracked by `FIR-BUG-wasm-none-float-runtime-gap`; generated artifact execution
 also remains pending.
 
+W6.6u composes checked recursive reference-count decrement. The concrete
+Talos host repeats the public checked release operation, using the frozen
+closure descriptor table for typed captures; ordinary objects may decrement
+in place or become dead and recursively release constructor fields, closure
+captures, and boxed ownership, while immediate and promoted tags remain exact
+checked no-ops. A recursive semantic frame theorem proves that the entire
+ownership traversal preserves globals, world, and trace, allowing the existing
+complete `LiveHeapRel.decrementReference_refines` theorem to lift to
+`ConcreteRuntimeRel`. The composed rule connects an exact object-like local,
+source evaluator, real compiler and adapter, unary host contract, and
+continuation; persistent decrements follow the compiler's proved elision path.
+Executable guards cover a multi-decrement above one, count-one parent/child
+recursive death, and a promoted-tag no-op. The closure descriptor equality is
+kept explicit. Unchecked nonpersistent composition and generated artifact
+execution remain pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

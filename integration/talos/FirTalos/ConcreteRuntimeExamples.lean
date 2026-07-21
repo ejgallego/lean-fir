@@ -262,6 +262,67 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- Multi-decrement repeats the checked ordinary-header transition exactly and
+-- leaves the object payload intact while the count remains positive.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match incrementStep 2 true store [.i32 object] with
+      | .Return [] shared =>
+          match decrementStep 2 true (some 1) shared [.i32 object] with
+          | .Return [] next =>
+              match next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 object),
+                  readObjectField next.host.runtime.heap
+                    (Word32.ofUInt32 object) 0 with
+              | .ok header, .ok field =>
+                  header.refCount == 1 && field.value == 23 &&
+                    next.host.failure?.isNone
+              | _, _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+-- Count-one release marks the parent dead before recursively releasing its
+-- owned ordinary child; both allocations end with canonical dead headers.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 child] childStore =>
+      match allocCtorStep unaryConstructorInfo #[.object] .object childStore
+          [.i32 child] with
+      | .Return [.i32 parent] parentStore =>
+          match decrementStep 1 true (some 1) parentStore [.i32 parent] with
+          | .Return [] next =>
+              match next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 child),
+                  next.host.runtime.heap.readLiveHeader
+                    (Word32.ofUInt32 parent) with
+              | .error (.deadObject childAddress),
+                  .error (.deadObject parentAddress) =>
+                  childAddress == Word32.ofUInt32 child &&
+                    parentAddress == Word32.ofUInt32 parent &&
+                    next.host.failure?.isNone
+              | _, _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
+-- Promoted tags share the heap-address bit pattern but retain the checked
+-- decrement no-op contract and their complete tag payload.
+#guard match naturalLiteralStep 2147483648 emptyHostStore [] with
+  | .Return [.i32 object] store =>
+      let cursor := store.host.runtime.heap.heapCursor
+      match decrementStep 4 true none store [.i32 object] with
+      | .Return [] next =>
+          match readTag next.host.runtime.heap (Word32.ofUInt32 object) with
+          | .ok tag =>
+              tag.toNat == 2147483648 &&
+                next.host.runtime.heap.heapCursor == cursor &&
+                next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | _ => false
+
 -- Constructor-tag mutation rewrites only the checked header: the new tag is
 -- visible while the existing object payload remains byte-for-byte decodable.
 #guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore

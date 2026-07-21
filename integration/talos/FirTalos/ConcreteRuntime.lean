@@ -590,6 +590,39 @@ theorem incrementFn_satisfies_contract (amount check initial args) :
       ((incrementFn amount check).invoke initial args) := by
   rfl
 
+/-- Executable concrete recursive reference-count decrement. The optional
+object-field count is part of the import identity but concrete ownership is
+decoded from the checked header and closure descriptor table. -/
+def decrementStep (amount : Nat) (check : Bool)
+    (_objectFields? : Option Nat) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match decrementReference store.host.runtime.heap (Word32.ofUInt32 bits)
+          amount check store.host.closureDescriptors with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def decrementFn (amount : Nat) (check : Bool)
+    (objectFields? : Option Nat) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := []
+  invoke := decrementStep amount check objectFields? }
+
+def decrementContract (amount : Nat) (check : Bool)
+    (objectFields? : Option Nat) : Wasm.HostContract Host :=
+  fun initial args result =>
+    result = decrementStep amount check objectFields? initial args
+
+theorem decrementFn_satisfies_contract
+    (amount check objectFields? initial args) :
+    decrementContract amount check objectFields? initial args
+      ((decrementFn amount check objectFields?).invoke initial args) := by
+  rfl
+
 /-- Executable concrete constructor-tag mutation. The checked runtime rewrites
 only the constructor header and rejects nonconstructor or out-of-range tags
 through the structured concrete failure channel. -/
@@ -1491,6 +1524,158 @@ theorem incValue_heapOnly
   | erased => simp [incValue] at updated
   | reuseToken location => simp [incValue] at updated
 
+/-- The auxiliary semantic runtime components preserved by ownership changes.
+Recursive decrement can update several heap cells, so an exact one-record
+`heapOnly` equation is inconvenient; these are precisely the components that
+the non-heap fields of `ConcreteRuntimeRel` observe. -/
+structure RuntimeAuxEq (before after : RuntimeState) : Prop where
+  globals : after.globals = before.globals
+  world : after.world = before.world
+  trace : after.trace = before.trace
+
+theorem RuntimeAuxEq.refl (runtime : RuntimeState) :
+    RuntimeAuxEq runtime runtime := by
+  exact ⟨rfl, rfl, rfl⟩
+
+theorem RuntimeAuxEq.trans
+    {before middle after : RuntimeState}
+    (first : RuntimeAuxEq before middle)
+    (second : RuntimeAuxEq middle after) :
+    RuntimeAuxEq before after := by
+  exact ⟨second.globals.trans first.globals,
+    second.world.trans first.world, second.trace.trans first.trace⟩
+
+theorem setCell_runtimeAux
+    {before after : RuntimeState} {location : Location} {cell : HeapCell}
+    (updated : setCell before location cell = .ok after) :
+    RuntimeAuxEq before after := by
+  rcases setCell_heapOnly updated with ⟨heap, rfl⟩
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- A successful state-threading fold preserves auxiliary runtime state when
+each successful step does. -/
+theorem List.foldlM_runtimeAux
+    {α : Type} {step : RuntimeState → α → Except RuntimeFault RuntimeState}
+    (stepAux : ∀ {before after item},
+      step before item = .ok after → RuntimeAuxEq before after)
+    {items : List α} {before after : RuntimeState}
+    (operation : items.foldlM (init := before) step = .ok after) :
+    RuntimeAuxEq before after := by
+  induction items generalizing before with
+  | nil =>
+      simp only [List.foldlM_nil] at operation
+      have runtimeEq := Except.ok.inj operation
+      subst after
+      exact RuntimeAuxEq.refl _
+  | cons item items ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at operation
+      cases head : step before item with
+      | error failure =>
+          rw [head] at operation
+          contradiction
+      | ok middle =>
+          rw [head] at operation
+          exact (stepAux head).trans (ih operation)
+
+theorem Array.foldlM_runtimeAux
+    {α : Type} {step : RuntimeState → α → Except RuntimeFault RuntimeState}
+    (stepAux : ∀ {before after item},
+      step before item = .ok after → RuntimeAuxEq before after)
+    {items : Array α} {before after : RuntimeState}
+    (operation : items.foldlM step before = .ok after) :
+    RuntimeAuxEq before after := by
+  have listOperation :
+      items.toList.foldlM (init := before) step = .ok after := by
+    simpa only [Array.foldlM_toList] using operation
+  exact List.foldlM_runtimeAux stepAux listOperation
+
+/-- Every successful recursive semantic release preserves globals, world, and
+external trace, including all recursively released children. -/
+theorem decLocationFuel_runtimeAux
+    {fuel : Nat} {before after : RuntimeState} {location : Location}
+    (operation : decLocationFuel fuel before location = .ok after) :
+    RuntimeAuxEq before after := by
+  induction fuel generalizing before after location with
+  | zero => simp [decLocationFuel] at operation
+  | succ fuel ih =>
+      simp only [decLocationFuel] at operation
+      cases read : getLiveCell before location with
+      | error failure =>
+          simp only [read, Bind.bind, Except.bind] at operation
+          contradiction
+      | ok cell =>
+          simp only [read, Bind.bind, Except.bind] at operation
+          cases persistent : cell.persistent with
+          | true =>
+              simp only [persistent, ↓reduceIte] at operation
+              have runtimeEq := Except.ok.inj operation
+              subst after
+              exact RuntimeAuxEq.refl _
+          | false =>
+              simp only [persistent, Bool.false_eq_true, ↓reduceIte] at operation
+              by_cases zero : cell.rc = 0
+              · rw [if_pos zero] at operation
+                contradiction
+              · rw [if_neg zero] at operation
+                by_cases aboveOne : cell.rc > 1
+                · rw [if_pos aboveOne] at operation
+                  exact setCell_runtimeAux operation
+                · rw [if_neg aboveOne] at operation
+                  cases parentOperation :
+                      setCell before location
+                        { object := cell.object, rc := 0, live := false } with
+                  | error failure =>
+                      rw [parentOperation] at operation
+                      contradiction
+                  | ok parent =>
+                      rw [parentOperation] at operation
+                      apply (setCell_runtimeAux parentOperation).trans
+                      apply Array.foldlM_runtimeAux (operation := operation)
+                      intro childBefore childAfter value childOperation
+                      cases value with
+                      | object reference =>
+                          cases reference with
+                          | heap child => exact ih childOperation
+                          | tagged payload =>
+                              simp only at childOperation
+                              have runtimeEq := Except.ok.inj childOperation
+                              subst childAfter
+                              exact RuntimeAuxEq.refl _
+                      | usize value | scalar value | erased | reuseToken value =>
+                          simp only at childOperation
+                          have runtimeEq := Except.ok.inj childOperation
+                          subst childAfter
+                          exact RuntimeAuxEq.refl _
+
+theorem decLocation_runtimeAux
+    {before after : RuntimeState} {location : Location}
+    (operation : decLocation before location = .ok after) :
+    RuntimeAuxEq before after := by
+  exact decLocationFuel_runtimeAux operation
+
+theorem decValueOnce_runtimeAux
+    {before after : RuntimeState} {value : Value} {check : Bool}
+    (operation : decValueOnce before value check = .ok after) :
+    RuntimeAuxEq before after := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact decLocation_runtimeAux operation
+      | tagged payload =>
+          cases check <;> simp [decValueOnce] at operation
+          subst after
+          exact RuntimeAuxEq.refl _
+  | usize value | scalar value | erased | reuseToken value =>
+      simp [decValueOnce] at operation
+
+theorem decValue_runtimeAux
+    {before after : RuntimeState} {value : Value} {amount : Nat} {check : Bool}
+    (operation : decValue before value amount check = .ok after) :
+    RuntimeAuxEq before after := by
+  apply List.foldlM_runtimeAux (operation := operation)
+  exact fun stepOperation => decValueOnce_runtimeAux stepOperation
+
 /-- Replace concrete memory after a heap-only source update while retaining
 the already-related globals, world token, and external trace. -/
 theorem ConcreteRuntimeRel.replaceHeap_of_heapOnly
@@ -1506,6 +1691,27 @@ theorem ConcreteRuntimeRel.replaceHeap_of_heapOnly
     globals := by simpa [replaceHeap, clearFailure] using related.globals
     world := by simpa [replaceHeap, clearFailure] using related.world
     trace := by simpa [replaceHeap, clearFailure] using related.trace }
+
+/-- Lift a recursively changed heap while reusing the explicitly framed
+semantic runtime components. -/
+theorem ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {witness : RefinementWitness} {before after : RuntimeState}
+    (related : ConcreteRuntimeRel initial.host.runtime witness before)
+    (heapRelated : LiveHeapRel heap witness after)
+    (aux : RuntimeAuxEq before after) :
+    ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness after := by
+  exact {
+    heap := by simpa [replaceHeap, clearFailure] using heapRelated
+    globals := by
+      rw [aux.globals]
+      simpa [replaceHeap, clearFailure] using related.globals
+    world := by
+      rw [aux.world]
+      simpa [replaceHeap, clearFailure] using related.world
+    trace := by
+      rw [aux.trace]
+      simpa [replaceHeap, clearFailure] using related.trace }
 
 /-- Successful concrete reference-count increment refines the exact semantic
 operation for both ordinary heap objects and checked tagged/promoted-tag
@@ -1576,6 +1782,81 @@ theorem incrementStep_of_refines
           subst nextRuntime
           refine ⟨initial.host.runtime.heap, ?_, ?_⟩
           · simp [incrementStep, clearFailure,
+              Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
+          · simpa [replaceHeap, clearFailure] using runtimeRelated
+
+/-- Repeating a checked decrement on an immediate or promoted tag remains a
+concrete no-op. -/
+theorem decrementReference_tagged_checked
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload)
+    (amount : Nat) (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReference state word amount true descriptors = .ok state := by
+  induction amount with
+  | zero => rfl
+  | succ amount ih =>
+      simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+        Bind.bind, Except.bind]
+      rw [related.decrementReferenceOnce_tagged tagged true descriptors]
+      exact ih
+
+theorem decValue_tagged_checked
+    (runtime : RuntimeState) (payload : UInt64) (amount : Nat) :
+    decValue runtime (.object (.tagged payload)) amount true = .ok runtime := by
+  induction amount with
+  | zero => rfl
+  | succ amount ih =>
+      simp only [decValue, List.replicate_succ, List.foldlM_cons,
+        Bind.bind, Except.bind, decValueOnce]
+      exact ih
+
+/-- Successful checked concrete decrement refines the exact semantic
+operation. Ordinary objects may recursively release ownership trees; tagged
+and promoted-tag words are checked no-ops. The descriptor equality exposes
+the frozen closure-layout contract needed to release typed captures. -/
+theorem decrementStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject : Value}
+    {word : Word32} {amount : Nat} {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (updated : decValue runtime sourceObject amount true = .ok nextRuntime) :
+    ∃ heap,
+      decrementStep amount true objectFields? initial
+          [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
+                runtimeRelated.heap.decrementReference_refines mapped updated
+              refine ⟨heap, ?_, ?_⟩
+              · simp [decrementStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, descriptorsEq,
+                  concreteOperation, replaceHeap]
+              · exact ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+                  runtimeRelated finalHeapRelated (decValue_runtimeAux updated)
+      | tagged taggedRelated =>
+          have concreteOperation :=
+            decrementReference_tagged_checked runtimeRelated.heap taggedRelated
+              amount initial.host.closureDescriptors
+          have afterEq : nextRuntime = runtime := by
+            rw [decValue_tagged_checked] at updated
+            exact (Except.ok.inj updated).symm
+          subst nextRuntime
+          refine ⟨initial.host.runtime.heap, ?_, ?_⟩
+          · simp [decrementStep, clearFailure,
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
           · simpa [replaceHeap, clearFailure] using runtimeRelated
 
@@ -2790,6 +3071,116 @@ theorem effectStepSimulates_inc_persistent
   · intro externals
     simp [executeStep, coreStep]
   · exact codeAdapted_inc_persistent continuationAdapted
+  · exact initialRelated
+
+/-- Checked nonpersistent decrement composed through source evaluation, the
+real compiler and adapter, concrete recursive ownership release, and the exact
+generated unary host-call prefix. -/
+theorem effectStepSimulates_dec
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {objectFields? : Option Nat}
+    {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : decValue sourceRuntime sourceObject amount true = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (objectRefines : objectKind.refines .tobject = true)
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (callFound : callIndex? sourceModule
+      (.runtime (.dec amount true objectFields?)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (decrementContract amount true objectFields?))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.dec objectId amount true false objectFields? continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated⟩ :=
+        decrementStep_of_refines initialRelated.1 objectRelated descriptorsEq
+          updated
+      refine ⟨heap, ?_⟩
+      apply effectStepSimulates_unaryHost
+        (step := decrementStep amount true objectFields?)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_dec objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/-- Persistent decrements are source and concrete control-flow no-ops. -/
+theorem effectStepSimulates_dec_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {sourceRuntime : RuntimeState} {targetRest : Wasm.Program}
+    {witness : RefinementWitness}
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceRuntime sourceEnv
+      (.dec objectId amount check true objectFields? continuation) continuation
+      targetRest targetRest initial initial locals witness witness := by
+  apply effectStepSimulates_elided
+  · intro externals
+    simp [executeStep, coreStep]
+  · exact codeAdapted_dec_persistent continuationAdapted
   · exact initialRelated
 
 /-- Constructor-tag mutation composed through the source evaluator, real
