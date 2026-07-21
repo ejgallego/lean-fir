@@ -36,6 +36,22 @@ def caseIds : Array String :=
 def productJson (kind path : String) : Json :=
   Json.mkObj [("kind", kind), ("path", path)]
 
+def semanticWasmContract : Json :=
+  Json.mkObj [
+    ("format", "wasm"),
+    ("target", "wasm32"),
+    ("runtimeFlavor", "fir-semantic-runtime-v1"),
+    ("abi", "fir-semantic-abi-v1")]
+
+def caseProducts (caseId : String) : Array Json :=
+  #[productJson "wasm-manifest" s!"modules/{caseId}.wasm.json",
+    productJson "wasm-module" s!"modules/{caseId}.wasm"]
+
+def caseProductsJson (caseId : String) : Json :=
+  Json.mkObj [
+    ("caseId", caseId),
+    ("products", Json.arr <| caseProducts caseId)]
+
 def buildInputJson (kind name : String) (path : System.FilePath) : Json :=
   Json.mkObj [
     ("kind", kind),
@@ -65,6 +81,11 @@ syntax (name := firValidationWasm) "#fir_validation_wasm" : command
 def elabFirValidationWasm : CommandElab := fun _ => do
   let env ← getEnv
   let selected ← liftIO selectedCaseIds
+  let sortedSelected := selected.qsort (· < ·)
+  let sortedManifestProducts := selected.qsort fun left right =>
+    s!"modules/{left}.wasm.json" < s!"modules/{right}.wasm.json"
+  let sortedModuleProducts := selected.qsort fun left right =>
+    s!"modules/{left}.wasm" < s!"modules/{right}.wasm"
   let outputDirectory :=
     (← liftIO <| IO.getEnv "FIR_VALIDATION_OUT_DIR").getD
       "_build/validation-v8/v8"
@@ -90,9 +111,9 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     liftIO <| IO.FS.writeFile (modulePath.toString ++ ".json")
       artifact.manifest.compress
   let manifestProducts :=
-    selected.map (fun caseId =>
+    sortedManifestProducts.map (fun caseId =>
       productJson "wasm-manifest" s!"modules/{caseId}.wasm.json") ++
-    selected.map (fun caseId =>
+    sortedModuleProducts.map (fun caseId =>
       productJson "wasm-module" s!"modules/{caseId}.wasm")
   let leanInput ← liftIO do
     return buildInputJson "lean-compiler" "bin/lean" (← IO.appPath)
@@ -109,7 +130,9 @@ def elabFirValidationWasm : CommandElab := fun _ => do
     buildInputManifest.compress
   let productManifest := Json.mkObj [
     ("version", Json.num protocolVersion),
-    ("products", Json.arr manifestProducts)]
+    ("contract", semanticWasmContract),
+    ("products", Json.arr manifestProducts),
+    ("cases", Json.arr <| sortedSelected.map caseProductsJson)]
   liftIO <| IO.FS.writeFile
     ((outputDirectory : System.FilePath) / "products.json")
     productManifest.compress

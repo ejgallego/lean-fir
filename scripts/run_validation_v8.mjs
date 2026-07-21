@@ -23,6 +23,12 @@ const SCALAR_KINDS = new Map([
 ]);
 
 const PROTOCOL_VERSION = 2;
+const SEMANTIC_WASM_CONTRACT = {
+  format: "wasm",
+  target: "wasm32",
+  runtimeFlavor: "fir-semantic-runtime-v1",
+  abi: "fir-semantic-abi-v1",
+};
 
 function jsonNatural(value, context) {
   assert.ok(value >= 0n, `${context} must be nonnegative`);
@@ -198,6 +204,10 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function compareProtocolStrings(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 assert.equal(requiredEnvironment("FIR_VALIDATION_PROTOCOL_VERSION"),
   String(PROTOCOL_VERSION));
 assert.equal(requiredEnvironment("FIR_VALIDATION_BACKEND"), "v8");
@@ -261,15 +271,28 @@ const expectedInventoryProducts = products
   .filter((product) => product !== inventoryProduct)
   .map((product) => ({ kind: product.kind, path: product.name }))
   .sort((left, right) =>
-    left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path));
+    compareProtocolStrings(left.kind, right.kind)
+      || compareProtocolStrings(left.path, right.path));
+const expectedInventoryCases = [...selectedCases]
+  .sort(compareProtocolStrings)
+  .map((caseId) => ({
+    caseId,
+    products: [
+      { kind: "wasm-manifest", path: `modules/${caseId}.wasm.json` },
+      { kind: "wasm-module", path: `modules/${caseId}.wasm` },
+    ],
+  }));
 assert.equal(inventory.version, PROTOCOL_VERSION,
   "unsupported product inventory version");
+assert.deepStrictEqual(inventory.contract, SEMANTIC_WASM_CONTRACT,
+  "product inventory uses the wrong semantic Wasm contract");
 assert.deepStrictEqual(
-  [...inventory.products].sort((left, right) =>
-    left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path)),
+  inventory.products,
   expectedInventoryProducts,
-  "product inventory disagrees with captured products",
+  "product inventory must be sorted and agree with captured products",
 );
+assert.deepStrictEqual(inventory.cases, expectedInventoryCases,
+  "product inventory case bindings disagree with selected cases");
 
 function caseProduct(caseId, kind, suffix) {
   const name = `modules/${caseId}.wasm${suffix}`;

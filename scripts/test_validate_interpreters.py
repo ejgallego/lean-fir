@@ -3150,6 +3150,7 @@ class HarnessTests(unittest.TestCase):
             / "native-v8-scalars.json"
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
+        self.assertEqual(plan.provider_configs, ())
         self.assertEqual(plan.pairs, (("native", "v8"),))
         adapter = harness.external_adapter_from_config(adapter_path)
         self.assertEqual(adapter.name, "v8")
@@ -3211,6 +3212,60 @@ class HarnessTests(unittest.TestCase):
             ),
         )
 
+    def test_checked_semantic_wasm_provider_declares_frozen_contract(self) -> None:
+        provider_path = (
+            harness.ROOT
+            / "validation-providers"
+            / "lean-wasm-semantic-scalars.json"
+        )
+        provider = harness.external_product_provider_from_config(provider_path)
+        self.assertEqual(provider.name, "lean-wasm-semantic")
+        self.assertEqual(
+            provider.contract,
+            harness.ProductContract(
+                "wasm",
+                "wasm32",
+                "fir-semantic-runtime-v1",
+                "fir-semantic-abi-v1",
+            ),
+        )
+        self.assertEqual(provider.bundle_manifest, "products.json")
+        self.assertEqual(provider.driver.product_manifest, "products.json")
+        self.assertEqual(
+            provider.driver.build_input_manifest, "build-inputs.json"
+        )
+        self.assertEqual(
+            provider.driver.build_command,
+            ["lake", "lean", "FirValidationWasm.lean"],
+        )
+        self.assertEqual(
+            provider.driver.build_replay_command,
+            ["lake", "env", "lean", "FirValidationWasm.lean"],
+        )
+        self.assertEqual(provider.driver.build_attempts, 2)
+        self.assertEqual(
+            provider.driver.build_file_access_recorder,
+            harness.ToolDeclaration(
+                "file-access-recorder", "strace", command="strace"
+            ),
+        )
+        self.assertEqual(
+            provider.driver.build_input_replay_isolator,
+            harness.ToolDeclaration(
+                "build-input-replay-isolator", "bwrap", command="bwrap"
+            ),
+        )
+        self.assertEqual(
+            [
+                (tool.kind, tool.name)
+                for tool in provider.driver.build_tool_declarations
+            ],
+            [
+                ("build-driver", "FirValidationWasm.lean"),
+                ("build-launcher", "lake"),
+            ],
+        )
+
     def test_checked_native_lcnf_v8_plan_is_complete_triangle(self) -> None:
         adapter_path = (
             harness.ROOT / "validation-adapters" / "v8-scalars.json"
@@ -3221,6 +3276,7 @@ class HarnessTests(unittest.TestCase):
             / "native-lcnf-v8-scalars.json"
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
+        self.assertEqual(plan.provider_configs, ())
         self.assertEqual(
             plan.pairs,
             (

@@ -569,9 +569,10 @@ produced this module” from “the engine reports consuming this exact module.�
 
 The generic harness also has an opt-in provider/consumer path for running more
 than one engine against exactly one compiler output. No checked production plan
-uses this path yet: the existing V8 adapter continues to own its build until the
-Lean Wasm compiler lane is ready. This separation lets provider infrastructure
-land without changing compiler, semantic-host, Talos, or runtime behavior.
+uses this path yet: the existing V8 adapter continues to own its build while the
+compiler and engine lanes rebase on the shared contract. This separation lets
+provider infrastructure land without changing compiler, semantic-host, Talos,
+or runtime behavior.
 
 A provider is a build-only component. Its strict config declares an opaque
 four-field product contract and reuses the same tool capture, repeated-build,
@@ -595,10 +596,17 @@ reported-input, strace, and sealed-replay machinery as an external adapter:
 }
 ```
 
-The contract values above are illustrative identifiers, not a selected FIR
-Wasm ABI. The harness compares and retains them exactly; the compiler/runtime
-lanes remain responsible for choosing real values through the shared-contract
-process.
+The example values above are illustrative. FIR's checked but not yet
+plan-referenced provider config selects the current semantic-host contract as
+`wasm` / `wasm32` / `fir-semantic-runtime-v1` /
+`fir-semantic-abi-v1`. `FirValidationWasm.lean` emits that contract together
+with a sorted product inventory and exact sorted per-case bindings, and the
+legacy V8 runner checks all three fields while it still owns the build. These
+identifiers describe the frozen semantic runtime used for native-oracle
+validation; they deliberately do not claim the future concrete Talos
+`wasm32-lean64` runtime. Changing either real contract remains a shared-contract
+change that must land separately before compiler or engine wiring depends on
+it.
 
 The build emits one sorted bundle manifest. Product paths are relative to the
 provider output directory, each selected case has an exact nonempty binding,
@@ -702,11 +710,12 @@ manifest data, and checks each retained result receipt against its exact case
 binding. The provider staging directory is therefore unnecessary for offline
 verification.
 
-The intended production sequence is to enable a Lean-Wasm provider only after
-the compiler lane supplies it, then attach the real V8 consumer. A Talos runner
-can subsequently consume that unchanged bundle as a second engine. Talos-owned
-runner wiring remains in the Wasm lane; this generic layer neither embeds Talos
-nor defines the semantic ABI.
+The intended production sequence is to activate the checked Lean-Wasm provider
+after both feature lanes have rebased on its contract, then attach the real V8
+consumer. A Talos runner can subsequently consume that unchanged semantic
+bundle as a second engine, or declare a distinct concrete-runtime contract when
+validating Talos's own interpreter. Talos-owned runner wiring remains in the
+Wasm lane; the generic layer embeds neither Talos nor concrete runtime details.
 
 ## Case and observation contract
 
