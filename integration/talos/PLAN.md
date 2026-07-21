@@ -2230,6 +2230,17 @@ length bound. Core runtime and Talos cache-set rules consume the resulting
 constructive leaf theorem directly. Recursive constructor and closure folds
 remain next; no executable or shared semantic contract changed.
 
+W6.6ae establishes the recursive constructor step. ABI-indexed ownership
+slots now expose either a mapped heap child or matching concrete/semantic
+persistence no-ops for immediate tags, promoted tags, and erased sentinels.
+Their ordered relation lifts any correct child recursion through the complete
+concrete `foldlM` and semantic heap fold while preserving `LiveHeapRel` after
+each child. A constructor theorem combines that fold with W6.6ad's parent
+metadata rewrite and proves the exact positive-fuel subgraph transition under
+an abstract child-recursion hypothesis. Closure capture filtering and the
+global fuel induction remain next; no executable or shared semantic contract
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

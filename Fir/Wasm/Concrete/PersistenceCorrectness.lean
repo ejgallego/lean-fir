@@ -425,6 +425,236 @@ theorem CachePersistenceRefines.of_heapLeaf
                   leafCell
               exact ⟨result, operation, finalRelated⟩
 
+/-- Thread one semantic persistence child step through a full runtime state;
+only the heap changes. -/
+def markPersistentValueFuel (fuel : Nat) (runtime : RuntimeState) :
+    Value → RuntimeState
+  | .object (.heap location) =>
+      { runtime with heap :=
+          markPersistentLocationFuel fuel runtime.heap location }
+  | _ => runtime
+
+/-- Both physical tagged encodings are exact concrete persistence no-ops at
+every fuel budget. -/
+theorem LiveHeapRel.markPersistentFuel_tagged
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload) (fuel : Nat)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    markPersistentFuel fuel state word descriptors = .ok state := by
+  cases tagged with
+  | immediate actualPayload fits =>
+      cases fuel <;>
+        simp [markPersistentFuel, Word32.classify_encodeImmediate] <;> rfl
+  | promoted found =>
+      obtain ⟨header, headerRead, _, persistent, _, _, _, _⟩ :=
+        (related.promoted payload word found).header
+      exact markPersistentFuel_eq_of_persistent headerRead persistent fuel descriptors
+
+/-- One ABI-admissible ownership slot is either a mapped heap child or an
+exact concrete/semantic persistence no-op. -/
+theorem OwnershipValueRel.persistenceStep
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {value : Value}
+    (heap : LiveHeapRel state witness runtime)
+    (ownership : OwnershipValueRel witness word value) (fuel : Nat)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    (∃ location,
+      value = .object (.heap location) ∧
+      witness.locations.lookup? location = some word) ∨
+    (markPersistentFuel fuel state word descriptors = .ok state ∧
+      markPersistentValueFuel fuel runtime value = runtime) := by
+  cases ownership with
+  | intro kind admissible valueRelated =>
+      cases valueRelated with
+      | object heapRelated =>
+          cases heapRelated with
+          | mapped found => exact .inl ⟨_, rfl, found⟩
+      | tagged taggedRelated =>
+          exact .inr ⟨heap.markPersistentFuel_tagged taggedRelated fuel descriptors, rfl⟩
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap heapRelated =>
+              cases heapRelated with
+              | mapped found => exact .inl ⟨_, rfl, found⟩
+          | tagged taggedRelated =>
+              exact .inr
+                ⟨heap.markPersistentFuel_tagged taggedRelated fuel descriptors, rfl⟩
+      | erased =>
+          refine .inr ⟨?_, rfl⟩
+          cases fuel <;>
+            simp [markPersistentFuel, Word32.classify, Word32.zero] <;> rfl
+      | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
+          simp [AbiKind.isObjectField] at admissible
+
+/-- Ordered ownership correspondence lifts any correct recursive persistence
+step through the complete concrete and semantic child folds. -/
+theorem OwnershipValuesRel.foldlM_markPersistent_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {words : List Word32} {values : List Value}
+    {fuel : Nat} {descriptors : ClosureDescriptorTable}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (recurse : ∀ {before : MemoryState} {semantic : RuntimeState}
+        {location : Location} {address : Word32},
+      LiveHeapRel before witness semantic →
+      witness.locations.lookup? location = some address →
+      ∃ after,
+        markPersistentFuel fuel before address descriptors = .ok after ∧
+        LiveHeapRel after witness
+          (markPersistentValueFuel fuel semantic (.object (.heap location)))) :
+    ∃ finalState,
+      words.foldlM (init := state) (fun next child =>
+        markPersistentFuel fuel next child descriptors) = .ok finalState ∧
+      LiveHeapRel finalState witness
+        (values.foldl (init := runtime) (markPersistentValueFuel fuel)) := by
+  induction related generalizing state runtime with
+  | nil =>
+      exact ⟨state, rfl, heap⟩
+  | @cons word value words values head tail ih =>
+      rcases head.persistenceStep heap fuel descriptors with heapStep | noOpStep
+      · obtain ⟨location, valueEq, mapped⟩ := heapStep
+        subst value
+        obtain ⟨nextState, concreteHead, nextHeap⟩ := recurse heap mapped
+        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih nextHeap
+        refine ⟨finalState, ?_, finalHeap⟩
+        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+        rw [concreteHead]
+        exact concreteTail
+      · obtain ⟨concreteHead, semanticHead⟩ := noOpStep
+        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih heap
+        refine ⟨finalState, ?_, ?_⟩
+        · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+          rw [concreteHead]
+          exact concreteTail
+        · simpa [semanticHead] using finalHeap
+
+/-- Runtime-state threading of semantic persistence is exactly the underlying
+heap fold, with every auxiliary runtime component framed. -/
+theorem foldl_markPersistentValueFuel
+    (fuel : Nat) (runtime : RuntimeState) (values : List Value) :
+    values.foldl (init := runtime) (markPersistentValueFuel fuel) = {
+      runtime with heap :=
+        values.foldl (init := runtime.heap) fun heap value =>
+          match value with
+          | .object (.heap location) =>
+              markPersistentLocationFuel fuel heap location
+          | _ => heap } := by
+  induction values generalizing runtime with
+  | nil => rfl
+  | cons value values ih =>
+      simp only [List.foldl_cons]
+      rw [ih]
+      cases value with
+      | object reference => cases reference <;> rfl
+      | usize | scalar | erased | reuseToken => rfl
+
+/-- One ordinary constructor node plus any correct child recursion composes
+to the matching positive-fuel persistence step for the complete constructor
+subgraph. -/
+theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {descriptors : ClosureDescriptorTable} {fuel : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (objectEq : cell.object = .ctor semantic)
+    (recurse : ∀ {before : MemoryState} {semanticState : RuntimeState}
+        {childLocation : Location} {childAddress : Word32},
+      LiveHeapRel before witness semanticState →
+      witness.locations.lookup? childLocation = some childAddress →
+      ∃ after,
+        markPersistentFuel fuel before childAddress descriptors = .ok after ∧
+        LiveHeapRel after witness
+          (markPersistentValueFuel fuel semanticState
+            (.object (.heap childLocation)))) :
+    ∃ result,
+      markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
+      LiveHeapRel result witness {
+        runtime with heap :=
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | @constructor info fieldKinds storedSemantic header _ descriptor storedObjectEq
+        objectRelated headerRead headerKind refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst storedSemantic
+      obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+        objectRelated.readOwnedReferences headerRead
+      obtain ⟨parentState, parentRuntime, targetHeader, targetHeaderRead,
+          parentWrite, semanticUpdate, parentRelated⟩ :=
+        related.writePersistentMetadata mapped found live
+      rw [headerRead] at targetHeaderRead
+      have targetHeaderEq := Except.ok.inj targetHeaderRead
+      subst targetHeader
+      unfold setCell at semanticUpdate
+      cases replacedEq : replaceCell runtime.heap location
+          { cell with rc := 0, persistent := true } with
+      | none =>
+          rw [replacedEq] at semanticUpdate
+          contradiction
+      | some parentHeap =>
+          rw [replacedEq] at semanticUpdate
+          have parentRuntimeEq := Except.ok.inj semanticUpdate
+          subst parentRuntime
+          obtain ⟨result, concreteFold, finalRelated⟩ :=
+            ownershipRelated.foldlM_markPersistent_refines parentRelated recurse
+          have rootHeapEq :
+              markPersistentLocationFuel (fuel + 1) runtime.heap location =
+                semantic.objectFields.toList.foldl (init := parentHeap)
+                  (fun heap value =>
+                    match value with
+                    | .object (.heap child) =>
+                        markPersistentLocationFuel fuel heap child
+                    | _ => heap) := by
+            simp only [markPersistentLocationFuel, found]
+            rw [if_neg (by simp [live, ordinary])]
+            rw [replacedEq, objectEq]
+            simp only [HeapObject.ownedValues]
+            rw [← Array.foldl_toList]
+            rfl
+          have addressHeap :=
+            (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+              headerRead).1
+          have headerOrdinary : header.persistent = false :=
+            persistent.trans ordinary
+          have ownedWithDescriptors :
+              readOwnedReferences state address header descriptors = .ok words := by
+            simpa [readOwnedReferences, headerKind] using ownedRead
+          have concreteOperation :
+              markPersistentFuel (fuel + 1) state address descriptors =
+                .ok result := by
+            simp only [markPersistentFuel]
+            rw [addressHeap, headerRead]
+            simp only [liftMemory, Bind.bind, Except.bind]
+            rw [if_neg (by simp [headerOrdinary])]
+            rw [ownedWithDescriptors, parentWrite]
+            exact concreteFold
+          refine ⟨result, concreteOperation, ?_⟩
+          rw [foldl_markPersistentValueFuel] at finalRelated
+          simpa [rootHeapEq] using finalRelated
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- Syntactic classification used by cache composition: only a semantic heap
 reference requires the recursive persistence simulation. -/
 def IsNonHeapReference : Value → Prop
