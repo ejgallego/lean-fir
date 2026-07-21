@@ -1260,6 +1260,73 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(matrix["summary"]["productConsumerCount"], 2)
             self.assertEqual(matrix["summary"]["productReceiptCount"], 4)
             self.assertEqual(
+                matrix["coverage"],
+                {
+                    "selectedCaseCount": 2,
+                    "expectedBackendResultCount": 4,
+                    "backendResultCount": 4,
+                    "successfulBackendResultCount": 4,
+                    "findingCount": 0,
+                    "unassignedFindingCount": 0,
+                    "backends": [
+                        {
+                            "backend": "v8",
+                            "selectedCaseCount": 2,
+                            "resultCaseCount": 2,
+                            "successfulCaseCount": 2,
+                            "comparisonCount": 2,
+                            "equalComparisonCount": 2,
+                            "findingCount": 0,
+                        },
+                        {
+                            "backend": "talos",
+                            "selectedCaseCount": 2,
+                            "resultCaseCount": 2,
+                            "successfulCaseCount": 2,
+                            "comparisonCount": 2,
+                            "equalComparisonCount": 2,
+                            "findingCount": 0,
+                        },
+                    ],
+                    "pairs": [
+                        {
+                            "reference": "v8",
+                            "candidate": "talos",
+                            "selectedCaseCount": 2,
+                            "comparedCaseCount": 2,
+                            "equalCaseCount": 2,
+                            "findingCount": 0,
+                        }
+                    ],
+                    "providers": [
+                        {
+                            "provider": "fixture-wasm",
+                            "bundleCaseCount": 2,
+                            "bundleProductCount": 2,
+                            "consumerCount": 2,
+                            "findingCount": 0,
+                        }
+                    ],
+                    "consumers": [
+                        {
+                            "backend": backend,
+                            "provider": "fixture-wasm",
+                            "selectedCaseCount": 2,
+                            "receiptCaseCount": 2,
+                            "receiptedProductReferenceCount": 2,
+                            "uniqueReceiptedProductCount": 2,
+                            "executionAccess": {
+                                "recorded": False,
+                                "recorder": None,
+                                "openedReceiptedProductCount": 0,
+                                "traceAccessCount": 0,
+                            },
+                        }
+                        for backend in ("talos", "v8")
+                    ],
+                },
+            )
+            self.assertEqual(
                 [
                     (receipt["backend"], receipt["caseId"])
                     for receipt in matrix["productReceipts"]
@@ -1296,7 +1363,8 @@ class HarnessTests(unittest.TestCase):
                 harness.sha256_bytes(matrix_content),
             )
             shutil.rmtree(out_dir / "fixture-wasm")
-            harness.verify_evidence_manifest(evidence_path)
+            evidence = harness.verify_evidence_manifest(evidence_path)
+            self.assertEqual(evidence["coverage"], matrix["coverage"])
 
             artifact = next(
                 item for item in matrix["artifacts"]
@@ -2384,6 +2452,33 @@ class HarnessTests(unittest.TestCase):
                 [bundle],
                 [consumer],
                 [receipt],
+            )
+            coverage = core.validation_coverage_report(
+                ["case"],
+                ["v8"],
+                [],
+                [bundle.provider, None],
+                [bundle],
+                [consumer],
+                [receipt],
+                {("case", "v8"): record},
+                {"v8": report},
+            )
+            self.assertEqual(
+                coverage["consumers"][0]["executionAccess"],
+                {
+                    "recorded": True,
+                    "recorder": "strace",
+                    "openedReceiptedProductCount": 1,
+                    "traceAccessCount": 1,
+                },
+            )
+            self.assertEqual(coverage["findingCount"], 2)
+            self.assertEqual(coverage["unassignedFindingCount"], 1)
+            self.assertEqual(coverage["providers"][0]["findingCount"], 1)
+            self.assertIn(
+                "opened 1/1 unique products with strace",
+                "\n".join(core.render_validation_coverage(coverage)),
             )
 
             with self.assertRaisesRegex(
@@ -5025,6 +5120,7 @@ class HarnessTests(unittest.TestCase):
             self.assertIn(
                 evidence["identity"]["evidence"], evidence_stdout.getvalue()
             )
+            self.assertIn("coverage results:", evidence_stdout.getvalue())
             matrix_path.write_bytes(original_matrix_bytes)
             self.assertEqual(
                 harness.verify_matrix_artifact(matrix_path)["identity"],
@@ -5040,6 +5136,22 @@ class HarnessTests(unittest.TestCase):
             ):
                 self.assertEqual(harness.main(), 0)
             self.assertIn(matrix["identity"]["run"], verify_stdout.getvalue())
+            self.assertIn("coverage backend native:", verify_stdout.getvalue())
+
+            invalid_matrix = json.loads(original_matrix_bytes)
+            invalid_matrix["coverage"]["backends"][0][
+                "successfulCaseCount"
+            ] = 0
+            matrix_path.write_text(
+                json.dumps(invalid_matrix, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "coverage disagrees with retained evidence",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+            matrix_path.write_bytes(original_matrix_bytes)
 
             retained_matrix = out_dir / evidence["matrix"]["artifact"]
             retained_matrix_bytes = retained_matrix.read_bytes()
@@ -5144,6 +5256,11 @@ class HarnessTests(unittest.TestCase):
             ]
             valid_with_finding["summary"] = dict(matrix["summary"])
             valid_with_finding["summary"]["findingCount"] = 1
+            valid_with_finding["coverage"] = json.loads(
+                json.dumps(matrix["coverage"])
+            )
+            valid_with_finding["coverage"]["findingCount"] = 1
+            valid_with_finding["coverage"]["unassignedFindingCount"] = 1
             matrix_path.write_text(
                 json.dumps(valid_with_finding), encoding="utf-8"
             )
@@ -5153,6 +5270,18 @@ class HarnessTests(unittest.TestCase):
             )
 
             evidence_bytes = evidence_path.read_bytes()
+            invalid_evidence = json.loads(evidence_bytes)
+            invalid_evidence["coverage"]["backendResultCount"] = 0
+            evidence_path.write_text(
+                json.dumps(invalid_evidence), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "evidence coverage disagrees with retained matrix",
+            ):
+                harness.verify_evidence_manifest(evidence_path)
+            evidence_path.write_bytes(evidence_bytes)
+
             invalid_evidence = json.loads(evidence_bytes)
             invalid_evidence["identity"]["evidence"] = "0" * 64
             evidence_path.write_text(json.dumps(invalid_evidence), encoding="utf-8")

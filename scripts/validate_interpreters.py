@@ -48,6 +48,7 @@ from validation_harness import (
     product_bundle_receipt_findings,
     product_bundle_receipt_value,
     records_from_output,
+    render_validation_coverage,
     retain_evidence_blob,
     result_domain_findings,
     result_map,
@@ -321,6 +322,8 @@ def main() -> int:
                 f"verified validation matrix {args.verify_matrix}: "
                 f"run {matrix['identity']['run']}"
             )
+            for line in render_validation_coverage(matrix["coverage"]):
+                print(line)
         else:
             evidence_path = args.verify_evidence
             if evidence_path is None:
@@ -331,6 +334,8 @@ def main() -> int:
                 f"evidence {manifest['identity']['evidence']}, "
                 f"run {manifest['identity']['run']}"
             )
+            for line in render_validation_coverage(manifest["coverage"]):
+                print(line)
         return 0
 
     args.out_dir = args.out_dir or DEFAULT_OUT
@@ -499,7 +504,11 @@ def main() -> int:
     if findings:
         for finding in findings:
             print(f"FAIL {finding.render()}", file=sys.stderr)
+        for line in render_validation_coverage(matrix["coverage"]):
+            print(line)
         return 1
+    for line in render_validation_coverage(matrix["coverage"]):
+        print(line)
     print(
         f"validated {len(selected)} case(s) across {len(pair_results)} pair(s): "
         + ", ".join(

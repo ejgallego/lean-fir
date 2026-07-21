@@ -1771,6 +1771,16 @@ def write_evidence_manifest(
     matrix_content: bytes,
     run_sha256: str,
 ) -> Path:
+    try:
+        matrix_value = json.loads(matrix_content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot retain non-JSON validation matrix: {error}"
+        ) from error
+    if not isinstance(matrix_value, dict) or not isinstance(
+        matrix_value.get("coverage"), dict
+    ):
+        raise ValidationError("validation matrix has no retainable coverage")
     run_digest = checked_sha256(run_sha256, "validation evidence run")
     matrix_digest = sha256_bytes(matrix_content)
     matrix_artifact = retain_evidence_blob(
@@ -1790,6 +1800,7 @@ def write_evidence_manifest(
                     "sha256": matrix_digest,
                     "artifact": matrix_artifact,
                 },
+                "coverage": matrix_value["coverage"],
             },
             indent=2,
             sort_keys=True,
@@ -5801,6 +5812,216 @@ def verify_execution_file_access_evidence(
             )
 
 
+def validation_coverage_report(
+    selected_cases: list[str],
+    backend_names: list[str],
+    pairs: list[tuple[str, str, int, int, int]],
+    finding_backends: list[str | None],
+    bundles: list[ProductBundle],
+    consumers: list[ProductConsumer],
+    receipts: list[ProductReceipt],
+    result_records: dict[tuple[str, str], dict],
+    execution_access_reports: dict[str, dict],
+) -> dict:
+    """Build the canonical, evidence-derived validation coverage summary."""
+    def is_success(record: dict, backend: str) -> bool:
+        _, outcome = checked_record(record, backend)
+        if "success" not in outcome:
+            return False
+        success_observation(record)
+        return True
+
+    backend_comparisons = {
+        backend: {"compared": 0, "equal": 0} for backend in backend_names
+    }
+    pair_coverage: list[dict[str, object]] = []
+    for reference, candidate, compared, equal, finding_count in pairs:
+        pair_coverage.append(
+            {
+                "reference": reference,
+                "candidate": candidate,
+                "selectedCaseCount": len(selected_cases),
+                "comparedCaseCount": compared,
+                "equalCaseCount": equal,
+                "findingCount": finding_count,
+            }
+        )
+        for backend in (reference, candidate):
+            backend_comparisons[backend]["compared"] += compared
+            backend_comparisons[backend]["equal"] += equal
+
+    backend_coverage: list[dict[str, object]] = []
+    successful_backend_results = 0
+    for backend in backend_names:
+        records = [
+            record
+            for (case_id, record_backend), record in result_records.items()
+            if record_backend == backend and case_id in selected_cases
+        ]
+        success_count = sum(int(is_success(record, backend)) for record in records)
+        successful_backend_results += success_count
+        backend_coverage.append(
+            {
+                "backend": backend,
+                "selectedCaseCount": len(selected_cases),
+                "resultCaseCount": len(records),
+                "successfulCaseCount": success_count,
+                "comparisonCount": backend_comparisons[backend]["compared"],
+                "equalComparisonCount": backend_comparisons[backend]["equal"],
+                "findingCount": finding_backends.count(backend),
+            }
+        )
+
+    consumer_counts = {bundle.provider: 0 for bundle in bundles}
+    for consumer in consumers:
+        consumer_counts[consumer.provider] += 1
+    provider_coverage = [
+        {
+            "provider": bundle.provider,
+            "bundleCaseCount": len(bundle.case_products),
+            "bundleProductCount": len(bundle.products),
+            "consumerCount": consumer_counts[bundle.provider],
+            "findingCount": finding_backends.count(bundle.provider),
+        }
+        for bundle in bundles
+    ]
+
+    consumer_coverage: list[dict[str, object]] = []
+    for consumer in consumers:
+        backend_receipts = [
+            receipt for receipt in receipts if receipt.backend == consumer.backend
+        ]
+        receipted_products = {
+            (product.backend, product.kind, product.name, product.sha256)
+            for receipt in backend_receipts
+            for product in receipt.products
+        }
+        access_report = execution_access_reports.get(consumer.backend)
+        if access_report is None:
+            execution_access = {
+                "recorded": False,
+                "recorder": None,
+                "openedReceiptedProductCount": 0,
+                "traceAccessCount": 0,
+            }
+        else:
+            recorder = access_report.get("recorder")
+            product_count = access_report.get("productCount")
+            access_count = access_report.get("accessCount")
+            if (
+                not isinstance(recorder, dict)
+                or not isinstance(recorder.get("name"), str)
+                or not isinstance(product_count, int)
+                or isinstance(product_count, bool)
+                or product_count < 0
+                or not isinstance(access_count, int)
+                or isinstance(access_count, bool)
+                or access_count < 0
+            ):
+                raise ValidationError(
+                    f"cannot summarize malformed {consumer.backend} "
+                    "execution file-access report"
+                )
+            execution_access = {
+                "recorded": True,
+                "recorder": recorder["name"],
+                "openedReceiptedProductCount": product_count,
+                "traceAccessCount": access_count,
+            }
+        consumer_coverage.append(
+            {
+                "backend": consumer.backend,
+                "provider": consumer.provider,
+                "selectedCaseCount": len(selected_cases),
+                "receiptCaseCount": len(backend_receipts),
+                "receiptedProductReferenceCount": sum(
+                    len(receipt.products) for receipt in backend_receipts
+                ),
+                "uniqueReceiptedProductCount": len(receipted_products),
+                "executionAccess": execution_access,
+            }
+        )
+
+    assigned_finding_owners = {
+        *backend_names,
+        *(bundle.provider for bundle in bundles),
+    }
+    return {
+        "selectedCaseCount": len(selected_cases),
+        "expectedBackendResultCount": len(selected_cases) * len(backend_names),
+        "backendResultCount": len(result_records),
+        "successfulBackendResultCount": successful_backend_results,
+        "findingCount": len(finding_backends),
+        "unassignedFindingCount": sum(
+            int(owner not in assigned_finding_owners)
+            for owner in finding_backends
+        ),
+        "backends": backend_coverage,
+        "pairs": pair_coverage,
+        "providers": provider_coverage,
+        "consumers": consumer_coverage,
+    }
+
+
+def render_validation_coverage(coverage: dict) -> list[str]:
+    """Render a verified canonical coverage report for humans."""
+    lines = [
+        "coverage results: "
+        f"{coverage['successfulBackendResultCount']}/"
+        f"{coverage['backendResultCount']} successful, "
+        f"{coverage['backendResultCount']}/"
+        f"{coverage['expectedBackendResultCount']} present, "
+        f"findings {coverage['findingCount']} "
+        f"({coverage['unassignedFindingCount']} unassigned)"
+    ]
+    for backend in coverage["backends"]:
+        lines.append(
+            f"coverage backend {backend['backend']}: "
+            f"results {backend['resultCaseCount']}/"
+            f"{backend['selectedCaseCount']}, "
+            f"successful {backend['successfulCaseCount']}, "
+            f"comparisons {backend['equalComparisonCount']}/"
+            f"{backend['comparisonCount']} equal, "
+            f"findings {backend['findingCount']}"
+        )
+    for pair in coverage["pairs"]:
+        lines.append(
+            f"coverage pair {pair['reference']} -> {pair['candidate']}: "
+            f"compared {pair['comparedCaseCount']}/"
+            f"{pair['selectedCaseCount']}, "
+            f"equal {pair['equalCaseCount']}, "
+            f"findings {pair['findingCount']}"
+        )
+    for provider in coverage["providers"]:
+        lines.append(
+            f"coverage provider {provider['provider']}: "
+            f"bundle cases {provider['bundleCaseCount']}, "
+            f"products {provider['bundleProductCount']}, "
+            f"consumers {provider['consumerCount']}, "
+            f"findings {provider['findingCount']}"
+        )
+    for consumer in coverage["consumers"]:
+        access = consumer["executionAccess"]
+        if access["recorded"]:
+            access_text = (
+                f", opened {access['openedReceiptedProductCount']}/"
+                f"{consumer['uniqueReceiptedProductCount']} unique products "
+                f"with {access['recorder']} "
+                f"({access['traceAccessCount']} trace paths)"
+            )
+        else:
+            access_text = ", execution access not recorded"
+        lines.append(
+            f"coverage consumer {consumer['backend']} <- "
+            f"{consumer['provider']}: receipts "
+            f"{consumer['receiptCaseCount']}/"
+            f"{consumer['selectedCaseCount']}, product references "
+            f"{consumer['receiptedProductReferenceCount']}, unique products "
+            f"{consumer['uniqueReceiptedProductCount']}{access_text}"
+        )
+    return lines
+
+
 @dataclass
 class PairValidationResult:
     reference: str
@@ -6028,14 +6249,45 @@ def write_matrix_artifact(
         artifacts,
         key=lambda artifact: (artifact.kind, artifact.name),
     )
+    coverage_results: dict[tuple[str, str], dict] = {}
+    coverage_execution_access: dict[str, dict] = {}
     for artifact in sorted_artifacts:
-        validation_artifact_scope(
+        artifact_backend, artifact_case, _ = validation_artifact_scope(
             artifact.kind,
             artifact.name,
             component_names,
             list(context.selected),
         )
         checked_sha256(artifact.sha256, "validation artifact")
+        if artifact.kind == "backend-result":
+            if artifact_case is None:
+                raise ValidationError("backend-result artifact has no case")
+            try:
+                record = json.loads(artifact.content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "backend-result artifact is not JSON"
+                ) from error
+            if not isinstance(record, dict):
+                raise ValidationError("backend-result artifact is malformed")
+            recorded_case, _ = checked_record(record, artifact_backend)
+            if recorded_case != artifact_case:
+                raise ValidationError(
+                    "backend-result artifact disagrees with its name"
+                )
+            coverage_results[(artifact_case, artifact_backend)] = record
+        elif artifact.kind == "execution-file-access":
+            try:
+                access_report = json.loads(artifact.content.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ValidationError(
+                    "execution-file-access artifact is not JSON"
+                ) from error
+            if not isinstance(access_report, dict):
+                raise ValidationError(
+                    "execution-file-access artifact is malformed"
+                )
+            coverage_execution_access[artifact_backend] = access_report
     artifact_keys = [
         (artifact.kind, artifact.name) for artifact in sorted_artifacts
     ]
@@ -6107,6 +6359,29 @@ def write_matrix_artifact(
         "artifacts": retained_artifacts,
         "pairs": pairs,
         "findings": [finding.to_json() for finding in findings],
+        "coverage": validation_coverage_report(
+            list(context.selected),
+            backend_names,
+            [
+                (
+                    result.reference,
+                    result.candidate,
+                    len(result.comparisons),
+                    sum(
+                        int(comparison["equal"])
+                        for comparison in result.comparisons
+                    ),
+                    len(result.findings),
+                )
+                for result in pair_results
+            ],
+            [finding.backend for finding in findings],
+            bundles,
+            sorted_consumers,
+            sorted_receipts,
+            coverage_results,
+            coverage_execution_access,
+        ),
         "summary": {
             "selectedCaseCount": len(context.selected),
             "backendCount": len(backend_names),
@@ -6212,6 +6487,7 @@ def verify_matrix_artifact(
         "artifacts",
         "pairs",
         "findings",
+        "coverage",
         "summary",
     }
     provider_fields = {
@@ -8014,6 +8290,7 @@ def verify_matrix_artifact(
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValidationError("validation matrix has malformed pairs")
     pair_names: list[tuple[str, str]] = []
+    coverage_pairs: list[tuple[str, str, int, int, int]] = []
     comparison_count = 0
     equal_comparison_count = 0
     for item in raw_pairs:
@@ -8159,6 +8436,15 @@ def verify_matrix_artifact(
                 "validation comparison summary disagrees with matrix pair"
             )
         pair_names.append((reference, candidate))
+        coverage_pairs.append(
+            (
+                reference,
+                candidate,
+                compared_cases,
+                equal_cases,
+                item["findingCount"],
+            )
+        )
         comparison_count += compared_cases
         equal_comparison_count += equal_cases
     if len(set(pair_names)) != len(pair_names):
@@ -8200,6 +8486,21 @@ def verify_matrix_artifact(
             or not all(isinstance(item, str) for item in finding.values())
         ):
             raise ValidationError("validation matrix has malformed finding")
+    expected_coverage = validation_coverage_report(
+        selected_cases,
+        checked_backends,
+        coverage_pairs,
+        [finding.get("backend") for finding in findings],
+        bundles,
+        product_consumers,
+        product_receipts,
+        result_records,
+        execution_access_reports,
+    )
+    if value["coverage"] != expected_coverage:
+        raise ValidationError(
+            "validation matrix coverage disagrees with retained evidence"
+        )
     summary = value["summary"]
     expected_summary_fields = {
         "selectedCaseCount",
@@ -8322,7 +8623,7 @@ def verify_evidence_manifest(path: Path) -> dict:
             f"cannot read validation evidence manifest {path}: {error}"
         ) from error
     if not isinstance(manifest, dict) or set(manifest) != {
-        "version", "identity", "matrix"
+        "version", "identity", "matrix", "coverage"
     }:
         raise ValidationError("validation evidence manifest is malformed")
     if (
@@ -8385,6 +8686,10 @@ def verify_evidence_manifest(path: Path) -> dict:
     if verified_matrix["identity"]["run"] != run_sha256:
         raise ValidationError(
             "validation evidence run disagrees with retained matrix"
+        )
+    if manifest["coverage"] != verified_matrix["coverage"]:
+        raise ValidationError(
+            "validation evidence coverage disagrees with retained matrix"
         )
     return manifest
 

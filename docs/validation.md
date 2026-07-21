@@ -142,6 +142,33 @@ The verifier checks the manifest path, identities, retained matrix digest, and
 then the complete matrix evidence graph.  The report tree remains relocatable
 because all manifest and matrix references are report-relative.
 
+Every matrix also carries a canonical `coverage` object. It reports selected,
+present, and successful results per backend; total, unassigned, backend, and
+provider findings; comparison and equality
+participation per backend and pair; bundle cases, products, and consumers per
+provider; and receipt cases, product references, unique products, and optional
+execution-access counts per consumer. The immutable evidence manifest repeats
+the exact object for discovery without opening the matrix. Both verification
+commands print a compact rendering such as:
+
+```text
+coverage results: 192/192 successful, 192/192 present, findings 0 (0 unassigned)
+coverage pair native -> v8: compared 64/64, equal 64, findings 0
+coverage consumer v8 <- lean-wasm-semantic: receipts 64/64, product references 128, unique products 128, opened 128/128 unique products with strace (<N> trace paths)
+```
+
+This is evidence-derived coverage, not a trusted counter channel. Offline
+verification reconstructs it from retained backend results, comparison
+artifacts, findings, provider bundles, product receipts, and execution-access
+reports after those underlying objects and raw traces have passed their own
+checks. A self-consistently rehashed matrix with an inflated success, equality,
+receipt, product, or open count is therefore rejected. The shape is generic:
+adding a Talos backend, pair, or provider-consumer assignment automatically adds
+the corresponding rows without a Talos-specific reporting path.
+The full process-tree trace-path count is operational telemetry and may vary
+with the engine or host toolchain; the receipted/opened product counts are the
+portable validation claim.
+
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run. `make validate-v8` does the same for the three-way
 native/LCNF/V8 matrix.
