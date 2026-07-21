@@ -350,6 +350,48 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- An empty reuse token allocates an empty constructor through its exact
+-- tagged representation and leaves the heap frontier unchanged.
+#guard match reuseStep emptyConstructorInfo false #[] .tagged emptyHostStore
+    [.i32 0] with
+  | .Return [.i32 word] store =>
+      word == 15 && store.host.runtime.heap.heapCursor == heapBase &&
+        store.host.failure?.isNone
+  | _ => false
+
+-- Fresh nonempty reuse consumes the same token zero but allocates and
+-- publishes an ordinary constructor with the supplied field.
+#guard match reuseStep unaryConstructorInfo false #[.tagged] .object
+    emptyHostStore [.i32 0, .i32 23] with
+  | .Return [.i32 object] store =>
+      match readTag store.host.runtime.heap (Word32.ofUInt32 object),
+          readObjectField store.host.runtime.heap (Word32.ofUInt32 object) 0 with
+      | .ok tag, .ok field =>
+          tag == 8 && field.value == 23 && store.host.failure?.isNone
+      | _, _ => false
+  | _ => false
+
+-- A nonempty reset token rebuilds the retained cell in place, consumes the
+-- reset-protocol descriptor, and publishes the requested replacement tag.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match resetStep 1 store [.i32 object] with
+      | .Return [.i32 token] resetStore =>
+          match reuseStep { unaryConstructorInfo with cidx := 9 } true
+              #[.tagged] .object resetStore [.i32 token, .i32 47] with
+          | .Return [.i32 result] next =>
+              match readTag next.host.runtime.heap (Word32.ofUInt32 result),
+                  readObjectField next.host.runtime.heap
+                    (Word32.ofUInt32 result) 0 with
+              | .ok tag, .ok field =>
+                  token == object && result == object && tag == 9 &&
+                    field.value == 47 && next.host.failure?.isNone
+              | _, _ => false
+          | _ => false
+      | _ => false
+  | _ => false
+
 -- Ordinary objects update only their checked header reference count.
 #guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
     [.i32 23] with

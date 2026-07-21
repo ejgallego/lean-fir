@@ -17,8 +17,8 @@ failure correspondence. The matrix is intentionally conservative.
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Concrete interprocedural judgment, body-WP-to-termination bridge, candidate and direct-call/local-write rules; complete compiler fold and artifact pending |
 | `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | Generated matcher plus one candidate `if`/fallthrough WP; complete compiler candidate fold, direct call, and artifact pending |
 | `closureProj` | Concrete Talos typed-capture host | Typed heap theorem | Partial | Generated `local.get; closureProj` capture-stack WP; full trampoline/direct-call and artifact pending |
-| `reset` | Yes | Tagged, nonunique, and unique protocol theorems | Partial | Concrete Talos host plus tagged/fallback/unique source/compiler/adapter composition, exact unary call, reuse-token local write, and arbitrary continuation; `reuse` and artifact pending |
-| `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Partial | Missing |
+| `reset` | Yes | Tagged, nonunique, and unique protocol theorems | Partial | Concrete Talos host plus tagged/fallback/unique source/compiler/adapter composition, exact unary call, reuse-token local write, and arbitrary continuation; artifact pending |
+| `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Partial | Concrete Talos host plus all three source/compiler/adapter branches, arbitrary-arity token/field call, descriptor transport, result-local write, and arbitrary continuation; artifact pending |
 | `box` | Five integer/USize kinds | Tagged and heap theorems | Partial | Witness-growing concrete host, source/compiler/adapter composition, exact unary call and object local write, and arbitrary continuation compose; floats share the runtime gap; artifact pending |
 | `unbox` | Five integer/USize kinds | Tagged and heap theorems | Partial | ABI-indexed concrete host, representation-indexed source step, compiler/adapter, generated unary result call, exact i32/i64 local write, and continuation compose; heap descriptor/result-kind match stays explicit; floats share the runtime gap; artifact pending |
 | `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Partial | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, and continuation compose; artifact pending |
@@ -70,7 +70,11 @@ Cross-cutting W6.5 state:
 - reset composes through its immediate, nonunique decrement, and unique
   protocol branches, transporting the representation witness and exact
   reuse-token local through the generated unary host call and continuation;
-  reuse and artifact execution remain pending; and
+  artifact execution remains pending; and
+- reuse composes through fresh tagged, fresh heap, and in-place protocol
+  branches, transporting the exact constructor descriptor across the generated
+  token-plus-fields host call, result-local write, and continuation; artifact
+  execution remains pending; and
 - constructor-tag mutation composes through the exact object local, live-cell
   descriptor, concrete header writer, and generated no-result host call while
   preserving the constructor payload; and

@@ -2195,6 +2195,17 @@ local, and an arbitrary continuation independently of which reset branch ran.
 Executable guards cover immediate, nonunique, and unique behavior. Consuming
 the protocol through generated `reuse` and artifact execution remain pending.
 
+W6.6ab composes reuse across fresh empty, fresh nonempty, and in-place paths.
+The concrete Talos host decodes the exact reuse-token lane followed by the
+compiler-selected wasm32 object fields. Physical token zero selects tagged or
+ordinary fresh allocation, while a nonzero token consumes W6.6aa's reset
+protocol and rebinds the retained address to the replacement constructor
+descriptor. A common runtime frame preserves globals, world, and trace; the
+composed rule connects source evaluation, compiler and adapter output, the
+arbitrary-arity host call, result-local write, and an arbitrary continuation.
+Executable guards cover all three paths, including reset-to-reuse identity of
+the retained address. Generated artifact execution remains pending.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
