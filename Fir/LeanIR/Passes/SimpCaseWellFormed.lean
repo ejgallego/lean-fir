@@ -44,10 +44,121 @@ def DeclListNormalizationTree
 def ProgramNormalizationTree (program : ImpureProgram) : Prop :=
   DeclListNormalizationTree program.decls.toList
 
+/-! ## Executable local well-formedness check -/
+
+/-- Executable parameter-binder check at one lexical position.  It mirrors
+`ScopeIndex.pushParamList`, rejecting reuse in either the variable or join
+namespace. -/
+def scopedParamsCheck : ScopeIndex → List (LCNF.Param .impure) → Bool
+  | _, [] => true
+  | index, param :: params =>
+      !index.sourceScope.contains param.fvarId &&
+        !index.sourceJoins.contains param.fvarId &&
+        scopedParamsCheck (index.pushVar param.fvarId) params
+
+private theorem checkerCaseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem funDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure) (rest : LCNF.Code .impure) :
+    sizeOf declaration.value < sizeOf (LCNF.Code.jp declaration rest) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
+mutual
+
+  /-- Transparent checker for exactly the local scope and freshness facts
+carried by `ScopedCodeWellFormedTree`.  Expression scoping remains part of the
+shared phase invariant and is deliberately not duplicated here. -/
+  def scopedCodeCheck
+      (index : ScopeIndex) : LCNF.Code .impure → Bool
+    | .let declaration rest =>
+        letValueScoped index.sourceScope declaration.value &&
+          !index.sourceScope.contains declaration.fvarId &&
+          !index.sourceJoins.contains declaration.fvarId &&
+          scopedCodeCheck (index.pushVar declaration.fvarId) rest
+    | .jp (.mk fvarId _ params _ body) rest =>
+        !index.sourceScope.contains fvarId &&
+          !index.sourceJoins.contains fvarId &&
+          scopedParamsCheck index params.toList &&
+          scopedCodeCheck (index.pushParams params) body &&
+          scopedCodeCheck (index.pushJoin fvarId) rest
+    | .jmp target args =>
+        index.sourceJoins.contains target &&
+          argsScoped index.sourceScope args
+    | .cases cases =>
+        index.sourceScope.contains cases.discr &&
+          scopedAltsCheck index cases.alts.toList
+    | .return result => index.sourceScope.contains result
+    | .unreach _ => true
+    | .oset object _ field rest =>
+        index.sourceScope.contains object &&
+          argScoped index.sourceScope field && scopedCodeCheck index rest
+    | .uset object _ field rest
+    | .sset object _ _ field _ rest =>
+        index.sourceScope.contains object &&
+          index.sourceScope.contains field && scopedCodeCheck index rest
+    | .setTag object _ rest
+    | .inc object _ _ _ rest
+    | .dec object _ _ _ _ rest
+    | .del object rest =>
+        index.sourceScope.contains object && scopedCodeCheck index rest
+
+  termination_by code => sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply checkerCaseAlts_sizeOf_lt
+
+  def scopedAltsCheck
+      (index : ScopeIndex) : List (LCNF.Alt .impure) → Bool
+    | [] => true
+    | .ctorAlt _ code :: alts
+    | .default code :: alts =>
+        scopedCodeCheck index code && scopedAltsCheck index alts
+
+  termination_by alts => sizeOf alts
+  decreasing_by all_goals simp_all <;> omega
+
+end
+
+theorem scopedCodeCheck_jp
+    (index : ScopeIndex) (declaration : LCNF.FunDecl .impure)
+    (rest : LCNF.Code .impure) :
+    scopedCodeCheck index (.jp declaration rest) =
+      (!index.sourceScope.contains declaration.fvarId &&
+        !index.sourceJoins.contains declaration.fvarId &&
+        scopedParamsCheck index declaration.params.toList &&
+        scopedCodeCheck (index.pushParams declaration.params)
+          declaration.value &&
+        scopedCodeCheck (index.pushJoin declaration.fvarId) rest) := by
+  cases declaration
+  simp [scopedCodeCheck, LCNF.FunDecl.fvarId, LCNF.FunDecl.params,
+    LCNF.FunDecl.value]
+
+/-- Declaration boundary for the local executable checker.  Top-level
+parameters are checked before the code body is entered. -/
+def declScopedCheck (declaration : LCNF.Decl .impure) : Bool :=
+  match declaration.value with
+  | .extern _ => true
+  | .code code =>
+      scopedParamsCheck ScopeIndex.empty declaration.params.toList &&
+        scopedCodeCheck (ScopeIndex.empty.pushParams declaration.params) code
+
+def ProgramScopedCheck (program : ImpureProgram) : Bool :=
+  program.decls.all declScopedCheck
+
 /-- The minimal declaration-local compiler invariant.  This contains no
 alpha, structural, semantic, or pass-specific certificate. -/
 structure DeclWellFormed (declaration : LCNF.Decl .impure) : Prop where
   hygienic : ImpureHygiene.declHygienic declaration = true
+  localCheck : declScopedCheck declaration = true
   normalization : DeclNormalizationTree declaration
   canonical : DeclRuntimeTypesCanonical declaration
 
@@ -56,6 +167,7 @@ structure DeclWellFormed (declaration : LCNF.Decl .impure) : Prop where
 independent invariants used only by the `simpCase` alpha-fold proof. -/
 structure ProgramWellFormed (program : ImpureProgram) : Prop where
   phase : WellFormedAt .impure program
+  localCheck : ProgramScopedCheck program = true
   normalization : ProgramNormalizationTree program
   canonical : ProgramRuntimeTypesCanonical program
 
@@ -269,6 +381,20 @@ mutual
 
 end
 
+/-- Constructor wrapper for an opaque `FunDecl`; exposing it once here keeps
+the checker soundness proof independent of declaration representation. -/
+theorem ScopedCodeWellFormedTree.jpDecl
+    (binderFresh : FreshJoinBinder declaration.fvarId
+      index.sourceScope index.sourceJoins)
+    (paramsFresh : ScopedParamsWellFormed index declaration.params.toList)
+    (bodyTree : ScopedCodeWellFormedTree
+      (index.pushParams declaration.params) declaration.value)
+    (continuation : ScopedCodeWellFormedTree
+      (index.pushJoin declaration.fvarId) rest) :
+    ScopedCodeWellFormedTree index (.jp declaration rest) := by
+  cases declaration
+  exact .jp binderFresh paramsFresh bodyTree continuation
+
 theorem ScopeIndex.freshTargetScope
     (index : ScopeIndex)
     (fresh : FreshForScope fvarId index.sourceScope) :
@@ -476,6 +602,201 @@ private theorem caseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
   rcases alts with ⟨alts⟩
   simp [LCNF.Cases.alts]
   omega
+
+theorem freshForScope_of_not_contains
+    (absent : scope.contains fvarId = false) :
+    FreshForScope fvarId scope := by
+  intro oldId oldScoped sameName
+  have sameId : fvarId = oldId := by
+    cases fvarId
+    cases oldId
+    simp_all
+  subst oldId
+  simp_all
+
+theorem ScopedParamsWellFormed.ofCheck
+    (checked : scopedParamsCheck index params = true) :
+    ScopedParamsWellFormed index params := by
+  cases params with
+  | nil => exact .nil
+  | cons param params =>
+      simp only [scopedParamsCheck, Bool.and_eq_true,
+        Bool.not_eq_true'] at checked
+      exact .cons
+        (freshForScope_of_not_contains checked.1.1)
+        (freshForScope_of_not_contains checked.1.2)
+        (ScopedParamsWellFormed.ofCheck checked.2)
+
+termination_by sizeOf params
+decreasing_by simp_all <;> omega
+
+mutual
+
+  /-- Soundness of the executable local checker.  Normalization and runtime
+  canonicality are kept as independent compiler invariants, so the result is
+  exactly the minimal tree and contains no pass certificate. -/
+  theorem ScopedCodeWellFormedTree.ofCheck
+      (checked : scopedCodeCheck index code = true)
+      (normalization : CodeNormalizationTree code)
+      (canonical : CodeRuntimeTypesCanonical code) :
+      ScopedCodeWellFormedTree index code := by
+    cases code with
+    | «let» declaration rest =>
+        cases normalization with
+        | letE restNormalization =>
+          cases canonical with
+          | letE runtimeTypes restCanonical =>
+            simp only [scopedCodeCheck, Bool.and_eq_true,
+              Bool.not_eq_true'] at checked
+            exact .letE checked.1.1.1
+              (freshForScope_of_not_contains checked.1.1.2)
+              (freshForScope_of_not_contains checked.1.2)
+              runtimeTypes
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | «fun» _ _ impossible => nomatch impossible
+    | jp declaration rest =>
+        cases normalization with
+        | jp bodyNormalization restNormalization =>
+          cases canonical with
+          | jp bodyCanonical restCanonical =>
+            simp only [scopedCodeCheck_jp, Bool.and_eq_true,
+              Bool.not_eq_true'] at checked
+            exact ScopedCodeWellFormedTree.jpDecl {
+              variables := freshForScope_of_not_contains checked.1.1.1.1
+              joins := freshForScope_of_not_contains checked.1.1.1.2
+            } (ScopedParamsWellFormed.ofCheck checked.1.1.2)
+              (ScopedCodeWellFormedTree.ofCheck checked.1.2
+                bodyNormalization bodyCanonical)
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | jmp target args =>
+        simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+        exact .jmp checked.1 checked.2
+    | cases cases =>
+        cases normalization with
+        | cases root branchNormalization =>
+          cases canonical with
+          | cases branchCanonical =>
+            simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+            exact .cases checked.1 root
+              (ScopedCodeWellFormedAlts.ofCheck checked.2
+                branchNormalization branchCanonical)
+    | «return» result =>
+        simp only [scopedCodeCheck] at checked
+        exact .ret checked
+    | unreach type => exact .unreach
+    | oset object fieldIndex field rest =>
+        cases normalization with
+        | oset restNormalization =>
+          cases canonical with
+          | oset restCanonical =>
+            simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+            exact .oset checked.1.1 checked.1.2
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | uset object fieldIndex field rest =>
+        cases normalization with
+        | uset restNormalization =>
+          cases canonical with
+          | uset restCanonical =>
+            simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+            exact .uset checked.1.1 checked.1.2
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | sset object width offset field type rest =>
+        cases normalization with
+        | sset restNormalization =>
+          cases canonical with
+          | sset restCanonical =>
+            simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+            exact .sset checked.1.1 checked.1.2
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | setTag object tag rest =>
+        simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+        cases normalization with
+        | setTag restNormalization =>
+          cases canonical with
+          | setTag restCanonical =>
+            exact .setTag checked.1
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | inc object amount check persistent rest =>
+        simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+        cases normalization with
+        | inc restNormalization =>
+          cases canonical with
+          | inc restCanonical =>
+            exact .inc checked.1
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | dec object amount check persistent objects rest =>
+        simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+        cases normalization with
+        | dec restNormalization =>
+          cases canonical with
+          | dec restCanonical =>
+            exact .dec checked.1
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+    | del object rest =>
+        simp only [scopedCodeCheck, Bool.and_eq_true] at checked
+        cases normalization with
+        | del restNormalization =>
+          cases canonical with
+          | del restCanonical =>
+            exact .del checked.1
+              (ScopedCodeWellFormedTree.ofCheck checked.2
+                restNormalization restCanonical)
+
+  termination_by sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals try { subst_vars; simp_all <;> omega }
+    all_goals first
+      | apply caseAlts_sizeOf_lt
+      | apply funDeclValue_sizeOf_lt
+
+  theorem ScopedCodeWellFormedAlts.ofCheck
+      (checked : scopedAltsCheck index alts = true)
+      (normalization : ∀ alt, alt ∈ alts →
+        CodeNormalizationTree alt.getCode)
+      (canonical : ∀ alt, alt ∈ alts →
+        CodeRuntimeTypesCanonical alt.getCode) :
+      ScopedCodeWellFormedAlts index alts := by
+    cases alts with
+    | nil => exact .nil
+    | cons alt alts =>
+        cases alt with
+        | alt _ _ _ impossible => nomatch impossible
+        | ctorAlt info code =>
+            simp only [scopedAltsCheck, Bool.and_eq_true] at checked
+            exact .ctor
+              (ScopedCodeWellFormedTree.ofCheck checked.1
+                (normalization _ List.mem_cons_self)
+                (canonical _ List.mem_cons_self))
+              (ScopedCodeWellFormedAlts.ofCheck checked.2
+                (fun alt member => normalization alt
+                  (List.mem_cons_of_mem _ member))
+                (fun alt member => canonical alt
+                  (List.mem_cons_of_mem _ member)))
+        | default code =>
+            simp only [scopedAltsCheck, Bool.and_eq_true] at checked
+            exact .default
+              (ScopedCodeWellFormedTree.ofCheck checked.1
+                (normalization _ List.mem_cons_self)
+                (canonical _ List.mem_cons_self))
+              (ScopedCodeWellFormedAlts.ofCheck checked.2
+                (fun alt member => normalization alt
+                  (List.mem_cons_of_mem _ member))
+                (fun alt member => canonical alt
+                  (List.mem_cons_of_mem _ member)))
+
+  termination_by sizeOf alts
+  decreasing_by all_goals simp_all <;> omega
+
+end
 
 mutual
 
@@ -896,12 +1217,23 @@ theorem ProgramWellFormed.declarationHygienic
   rw [Array.all_eq_true'] at allHygienic
   exact allHygienic declaration (Array.mem_def.mpr member)
 
+theorem ProgramWellFormed.declarationLocalCheck
+    (wellFormed : ProgramWellFormed program)
+    {declaration : LCNF.Decl .impure}
+    (member : declaration ∈ program.decls.toList) :
+    declScopedCheck declaration = true := by
+  have checked := wellFormed.localCheck
+  unfold ProgramScopedCheck at checked
+  rw [Array.all_eq_true'] at checked
+  exact checked declaration (Array.mem_def.mpr member)
+
 theorem ProgramWellFormed.declaration
     (wellFormed : ProgramWellFormed program)
     {declaration : LCNF.Decl .impure}
     (member : declaration ∈ program.decls.toList) :
     DeclWellFormed declaration := {
   hygienic := wellFormed.declarationHygienic member
+  localCheck := wellFormed.declarationLocalCheck member
   normalization := wellFormed.normalization declaration member
   canonical := wellFormed.canonical declaration member
 }
@@ -910,10 +1242,12 @@ theorem ProgramWellFormed.declaration
 pass-specific compiler-output invariants. -/
 theorem ProgramWellFormed.ofCompilerInvariants
     (phase : WellFormedAt .impure program)
+    (localCheck : ProgramScopedCheck program = true)
     (normalization : ProgramNormalizationTree program)
     (canonical : ProgramRuntimeTypesCanonical program) :
     ProgramWellFormed program := {
   phase
+  localCheck
   normalization
   canonical
 }
