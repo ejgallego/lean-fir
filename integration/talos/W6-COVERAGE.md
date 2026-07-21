@@ -7,9 +7,9 @@ failure correspondence. The matrix is intentionally conservative.
 
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
-| `literal` | Naturals only | Tagged encoder and large-natural heap theorem | Partial | Natural concrete host plus generated literal-`let` WP; artifact pending; strings missing |
-| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP; artifact pending |
-| `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
+| `literal` | Naturals only | Tagged encoder and large-natural heap theorem | Partial | Natural concrete host plus generated literal-`let` WP and whole-module concrete Talos execution; external-engine artifact pending; strings missing |
+| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP and whole-module concrete Talos execution; external-engine artifact pending |
+| `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP and whole-module concrete Talos execution; external-engine artifact pending |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP; artifact pending |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP; artifact pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, or natural graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, and local write compose; per-declaration body proofs and artifact switch pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
@@ -29,7 +29,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Concrete checked ordinary/tagged/promoted recursive host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose with explicit closure-descriptor identity; unchecked nonpersistent composition and artifact pending |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, and continuation compose without weakening ordinary object decoding; artifact pending |
-| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP; artifact pending |
+| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP and whole-module concrete Talos execution; external-engine artifact pending |
 
 Cross-cutting W6.5 state:
 
@@ -92,8 +92,13 @@ Cross-cutting W6.5 state:
 - all four supported packed-integer mutations compose through their exact
   i32/i64 lanes and generated binary host calls for the initial-empty-field
   theorem fragment; repeated/disjoint scalar framing remains open; and
-- the other supported operations still need that composition, while the
-  generated V8 artifact lane continues to use the semantic host runtime.
+- a validated positional resolver now instantiates complete lowered Talos
+  modules with the concrete host and executes the natural-literal,
+  constructor/projection, and constructor-case fixtures without semantic
+  handles; unsupported runtime families fail during resolution; and
+- the other supported operations still need whole-module execution coverage,
+  while the generated Node/browser artifact lane continues to use the semantic
+  JavaScript host runtime.
 
 Update this table in the same commit whenever an operation crosses one of
 these boundaries. A broad W6 completion claim requires every supported row to

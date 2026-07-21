@@ -2284,6 +2284,17 @@ global writes, and Talos `cacheSetStep` obtain that proof constructively with
 explicit host/witness closure-descriptor identity. No executable or shared FIR
 semantic contract changed.
 
+W6.6aj installs the first whole-module concrete resolver. It validates stable
+runtime import identities, preserves their positional ABI, constructs a Talos
+environment and matching exact-invocation specification from the existing W6
+hosts, and proves that the environment satisfies that specification. Natural
+literal, constructor/projection, and constructor-case programs now pass the
+complete lower/adapt/resolve/execute path with concrete words and host-owned
+linear memory. String/scalar literals, floating scalar operations, legacy
+`closureApply`, and external imports are rejected at resolution as explicit
+fragment gates. The emitted Node/browser artifacts still use the semantic
+JavaScript host; switching that external-engine boundary remains separate.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

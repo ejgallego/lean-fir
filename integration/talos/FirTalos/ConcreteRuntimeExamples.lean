@@ -1,8 +1,71 @@
-import FirTalos.ConcreteRuntime
+import FirTalos.ConcreteResolver
+import Fir.Wasm.Examples
+import Interpreter.Wasm.Semantics
 
 namespace FirTalos.Concrete
 
 open Fir.Wasm.Concrete
+
+private structure RuntimeFixture where
+  source : Fir.Wasm.Module
+  target : Wasm.Module
+  hosts : ResolvedHosts
+
+private def runtimeFixture? (program : Fir.LeanIR.ImpureProgram) :
+    Option RuntimeFixture := do
+  let source ← match Fir.Wasm.lower program with
+    | .ok source => some source
+    | .error _ => none
+  let adapted ← match FirTalos.adapt source with
+    | .ok adapted => some adapted
+    | .error _ => none
+  let hosts ← match resolveHosts source with
+    | .ok hosts => some hosts
+    | .error _ => none
+  return { source, target := adapted.wasmModule, hosts }
+
+private def RuntimeFixture.importsResolveExactly (fixture : RuntimeFixture) : Bool :=
+  fixture.source.imports.size == fixture.hosts.hosts.length &&
+    fixture.target.imports.length == fixture.hosts.env.funcs.length &&
+    fixture.hosts.env.funcs.length == fixture.hosts.spec.contracts.length &&
+    (fixture.source.imports.toList.zip fixture.hosts.hosts).all fun pair =>
+      pair.fst.operation? == some pair.snd.operation &&
+        pair.snd.function.params ==
+          pair.fst.signature.params.toList.map FirTalos.abiKind &&
+        pair.snd.function.results ==
+          pair.fst.signature.results.toList.map FirTalos.abiKind
+
+private def RuntimeFixture.runMain (fixture : RuntimeFixture) : Wasm.Result Host :=
+  Wasm.run 100 fixture.target fixture.source.imports.size
+    (fixture.target.initialStore (α := Host)) [] fixture.hosts.env
+
+private def fixtureReturnsWord? (program : Fir.LeanIR.ImpureProgram)
+    (expected : UInt32) : Bool :=
+  (runtimeFixture? program).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Success [.i32 result] store =>
+          result == expected && store.host.failure?.isNone
+      | _ => false
+
+-- Complete lowered modules now execute against concrete linear memory rather
+-- than semantic handles for the first artifact-ready fragment.
+#guard fixtureReturnsWord? Fir.Wasm.abiLiteralProgram 85
+
+#guard fixtureReturnsWord? Fir.Wasm.abiCtorProjectionProgram 15
+
+#guard fixtureReturnsWord? Fir.Wasm.abiCaseProgram 3
+
+-- Unsupported runtime families are rejected by resolution rather than
+-- reaching a concrete host that only traps after instantiation.
+#guard (hostFn? (.literal (.str "concrete") .object)).isNone
+
+#guard (hostFn? (.scalarProj 1 0 .float32)).isNone
+
+#guard Fir.Wasm.externalModule?.any fun source =>
+  match resolveHosts source with
+  | .error (.unsupportedExternalImport 0 `external) => true
+  | _ => false
 
 private def emptyHostStore : Wasm.Store Host :=
   ({ funcs := [] } : Wasm.Module).initialStore
