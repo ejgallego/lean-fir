@@ -158,6 +158,114 @@ class ValidationProduct:
 
 
 @dataclass(frozen=True)
+class ProductContract:
+    format: str
+    target: str
+    runtime_flavor: str
+    abi: str
+
+    def to_json(self) -> dict[str, str]:
+        return {
+            "format": self.format,
+            "target": self.target,
+            "runtimeFlavor": self.runtime_flavor,
+            "abi": self.abi,
+        }
+
+
+@dataclass(frozen=True)
+class ProductProviderRequirement:
+    provider: str
+    contract: ProductContract
+
+
+@dataclass(frozen=True)
+class ProductBundle:
+    provider: str
+    contract: ProductContract
+    bundle_sha256: str
+    products: tuple[ValidationProduct, ...]
+    case_products: tuple[tuple[str, tuple[ValidationProduct, ...]], ...]
+
+    @property
+    def products_by_case(self) -> dict[str, tuple[ValidationProduct, ...]]:
+        return dict(self.case_products)
+
+    def identity_json(self) -> dict:
+        return {
+            "version": PROTOCOL_VERSION,
+            "provider": self.provider,
+            "contract": self.contract.to_json(),
+            "products": [product.to_json() for product in self.products],
+            "cases": [
+                {
+                    "caseId": case_id,
+                    "products": [product.to_json() for product in products],
+                }
+                for case_id, products in self.case_products
+            ],
+        }
+
+    def to_json(self) -> dict:
+        return {
+            **self.identity_json(),
+            "bundleSha256": self.bundle_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ProductConsumer:
+    backend: str
+    provider: str
+    contract: ProductContract
+    bundle_sha256: str
+
+    def to_json(self) -> dict:
+        return {
+            "backend": self.backend,
+            "provider": self.provider,
+            "contract": self.contract.to_json(),
+            "bundleSha256": self.bundle_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ProductReceipt:
+    backend: str
+    case_id: str
+    provider: str
+    bundle_sha256: str
+    products: tuple[ValidationProduct, ...]
+
+    def to_json(self) -> dict:
+        return {
+            "backend": self.backend,
+            "caseId": self.case_id,
+            "provider": self.provider,
+            "bundleSha256": self.bundle_sha256,
+            "products": [
+                {
+                    "kind": product.kind,
+                    "name": product.name,
+                    "sha256": product.sha256,
+                }
+                for product in self.products
+            ],
+        }
+
+
+@dataclass
+class ProductProviderRun:
+    provider: str
+    bundle: ProductBundle
+    products: list[ValidationProduct] = field(default_factory=list)
+    findings: list[ValidationFinding] = field(default_factory=list)
+    tools: list[ValidationTool] = field(default_factory=list)
+    build_inputs: list[ValidationBuildInput] = field(default_factory=list)
+    artifacts: list[ValidationArtifact] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ValidationTool:
     backend: str
     kind: str
@@ -450,24 +558,36 @@ def validation_run_sha256(
     products: list[ValidationProduct],
     tools: list[ValidationTool] | None = None,
     build_inputs: list[ValidationBuildInput] | None = None,
+    bundles: list[ProductBundle] | None = None,
+    consumers: list[ProductConsumer] | None = None,
+    receipts: list[ProductReceipt] | None = None,
 ) -> str:
-    return canonical_json_sha256(
-        {
-            "version": PROTOCOL_VERSION,
-            "selectionSha256": selection_sha256,
-            "backends": backend_names,
-            "pairs": [
-                {"reference": reference, "candidate": candidate}
-                for reference, candidate in pair_names
-            ],
-            "inputs": [item.to_json() for item in inputs],
-            "products": [product.to_json() for product in products],
-            "tools": [tool.to_json() for tool in (tools or [])],
-            "buildInputs": [
-                item.to_json() for item in (build_inputs or [])
-            ],
-        }
-    )
+    value = {
+        "version": PROTOCOL_VERSION,
+        "selectionSha256": selection_sha256,
+        "backends": backend_names,
+        "pairs": [
+            {"reference": reference, "candidate": candidate}
+            for reference, candidate in pair_names
+        ],
+        "inputs": [item.to_json() for item in inputs],
+        "products": [product.to_json() for product in products],
+        "tools": [tool.to_json() for tool in (tools or [])],
+        "buildInputs": [
+            item.to_json() for item in (build_inputs or [])
+        ],
+    }
+    if bundles is not None or consumers is not None or receipts is not None:
+        value["productBundles"] = [
+            bundle.to_json() for bundle in (bundles or [])
+        ]
+        value["productConsumers"] = [
+            consumer.to_json() for consumer in (consumers or [])
+        ]
+        value["productReceipts"] = [
+            receipt.to_json() for receipt in (receipts or [])
+        ]
+    return canonical_json_sha256(value)
 
 
 def validation_evidence_sha256(
@@ -563,6 +683,41 @@ def checked_sha256(value: object, context: str) -> str:
     return value
 
 
+def product_contract_from_json(value: object, context: str) -> ProductContract:
+    if not isinstance(value, dict) or set(value) != {
+        "format", "target", "runtimeFlavor", "abi"
+    }:
+        raise ValidationError(
+            f"{context}: product contract must contain format, target, "
+            "runtimeFlavor, and abi"
+        )
+    fields = []
+    for name in ("format", "target", "runtimeFlavor", "abi"):
+        field_value = value[name]
+        if not isinstance(field_value, str) or not field_value:
+            raise ValidationError(
+                f"{context}: product contract {name} must be a nonempty string"
+            )
+        fields.append(field_value)
+    return ProductContract(fields[0], fields[1], fields[2], fields[3])
+
+
+def product_bundle_sha256(
+    provider: str,
+    contract: ProductContract,
+    products: tuple[ValidationProduct, ...],
+    case_products: tuple[tuple[str, tuple[ValidationProduct, ...]], ...],
+) -> str:
+    provisional = ProductBundle(
+        validate_backend_name(provider, "product provider"),
+        contract,
+        "0" * 64,
+        products,
+        case_products,
+    )
+    return canonical_json_sha256(provisional.identity_json())
+
+
 def validation_product_and_content_from_file(
     backend: str,
     declaration: ProductDeclaration,
@@ -635,9 +790,13 @@ def product_declarations_from_manifest(
         raise ValidationError(
             f"{context}: cannot parse product manifest: {error}"
         ) from error
-    if not isinstance(value, dict) or set(value) != {"version", "products"}:
+    if not isinstance(value, dict) or set(value) not in (
+        {"version", "products"},
+        {"version", "contract", "products", "cases"},
+    ):
         raise ValidationError(
-            f"{context}: product manifest must contain version and products"
+            f"{context}: product manifest must contain version and products, "
+            "optionally with contract and cases"
         )
     version = value["version"]
     if (
@@ -682,6 +841,259 @@ def product_declarations_from_manifest(
             declarations,
             key=lambda declaration: (declaration.kind, declaration.path),
         )
+    )
+
+
+def product_bundle_from_manifest(
+    provider: str,
+    configured_contract: ProductContract,
+    content: bytes,
+    products: tuple[ValidationProduct, ...],
+    selected_cases: list[str],
+    context: str,
+) -> ProductBundle:
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{context}: cannot parse product bundle manifest: {error}"
+        ) from error
+    if not isinstance(value, dict) or set(value) != {
+        "version", "contract", "products", "cases"
+    }:
+        raise ValidationError(
+            f"{context}: product bundle manifest must contain version, "
+            "contract, products, and cases"
+        )
+    if (
+        not isinstance(value["version"], int)
+        or isinstance(value["version"], bool)
+        or value["version"] != PROTOCOL_VERSION
+    ):
+        raise ValidationError(f"{context}: unsupported product bundle version")
+    contract = product_contract_from_json(value["contract"], f"{context}/contract")
+    if contract != configured_contract:
+        raise ValidationError(
+            f"{context}: emitted product contract disagrees with provider config"
+        )
+    declarations = product_declarations_from_manifest(content, context)
+    declaration_keys = [(item.kind, item.path) for item in declarations]
+    raw_declaration_keys = [
+        (item.get("kind"), item.get("path"))
+        for item in value["products"]
+        if isinstance(item, dict)
+    ]
+    if raw_declaration_keys != declaration_keys:
+        raise ValidationError(f"{context}: products are not sorted")
+
+    provider_name = validate_backend_name(provider, "product provider")
+    ordinary_products = tuple(
+        product for product in products
+        if product.kind != RESERVED_PRODUCT_KIND
+    )
+    if any(product.backend != provider_name for product in ordinary_products):
+        raise ValidationError(f"{context}: product owner disagrees with provider")
+    product_by_key = {
+        (product.kind, product.name): product for product in ordinary_products
+    }
+    if len(product_by_key) != len(ordinary_products):
+        raise ValidationError(f"{context}: duplicate provider products")
+    if set(declaration_keys) != set(product_by_key):
+        raise ValidationError(
+            f"{context}: manifest declarations disagree with provider products"
+        )
+
+    raw_cases = value["cases"]
+    if not isinstance(raw_cases, list):
+        raise ValidationError(f"{context}: cases must be an object array")
+    bindings: list[tuple[str, tuple[ValidationProduct, ...]]] = []
+    seen_cases: set[str] = set()
+    referenced: set[tuple[str, str]] = set()
+    for index, raw_case in enumerate(raw_cases):
+        case_context = f"{context}/cases/{index}"
+        if not isinstance(raw_case, dict) or set(raw_case) != {
+            "caseId", "products"
+        }:
+            raise ValidationError(
+                f"{case_context}: expected caseId and products fields"
+            )
+        case_id = validate_backend_name(raw_case["caseId"], case_context)
+        if case_id in seen_cases:
+            raise ValidationError(f"{context}: duplicate case binding: {case_id}")
+        seen_cases.add(case_id)
+        raw_references = raw_case["products"]
+        if not isinstance(raw_references, list) or not raw_references:
+            raise ValidationError(
+                f"{case_context}: products must be a nonempty object array"
+            )
+        keys: list[tuple[str, str]] = []
+        for reference_index, raw_reference in enumerate(raw_references):
+            reference_context = (
+                f"{case_context}/products/{reference_index}"
+            )
+            if not isinstance(raw_reference, dict) or set(raw_reference) != {
+                "kind", "path"
+            }:
+                raise ValidationError(
+                    f"{reference_context}: expected kind and path fields"
+                )
+            key = (
+                validate_backend_name(raw_reference["kind"], reference_context),
+                checked_relative_posix_path(
+                    raw_reference["path"], reference_context
+                ),
+            )
+            if key not in product_by_key:
+                raise ValidationError(
+                    f"{reference_context}: references an undeclared product"
+                )
+            keys.append(key)
+        if len(set(keys)) != len(keys) or keys != sorted(keys):
+            raise ValidationError(
+                f"{case_context}: product references must be sorted and unique"
+            )
+        referenced.update(keys)
+        bindings.append(
+            (case_id, tuple(product_by_key[key] for key in keys))
+        )
+    expected_cases = list(selected_cases)
+    if [case_id for case_id, _ in bindings] != sorted(expected_cases):
+        raise ValidationError(
+            f"{context}: case bindings must exactly match selected cases in "
+            "sorted order"
+        )
+    if referenced != set(product_by_key):
+        raise ValidationError(f"{context}: contains unreferenced products")
+    sorted_products = tuple(
+        sorted(ordinary_products, key=lambda item: (item.kind, item.name))
+    )
+    case_products = tuple(bindings)
+    digest = product_bundle_sha256(
+        provider_name, contract, sorted_products, case_products
+    )
+    return ProductBundle(
+        provider_name,
+        contract,
+        digest,
+        sorted_products,
+        case_products,
+    )
+
+
+def product_bundle_from_json(
+    value: object,
+    provider_names: list[str],
+    matrix_products: list[ValidationProduct],
+    selected_cases: list[str],
+    context: str,
+) -> ProductBundle:
+    if not isinstance(value, dict) or set(value) != {
+        "version",
+        "provider",
+        "contract",
+        "bundleSha256",
+        "products",
+        "cases",
+    }:
+        raise ValidationError(f"{context}: malformed product bundle")
+    if (
+        not isinstance(value["version"], int)
+        or isinstance(value["version"], bool)
+        or value["version"] != PROTOCOL_VERSION
+    ):
+        raise ValidationError(f"{context}: unsupported product bundle version")
+    provider = validate_backend_name(value["provider"], f"{context} provider")
+    if provider not in provider_names:
+        raise ValidationError(f"{context}: names inactive provider")
+    contract = product_contract_from_json(value["contract"], f"{context} contract")
+    digest = checked_sha256(value["bundleSha256"], f"{context} identity")
+    available = {
+        (product.backend, product.kind, product.name, product.sha256): product
+        for product in matrix_products
+        if product.backend == provider
+        and product.kind != RESERVED_PRODUCT_KIND
+    }
+
+    def checked_reference(raw: object, reference_context: str) -> ValidationProduct:
+        if not isinstance(raw, dict) or set(raw) != {
+            "backend", "kind", "name", "sha256"
+        }:
+            raise ValidationError(
+                f"{reference_context}: malformed product reference"
+            )
+        key = (
+            validate_backend_name(raw["backend"], f"{reference_context} owner"),
+            validate_backend_name(raw["kind"], f"{reference_context} kind"),
+            checked_relative_posix_path(raw["name"], f"{reference_context} name"),
+            checked_sha256(raw["sha256"], reference_context),
+        )
+        product = available.get(key)
+        if product is None:
+            raise ValidationError(
+                f"{reference_context}: references an undeclared provider product"
+            )
+        return product
+
+    raw_products = value["products"]
+    if not isinstance(raw_products, list) or not raw_products:
+        raise ValidationError(f"{context}: products must be a nonempty array")
+    products = tuple(
+        checked_reference(item, f"{context}/products/{index}")
+        for index, item in enumerate(raw_products)
+    )
+    product_keys = [(item.kind, item.name) for item in products]
+    if len(set(product_keys)) != len(product_keys) or product_keys != sorted(
+        product_keys
+    ):
+        raise ValidationError(f"{context}: products are not sorted and unique")
+    if set(products) != set(available.values()):
+        raise ValidationError(
+            f"{context}: inventory disagrees with retained provider products"
+        )
+    raw_cases = value["cases"]
+    if not isinstance(raw_cases, list):
+        raise ValidationError(f"{context}: cases must be an object array")
+    case_products: list[tuple[str, tuple[ValidationProduct, ...]]] = []
+    referenced: set[ValidationProduct] = set()
+    for index, raw_case in enumerate(raw_cases):
+        case_context = f"{context}/cases/{index}"
+        if not isinstance(raw_case, dict) or set(raw_case) != {
+            "caseId", "products"
+        }:
+            raise ValidationError(f"{case_context}: malformed case binding")
+        case_id = validate_backend_name(raw_case["caseId"], case_context)
+        raw_references = raw_case["products"]
+        if not isinstance(raw_references, list) or not raw_references:
+            raise ValidationError(
+                f"{case_context}: products must be a nonempty array"
+            )
+        bound = tuple(
+            checked_reference(item, f"{case_context}/products/{item_index}")
+            for item_index, item in enumerate(raw_references)
+        )
+        bound_keys = [(item.kind, item.name) for item in bound]
+        if len(set(bound_keys)) != len(bound_keys) or bound_keys != sorted(
+            bound_keys
+        ):
+            raise ValidationError(
+                f"{case_context}: products are not sorted and unique"
+            )
+        referenced.update(bound)
+        case_products.append((case_id, bound))
+    if [case_id for case_id, _ in case_products] != sorted(selected_cases):
+        raise ValidationError(
+            f"{context}: case bindings do not match selected cases"
+        )
+    if referenced != set(products):
+        raise ValidationError(f"{context}: contains unreferenced products")
+    checked_cases = tuple(case_products)
+    expected_digest = product_bundle_sha256(
+        provider, contract, products, checked_cases
+    )
+    if digest != expected_digest:
+        raise ValidationError(f"{context}: product bundle identity mismatch")
+    return ProductBundle(
+        provider, contract, digest, products, checked_cases
     )
 
 
@@ -1949,6 +2361,7 @@ class RunContext:
     descriptors: list[dict]
     selected: list[str]
     inputs: tuple[ValidationInput, ...] = ()
+    product_bundles: dict[str, ProductBundle] = field(default_factory=dict)
 
     @property
     def all_cases(self) -> list[str]:
@@ -2071,6 +2484,125 @@ def product_receipt_findings(backend_run: BackendRun) -> list[ValidationFinding]
     return findings
 
 
+PRODUCT_BUNDLE_RECEIPT_DIAGNOSTIC = "validation-product-bundle"
+
+
+def product_bundle_receipt_value(
+    bundle: ProductBundle, case_id: str
+) -> str:
+    products = bundle.products_by_case.get(case_id)
+    if products is None:
+        raise ValidationError(
+            f"product bundle {bundle.provider} has no binding for {case_id}"
+        )
+    return json.dumps(
+        {
+            "provider": bundle.provider,
+            "bundleSha256": bundle.bundle_sha256,
+            "products": [
+                {
+                    "kind": product.kind,
+                    "name": product.name,
+                    "sha256": product.sha256,
+                }
+                for product in products
+            ],
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def checked_product_bundle_receipt(
+    record: dict,
+    backend: str,
+    case_id: str,
+    bundle: ProductBundle,
+) -> ProductReceipt:
+    diagnostics = record.get("diagnostics", [])
+    if not isinstance(diagnostics, list) or not all(
+        isinstance(item, dict) for item in diagnostics
+    ):
+        raise ValidationError(
+            f"{backend}/{case_id}: malformed diagnostics while reading "
+            "product bundle receipt"
+        )
+    receipts = [
+        item for item in diagnostics
+        if item.get("key") == PRODUCT_BUNDLE_RECEIPT_DIAGNOSTIC
+    ]
+    if len(receipts) != 1 or set(receipts[0]) != {"key", "value"}:
+        raise ValidationError(
+            f"{backend}/{case_id}: missing or malformed product bundle receipt"
+        )
+    expected = product_bundle_receipt_value(bundle, case_id)
+    try:
+        actual = json.dumps(
+            json.loads(receipts[0]["value"]),
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{backend}/{case_id}: malformed product bundle receipt"
+        ) from error
+    if actual != expected:
+        raise ValidationError(
+            f"{backend}/{case_id}: product receipt disagrees with provider "
+            "case binding"
+        )
+    products = bundle.products_by_case.get(case_id)
+    if products is None:
+        raise ValidationError(
+            f"{backend}/{case_id}: provider has no case binding"
+        )
+    return ProductReceipt(
+        backend,
+        case_id,
+        bundle.provider,
+        bundle.bundle_sha256,
+        products,
+    )
+
+
+def product_bundle_receipt_findings(
+    backend_run: BackendRun, bundle: ProductBundle
+) -> list[ValidationFinding]:
+    findings: list[ValidationFinding] = []
+    for case_id, record in sorted(backend_run.results.items()):
+        try:
+            checked_product_bundle_receipt(
+                record, backend_run.backend, case_id, bundle
+            )
+        except ValidationError as error:
+            message = str(error)
+            prefix = f"{backend_run.backend}/{case_id}: "
+            if message.startswith(prefix):
+                message = message[len(prefix):]
+            findings.append(
+                ValidationFinding(
+                    "audit", message, backend_run.backend, case_id
+                )
+            )
+    return findings
+
+
+def verify_product_bundle_files(
+    context: RunContext, bundle: ProductBundle, phase: str
+) -> None:
+    for product in bundle.products:
+        captured = validation_product_from_file(
+            bundle.provider,
+            ProductDeclaration(product.kind, product.name),
+            context.out_dir,
+        )
+        if captured != product:
+            raise ValidationError(
+                f"{bundle.provider} bundle product changed {phase}: "
+                f"{product.kind}:{product.name}"
+            )
+
+
 class BackendAdapter(Protocol):
     name: str
 
@@ -2084,6 +2616,13 @@ class BackendAdapter(Protocol):
         ...
 
     def audit(self, context: RunContext, backend_run: BackendRun) -> BackendAudit:
+        ...
+
+
+class ProductProvider(Protocol):
+    name: str
+
+    def build(self, context: BuildContext) -> ProductProviderRun:
         ...
 
 
@@ -2105,6 +2644,7 @@ class ExternalCommandAdapter:
     build_attempts: int = 1
     tool_declarations: tuple[ToolDeclaration, ...] = ()
     build_tool_declarations: tuple[ToolDeclaration, ...] = ()
+    product_provider: ProductProviderRequirement | None = None
     _built_products: tuple[ValidationProduct, ...] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -3587,6 +4127,24 @@ class ExternalCommandAdapter:
             (*self._built_build_tools, *self._built_tools),
             "between build and execution",
         )
+        bundle = None
+        exposed_products = self._built_products
+        if self.product_provider is not None:
+            bundle = context.product_bundles.get(self.product_provider.provider)
+            if bundle is None:
+                raise ValidationError(
+                    f"{self.name} requires missing product provider "
+                    f"{self.product_provider.provider}"
+                )
+            if bundle.contract != self.product_provider.contract:
+                raise ValidationError(
+                    f"{self.name} product contract disagrees with provider "
+                    f"{bundle.provider}"
+                )
+            exposed_products = bundle.products
+            verify_product_bundle_files(
+                context, bundle, f"before {self.name} execution"
+            )
         environment = self.environment(context.out_dir, context)
         environment.update(
             {
@@ -3602,7 +4160,7 @@ class ExternalCommandAdapter:
                                 ).resolve()
                             ),
                         }
-                        for product in self._built_products
+                        for product in exposed_products
                     ],
                     separators=(",", ":"),
                     sort_keys=True,
@@ -3615,12 +4173,20 @@ class ExternalCommandAdapter:
                 ),
             }
         )
+        if bundle is not None:
+            environment["FIR_VALIDATION_PRODUCT_BUNDLE"] = json.dumps(
+                bundle.to_json(), separators=(",", ":"), sort_keys=True
+            )
         completed = run(
             list(self._built_run_command),
             context.root,
             self.timeout_seconds,
             environment,
         )
+        if bundle is not None:
+            verify_product_bundle_files(
+                context, bundle, f"during {self.name} execution"
+            )
         execution_artifacts = write_process_artifacts(
             destination, completed, self.name
         )
@@ -3702,6 +4268,7 @@ def external_adapter_from_config(
         "buildInputReplay",
         "tools",
         "buildTools",
+        "productProvider",
     }
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
@@ -3810,6 +4377,36 @@ def external_adapter_from_config(
         if not build_command:
             raise ValidationError(
                 f"adapter config {path}: productManifest requires buildCommand"
+            )
+    raw_product_provider = value.get("productProvider")
+    product_provider = None
+    if raw_product_provider is not None:
+        if not isinstance(raw_product_provider, dict) or set(
+            raw_product_provider
+        ) != {"name", "contract"}:
+            raise ValidationError(
+                f"adapter config {path}: productProvider must contain name "
+                "and contract"
+            )
+        product_provider = ProductProviderRequirement(
+            validate_backend_name(
+                raw_product_provider["name"],
+                f"adapter config {path}: product provider",
+            ),
+            product_contract_from_json(
+                raw_product_provider["contract"],
+                f"adapter config {path}: product provider contract",
+            ),
+        )
+        if build_command or product_declarations or product_manifest is not None:
+            raise ValidationError(
+                f"adapter config {path}: productProvider cannot be combined "
+                "with adapter-owned builds or products"
+            )
+        if result_domain != "selected":
+            raise ValidationError(
+                f"adapter config {path}: productProvider requires "
+                "resultDomain 'selected'"
             )
     if build_attempts > 1 and not build_command:
         raise ValidationError(
@@ -4228,6 +4825,145 @@ def external_adapter_from_config(
         build_attempts=build_attempts,
         tool_declarations=tool_declarations,
         build_tool_declarations=build_tool_declarations,
+        product_provider=product_provider,
+    )
+
+
+@dataclass
+class ExternalProductProvider:
+    """Product provider reusing the external adapter's hermetic build path."""
+
+    name: str
+    contract: ProductContract
+    bundle_manifest: str
+    driver: ExternalCommandAdapter
+
+    def build(self, context: BuildContext) -> ProductProviderRun:
+        if context.run_context is None:
+            raise ValidationError(
+                f"{self.name} provider requires a validation run context"
+            )
+        self.driver.build(context)
+        products = self.driver._built_products
+        tools = self.driver._built_tools
+        build_tools = self.driver._built_build_tools
+        build_inputs = self.driver._built_build_inputs
+        if (
+            products is None
+            or tools is None
+            or build_tools is None
+            or build_inputs is None
+        ):
+            raise ValidationError(f"{self.name} provider build is incomplete")
+        _, content = validation_product_and_content_from_file(
+            self.name,
+            ProductDeclaration(RESERVED_PRODUCT_KIND, self.bundle_manifest),
+            context.out_dir,
+        )
+        bundle = product_bundle_from_manifest(
+            self.name,
+            self.contract,
+            content,
+            products,
+            context.run_context.selected,
+            f"{self.name} product bundle manifest",
+        )
+        return ProductProviderRun(
+            self.name,
+            bundle,
+            products=list(products),
+            findings=list(self.driver._build_findings),
+            tools=[*build_tools, *tools],
+            build_inputs=list(build_inputs),
+            artifacts=list(self.driver._build_artifacts),
+        )
+
+
+def external_product_provider_from_config(
+    path: Path, content: bytes | None = None
+) -> ExternalProductProvider:
+    """Load a strict build-only provider config."""
+    try:
+        source = path.read_bytes() if content is None else content
+        value = json.loads(source.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot read product provider config {path}: {error}"
+        ) from error
+    if not isinstance(value, dict):
+        raise ValidationError(
+            f"product provider config {path}: expected a JSON object"
+        )
+    required = {
+        "version", "name", "contract", "buildCommand", "bundleManifest"
+    }
+    optional = {
+        "buildReplayCommand",
+        "buildAttempts",
+        "timeoutSeconds",
+        "buildInputManifest",
+        "buildFileAccessRecorder",
+        "buildInputReplay",
+        "buildTools",
+    }
+    missing = sorted(required - value.keys())
+    unknown = sorted(value.keys() - required - optional)
+    if missing:
+        raise ValidationError(
+            f"product provider config {path}: missing fields: "
+            + ", ".join(missing)
+        )
+    if unknown:
+        raise ValidationError(
+            f"product provider config {path}: unknown fields: "
+            + ", ".join(unknown)
+        )
+    if (
+        not isinstance(value["version"], int)
+        or isinstance(value["version"], bool)
+        or value["version"] != PROTOCOL_VERSION
+    ):
+        raise ValidationError(
+            f"product provider config {path}: unsupported version"
+        )
+    name = validate_backend_name(
+        value["name"], f"product provider config {path}"
+    )
+    contract = product_contract_from_json(
+        value["contract"], f"product provider config {path}/contract"
+    )
+    bundle_manifest = checked_relative_posix_path(
+        value["bundleManifest"],
+        f"product provider config {path}: bundleManifest",
+    )
+    adapter_value = {
+        key: item for key, item in value.items()
+        if key not in {"version", "contract", "bundleManifest"}
+    }
+    adapter_value.update(
+        {
+            # The shared build parser requires an execution tool. It is
+            # discarded immediately below; providers never execute it.
+            "runCommand": ["true"],
+            "resultDomain": "selected",
+            "productManifest": bundle_manifest,
+            "tools": [
+                {
+                    "kind": "provider-placeholder",
+                    "name": "true",
+                    "command": "true",
+                }
+            ],
+        }
+    )
+    driver = external_adapter_from_config(
+        path,
+        (json.dumps(adapter_value, sort_keys=True) + "\n").encode("utf-8"),
+    )
+    driver.run_command = []
+    driver.tool_declarations = ()
+    return ExternalProductProvider(
+        name, contract, bundle_manifest, driver
     )
 
 
@@ -4235,6 +4971,7 @@ def external_adapter_from_config(
 class ValidationPlan:
     adapter_configs: tuple[Path, ...]
     pairs: tuple[tuple[str, str], ...]
+    provider_configs: tuple[Path, ...] = ()
 
 
 def validation_plan_from_config(
@@ -4249,8 +4986,9 @@ def validation_plan_from_config(
     if not isinstance(value, dict):
         raise ValidationError(f"validation plan {path}: expected a JSON object")
     required = {"version", "adapterConfigs", "pairs"}
+    optional = {"providerConfigs"}
     missing = sorted(required - value.keys())
-    unknown = sorted(value.keys() - required)
+    unknown = sorted(value.keys() - required - optional)
     if missing:
         raise ValidationError(
             f"validation plan {path}: missing fields: {', '.join(missing)}"
@@ -4290,6 +5028,26 @@ def validation_plan_from_config(
             f"validation plan {path}: duplicate adapterConfigs"
         )
 
+    raw_provider_configs = value.get("providerConfigs", [])
+    if not isinstance(raw_provider_configs, list) or not all(
+        isinstance(config, str) and config for config in raw_provider_configs
+    ):
+        raise ValidationError(
+            f"validation plan {path}: providerConfigs must be a path array"
+        )
+    provider_configs = tuple(
+        (
+            Path(config)
+            if Path(config).is_absolute()
+            else path.parent / config
+        ).resolve()
+        for config in raw_provider_configs
+    )
+    if len(set(provider_configs)) != len(provider_configs):
+        raise ValidationError(
+            f"validation plan {path}: duplicate providerConfigs"
+        )
+
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValidationError(
@@ -4313,7 +5071,7 @@ def validation_plan_from_config(
         raise ValidationError(
             f"validation plan {path}: duplicate comparison pairs"
         )
-    return ValidationPlan(adapter_configs, tuple(pairs))
+    return ValidationPlan(adapter_configs, tuple(pairs), provider_configs)
 
 
 @dataclass
@@ -4333,8 +5091,94 @@ def write_matrix_artifact(
     tools: tuple[ValidationTool, ...] = (),
     artifacts: tuple[ValidationArtifact, ...] = (),
     build_inputs: tuple[ValidationBuildInput, ...] = (),
+    provider_runs: tuple[ProductProviderRun, ...] = (),
+    product_consumers: tuple[ProductConsumer, ...] = (),
+    product_receipts: tuple[ProductReceipt, ...] = (),
 ) -> Path:
     context.out_dir.mkdir(parents=True, exist_ok=True)
+    provider_runs = tuple(
+        sorted(provider_runs, key=lambda run: run.provider)
+    )
+    provider_names = [
+        validate_backend_name(run.provider, "product provider")
+        for run in provider_runs
+    ]
+    if len(set(provider_names)) != len(provider_names):
+        raise ValidationError("validation matrix contains duplicate providers")
+    if set(provider_names) & set(backend_names):
+        raise ValidationError(
+            "validation matrix provider and backend names must be disjoint"
+        )
+    component_names = [*backend_names, *provider_names]
+    bundles = [run.bundle for run in provider_runs]
+    for run, bundle in zip(provider_runs, bundles):
+        if bundle.provider != run.provider:
+            raise ValidationError(
+                f"provider run {run.provider} returned bundle for "
+                f"{bundle.provider}"
+            )
+        expected_digest = product_bundle_sha256(
+            bundle.provider,
+            bundle.contract,
+            bundle.products,
+            bundle.case_products,
+        )
+        if bundle.bundle_sha256 != expected_digest:
+            raise ValidationError(
+                f"product bundle identity mismatch: {bundle.provider}"
+            )
+    sorted_consumers = sorted(
+        product_consumers, key=lambda item: item.backend
+    )
+    if len({item.backend for item in sorted_consumers}) != len(
+        sorted_consumers
+    ):
+        raise ValidationError("validation matrix contains duplicate consumers")
+    bundle_by_provider = {bundle.provider: bundle for bundle in bundles}
+    for consumer in sorted_consumers:
+        if consumer.backend not in backend_names:
+            raise ValidationError(
+                f"product consumer names inactive backend: {consumer.backend}"
+            )
+        bundle = bundle_by_provider.get(consumer.provider)
+        if (
+            bundle is None
+            or consumer.contract != bundle.contract
+            or consumer.bundle_sha256 != bundle.bundle_sha256
+        ):
+            raise ValidationError(
+                f"product consumer {consumer.backend} disagrees with provider"
+            )
+    sorted_receipts = sorted(
+        product_receipts, key=lambda item: (item.backend, item.case_id)
+    )
+    receipt_keys = [
+        (receipt.backend, receipt.case_id) for receipt in sorted_receipts
+    ]
+    if len(set(receipt_keys)) != len(receipt_keys):
+        raise ValidationError("validation matrix contains duplicate receipts")
+    consumer_by_backend = {
+        consumer.backend: consumer for consumer in sorted_consumers
+    }
+    for receipt in sorted_receipts:
+        consumer = consumer_by_backend.get(receipt.backend)
+        bundle = bundle_by_provider.get(receipt.provider)
+        expected_products = (
+            bundle.products_by_case.get(receipt.case_id)
+            if bundle is not None
+            else None
+        )
+        if (
+            consumer is None
+            or receipt.case_id not in context.selected
+            or receipt.provider != consumer.provider
+            or receipt.bundle_sha256 != consumer.bundle_sha256
+            or receipt.products != expected_products
+        ):
+            raise ValidationError(
+                f"product receipt disagrees with provider case binding: "
+                f"{receipt.backend}/{receipt.case_id}"
+            )
     inputs = (
         ValidationInput(
             "corpus",
@@ -4355,7 +5199,7 @@ def write_matrix_artifact(
         validate_backend_name(product.backend, "validation product backend")
         validate_backend_name(product.kind, "validation product kind")
         checked_relative_posix_path(product.name, "validation product")
-        if product.backend not in backend_names:
+        if product.backend not in component_names:
             raise ValidationError(
                 f"validation product names inactive backend: {product.backend}"
             )
@@ -4375,7 +5219,7 @@ def write_matrix_artifact(
         validate_backend_name(tool.backend, "validation tool backend")
         validate_backend_name(tool.kind, "validation tool kind")
         checked_relative_posix_path(tool.name, "validation tool name")
-        if tool.backend not in backend_names:
+        if tool.backend not in component_names:
             raise ValidationError(
                 f"validation tool names inactive backend: {tool.backend}"
             )
@@ -4396,7 +5240,7 @@ def write_matrix_artifact(
         checked_relative_posix_path(
             item.name, "validation build input name"
         )
-        if item.backend not in backend_names:
+        if item.backend not in component_names:
             raise ValidationError(
                 f"validation build input names inactive backend: "
                 f"{item.backend}"
@@ -4410,7 +5254,7 @@ def write_matrix_artifact(
         raise ValidationError(
             "validation matrix contains duplicate build inputs"
         )
-    for backend in backend_names:
+    for backend in component_names:
         backend_inputs = [
             item for item in sorted_build_inputs if item.backend == backend
         ]
@@ -4450,7 +5294,7 @@ def write_matrix_artifact(
         validation_artifact_scope(
             artifact.kind,
             artifact.name,
-            backend_names,
+            component_names,
             list(context.selected),
         )
         checked_sha256(artifact.sha256, "validation artifact")
@@ -4505,6 +5349,9 @@ def write_matrix_artifact(
         sorted_products,
         sorted_tools,
         sorted_build_inputs,
+        bundles if provider_runs else None,
+        sorted_consumers if provider_runs else None,
+        sorted_receipts if provider_runs else None,
     )
     matrix_value = {
         "version": PROTOCOL_VERSION,
@@ -4542,6 +5389,25 @@ def write_matrix_artifact(
             "artifactCount": len(sorted_artifacts),
         },
     }
+    if provider_runs:
+        matrix_value["providers"] = provider_names
+        matrix_value["productBundles"] = [
+            bundle.to_json() for bundle in bundles
+        ]
+        matrix_value["productConsumers"] = [
+            consumer.to_json() for consumer in sorted_consumers
+        ]
+        matrix_value["productReceipts"] = [
+            receipt.to_json() for receipt in sorted_receipts
+        ]
+        matrix_value["summary"].update(
+            {
+                "providerCount": len(provider_names),
+                "bundleCount": len(bundles),
+                "productConsumerCount": len(sorted_consumers),
+                "productReceiptCount": len(sorted_receipts),
+            }
+        )
     matrix_content = (
         json.dumps(matrix_value, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
@@ -4596,7 +5462,7 @@ def verify_matrix_artifact(
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValidationError(f"cannot read validation matrix {path}: {error}") from error
-    expected_fields = {
+    legacy_fields = {
         "version",
         "identity",
         "selectedCases",
@@ -4610,8 +5476,15 @@ def verify_matrix_artifact(
         "findings",
         "summary",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields:
+    provider_fields = {
+        "providers", "productBundles", "productConsumers", "productReceipts"
+    }
+    if not isinstance(value, dict) or set(value) not in (
+        legacy_fields,
+        legacy_fields | provider_fields,
+    ):
         raise ValidationError("validation matrix has malformed top-level fields")
+    has_providers = set(value) == legacy_fields | provider_fields
     if (
         not isinstance(value["version"], int)
         or isinstance(value["version"], bool)
@@ -4640,6 +5513,25 @@ def verify_matrix_artifact(
     ]
     if len(set(checked_backends)) != len(checked_backends):
         raise ValidationError("validation matrix has duplicate backends")
+    raw_providers = value.get("providers", [])
+    if not isinstance(raw_providers, list):
+        raise ValidationError("validation matrix has malformed providers")
+    checked_providers = [
+        validate_backend_name(provider, "validation matrix provider")
+        for provider in raw_providers
+    ]
+    if (
+        len(set(checked_providers)) != len(checked_providers)
+        or checked_providers != sorted(checked_providers)
+    ):
+        raise ValidationError(
+            "validation matrix providers are not sorted and unique"
+        )
+    if set(checked_backends) & set(checked_providers):
+        raise ValidationError(
+            "validation matrix provider and backend names overlap"
+        )
+    checked_components = [*checked_backends, *checked_providers]
 
     raw_inputs = value["inputs"]
     if not isinstance(raw_inputs, list) or not raw_inputs:
@@ -4714,7 +5606,7 @@ def verify_matrix_artifact(
         kind = validate_backend_name(item["kind"], "validation product kind")
         name = checked_relative_posix_path(item["name"], "validation product name")
         digest = checked_sha256(item["sha256"], "validation product")
-        if backend not in checked_backends:
+        if backend not in checked_components:
             raise ValidationError("validation product names inactive backend")
         expected_artifact = f"evidence/products/{digest}"
         if item["artifact"] != expected_artifact:
@@ -4734,7 +5626,7 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix has duplicate products")
     if product_keys != sorted(product_keys):
         raise ValidationError("validation matrix products are not sorted")
-    for backend in checked_backends:
+    for backend in checked_components:
         manifests = [
             product
             for product in products
@@ -4764,6 +5656,161 @@ def verify_matrix_artifact(
                 f"retained {backend} product manifest disagrees with matrix products"
             )
 
+    raw_bundles = value.get("productBundles", [])
+    if not isinstance(raw_bundles, list):
+        raise ValidationError("validation matrix has malformed productBundles")
+    bundles = [
+        product_bundle_from_json(
+            item,
+            checked_providers,
+            products,
+            selected_cases,
+            f"validation product bundle {index}",
+        )
+        for index, item in enumerate(raw_bundles)
+    ]
+    if (
+        [bundle.provider for bundle in bundles] != checked_providers
+        or len(bundles) != len(checked_providers)
+    ):
+        raise ValidationError(
+            "validation product bundles disagree with providers"
+        )
+    bundle_by_provider = {bundle.provider: bundle for bundle in bundles}
+    for bundle in bundles:
+        manifests = [
+            product for product in products
+            if product.backend == bundle.provider
+            and product.kind == RESERVED_PRODUCT_KIND
+        ]
+        if len(manifests) != 1:
+            raise ValidationError(
+                f"provider {bundle.provider} requires one bundle manifest"
+            )
+        manifest = manifests[0]
+        reconstructed = product_bundle_from_manifest(
+            bundle.provider,
+            bundle.contract,
+            product_contents[
+                (manifest.backend, manifest.kind, manifest.name)
+            ],
+            tuple(
+                product for product in products
+                if product.backend == bundle.provider
+            ),
+            selected_cases,
+            f"retained {bundle.provider} product bundle manifest",
+        )
+        if reconstructed != bundle:
+            raise ValidationError(
+                f"retained {bundle.provider} bundle disagrees with matrix"
+            )
+
+    raw_consumers = value.get("productConsumers", [])
+    if not isinstance(raw_consumers, list):
+        raise ValidationError("validation matrix has malformed productConsumers")
+    product_consumers: list[ProductConsumer] = []
+    for index, item in enumerate(raw_consumers):
+        consumer_context = f"validation product consumer {index}"
+        if not isinstance(item, dict) or set(item) != {
+            "backend", "provider", "contract", "bundleSha256"
+        }:
+            raise ValidationError(f"{consumer_context}: malformed consumer")
+        backend = validate_backend_name(item["backend"], consumer_context)
+        provider = validate_backend_name(item["provider"], consumer_context)
+        contract = product_contract_from_json(
+            item["contract"], f"{consumer_context} contract"
+        )
+        bundle_sha256 = checked_sha256(
+            item["bundleSha256"], f"{consumer_context} bundle"
+        )
+        bundle = bundle_by_provider.get(provider)
+        if (
+            backend not in checked_backends
+            or bundle is None
+            or contract != bundle.contract
+            or bundle_sha256 != bundle.bundle_sha256
+        ):
+            raise ValidationError(
+                f"{consumer_context}: disagrees with backend or provider"
+            )
+        product_consumers.append(
+            ProductConsumer(backend, provider, contract, bundle_sha256)
+        )
+    if (
+        [consumer.backend for consumer in product_consumers]
+        != sorted(consumer.backend for consumer in product_consumers)
+        or len({consumer.backend for consumer in product_consumers})
+        != len(product_consumers)
+    ):
+        raise ValidationError(
+            "validation product consumers are not sorted and unique"
+        )
+    if has_providers != bool(checked_providers):
+        raise ValidationError(
+            "validation matrix provider schema is empty or incomplete"
+        )
+    if checked_providers and {
+        consumer.provider for consumer in product_consumers
+    } != set(checked_providers):
+        raise ValidationError(
+            "validation matrix contains an unused product provider"
+        )
+
+    raw_receipts = value.get("productReceipts", [])
+    if not isinstance(raw_receipts, list):
+        raise ValidationError("validation matrix has malformed productReceipts")
+    product_receipts: list[ProductReceipt] = []
+    consumer_by_backend = {
+        consumer.backend: consumer for consumer in product_consumers
+    }
+    for index, item in enumerate(raw_receipts):
+        receipt_context = f"validation product receipt {index}"
+        if not isinstance(item, dict):
+            raise ValidationError(f"{receipt_context}: malformed receipt")
+        backend = validate_backend_name(
+            item.get("backend"), f"{receipt_context} backend"
+        )
+        case_id = validate_backend_name(
+            item.get("caseId"), f"{receipt_context} case"
+        )
+        provider = validate_backend_name(
+            item.get("provider"), f"{receipt_context} provider"
+        )
+        bundle = bundle_by_provider.get(provider)
+        consumer = consumer_by_backend.get(backend)
+        receipt_products = (
+            bundle.products_by_case.get(case_id)
+            if bundle is not None
+            else None
+        )
+        if bundle is None or consumer is None or receipt_products is None:
+            raise ValidationError(
+                f"{receipt_context}: names inactive consumer, provider, or case"
+            )
+        receipt = ProductReceipt(
+            backend,
+            case_id,
+            provider,
+            bundle.bundle_sha256,
+            receipt_products,
+        )
+        if item != receipt.to_json() or consumer.provider != provider:
+            raise ValidationError(
+                f"{receipt_context}: disagrees with provider case binding"
+            )
+        product_receipts.append(receipt)
+    if [
+        (receipt.backend, receipt.case_id) for receipt in product_receipts
+    ] != sorted(
+        (receipt.backend, receipt.case_id) for receipt in product_receipts
+    ) or len({
+        (receipt.backend, receipt.case_id) for receipt in product_receipts
+    }) != len(product_receipts):
+        raise ValidationError(
+            "validation product receipts are not sorted and unique"
+        )
+
     raw_tools = value["tools"]
     if not isinstance(raw_tools, list):
         raise ValidationError("validation matrix has malformed tools")
@@ -4777,7 +5824,7 @@ def verify_matrix_artifact(
         kind = validate_backend_name(item["kind"], "validation tool kind")
         name = checked_relative_posix_path(item["name"], "validation tool name")
         digest = checked_sha256(item["sha256"], "validation tool")
-        if backend not in checked_backends:
+        if backend not in checked_components:
             raise ValidationError("validation tool names inactive backend")
         expected_artifact = f"evidence/tools/{digest}"
         if item["artifact"] != expected_artifact:
@@ -4817,7 +5864,7 @@ def verify_matrix_artifact(
             item["name"], "validation build input name"
         )
         digest = checked_sha256(item["sha256"], "validation build input")
-        if backend not in checked_backends:
+        if backend not in checked_components:
             raise ValidationError(
                 "validation build input names inactive backend"
             )
@@ -4844,7 +5891,7 @@ def verify_matrix_artifact(
         raise ValidationError("validation matrix has duplicate build inputs")
     if build_input_keys != sorted(build_input_keys):
         raise ValidationError("validation matrix build inputs are not sorted")
-    for backend in checked_backends:
+    for backend in checked_components:
         backend_inputs = [
             item for item in build_inputs if item.backend == backend
         ]
@@ -4909,7 +5956,7 @@ def verify_matrix_artifact(
         )
         digest = checked_sha256(item["sha256"], "validation artifact")
         backend, case_id, scope = validation_artifact_scope(
-            kind, name, checked_backends, selected_cases
+            kind, name, checked_components, selected_cases
         )
         expected_artifact = f"evidence/artifacts/{digest}"
         if item["artifact"] != expected_artifact:
@@ -4924,7 +5971,7 @@ def verify_matrix_artifact(
         )
         artifacts.append(ValidationArtifact(kind, name, digest, content))
         if kind == "backend-result":
-            if case_id is None:
+            if case_id is None or backend not in checked_backends:
                 raise ValidationError("backend-result artifact has no case")
             try:
                 record = json.loads(content.decode("utf-8"))
@@ -6176,6 +7223,25 @@ def verify_matrix_artifact(
                 "build-input replay has no paired process logs"
             )
 
+    reconstructed_receipts: list[ProductReceipt] = []
+    for consumer in product_consumers:
+        bundle = bundle_by_provider[consumer.provider]
+        for case_id in selected_cases:
+            record = result_records.get((case_id, consumer.backend))
+            if record is not None:
+                reconstructed_receipts.append(
+                    checked_product_bundle_receipt(
+                        record, consumer.backend, case_id, bundle
+                    )
+                )
+    reconstructed_receipts.sort(
+        key=lambda receipt: (receipt.backend, receipt.case_id)
+    )
+    if reconstructed_receipts != product_receipts:
+        raise ValidationError(
+            "validation product receipts disagree with retained results"
+        )
+
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValidationError("validation matrix has malformed pairs")
@@ -6355,6 +7421,13 @@ def verify_matrix_artifact(
         "buildInputCount",
         "artifactCount",
     }
+    if has_providers:
+        expected_summary_fields |= {
+            "providerCount",
+            "bundleCount",
+            "productConsumerCount",
+            "productReceiptCount",
+        }
     if not isinstance(summary, dict) or set(summary) != expected_summary_fields:
         raise ValidationError("validation matrix has malformed summary")
     if any(
@@ -6375,6 +7448,15 @@ def verify_matrix_artifact(
         "buildInputCount": len(build_inputs),
         "artifactCount": len(artifacts),
     }
+    if has_providers:
+        expected_summary.update(
+            {
+                "providerCount": len(checked_providers),
+                "bundleCount": len(bundles),
+                "productConsumerCount": len(product_consumers),
+                "productReceiptCount": len(product_receipts),
+            }
+        )
     if summary != expected_summary:
         raise ValidationError("validation matrix summary disagrees with contents")
 
@@ -6402,6 +7484,9 @@ def verify_matrix_artifact(
         products,
         tools,
         build_inputs,
+        bundles if has_providers else None,
+        product_consumers if has_providers else None,
+        product_receipts if has_providers else None,
     )
     if run_sha256 != expected_run_sha256:
         raise ValidationError("validation run identity mismatch")
@@ -6511,9 +7596,125 @@ def verify_evidence_manifest(path: Path) -> dict:
     return manifest
 
 
+def build_product_providers(
+    context: BuildContext,
+    providers: tuple[ProductProvider, ...],
+) -> tuple[ProductProviderRun, ...]:
+    """Build each configured provider exactly once."""
+    if context.run_context is None:
+        raise ValidationError("product providers require a validation run context")
+    runs: list[ProductProviderRun] = []
+    names: set[str] = set()
+    for provider in providers:
+        name = validate_backend_name(provider.name, "product provider")
+        if name in names:
+            raise ValidationError(f"product provider configured twice: {name}")
+        names.add(name)
+        provider_run = provider.build(context)
+        if provider_run.provider != name:
+            raise ValidationError(
+                f"provider {name} returned provider run {provider_run.provider}"
+            )
+        if any(product.backend != name for product in provider_run.products):
+            raise ValidationError(
+                f"product provider {name} returned foreign-owned products"
+            )
+        if any(tool.backend != name for tool in provider_run.tools):
+            raise ValidationError(
+                f"product provider {name} returned foreign-owned tools"
+            )
+        if any(item.backend != name for item in provider_run.build_inputs):
+            raise ValidationError(
+                f"product provider {name} returned foreign-owned build inputs"
+            )
+        for artifact in provider_run.artifacts:
+            artifact_owner, _, _ = validation_artifact_scope(
+                artifact.kind,
+                artifact.name,
+                [name],
+                context.run_context.selected,
+            )
+            if artifact_owner != name or artifact.kind == "backend-result":
+                raise ValidationError(
+                    f"product provider {name} returned foreign execution evidence"
+                )
+        if any(
+            finding.backend not in (None, name)
+            or (
+                finding.case_id is not None
+                and finding.case_id not in context.run_context.selected
+            )
+            for finding in provider_run.findings
+        ):
+            raise ValidationError(
+                f"product provider {name} returned foreign findings"
+            )
+        checked_bundle = product_bundle_from_json(
+            provider_run.bundle.to_json(),
+            [name],
+            provider_run.products,
+            context.run_context.selected,
+            f"product provider {name}",
+        )
+        if checked_bundle != provider_run.bundle:
+            raise ValidationError(
+                f"product provider {name} returned a malformed bundle"
+            )
+        manifests = [
+            product for product in provider_run.products
+            if product.backend == name
+            and product.kind == RESERVED_PRODUCT_KIND
+        ]
+        if len(manifests) != 1:
+            raise ValidationError(
+                f"product provider {name} requires one bundle manifest"
+            )
+        manifest = manifests[0]
+        captured_manifest, content = validation_product_and_content_from_file(
+            name,
+            ProductDeclaration(manifest.kind, manifest.name),
+            context.out_dir,
+        )
+        if captured_manifest != manifest:
+            raise ValidationError(
+                f"product provider {name} bundle manifest changed after build"
+            )
+        reconstructed = product_bundle_from_manifest(
+            name,
+            checked_bundle.contract,
+            content,
+            tuple(provider_run.products),
+            context.run_context.selected,
+            f"product provider {name} manifest",
+        )
+        if reconstructed != checked_bundle:
+            raise ValidationError(
+                f"product provider {name} manifest disagrees with its bundle"
+            )
+        runs.append(provider_run)
+    return tuple(runs)
+
+
+def verify_product_provider_run(
+    context: RunContext, provider_run: ProductProviderRun, phase: str
+) -> None:
+    for product in provider_run.products:
+        captured = validation_product_from_file(
+            provider_run.provider,
+            ProductDeclaration(product.kind, product.name),
+            context.out_dir,
+        )
+        if captured != product:
+            raise ValidationError(
+                f"{provider_run.provider} products changed {phase}: "
+                f"{product.kind}:{product.name}"
+            )
+
+
 def validate_matrix(
     context: RunContext,
     pairs: list[tuple[BackendAdapter, BackendAdapter]],
+    provider_runs: tuple[ProductProviderRun, ...] = (),
 ) -> tuple[list[PairValidationResult], list[ValidationFinding]]:
     """Execute each backend once, then compare every requested directed pair."""
     if not pairs:
@@ -6543,14 +7744,122 @@ def validate_matrix(
                 )
             adapters[adapter.name] = adapter
 
+    provider_run_by_name: dict[str, ProductProviderRun] = {}
+    for provider_run in provider_runs:
+        provider_name = validate_backend_name(
+            provider_run.provider, "product provider"
+        )
+        if provider_name in provider_run_by_name:
+            raise ValidationError(
+                f"product provider ran more than once: {provider_name}"
+            )
+        if provider_name in adapters:
+            raise ValidationError(
+                f"product provider and backend names overlap: {provider_name}"
+            )
+        if provider_run.bundle.provider != provider_name:
+            raise ValidationError(
+                f"provider run {provider_name} returned a foreign bundle"
+            )
+        if context.product_bundles.get(provider_name) != provider_run.bundle:
+            raise ValidationError(
+                f"run context disagrees with product provider {provider_name}"
+            )
+        provider_run_by_name[provider_name] = provider_run
+
+    product_consumers: list[ProductConsumer] = []
+    used_providers: set[str] = set()
+    for name, adapter in adapters.items():
+        requirement = getattr(adapter, "product_provider", None)
+        if requirement is None:
+            continue
+        if not isinstance(requirement, ProductProviderRequirement):
+            raise ValidationError(
+                f"backend {name} has malformed product provider requirement"
+            )
+        provider_run = provider_run_by_name.get(requirement.provider)
+        if provider_run is None:
+            raise ValidationError(
+                f"backend {name} requires missing product provider "
+                f"{requirement.provider}"
+            )
+        bundle = provider_run.bundle
+        if requirement.contract != bundle.contract:
+            raise ValidationError(
+                f"backend {name} product contract disagrees with provider "
+                f"{bundle.provider}"
+            )
+        product_consumers.append(
+            ProductConsumer(
+                name,
+                bundle.provider,
+                requirement.contract,
+                bundle.bundle_sha256,
+            )
+        )
+        used_providers.add(bundle.provider)
+    unused_providers = sorted(provider_run_by_name.keys() - used_providers)
+    if unused_providers:
+        raise ValidationError(
+            "unused product provider(s): " + ", ".join(unused_providers)
+        )
+
     backend_runs: dict[str, BackendRun] = {}
     backend_findings: dict[str, list[ValidationFinding]] = {}
-    all_findings: list[ValidationFinding] = []
+    product_receipts: list[ProductReceipt] = []
+    all_findings: list[ValidationFinding] = [
+        finding
+        for provider_run in provider_runs
+        for finding in provider_run.findings
+    ]
     for name, adapter in adapters.items():
+        requirement = getattr(adapter, "product_provider", None)
+        provider_run = (
+            provider_run_by_name[requirement.provider]
+            if isinstance(requirement, ProductProviderRequirement)
+            else None
+        )
+        if provider_run is not None:
+            verify_product_provider_run(
+                context, provider_run, f"before {name} execution"
+            )
         backend_run = adapter.execute(context)
+        if provider_run is not None:
+            verify_product_provider_run(
+                context, provider_run, f"during {name} execution"
+            )
         if backend_run.backend != name:
             raise ValidationError(
                 f"adapter {name} returned backend run {backend_run.backend}"
+            )
+        if any(product.backend != name for product in backend_run.products):
+            raise ValidationError(
+                f"backend {name} returned foreign-owned products"
+            )
+        if any(tool.backend != name for tool in backend_run.tools):
+            raise ValidationError(
+                f"backend {name} returned foreign-owned tools"
+            )
+        if any(item.backend != name for item in backend_run.build_inputs):
+            raise ValidationError(
+                f"backend {name} returned foreign-owned build inputs"
+            )
+        for artifact in backend_run.artifacts:
+            artifact_owner, _, _ = validation_artifact_scope(
+                artifact.kind,
+                artifact.name,
+                [name],
+                context.selected,
+            )
+            if artifact_owner != name:
+                raise ValidationError(
+                    f"backend {name} returned foreign-owned artifacts"
+                )
+        if provider_run is not None and (
+            backend_run.products or backend_run.build_inputs
+        ):
+            raise ValidationError(
+                f"product consumer {name} returned build-owned evidence"
             )
         findings = list(backend_run.findings)
         findings.extend(
@@ -6560,6 +7869,13 @@ def validate_matrix(
         )
         audit = adapter.audit(context, backend_run)
         findings.extend(audit.findings)
+        if provider_run is not None:
+            for case_id, record in sorted(backend_run.results.items()):
+                product_receipts.append(
+                    checked_product_bundle_receipt(
+                        record, name, case_id, provider_run.bundle
+                    )
+                )
         backend_runs[name] = backend_run
         backend_findings[name] = findings
         all_findings.extend(findings)
@@ -6611,20 +7927,40 @@ def validate_matrix(
         for backend_run in backend_runs.values()
         for product in backend_run.products
     )
+    products += tuple(
+        product
+        for provider_run in provider_runs
+        for product in provider_run.products
+    )
     tools = tuple(
         tool
         for backend_run in backend_runs.values()
         for tool in backend_run.tools
+    )
+    tools += tuple(
+        tool
+        for provider_run in provider_runs
+        for tool in provider_run.tools
     )
     build_inputs = tuple(
         item
         for backend_run in backend_runs.values()
         for item in backend_run.build_inputs
     )
+    build_inputs += tuple(
+        item
+        for provider_run in provider_runs
+        for item in provider_run.build_inputs
+    )
     artifacts = tuple(
         artifact
         for backend_run in backend_runs.values()
         for artifact in backend_run.artifacts
+    )
+    artifacts += tuple(
+        artifact
+        for provider_run in provider_runs
+        for artifact in provider_run.artifacts
     )
     write_matrix_artifact(
         context,
@@ -6635,6 +7971,9 @@ def validate_matrix(
         tools,
         artifacts,
         build_inputs,
+        provider_runs,
+        tuple(product_consumers),
+        tuple(product_receipts),
     )
     return pair_results, all_findings
 

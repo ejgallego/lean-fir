@@ -16,7 +16,13 @@ from validation_harness import (
     BuildContext,
     ExternalCommandAdapter,
     PairValidationResult,
+    ProductBundle,
+    ProductConsumer,
+    ProductContract,
     ProductDeclaration,
+    ProductProviderRequirement,
+    ProductProviderRun,
+    ProductReceipt,
     RunContext,
     ToolDeclaration,
     ValidationArtifact,
@@ -28,15 +34,19 @@ from validation_harness import (
     ValidationProduct,
     ValidationTool,
     canonical_json_sha256,
+    build_product_providers,
     checked_record,
     comparison_artifact_path,
     compare_backend_results,
     compare_success,
     corpus_artifact_bytes,
     external_adapter_from_config,
+    external_product_provider_from_config,
     manifest_from_output as parse_manifest_from_output,
     product_receipt_findings,
     product_receipt_value,
+    product_bundle_receipt_findings,
+    product_bundle_receipt_value,
     records_from_output,
     retain_evidence_blob,
     result_domain_findings,
@@ -264,6 +274,13 @@ def main() -> int:
         help="register an external protocol backend from this JSON file",
     )
     parser.add_argument(
+        "--provider-config",
+        action="append",
+        type=Path,
+        default=[],
+        help="register a shared product provider from this JSON file",
+    )
+    parser.add_argument(
         "--plan",
         type=Path,
         help="load adapter configs and directed pairs from this JSON plan",
@@ -291,6 +308,7 @@ def main() -> int:
             or args.candidate
             or args.pair
             or args.adapter_config
+            or args.provider_config
             or args.plan
         ):
             raise ValidationError(
@@ -319,10 +337,16 @@ def main() -> int:
 
     provenance_inputs = []
     if args.plan is not None:
-        if args.pair or args.adapter_config or args.reference or args.candidate:
+        if (
+            args.pair
+            or args.adapter_config
+            or args.provider_config
+            or args.reference
+            or args.candidate
+        ):
             raise ValidationError(
                 "--plan cannot be combined with --pair, --adapter-config, "
-                "--reference, or --candidate"
+                "--provider-config, --reference, or --candidate"
             )
         plan_input = validation_input_from_file(
             "validation-plan", args.plan, ROOT
@@ -331,6 +355,7 @@ def main() -> int:
         plan = validation_plan_from_config(args.plan, plan_input.content)
         pair_names = list(plan.pairs)
         adapter_config_paths = list(plan.adapter_configs)
+        provider_config_paths = list(plan.provider_configs)
     else:
         pair_names = (
             [parse_pair_spec(specification) for specification in args.pair]
@@ -342,8 +367,14 @@ def main() -> int:
             ]
         )
         adapter_config_paths = args.adapter_config
+        provider_config_paths = args.provider_config
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("comparison pair selected more than once")
+    provider_inputs = [
+        validation_input_from_file("provider-config", path, ROOT)
+        for path in provider_config_paths
+    ]
+    provenance_inputs.extend(provider_inputs)
     adapter_inputs = [
         validation_input_from_file("adapter-config", path, ROOT)
         for path in adapter_config_paths
@@ -357,6 +388,20 @@ def main() -> int:
                 f"backend registered more than once: {adapter.name}"
             )
         adapters[adapter.name] = adapter
+    providers = {}
+    for path, provider_input in zip(provider_config_paths, provider_inputs):
+        provider = external_product_provider_from_config(
+            path, provider_input.content
+        )
+        if provider.name in providers:
+            raise ValidationError(
+                f"product provider registered more than once: {provider.name}"
+            )
+        if provider.name in adapters:
+            raise ValidationError(
+                f"product provider and backend names overlap: {provider.name}"
+            )
+        providers[provider.name] = provider
     requested_backends = {
         backend for pair_name in pair_names for backend in pair_name
     }
@@ -374,6 +419,22 @@ def main() -> int:
     participating_adapters = {
         adapter.name: adapter for pair in pairs for adapter in pair
     }
+    required_provider_names = {
+        requirement.provider
+        for adapter in participating_adapters.values()
+        for requirement in [getattr(adapter, "product_provider", None)]
+        if isinstance(requirement, ProductProviderRequirement)
+    }
+    unknown_providers = sorted(required_provider_names - providers.keys())
+    if unknown_providers:
+        raise ValidationError(
+            "unknown product provider(s): " + ", ".join(unknown_providers)
+        )
+    unused_providers = sorted(providers.keys() - required_provider_names)
+    if unused_providers:
+        raise ValidationError(
+            "unused product provider(s): " + ", ".join(unused_providers)
+        )
     adapters["native"].build(
         BuildContext(ROOT, args.out_dir, args.no_build)
     )
@@ -382,12 +443,27 @@ def main() -> int:
         descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
     write_corpus_manifest(args.out_dir, descriptors)
+    base_context = RunContext(
+        ROOT,
+        args.out_dir,
+        descriptors,
+        selected,
+        tuple(provenance_inputs),
+    )
+    provider_build_context = BuildContext(
+        ROOT, args.out_dir, args.no_build, run_context=base_context
+    )
+    provider_runs = build_product_providers(
+        provider_build_context,
+        tuple(providers[name] for name in sorted(required_provider_names)),
+    )
     context = RunContext(
         ROOT,
         args.out_dir,
         descriptors,
         selected,
         tuple(provenance_inputs),
+        {run.provider: run.bundle for run in provider_runs},
     )
     build_context = BuildContext(
         ROOT, args.out_dir, args.no_build, run_context=context
@@ -399,7 +475,9 @@ def main() -> int:
     }
     for adapter in adapters_to_build.values():
         adapter.build(build_context)
-    pair_results, findings = validate_matrix(context, pairs)
+    pair_results, findings = validate_matrix(
+        context, pairs, provider_runs
+    )
     matrix_content = (args.out_dir / "matrix.json").read_bytes()
     matrix = json.loads(matrix_content)
     evidence_path = validation_evidence_manifest_path(

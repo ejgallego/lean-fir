@@ -985,6 +985,274 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(native.execute_count, 1)
             self.assertEqual(v8.execute_count, 1)
 
+    def test_product_provider_is_built_once_for_two_consumers_and_verified_offline(
+        self,
+    ) -> None:
+        contract = harness.ProductContract(
+            "wasm", "wasm32", "fixture", "fixture-v1"
+        )
+
+        class CountingProvider:
+            name = "fixture-wasm"
+
+            def __init__(self) -> None:
+                self.build_count = 0
+
+            def build(
+                self, context: harness.BuildContext
+            ) -> harness.ProductProviderRun:
+                self.build_count += 1
+                self.assert_context(context)
+                assert context.run_context is not None
+                provider_dir = context.out_dir / self.name
+                modules_dir = provider_dir / "modules"
+                modules_dir.mkdir(parents=True)
+                product_bytes = {
+                    "first": b"\0asm\x01\0\0\0first",
+                    "second": b"\0asm\x01\0\0\0second",
+                }
+                ordinary = []
+                for case_id, content in product_bytes.items():
+                    path = modules_dir / f"{case_id}.wasm"
+                    path.write_bytes(content)
+                    ordinary.append(
+                        harness.ValidationProduct(
+                            self.name,
+                            "wasm-module",
+                            f"modules/{case_id}.wasm",
+                            harness.sha256_bytes(content),
+                        )
+                    )
+                manifest_value = {
+                    "version": 2,
+                    "contract": contract.to_json(),
+                    "products": [
+                        {"kind": product.kind, "path": product.name}
+                        for product in ordinary
+                    ],
+                    "cases": [
+                        {
+                            "caseId": case_id,
+                            "products": [
+                                {
+                                    "kind": "wasm-module",
+                                    "path": f"modules/{case_id}.wasm",
+                                }
+                            ],
+                        }
+                        for case_id in ("first", "second")
+                    ],
+                }
+                manifest_content = (
+                    json.dumps(manifest_value, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                manifest_path = provider_dir / "bundle.json"
+                manifest_path.write_bytes(manifest_content)
+                products = tuple(
+                    sorted(
+                        [
+                            *ordinary,
+                            harness.ValidationProduct(
+                                self.name,
+                                core.RESERVED_PRODUCT_KIND,
+                                "bundle.json",
+                                harness.sha256_bytes(manifest_content),
+                            ),
+                        ],
+                        key=lambda product: (product.kind, product.name),
+                    )
+                )
+                bundle = core.product_bundle_from_manifest(
+                    self.name,
+                    contract,
+                    manifest_content,
+                    products,
+                    context.run_context.selected,
+                    "fixture bundle",
+                )
+                return harness.ProductProviderRun(
+                    self.name, bundle, products=list(products)
+                )
+
+            def assert_context(self, context: harness.BuildContext) -> None:
+                if context.run_context is None:
+                    raise AssertionError("provider received no run context")
+
+        class CountingConsumer:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.product_provider = harness.ProductProviderRequirement(
+                    "fixture-wasm", contract
+                )
+                self.execute_count = 0
+                self.audit_count = 0
+
+            def execute(
+                self, context: harness.RunContext
+            ) -> harness.BackendRun:
+                self.execute_count += 1
+                bundle = context.product_bundles["fixture-wasm"]
+                results = {}
+                for case_id in context.selected:
+                    record = success(case_id, self.name)
+                    record["diagnostics"] = [
+                        {
+                            "key": core.PRODUCT_BUNDLE_RECEIPT_DIAGNOSTIC,
+                            "value": harness.product_bundle_receipt_value(
+                                bundle, case_id
+                            ),
+                        }
+                    ]
+                    results[case_id] = record
+                return harness.BackendRun(
+                    self.name, list(context.selected), results=results
+                )
+
+            def audit(
+                self,
+                context: harness.RunContext,
+                backend_run: harness.BackendRun,
+            ) -> harness.BackendAudit:
+                self.audit_count += 1
+                return harness.BackendAudit()
+
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            descriptors = [descriptor("first"), descriptor("second")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            base_context = harness.RunContext(
+                harness.ROOT,
+                out_dir,
+                descriptors,
+                ["first", "second"],
+            )
+            provider = CountingProvider()
+            provider_runs = harness.build_product_providers(
+                harness.BuildContext(
+                    harness.ROOT, out_dir, False, base_context
+                ),
+                (provider,),
+            )
+            context = harness.RunContext(
+                base_context.root,
+                base_context.out_dir,
+                base_context.descriptors,
+                base_context.selected,
+                product_bundles={
+                    run.provider: run.bundle for run in provider_runs
+                },
+            )
+            v8 = CountingConsumer("v8")
+            talos = CountingConsumer("talos")
+            pair_results, findings = harness.validate_matrix(
+                context, [(v8, talos)], provider_runs
+            )
+            self.assertEqual(provider.build_count, 1)
+            self.assertEqual(findings, [])
+            self.assertEqual(len(pair_results[0].comparisons), 2)
+            self.assertTrue(
+                all(item["equal"] for item in pair_results[0].comparisons)
+            )
+            for consumer in (v8, talos):
+                self.assertEqual(consumer.execute_count, 1)
+                self.assertEqual(consumer.audit_count, 1)
+
+            matrix_path = out_dir / "matrix.json"
+            matrix_content = matrix_path.read_bytes()
+            matrix = json.loads(matrix_content)
+            bundle_value = matrix["productBundles"][0]
+            self.assertEqual(matrix["providers"], ["fixture-wasm"])
+            self.assertEqual(
+                [consumer["backend"] for consumer in matrix["productConsumers"]],
+                ["talos", "v8"],
+            )
+            self.assertEqual(len(bundle_value["products"]), 2)
+            self.assertEqual(matrix["summary"]["productCount"], 3)
+            self.assertEqual(matrix["summary"]["providerCount"], 1)
+            self.assertEqual(matrix["summary"]["bundleCount"], 1)
+            self.assertEqual(matrix["summary"]["productConsumerCount"], 2)
+            self.assertEqual(matrix["summary"]["productReceiptCount"], 4)
+            self.assertEqual(
+                [
+                    (receipt["backend"], receipt["caseId"])
+                    for receipt in matrix["productReceipts"]
+                ],
+                [
+                    ("talos", "first"),
+                    ("talos", "second"),
+                    ("v8", "first"),
+                    ("v8", "second"),
+                ],
+            )
+            bundle_digest = bundle_value["bundleSha256"]
+            for backend in ("v8", "talos"):
+                for case_id in ("first", "second"):
+                    record = json.loads(
+                        (
+                            out_dir
+                            / case_id
+                            / backend
+                            / "result.json"
+                        ).read_text(encoding="utf-8")
+                    )
+                    receipt = json.loads(record["diagnostics"][0]["value"])
+                    self.assertEqual(receipt["provider"], "fixture-wasm")
+                    self.assertEqual(receipt["bundleSha256"], bundle_digest)
+                    self.assertEqual(
+                        [product["name"] for product in receipt["products"]],
+                        [f"modules/{case_id}.wasm"],
+                    )
+
+            evidence_path = harness.validation_evidence_manifest_path(
+                out_dir,
+                matrix["identity"]["run"],
+                harness.sha256_bytes(matrix_content),
+            )
+            shutil.rmtree(out_dir / "fixture-wasm")
+            harness.verify_evidence_manifest(evidence_path)
+
+            artifact = next(
+                item for item in matrix["artifacts"]
+                if item["kind"] == "backend-result"
+                and item["name"] == "first/talos/result.json"
+            )
+            record = json.loads(
+                (out_dir / artifact["artifact"]).read_text(encoding="utf-8")
+            )
+            wrong_product = bundle_value["cases"][1]["products"][0]
+            record["diagnostics"][0]["value"] = json.dumps(
+                {
+                    "provider": "fixture-wasm",
+                    "bundleSha256": bundle_digest,
+                    "products": [
+                        {
+                            "kind": wrong_product["kind"],
+                            "name": wrong_product["name"],
+                            "sha256": wrong_product["sha256"],
+                        }
+                    ],
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            tampered_content = (
+                json.dumps(record, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            tampered_sha256 = harness.sha256_bytes(tampered_content)
+            artifact["sha256"] = tampered_sha256
+            artifact["artifact"] = harness.retain_evidence_blob(
+                out_dir, "artifacts", tampered_sha256, tampered_content
+            )
+            matrix_path.write_text(
+                json.dumps(matrix, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "product receipt disagrees with provider case binding",
+            ):
+                harness.verify_matrix_artifact(matrix_path)
+
     def test_validation_identity_is_deterministic_and_sensitive(self) -> None:
         inputs = (
             harness.ValidationInput("corpus", "corpus.json", "0" * 64),
@@ -2961,6 +3229,238 @@ class HarnessTests(unittest.TestCase):
                 ("lcnf", "v8"),
             ),
         )
+
+    def test_provider_consumer_configs_and_plan_are_strict(self) -> None:
+        contract = {
+            "format": "wasm",
+            "target": "wasm32",
+            "runtimeFlavor": "fixture",
+            "abi": "fixture-v1",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_program = (
+                "import json,os,pathlib;"
+                "root=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR']);"
+                "(root/'module.wasm').write_bytes(b'fixture-wasm');"
+                f"contract=json.loads({json.dumps(json.dumps(contract))});"
+                "manifest={'version':2,'contract':contract,'products':["
+                "{'kind':'wasm-module','path':'module.wasm'}],'cases':["
+                "{'caseId':'case','products':[{'kind':'wasm-module',"
+                "'path':'module.wasm'}]}]};"
+                "(root/'bundle.json').write_text(json.dumps(manifest))"
+            )
+            provider_path = root / "provider.json"
+            provider_value = {
+                "version": 2,
+                "name": "fixture-wasm",
+                "contract": contract,
+                "buildCommand": [
+                    Path(sys.executable).name,
+                    "-c",
+                    build_program,
+                ],
+                "bundleManifest": "bundle.json",
+                "buildTools": [
+                    {
+                        "kind": "compiler",
+                        "name": "python",
+                        "command": Path(sys.executable).name,
+                    }
+                ],
+            }
+            provider_path.write_text(
+                json.dumps(provider_value), encoding="utf-8"
+            )
+            provider = harness.external_product_provider_from_config(
+                provider_path
+            )
+            self.assertEqual(provider.name, "fixture-wasm")
+            self.assertEqual(
+                provider.contract,
+                harness.ProductContract(
+                    "wasm", "wasm32", "fixture", "fixture-v1"
+                ),
+            )
+            self.assertEqual(provider.bundle_manifest, "bundle.json")
+            self.assertEqual(provider.driver.product_manifest, "bundle.json")
+            out_dir = root / "out"
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            provider_runs = harness.build_product_providers(
+                harness.BuildContext(
+                    root,
+                    out_dir,
+                    False,
+                    harness.RunContext(
+                        root, out_dir, descriptors, ["case"]
+                    ),
+                ),
+                (provider,),
+            )
+            self.assertEqual(len(provider_runs), 1)
+            self.assertEqual(
+                [product.name for product in provider_runs[0].bundle.products],
+                ["module.wasm"],
+            )
+
+            adapter_path = root / "v8.json"
+            consumer_program = (
+                "import json,os;"
+                "backend=os.environ['FIR_VALIDATION_BACKEND'];"
+                "bundle=json.loads(os.environ['FIR_VALIDATION_PRODUCT_BUNDLE']);"
+                "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
+                "assert len(products)==1 and products[0]['backend']=='fixture-wasm';"
+                "binding=bundle['cases'][0]['products'];"
+                "receipt={'provider':bundle['provider'],"
+                "'bundleSha256':bundle['bundleSha256'],'products':["
+                "{'kind':item['kind'],'name':item['name'],'sha256':item['sha256']}"
+                " for item in binding]};"
+                "record={'version':2,'caseId':'case','backend':backend,"
+                "'diagnostics':[{'key':'validation-product-bundle','value':"
+                "json.dumps(receipt,separators=(',',':'),sort_keys=True)}],"
+                "'outcome':{'success':{'observation':{'termination':"
+                "{'returned':{'value':{'nat':{'value':'42'}}}},'stdout':'',"
+                "'stderr':'','effects':[]}}}};"
+                "print(json.dumps(record))"
+            )
+            adapter_value = {
+                "name": "v8",
+                "runCommand": [
+                    Path(sys.executable).name,
+                    "-c",
+                    consumer_program,
+                ],
+                "resultDomain": "selected",
+                "tools": [
+                    {
+                        "kind": "engine",
+                        "name": "python",
+                        "command": Path(sys.executable).name,
+                    }
+                ],
+                "productProvider": {
+                    "name": "fixture-wasm",
+                    "contract": contract,
+                },
+            }
+            adapter_path.write_text(
+                json.dumps(adapter_value), encoding="utf-8"
+            )
+            adapter = harness.external_adapter_from_config(adapter_path)
+            self.assertEqual(
+                adapter.product_provider,
+                harness.ProductProviderRequirement(
+                    "fixture-wasm", provider.contract
+                ),
+            )
+            consumer_context = harness.RunContext(
+                root,
+                out_dir,
+                descriptors,
+                ["case"],
+                product_bundles={
+                    "fixture-wasm": provider_runs[0].bundle
+                },
+            )
+            adapter.build(
+                harness.BuildContext(
+                    root, out_dir, False, consumer_context
+                )
+            )
+            backend_run = adapter.execute(consumer_context)
+            self.assertEqual(backend_run.products, [])
+            self.assertEqual(
+                harness.product_bundle_receipt_findings(
+                    backend_run, provider_runs[0].bundle
+                ),
+                [],
+            )
+            talos_value = {**adapter_value, "name": "talos"}
+            talos = harness.external_adapter_from_config(
+                root / "talos.json",
+                json.dumps(talos_value).encode("utf-8"),
+            )
+            talos.build(
+                harness.BuildContext(
+                    root, out_dir, False, consumer_context
+                )
+            )
+            pair_results, findings = harness.validate_matrix(
+                consumer_context,
+                [(adapter, talos)],
+                provider_runs,
+            )
+            self.assertEqual(findings, [])
+            self.assertTrue(pair_results[0].comparisons[0]["equal"])
+            provider_matrix = harness.verify_matrix_artifact(
+                out_dir / "matrix.json"
+            )
+            self.assertEqual(
+                provider_matrix["providers"], ["fixture-wasm"]
+            )
+            self.assertEqual(
+                [
+                    tool["backend"]
+                    for tool in provider_matrix["tools"]
+                    if tool["kind"] == "compiler"
+                ],
+                ["fixture-wasm"],
+            )
+
+            plan_path = root / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "providerConfigs": ["provider.json"],
+                        "adapterConfigs": ["v8.json"],
+                        "pairs": [
+                            {"reference": "native", "candidate": "v8"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            plan = harness.validation_plan_from_config(plan_path)
+            self.assertEqual(
+                plan.provider_configs, (provider_path.resolve(),)
+            )
+            self.assertEqual(
+                plan.adapter_configs, (adapter_path.resolve(),)
+            )
+
+            corpus_consumer = {**adapter_value, "resultDomain": "corpus"}
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "productProvider requires resultDomain 'selected'",
+            ):
+                harness.external_adapter_from_config(
+                    adapter_path,
+                    json.dumps(corpus_consumer).encode("utf-8"),
+                )
+
+            adapter_value["buildCommand"] = [
+                sys.executable, "-c", "pass"
+            ]
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "productProvider cannot be combined",
+            ):
+                harness.external_adapter_from_config(
+                    adapter_path,
+                    json.dumps(adapter_value).encode("utf-8"),
+                )
+
+            provider_value["runCommand"] = [sys.executable, "-c", "pass"]
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "unknown fields: runCommand",
+            ):
+                harness.external_product_provider_from_config(
+                    provider_path,
+                    json.dumps(provider_value).encode("utf-8"),
+                )
 
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
         class FakeNativeAdapter:

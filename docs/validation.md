@@ -565,6 +565,149 @@ Missing, empty, malformed, duplicate, or undeclared receipts become structured
 `audit` findings.  Thus the future V8 evidence will distinguish “the harness
 produced this module” from “the engine reports consuming this exact module.”
 
+## Shared compiler products
+
+The generic harness also has an opt-in provider/consumer path for running more
+than one engine against exactly one compiler output. No checked production plan
+uses this path yet: the existing V8 adapter continues to own its build until the
+Lean Wasm compiler lane is ready. This separation lets provider infrastructure
+land without changing compiler, semantic-host, Talos, or runtime behavior.
+
+A provider is a build-only component. Its strict config declares an opaque
+four-field product contract and reuses the same tool capture, repeated-build,
+reported-input, strace, and sealed-replay machinery as an external adapter:
+
+```json
+{
+  "version": 2,
+  "name": "example-wasm-provider",
+  "contract": {
+    "format": "wasm",
+    "target": "wasm32",
+    "runtimeFlavor": "example-runtime",
+    "abi": "example-abi"
+  },
+  "buildCommand": ["lean", "--run", "ExampleWasmProvider.lean"],
+  "bundleManifest": "bundle.json",
+  "buildTools": [
+    {"kind": "compiler", "name": "lean", "command": "lean"}
+  ]
+}
+```
+
+The contract values above are illustrative identifiers, not a selected FIR
+Wasm ABI. The harness compares and retains them exactly; the compiler/runtime
+lanes remain responsible for choosing real values through the shared-contract
+process.
+
+The build emits one sorted bundle manifest. Product paths are relative to the
+provider output directory, each selected case has an exact nonempty binding,
+and products may be shared by many cases:
+
+```json
+{
+  "version": 2,
+  "contract": {
+    "format": "wasm",
+    "target": "wasm32",
+    "runtimeFlavor": "example-runtime",
+    "abi": "example-abi"
+  },
+  "products": [
+    {"kind": "wasm-module", "path": "modules/example.wasm"}
+  ],
+  "cases": [
+    {
+      "caseId": "lit-nat",
+      "products": [
+        {"kind": "wasm-module", "path": "modules/example.wasm"}
+      ]
+    }
+  ]
+}
+```
+
+The harness hashes the emitted files and derives `bundleSha256` from the
+provider name, product contract, complete hashed inventory, and case bindings.
+It rejects missing or extra cases, duplicate or unsorted declarations,
+undeclared references, unreferenced products, owner drift, contract drift, and
+identity drift. The bundle manifest is retained alongside its products, while
+the logical bundle inventory excludes that metadata file.
+
+An engine adapter consumes one provider and cannot also declare an
+adapter-owned build or products:
+
+```json
+{
+  "name": "example-v8-engine",
+  "runCommand": ["node", "scripts/run-example-v8.mjs"],
+  "resultDomain": "selected",
+  "productProvider": {
+    "name": "example-wasm-provider",
+    "contract": {
+      "format": "wasm",
+      "target": "wasm32",
+      "runtimeFlavor": "example-runtime",
+      "abi": "example-abi"
+    }
+  },
+  "tools": [
+    {"kind": "engine", "name": "node", "command": "node"},
+    {
+      "kind": "runner",
+      "name": "scripts/run-example-v8.mjs",
+      "path": "../scripts/run-example-v8.mjs"
+    }
+  ]
+}
+```
+
+Every consumer receives the whole verified inventory through
+`FIR_VALIDATION_PRODUCTS` and the contract, bundle identity, and exact case
+bindings through `FIR_VALIDATION_PRODUCT_BUNDLE`. Before and after each engine
+execution, the harness rehashes the provider's products, including its bundle
+manifest. The consumer returns one `validation-product-bundle` diagnostic per
+result. Its JSON value names the provider, `bundleSha256`, and the exact
+`kind`/`name`/`sha256` products bound to that case. A valid but wrong case's
+module is rejected, not accepted as a declared subset. Unlike the legacy
+adapter-owned subset receipt, a missing, malformed, or inexact shared-bundle
+receipt is a structural validation error, so no unverifiable matrix is written.
+
+Plans opt in by adding `providerConfigs`; one configured provider is built once
+even when several engines consume it:
+
+```json
+{
+  "version": 2,
+  "providerConfigs": ["../validation-providers/example-wasm.json"],
+  "adapterConfigs": [
+    "../validation-adapters/example-v8.json",
+    "../validation-adapters/example-talos.json"
+  ],
+  "pairs": [
+    {"reference": "example-v8-engine", "candidate": "example-talos-engine"}
+  ]
+}
+```
+
+Provider and backend names are disjoint, unused or missing providers fail
+closed, and each backend currently consumes at most one provider. Provider
+products, tools, inputs, and build artifacts occur once in the evidence
+inventory rather than once per engine. Opted-in matrices add sorted
+`providers`, `productBundles`, `productConsumers`, and exact sorted
+`productReceipts` records and bind the bundles, assignments, and receipts into
+`identity.run`. Offline verification
+rehashes every retained product, reconstructs the bundle from both matrix and
+manifest data, and checks each retained result receipt against its exact case
+binding. The provider staging directory is therefore unnecessary for offline
+verification.
+
+The intended production sequence is to enable a Lean-Wasm provider only after
+the compiler lane supplies it, then attach the real V8 consumer. A Talos runner
+can subsequently consume that unchanged bundle as a second engine. Talos-owned
+runner wiring remains in the Wasm lane; this generic layer neither embeds Talos
+nor defines the semantic ABI.
+
 ## Case and observation contract
 
 `Fir.Validation.Corpus` defines each case once.  A case names its source entry,
