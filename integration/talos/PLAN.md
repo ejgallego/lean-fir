@@ -2241,6 +2241,18 @@ an abstract child-recursion hypothesis. Closure capture filtering and the
 global fuel induction remain next; no executable or shared semantic contract
 changed.
 
+W6.6af establishes the matching recursive closure step. A pure capture-fold
+theorem proves that statically non-owning captures are semantic persistence
+no-ops, so the descriptor-filtered concrete child order agrees with FIR's full
+capture order. The closure node theorem combines that filter with the common
+metadata rewrite and ordered child recursion, retaining explicit descriptor-
+table identity. Closing the global induction then exposed
+`FIR-BUG-wasm-none-persistence-dead-child-refinement`: `LiveHeapRel` admits a
+live parent owning a mapped dead child, which FIR skips but concrete
+`readLiveHeader` rejects. The discrepancy is recorded before changing either
+the refinement invariant or operation-specific dead handling. No shared FIR
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

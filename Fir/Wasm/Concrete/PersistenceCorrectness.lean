@@ -655,6 +655,204 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
       rw [objectEq] at storedObjectEq
       contradiction
 
+/-- A statically non-owning closure capture cannot denote a semantic heap
+reference, so persistence is the identity on it. -/
+private theorem ValueRel.markPersistentNoOp_of_notObjectField
+    {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
+    {value : Value} (related : ValueRel witness kind lane value)
+    (rejected : kind.isObjectField = false) (fuel : Nat)
+    (runtime : RuntimeState) :
+    markPersistentValueFuel fuel runtime value = runtime := by
+  cases related with
+  | object | tagged | tobject | erased =>
+      simp [AbiKind.isObjectField] at rejected
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+
+/-- Filtering statically non-owning closure captures preserves the pure
+semantic persistence fold. -/
+private theorem closureOwnedValues_foldl_markPersistent_eq_of_each
+    (witness : RefinementWitness) (kinds : List AbiKind) (values : List Value)
+    (sizeEq : kinds.length = values.length)
+    (each : ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+      kinds[offset]? = some kind →
+      values[offset]? = some value →
+      ∃ lane, ValueRel witness kind lane value)
+    (fuel : Nat) (runtime : RuntimeState) :
+    values.foldl (init := runtime) (markPersistentValueFuel fuel) =
+      (closureOwnedValues kinds values).foldl (init := runtime)
+        (markPersistentValueFuel fuel) := by
+  induction kinds generalizing values runtime with
+  | nil =>
+      cases values with
+      | nil => rfl
+      | cons value values => simp at sizeEq
+  | cons kind kinds ih =>
+      cases values with
+      | nil => simp at sizeEq
+      | cons value values =>
+          have tailSize : kinds.length = values.length := by
+            simpa using sizeEq
+          obtain ⟨lane, headRelated⟩ := each 0 kind value (by simp) (by simp)
+          have tailEach : ∀ (offset : Nat) (tailKind : AbiKind)
+              (tailValue : Value),
+              kinds[offset]? = some tailKind →
+              values[offset]? = some tailValue →
+              ∃ lane, ValueRel witness tailKind lane tailValue := by
+            intro offset tailKind tailValue kindAt valueAt
+            exact each (offset + 1) tailKind tailValue (by simpa using kindAt)
+              (by simpa using valueAt)
+          by_cases admissible : kind.isObjectField = true
+          · simp only [closureOwnedValues, admissible, if_true, List.foldl_cons]
+            exact ih values tailSize tailEach
+              (markPersistentValueFuel fuel runtime value)
+          · have rejected : kind.isObjectField = false := by
+              cases found : kind.isObjectField <;> simp_all
+            have headNoOp :=
+              headRelated.markPersistentNoOp_of_notObjectField rejected fuel runtime
+            simp only [closureOwnedValues, rejected, List.foldl_cons]
+            rw [headNoOp]
+            exact ih values tailSize tailEach runtime
+
+/-- The semantic persistence fold over every closure capture agrees with the
+concrete ownership decoder's filtered capture order. -/
+theorem ClosureObjectRel.foldl_markPersistent_closureOwnedValues
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {captures : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds captures)
+    (fuel : Nat) (runtime : RuntimeState) :
+    captures.toList.foldl (init := runtime) (markPersistentValueFuel fuel) =
+      (closureOwnedValues captureKinds.toList captures.toList).foldl
+        (init := runtime) (markPersistentValueFuel fuel) := by
+  apply closureOwnedValues_foldl_markPersistent_eq_of_each witness
+    captureKinds.toList captures.toList
+  · simpa using related.captureKindsSize
+  · intro offset kind value kindAt valueAt
+    obtain ⟨lane, _, laneRelated⟩ := related.captures offset kind value
+      (by simpa using kindAt) (by simpa using valueAt)
+    exact ⟨lane, laneRelated⟩
+
+/-- One ordinary closure node plus any correct child recursion composes to the
+matching positive-fuel persistence step. Scalar captures are removed by the
+concrete descriptor filter and reinserted through their proved semantic no-op. -/
+theorem LiveHeapRel.markPersistentFuel_refines_closure_step
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {function : Lean.Name} {arity : Nat}
+    {captures : Array Value} {descriptors : ClosureDescriptorTable} {fuel : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (objectEq : cell.object = .closure function arity captures)
+    (descriptorsEq : descriptors = witness.closureDescriptors)
+    (recurse : ∀ {before : MemoryState} {semanticState : RuntimeState}
+        {childLocation : Location} {childAddress : Word32},
+      LiveHeapRel before witness semanticState →
+      witness.locations.lookup? childLocation = some childAddress →
+      ∃ after,
+        markPersistentFuel fuel before childAddress descriptors = .ok after ∧
+        LiveHeapRel after witness
+          (markPersistentValueFuel fuel semanticState
+            (.object (.heap childLocation)))) :
+    ∃ result,
+      markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
+      LiveHeapRel result witness {
+        runtime with heap :=
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } := by
+  subst descriptors
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated headerRead headerKind refCount
+        persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      cases closureRelated with
+      | @closure storedFunction storedArity captureKinds storedCaptures header _
+          storedObjectEq objectRelated headerRead headerKind descriptorLookup fixedCount
+          extent refCount persistent cellLive =>
+          rw [objectEq] at storedObjectEq
+          have closureEq := HeapObject.closure.inj storedObjectEq
+          obtain ⟨functionEq, arityEq, capturesEq⟩ := closureEq
+          subst storedFunction
+          subst storedArity
+          subst storedCaptures
+          obtain ⟨words, closureWordsRead, ownershipRelated⟩ :=
+            objectRelated.readClosureOwnedReferences
+          have ownedRead :
+              readOwnedReferences state address header witness.closureDescriptors =
+                .ok words := by
+            simpa [readOwnedReferences, headerKind, descriptorLookup,
+              objectRelated.captureKindsSize, fixedCount] using closureWordsRead
+          obtain ⟨parentState, parentRuntime, targetHeader, targetHeaderRead,
+              parentWrite, semanticUpdate, parentRelated⟩ :=
+            related.writePersistentMetadata mapped found live
+          rw [headerRead] at targetHeaderRead
+          have targetHeaderEq := Except.ok.inj targetHeaderRead
+          subst targetHeader
+          unfold setCell at semanticUpdate
+          cases replacedEq : replaceCell runtime.heap location
+              { cell with rc := 0, persistent := true } with
+          | none =>
+              rw [replacedEq] at semanticUpdate
+              contradiction
+          | some parentHeap =>
+              rw [replacedEq] at semanticUpdate
+              have parentRuntimeEq := Except.ok.inj semanticUpdate
+              subst parentRuntime
+              obtain ⟨result, concreteFold, filteredRelated⟩ :=
+                ownershipRelated.foldlM_markPersistent_refines parentRelated recurse
+              have foldEq := objectRelated.foldl_markPersistent_closureOwnedValues fuel
+                ({ runtime with heap := parentHeap } : RuntimeState)
+              rw [← foldEq] at filteredRelated
+              have rootHeapEq :
+                  markPersistentLocationFuel (fuel + 1) runtime.heap location =
+                    captures.toList.foldl (init := parentHeap)
+                      (fun heap value =>
+                        match value with
+                        | .object (.heap child) =>
+                            markPersistentLocationFuel fuel heap child
+                        | _ => heap) := by
+                simp only [markPersistentLocationFuel, found]
+                rw [if_neg (by simp [live, ordinary])]
+                rw [replacedEq, objectEq]
+                simp only [HeapObject.ownedValues]
+                rw [← Array.foldl_toList]
+                rfl
+              have addressHeap :=
+                (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+                  headerRead).1
+              have headerOrdinary : header.persistent = false :=
+                persistent.trans ordinary
+              have concreteOperation :
+                  markPersistentFuel (fuel + 1) state address
+                    witness.closureDescriptors =
+                    .ok result := by
+                simp only [markPersistentFuel]
+                rw [addressHeap, headerRead]
+                simp only [liftMemory, Bind.bind, Except.bind]
+                rw [if_neg (by simp [headerOrdinary])]
+                rw [ownedRead, parentWrite]
+                exact concreteFold
+              refine ⟨result, concreteOperation, ?_⟩
+              rw [foldl_markPersistentValueFuel] at filteredRelated
+              simpa [rootHeapEq] using filteredRelated
+
 /-- Syntactic classification used by cache composition: only a semantic heap
 reference requires the recursive persistence simulation. -/
 def IsNonHeapReference : Value → Prop
