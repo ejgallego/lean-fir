@@ -1,9 +1,13 @@
 import FirTalos.ConcreteResolver
+import FirTalos.DifferentialExamples
 import Fir.Wasm.Examples
 import Interpreter.Wasm.Semantics
 
 namespace FirTalos.Concrete
 
+open Lean.Compiler
+open Fir.LeanIR.Impure
+open Fir.LeanIR.InterpreterExamples
 open Fir.Wasm.Concrete
 
 private structure RuntimeFixture where
@@ -36,8 +40,8 @@ private def RuntimeFixture.importsResolveExactly (fixture : RuntimeFixture) : Bo
           pair.fst.signature.results.toList.map FirTalos.abiKind
 
 private def RuntimeFixture.runMain (fixture : RuntimeFixture) : Wasm.Result Host :=
-  Wasm.run 100 fixture.target fixture.source.imports.size
-    (fixture.target.initialStore (α := Host)) [] fixture.hosts.env
+  Wasm.run 100 fixture.target ((fixture.target.findExport "main").getD 0)
+    (initialStore fixture.source fixture.target) [] fixture.hosts.env
 
 private def fixtureReturnsWord? (program : Fir.LeanIR.ImpureProgram)
     (expected : UInt32) : Bool :=
@@ -48,6 +52,15 @@ private def fixtureReturnsWord? (program : Fir.LeanIR.ImpureProgram)
           result == expected && store.host.failure?.isNone
       | _ => false
 
+private def fixtureReturnsI64? (program : Fir.LeanIR.ImpureProgram)
+    (expected : UInt64) : Bool :=
+  (runtimeFixture? program).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Success [.i64 result] store =>
+          result == expected && store.host.failure?.isNone
+      | _ => false
+
 -- Complete lowered modules now execute against concrete linear memory rather
 -- than semantic handles for the first artifact-ready fragment.
 #guard fixtureReturnsWord? Fir.Wasm.abiLiteralProgram 85
@@ -55,6 +68,102 @@ private def fixtureReturnsWord? (program : Fir.LeanIR.ImpureProgram)
 #guard fixtureReturnsWord? Fir.Wasm.abiCtorProjectionProgram 15
 
 #guard fixtureReturnsWord? Fir.Wasm.abiCaseProgram 3
+
+#guard fixtureReturnsWord? Fir.Wasm.abiDefaultCaseProgram 11
+
+#guard fixtureReturnsI64? FirTalos.abiUSizeProjectionProgram 0
+
+private def acceptedScalarLayoutMismatchIsStructured : Bool :=
+  match runtimeFixture? Fir.Wasm.abiMutationProgram with
+  | some fixture =>
+      fixture.importsResolveExactly &&
+        match fixture.runMain with
+        | .Trap store _ =>
+            store.host.failure? == some (.runtime (.source (.runtime
+              (.scalarFieldMissing 1 0))))
+        | _ => false
+  | none => false
+
+#guard acceptedScalarLayoutMismatchIsStructured
+
+/-- The positive scalar-mutation fixture uses the exact slot index emitted by
+Lean 4.32's `ToImpure`: object fields plus `USize` fields. -/
+private def compilerShapedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 2))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl u usizeType (.lit (.usize 55))) <|
+      .uset p 0 u <|
+      .let (letDecl s u64Type (.lit (.uint64 66))) <|
+      .sset p 2 0 s u64Type <|
+      .oset p 0 (.fvar y) <|
+      .setTag p 4 <|
+      .let (letDecl r u64Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsI64? compilerShapedScalarMutationProgram 66
+
+private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .dec p 1 true false (some 1) <|
+      .let (letDecl r LCNF.ImpureType.tobject (.lit (.nat 12))) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? decrementGraphProgram 25
+
+private def deleteObjectProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 20))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .del p <|
+      .let (letDecl r LCNF.ImpureType.tobject (.lit (.nat 22))) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? deleteObjectProgram 45
+
+private def cachedHeapDecl : LCNF.Decl .impure :=
+  decl `FirTalos.Concrete.cachedHeap #[] objType (.code <|
+    .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 42))) <|
+    .let (letDecl p objType
+      (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+    .return p)
+
+private def cachedQ : Lean.FVarId := Lean.FVarId.mk `cachedQ
+
+private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[cachedHeapDecl,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl p objType
+          (.fap `FirTalos.Concrete.cachedHeap #[])) <|
+        .let (letDecl cachedQ objType
+          (.fap `FirTalos.Concrete.cachedHeap #[])) <|
+        .let (letDecl r LCNF.ImpureType.tobject (.oproj 0 cachedQ)) <|
+        .return r)] }
+
+#guard fixtureReturnsWord? cachedHeapProgram 85
+
+#guard fixtureReturnsWord? Fir.Wasm.abiObjectMutationProgram 177
+
+#guard fixtureReturnsWord? Fir.Wasm.abiTagMutationProgram 199
+
+#guard fixtureReturnsI64?
+  (FirTalos.abiBoxRoundtripProgram FirTalos.differentialMaxUInt64)
+  FirTalos.differentialMaxUInt64
+
+#guard fixtureReturnsWord? FirTalos.abiIsSharedTaggedProgram 1
+
+#guard fixtureReturnsWord? FirTalos.abiIsSharedUniqueProgram 0
+
+#guard fixtureReturnsWord? Fir.Wasm.abiResetReuseProgram 143
+
+#guard fixtureReturnsWord? Fir.Wasm.abiSharedResetProgram 163
+
+#guard fixtureReturnsWord? Fir.Wasm.abiDirectCallProgram 23
 
 -- Unsupported runtime families are rejected by resolution rather than
 -- reaching a concrete host that only traps after instantiation.

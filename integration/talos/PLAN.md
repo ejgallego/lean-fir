@@ -2295,6 +2295,20 @@ linear memory. String/scalar literals, floating scalar operations, legacy
 fragment gates. The emitted Node/browser artifacts still use the semantic
 JavaScript host; switching that external-engine boundary remains separate.
 
+W6.6ak widens that resolver path across the closed supported corpus. Concrete
+host initialization now derives typed cache slots from the same source
+initializers that create Wasm flag/value globals, allowing a twice-called
+cached constructor graph to exercise miss publication, recursive persistence,
+and hit reuse. Whole-module executions additionally cover default cases,
+direct calls, `USize` and packed scalar access/mutation, object/tag mutation,
+integer boxing/unboxing, sharing, checked increment/decrement, deletion, and
+both reset/reuse branches. This audit found
+`FIR-BUG-wasm-none-scalar-slot-layout-contract`: the shared hand-written
+mutation fixture uses index `1` despite a two-slot object/`USize` prefix. The
+regression retains its exact structured failure, while a separate index-`2`
+fixture follows Lean 4.32 `ToImpure` and passes concretely. No shared contract
+was weakened or changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

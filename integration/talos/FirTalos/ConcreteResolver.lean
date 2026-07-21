@@ -93,6 +93,28 @@ def ResolvedHosts.env (resolved : ResolvedHosts) : Wasm.HostEnv Host :=
 def ResolvedHosts.spec (resolved : ResolvedHosts) : Wasm.HostSpec Host :=
   { contracts := resolved.hosts.map (·.contract) }
 
+/-- The concrete runtime combines each generated value global and its Wasm
+initialized flag into one typed optional slot. Derive those slots from the
+same cached declarations used by lowering. -/
+def cacheDeclarations (source : Fir.Wasm.Module) :
+    List (Lean.Name × AbiKind) :=
+  source.initializers.toList.filterMap fun name => do
+    let signature ← source.callSignature? (.declaration name)
+    let kind ← signature.results[0]?
+    return (name, kind)
+
+/-- Prepare host-owned runtime state for a validated module. Physical Wasm
+globals remain in Talos's store; this table is the typed concrete counterpart
+used by `cacheSet`. -/
+def initialHost (source : Fir.Wasm.Module) : Host :=
+  { runtime := {
+      globals := Fir.Wasm.Concrete.ConcreteGlobals.declare
+        (cacheDeclarations source) } }
+
+def initialStore (source : Fir.Wasm.Module) (target : Wasm.Module) :
+    Wasm.Store Host :=
+  { target.initialStore (α := Host) with host := initialHost source }
+
 private def resolveImports (index : Nat) :
     List Import → Except ResolverError (List ResolvedHost)
   | [] => .ok []
