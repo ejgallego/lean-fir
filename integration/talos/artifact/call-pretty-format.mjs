@@ -12,10 +12,13 @@ const manifest = JSON.parse(fs.readFileSync(`${artifactPath}.json`, "utf8"));
 assert.ok(WebAssembly.validate(bytes), `${artifactPath} failed WebAssembly validation`);
 assert.equal(manifest.result, "object");
 assert.deepStrictEqual(manifest.params, ["tobject", "tobject", "tobject", "tobject"]);
+assert.ok(!Object.hasOwn(manifest, "fixture"));
+assert.ok(!Object.hasOwn(manifest, "arguments"));
+assert.ok(!Object.hasOwn(manifest, "initialRuntime"));
 
-// The manifest contains one reproducible build-time invocation. A real caller
-// does not need that heap: it may allocate ordinary semantic runtime values and
-// pass their opaque handles directly to the reusable module.
+// This descriptor intentionally contains no reproducible build-time
+// invocation. A caller allocates ordinary semantic runtime values and passes
+// their opaque handles directly to the reusable module.
 const host = new SemanticHost(undefined, formatExternalRegistry);
 const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
 const prettyM = instance.exports[manifest.entry];

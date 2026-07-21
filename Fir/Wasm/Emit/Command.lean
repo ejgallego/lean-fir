@@ -6,6 +6,7 @@ namespace Fir.Wasm.Emit.Source
 open Lean Elab Command
 
 syntax (name := firWasmEmit) "#fir_wasm_emit " ident " to " str : command
+syntax (name := firWasmEmitModule) "#fir_wasm_emit_module " ident " to " str : command
 syntax (name := firWasmEmitCase) "#fir_wasm_emit_case " str " to " str : command
 declare_syntax_cat firWasmArg
 syntax "erased" : firWasmArg
@@ -89,10 +90,28 @@ private def writeArtifact (stx entry output : Syntax)
     if runtime.heap.isEmpty then compile entryName args
     else compileWithRuntime entryName runtime args
 
+private def writeModuleArtifact (stx entry output : Syntax) : CommandElabM Unit := do
+  let some outputPath := output.isStrLit? |
+    throwErrorAt output "expected an output path"
+  let entryName ← resolveGlobalConstNoOverload entry
+  let result ← liftCoreM <| compileModule entryName
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwErrorAt entry "failed to emit {entryName}: {repr error}"
+  match ← artifact.write outputPath with
+  | .ok () => logInfoAt stx s!"wrote {artifact.bytes.size} bytes to {outputPath}"
+  | .error error => throwErrorAt output "failed to describe {entryName}: {repr error}"
+
 @[command_elab firWasmEmit]
 def elabFirWasmEmit : CommandElab
   | stx@`(#fir_wasm_emit $entry:ident to $output:str) => do
       writeArtifact stx entry output {} #[]
+  | _ => throwUnsupportedSyntax
+
+@[command_elab firWasmEmitModule]
+def elabFirWasmEmitModule : CommandElab
+  | stx@`(#fir_wasm_emit_module $entry:ident to $output:str) => do
+      writeModuleArtifact stx entry output
   | _ => throwUnsupportedSyntax
 
 @[command_elab firWasmEmitWith]

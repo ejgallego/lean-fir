@@ -307,6 +307,19 @@ def entryResultKind (entry : Name) (function : Fir.Wasm.Function) : Except Strin
   | [kind] => pure kind
   | results => throw s!"entry {entry} must return exactly one ABI value, got {results.length}"
 
+/-- Describe a reusable module without attaching any particular invocation. -/
+def moduleJson (sourceEntry entry : Name) (module : Fir.Wasm.Module) : Except String Json := do
+  let function ← entryFunction module entry
+  let result ← entryResultKind entry function
+  let params := function.params.map (·.snd)
+  let imports ← module.imports.toList.mapM importJson
+  return Json.mkObj [
+    ("sourceEntry", sourceEntry.toString),
+    ("entry", entry.toString),
+    ("result", abiKindName result),
+    ("params", Json.arr (params.map fun kind => (abiKindName kind : Json))),
+    ("imports", Json.arr imports.toArray)]
+
 def artifactJson (artifactName : String) (sourceEntry entry : Name)
     (module : Fir.Wasm.Module) (args : Array Value) : Except String Json := do
   let function ← entryFunction module entry

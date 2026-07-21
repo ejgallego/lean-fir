@@ -151,6 +151,18 @@ run_cmd do
   let moduleArtifact ← match result with
     | .ok artifact => pure artifact
     | .error error => throwError "parameterized source did not compile: {repr error}"
+  let moduleManifest ← match moduleArtifact.moduleManifest with
+    | .ok manifest => pure manifest
+    | .error error => throwError "parameterized module descriptor failed: {repr error}"
+  let moduleManifestText := moduleManifest.compress
+  unless moduleManifestText.contains
+      "\"entry\":\"Fir.Validation.Corpus.Source.idUSize\"" &&
+      moduleManifestText.contains "\"params\":[\"usize\"]" &&
+      moduleManifestText.contains "\"result\":\"usize\"" do
+    throwError "parameterized module descriptor lost its raw ABI: {moduleManifestText}"
+  for invocationField in #["\"fixture\"", "\"arguments\"", "\"initialRuntime\""] do
+    if moduleManifestText.contains invocationField then
+      throwError "module descriptor retained invocation field {invocationField}"
   let artifact ← match moduleArtifact.withInvocation
       "id-usize-42" ``Fir.Validation.Corpus.Source.idUSize
       ``Fir.Validation.Corpus.Source.idUSize #[.usize 42] with

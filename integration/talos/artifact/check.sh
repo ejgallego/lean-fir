@@ -15,6 +15,7 @@ source_artifacts=(
   source-uint64
   source-nat
   source-usize-id
+  source-usize-id-module
   source-uint8-id
   source-uint16-id
   source-uint32-id
@@ -23,6 +24,7 @@ source_artifacts=(
   source-nat-list-case
   source-pretty-format
   source-pretty-format-coverage
+  source-pretty-format-module
 )
 for source in "${source_artifacts[@]}"; do
   test -s "_build/$source.wasm"
@@ -38,6 +40,10 @@ for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"
   cmp "_build/$source-first.wasm.lcnf" "_build/$source.wasm.lcnf"
 done
+cmp _build/source-usize-id-module.wasm _build/source-usize-id.wasm
+cmp _build/source-usize-id-module.wasm.lcnf _build/source-usize-id.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm _build/source-pretty-format.wasm
+cmp _build/source-pretty-format-module.wasm.lcnf _build/source-pretty-format.wasm.lcnf
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -136,7 +142,7 @@ node --input-type=module -e '
   _build/source-nat-list-case.wasm \
   _build/source-pretty-format.wasm \
   _build/source-pretty-format-coverage.wasm
-node call-pretty-format.mjs _build/source-pretty-format.wasm
+node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node test-semantic-host.mjs
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"

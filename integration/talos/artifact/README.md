@@ -70,6 +70,19 @@ def idUSize (value : USize) : USize := value
 #fir_wasm_emit idUSize with [usize(42)] to "id-usize.wasm"
 ```
 
+Consumers that will supply every argument at runtime can emit the reusable
+module without attaching a sample invocation:
+
+```lean
+#fir_wasm_emit_module idUSize to "id-usize-module.wasm"
+```
+
+Its JSON descriptor contains only `sourceEntry`, exported `entry`, `params`,
+`result`, and the exact semantic-host `imports`. It deliberately has no
+`fixture`, `arguments`, or `initialRuntime`; those remain invocation-manifest
+fields for reproducible corpus runs. Module-only and invocation-bearing
+emission produce identical `.wasm` and `.lcnf` files.
+
 The command writes `answer.wasm`, the Node-compatible ABI manifest
 `answer.wasm.json`, and the captured final-impure program
 `answer.wasm.lcnf`. Invocation arguments are checked against the ABI kinds
@@ -110,15 +123,16 @@ A companion invocation of the same Wasm module exercises all eight `Format`
 constructors, both flattened and real line breaks, Unicode text, and a newline
 embedded inside `Format.text`; V8 again compares with a native Lean oracle.
 
-`call-pretty-format.mjs` demonstrates the consumer boundary without using the
-attached fixture invocation. It creates an empty `SemanticHost`, instantiates
-the module once, allocates the eight ordinary Lean 4.32 `Format` layouts
-directly in that heap, encodes their raw `tobject` handles, and calls the same
-export repeatedly. The small constructor helpers describe only runtime layout;
-they do not form a second AST. Run it after artifact generation with:
+`call-pretty-format.mjs` demonstrates the consumer boundary using the
+invocation-free module descriptor. It creates an empty `SemanticHost`,
+instantiates the module once, allocates the eight ordinary Lean 4.32 `Format`
+layouts directly in that heap, encodes their raw `tobject` handles, and calls
+the same export repeatedly. The small constructor helpers describe only
+runtime layout; they do not form a second AST. Run it after artifact generation
+with:
 
 ```text
-node call-pretty-format.mjs _build/source-pretty-format.wasm
+node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
 The client also retains the focused expected-failure regression for

@@ -141,6 +141,9 @@ end Fir.Wasm.Emit.SourceFixture
 #fir_wasm_emit_case "usize-roundtrip"
   to "_build/source-usize-id.wasm"
 
+#fir_wasm_emit_module Fir.Validation.Corpus.Source.idUSize
+  to "_build/source-usize-id-module.wasm"
+
 #fir_wasm_emit_case "uint8-roundtrip"
   to "_build/source-uint8-id.wasm"
 
@@ -169,6 +172,9 @@ run_cmd do
   let moduleArtifact ← match result with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile Format facade: {repr error}"
+  match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
+  | .ok () => pure ()
+  | .error error => throwError "failed to write reusable Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

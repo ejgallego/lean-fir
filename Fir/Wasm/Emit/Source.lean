@@ -83,6 +83,11 @@ def compileModule (entry : Name) (dependencies : Array Name := #[]) :
     Fir.Validation.Lcnf.compileEntry entry dependencies
   compileModuleArtifact source
 
+/-- Build the invocation-free descriptor for a reusable compiled module. -/
+def ModuleArtifact.moduleManifest (artifact : ModuleArtifact) : Except CompileError Json :=
+  Manifest.moduleJson artifact.source.entry artifact.source.entry artifact.module
+    |>.mapError .manifest
+
 /-- Attach one checked semantic invocation to an already compiled module. -/
 def ModuleArtifact.withInvocation (artifact : ModuleArtifact) (artifactName : String)
     (sourceEntry entry : Name) (args : Array Value) : Except CompileError Artifact := do
@@ -210,11 +215,24 @@ def compileClosed (entry : Name) (dependencies : Array Name := #[]) :
     CoreM (Except CompileError Artifact) :=
   compile entry #[] dependencies
 
-def Artifact.write (artifact : Artifact) (path : System.FilePath) : IO Unit := do
+private def writeArtifactFiles (artifact : ModuleArtifact) (manifest : Json)
+    (path : System.FilePath) : IO Unit := do
   if let some parent := path.parent then
     IO.FS.createDirAll parent
   IO.FS.writeBinFile path artifact.bytes
-  IO.FS.writeFile (path.toString ++ ".json") artifact.manifest.compress
+  IO.FS.writeFile (path.toString ++ ".json") manifest.compress
   IO.FS.writeFile (path.toString ++ ".lcnf") (artifact.formattedLcnf ++ "\n")
+
+/-- Write reusable Wasm, its invocation-free ABI descriptor, and captured LCNF. -/
+def ModuleArtifact.write (artifact : ModuleArtifact) (path : System.FilePath) :
+    IO (Except CompileError Unit) := do
+  let manifest ← match artifact.moduleManifest with
+    | .ok manifest => pure manifest
+    | .error error => return .error error
+  writeArtifactFiles artifact manifest path
+  return .ok ()
+
+def Artifact.write (artifact : Artifact) (path : System.FilePath) : IO Unit := do
+  writeArtifactFiles artifact.toModuleArtifact artifact.manifest path
 
 end Fir.Wasm.Emit.Source
