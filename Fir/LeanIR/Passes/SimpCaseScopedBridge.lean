@@ -6743,6 +6743,270 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_reachableCaseTag
   shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge bridge
     reachableCaseTag_selectionLaws certificates run
 
+/-- A lookup-facing alpha relation that additionally records preservation of
+the declaration name used by `Program.findDecl?`. The alpha relation itself
+intentionally does not identify declaration names, so list-level lifting must
+carry this compiler invariant separately. -/
+structure NamedProgramDeclRelated
+    (left right : LCNF.Decl .impure) : Prop where
+  name_eq : left.name = right.name
+  declaration : ProgramDeclRelated left right
+
+/-- Pointwise name-preserving declaration alpha relations align every named
+lookup, including programs with duplicate declaration names. -/
+theorem programsRelated_of_namedDeclList
+    (related : ListRel NamedProgramDeclRelated left right) :
+    ProgramsRelated ({ decls := left.toArray } : ImpureProgram)
+      ({ decls := right.toArray } : ImpureProgram) := by
+  intro name
+  simp only [Program.findDecl?, ← Array.find?_toList]
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      rename_i leftHead rightHead leftTail rightTail
+      have predicateEq :
+          (leftHead.name == name) = (rightHead.name == name) := by
+        rw [head.name_eq]
+      simp only [List.find?_cons]
+      rw [predicateEq]
+      cases rightHead.name == name with
+      | false => exact ih
+      | true => exact .some head.declaration
+
+/-- Bidirectional pointwise declaration alpha evidence, with one shared name
+alignment used by both lookup orientations. -/
+structure NamedProgramDeclBirelated
+    (left right : LCNF.Decl .impure) : Prop where
+  name_eq : left.name = right.name
+  forward : ProgramDeclRelated left right
+  backward : ProgramDeclRelated right left
+
+theorem namedProgramDeclList_forward
+    (related : ListRel NamedProgramDeclBirelated left right) :
+    ListRel NamedProgramDeclRelated left right := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons {
+        name_eq := head.name_eq
+        declaration := head.forward
+      } ih
+
+theorem namedProgramDeclList_backward
+    (related : ListRel NamedProgramDeclBirelated left right) :
+    ListRel NamedProgramDeclRelated right left := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons {
+        name_eq := head.name_eq.symm
+        declaration := head.backward
+      } ih
+
+/-- Pointwise bidirectional declaration evidence assembles the whole-program
+alpha boundary needed by a structural/alpha/structural round. -/
+theorem programsBirelated_of_namedDeclList
+    (related : ListRel NamedProgramDeclBirelated left right) :
+    ProgramsBirelated ({ decls := left.toArray } : ImpureProgram)
+      ({ decls := right.toArray } : ImpureProgram) := by
+  exact {
+    forward := programsRelated_of_namedDeclList
+      (namedProgramDeclList_forward related)
+    backward := programsRelated_of_namedDeclList
+      (namedProgramDeclList_backward related)
+  }
+
+/-- One declaration-local structural/alpha/structural round. Unlike
+`ProgramDeclRelated`, the middle alpha edge explicitly preserves the lookup
+name so it can be assembled pointwise into a whole-program round. -/
+structure StructuralAlphaStructuralDecl
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (before after : LCNF.Decl .impure) where
+  structuralMiddle : LCNF.Decl .impure
+  alphaMiddle : LCNF.Decl .impure
+  structuralBefore : DeclRelated (CodeRel validCase)
+    before structuralMiddle
+  alpha : NamedProgramDeclBirelated structuralMiddle alphaMiddle
+  structuralAfter : DeclRelated (CodeRel validCase) alphaMiddle after
+
+/-- Pointwise declaration rounds with their two intermediate declaration
+lists retained explicitly. This is the list-level representation from which
+whole-program rounds are constructed. -/
+structure StructuralAlphaStructuralDeclList
+    (validCase : LCNF.Cases .impure → Nat → Prop)
+    (before after : List (LCNF.Decl .impure)) where
+  structuralMiddle : List (LCNF.Decl .impure)
+  alphaMiddle : List (LCNF.Decl .impure)
+  structuralBefore : ListRel (DeclRelated (CodeRel validCase))
+    before structuralMiddle
+  alpha : ListRel NamedProgramDeclBirelated structuralMiddle alphaMiddle
+  structuralAfter : ListRel (DeclRelated (CodeRel validCase))
+    alphaMiddle after
+
+def StructuralAlphaStructuralDeclList.nil :
+    StructuralAlphaStructuralDeclList validCase [] [] := {
+  structuralMiddle := []
+  alphaMiddle := []
+  structuralBefore := .nil
+  alpha := .nil
+  structuralAfter := .nil
+}
+
+def StructuralAlphaStructuralDeclList.cons
+    (head : StructuralAlphaStructuralDecl validCase beforeHead afterHead)
+    (tail : StructuralAlphaStructuralDeclList validCase beforeTail afterTail) :
+    StructuralAlphaStructuralDeclList validCase
+      (beforeHead :: beforeTail) (afterHead :: afterTail) := {
+  structuralMiddle := head.structuralMiddle :: tail.structuralMiddle
+  alphaMiddle := head.alphaMiddle :: tail.alphaMiddle
+  structuralBefore := .cons head.structuralBefore tail.structuralBefore
+  alpha := .cons head.alpha tail.alpha
+  structuralAfter := .cons head.structuralAfter tail.structuralAfter
+}
+
+/-- Pointwise declaration rounds assemble into the existing whole-program
+semantic phase object without adding lookup or name-uniqueness assumptions. -/
+def StructuralAlphaStructuralDeclList.programRound
+    (round : StructuralAlphaStructuralDeclList validCase before after) :
+    StructuralAlphaStructuralPrograms validCase
+      ({ decls := before.toArray } : ImpureProgram)
+      ({ decls := after.toArray } : ImpureProgram) := {
+  structuralMiddle := { decls := round.structuralMiddle.toArray }
+  alphaMiddle := { decls := round.alphaMiddle.toArray }
+  structuralBefore := by
+    simpa [ProgramRelated] using round.structuralBefore
+  alpha := programsBirelated_of_namedDeclList round.alpha
+  structuralAfter := by
+    simpa [ProgramRelated] using round.structuralAfter
+}
+
+/-- Lift one scoped code round to a declaration-local round while preserving
+all declaration identity and ABI metadata. -/
+def ScopedCodePhaseResult.declarationRound
+    {declaration : LCNF.Decl .impure}
+    (round : ScopedCodePhaseResult validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    StructuralAlphaStructuralDecl validCase
+      { declaration with value := .code source }
+      { declaration with value := .code target } := by
+  let factor := round.trifactor
+  have alphaForward : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList
+      factor.structuralMiddle factor.alphaMiddle := by
+    apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
+      parameterShape
+    simpa [ScopeIndex.pushParams] using factor.alphaForward
+  have alphaBackward : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList
+      factor.alphaMiddle factor.structuralMiddle := by
+    exact paramBodyRelated_replaceCode_backward
+      (index := ScopeIndex.empty)
+      (by simpa [ScopeIndex.empty] using parameterShape)
+      (by simpa [ScopeIndex.pushParams] using factor.alphaBackward)
+  exact {
+    structuralMiddle :=
+      { declaration with value := .code factor.structuralMiddle }
+    alphaMiddle := { declaration with value := .code factor.alphaMiddle }
+    structuralBefore := decl_update_code_related factor.structuralBefore
+    alpha := {
+      name_eq := rfl
+      forward := ProgramDeclRelated.code declaration declaration
+        factor.structuralMiddle factor.alphaMiddle alphaForward
+      backward := ProgramDeclRelated.code declaration declaration
+        factor.alphaMiddle factor.structuralMiddle alphaBackward
+    }
+    structuralAfter := decl_update_code_related factor.structuralAfter
+  }
+
+/-- Complete proof-facing source data for one declaration. Code declarations
+carry the recursive certificate tree and the top-level parameter shape needed
+to lift every local phase round; external declarations require no code proof. -/
+inductive ScopedDeclTargetCertificate
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    LCNF.Decl .impure → Type where
+  | code
+      (declaration : LCNF.Decl .impure)
+      (code : LCNF.Code .impure)
+      (tree : ScopedCodeTargetCertificateTree validCase
+        (ScopeIndex.empty.pushParams declaration.params) code)
+      (parameterShape : ParamBodyRelated
+        (leftJoins := []) (rightJoins := [])
+        ({} : FVarIdMap FVarId) [] []
+        declaration.params.toList declaration.params.toList code code) :
+      ScopedDeclTargetCertificate validCase
+        { declaration with value := .code code }
+  | extern
+      (declaration : LCNF.Decl .impure)
+      (metadata : ExternAttrData) :
+      ScopedDeclTargetCertificate validCase
+        { declaration with value := .extern metadata }
+
+/-- Pointwise declaration certificates in compiler declaration order. Keeping
+this in `Type` permits recursive construction of program traces while every
+individual proof component remains proposition-valued. -/
+inductive ScopedDeclTargetCertificateList
+    (validCase : LCNF.Cases .impure → Nat → Prop) :
+    List (LCNF.Decl .impure) → Type where
+  | nil : ScopedDeclTargetCertificateList validCase []
+  | cons
+      (head : ScopedDeclTargetCertificate validCase declaration)
+      (tail : ScopedDeclTargetCertificateList validCase declarations) :
+      ScopedDeclTargetCertificateList validCase
+        (declaration :: declarations)
+
+/-- A certified declaration supplies the identity phase round used when a
+different declaration is taking one of its local non-lockstep rounds. -/
+def ScopedDeclTargetCertificate.identityRound
+    (certificate : ScopedDeclTargetCertificate validCase declaration) :
+    StructuralAlphaStructuralDecl validCase declaration declaration :=
+  match certificate with
+  | @ScopedDeclTargetCertificate.code _ declaration codeValue tree parameterShape =>
+      (ScopedCodeTargetCertificate.identity tree.root).result.declarationRound
+        parameterShape
+  | @ScopedDeclTargetCertificate.extern _ declaration metadata =>
+      let structural : DeclRelated (CodeRel validCase)
+          { declaration with value := .extern metadata }
+          { declaration with value := .extern metadata } := {
+        name_eq := rfl
+        levelParams_eq := rfl
+        type_eq := rfl
+        params_eq := rfl
+        safe_eq := rfl
+        value := .extern metadata
+        recursive_eq := rfl
+        inlineAttr_eq := rfl
+      }
+      {
+        structuralMiddle := { declaration with value := .extern metadata }
+        alphaMiddle := { declaration with value := .extern metadata }
+        structuralBefore := structural
+        alpha := {
+          name_eq := rfl
+          forward := ProgramDeclRelated.extern declaration declaration
+            metadata metadata rfl rfl rfl
+          backward := ProgramDeclRelated.extern declaration declaration
+            metadata metadata rfl rfl rfl
+        }
+        structuralAfter := structural
+      }
+
+/-- Pointwise source certificates assemble the whole declaration-list
+identity round used to lift a local declaration trace through its context. -/
+def ScopedDeclTargetCertificateList.identityRound
+    (certificates : ScopedDeclTargetCertificateList validCase declarations) :
+    StructuralAlphaStructuralDeclList validCase declarations declarations :=
+  match certificates with
+  | .nil => .nil
+  | .cons head tail => .cons head.identityRound tail.identityRound
+
 /-- A one-declaration program wrapper used to lift a scoped code trace to the
 existing whole-program structural/alpha/structural semantics. All declaration
 identity and ABI fields are retained definitionally. -/
@@ -6799,36 +7063,10 @@ def ScopedCodePhaseResult.singletonProgramRound
       declaration.params.toList declaration.params.toList source source) :
     StructuralAlphaStructuralPrograms validCase
       (singletonCodeProgram declaration source)
-      (singletonCodeProgram declaration target) := by
-  let factor := round.trifactor
-  have alphaForward : ParamBodyRelated
-      (leftJoins := []) (rightJoins := [])
-      ({} : FVarIdMap FVarId) [] []
-      declaration.params.toList declaration.params.toList
-      factor.structuralMiddle factor.alphaMiddle := by
-    apply paramBodyRelated_replaceCode (index := ScopeIndex.empty)
-      parameterShape
-    simpa [ScopeIndex.pushParams] using factor.alphaForward
-  have alphaBackward : ParamBodyRelated
-      (leftJoins := []) (rightJoins := [])
-      ({} : FVarIdMap FVarId) [] []
-      declaration.params.toList declaration.params.toList
-      factor.alphaMiddle factor.structuralMiddle := by
-    exact paramBodyRelated_replaceCode_backward
-      (index := ScopeIndex.empty)
-      (by simpa [ScopeIndex.empty] using parameterShape)
-      (by simpa [ScopeIndex.pushParams] using factor.alphaBackward)
-  exact {
-    structuralMiddle := singletonCodeProgram declaration
-      factor.structuralMiddle
-    alphaMiddle := singletonCodeProgram declaration factor.alphaMiddle
-    structuralBefore := singletonCodeProgram_structural factor.structuralBefore
-    alpha := {
-      forward := singletonCodeProgram_alpha alphaForward
-      backward := singletonCodeProgram_alpha alphaBackward
-    }
-    structuralAfter := singletonCodeProgram_structural factor.structuralAfter
-  }
+      (singletonCodeProgram declaration target) :=
+  (StructuralAlphaStructuralDeclList.cons
+      (round.declarationRound parameterShape)
+      (StructuralAlphaStructuralDeclList.nil (validCase := validCase))).programRound
 
 /-- The endpoint alpha identity of one round refreshes the parameter-body
 shape needed to lift the following round. -/
