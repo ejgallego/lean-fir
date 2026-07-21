@@ -6729,6 +6729,20 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
       bridge)
     certificates run
 
+/-- Canonical reachable-tag specialization of the preferred traversal API.
+The semantic selection premise is discharged definitionally, leaving only
+the audited alpha bridge, complete source certificates, and the executable
+shadow run. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_reachableCaseTag
+    (bridge : UpstreamBridge)
+    (certificates : ScopedCodeTargetCertificateTree ReachableCaseTag
+      index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      ReachableCaseTag index source target) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge bridge
+    reachableCaseTag_selectionLaws certificates run
+
 /-- A one-declaration program wrapper used to lift a scoped code trace to the
 existing whole-program structural/alpha/structural semantics. All declaration
 identity and ABI fields are retained definitionally. -/
@@ -6872,6 +6886,71 @@ theorem ScopedCodePhaseTrace.singletonProgramSamePhaseCorrectOn
       ((trace.singletonProgramTrace parameterShape).Admissible externals) :=
   structuralAlphaStructuralTraceSamePhaseCorrectOn
     (trace.singletonProgramTrace parameterShape)
+
+/-- A certified endpoint trace reaches the same whole-program semantic
+consumer while retaining its final side-condition and canonical-runtime
+certificate for subsequent passes. -/
+theorem ScopedCodePhaseEndpointCertifiedTrace.singletonProgramSamePhaseCorrectOn
+    {declaration : LCNF.Decl .impure}
+    (trace : ScopedCodePhaseEndpointCertifiedTrace validCase
+      (ScopeIndex.empty.pushParams declaration.params) source target)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source) :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      (singletonCodeProgram declaration source)
+      (singletonCodeProgram declaration target) entries
+      ((trace.trace.singletonProgramTrace parameterShape).Admissible
+        externals) :=
+  trace.trace.singletonProgramSamePhaseCorrectOn parameterShape
+
+/-- End-to-end semantic correctness for the executable shadow traversal. The
+existential trace records the honest non-lockstep phase schedule and exposes
+its certified target for the next compiler pass. -/
+theorem shadowCode_singletonProgramSamePhaseCorrectOn_of_upstreamBridge
+    {declaration : LCNF.Decl .impure}
+    (bridge : UpstreamBridge)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase
+      (ScopeIndex.empty.pushParams declaration.params) source)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source)
+    (run : shadowCode? fuel source = some target) :
+    ∃ trace : ScopedCodePhaseEndpointCertifiedTrace validCase
+        (ScopeIndex.empty.pushParams declaration.params) source target,
+      SamePhaseCorrectOn (Impure.semantics externals)
+        (singletonCodeProgram declaration source)
+        (singletonCodeProgram declaration target) entries
+        ((trace.trace.singletonProgramTrace parameterShape).Admissible
+          externals) := by
+  rcases shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
+      bridge selection certificates run with ⟨trace⟩
+  exact ⟨trace, trace.singletonProgramSamePhaseCorrectOn parameterShape⟩
+
+/-- Canonical reachable-tag specialization of the end-to-end semantic
+theorem; no separate selection contract remains at the public boundary. -/
+theorem shadowCode_singletonProgramSamePhaseCorrectOn_reachableCaseTag
+    {declaration : LCNF.Decl .impure}
+    (bridge : UpstreamBridge)
+    (certificates : ScopedCodeTargetCertificateTree ReachableCaseTag
+      (ScopeIndex.empty.pushParams declaration.params) source)
+    (parameterShape : ParamBodyRelated
+      (leftJoins := []) (rightJoins := [])
+      ({} : FVarIdMap FVarId) [] []
+      declaration.params.toList declaration.params.toList source source)
+    (run : shadowCode? fuel source = some target) :
+    ∃ trace : ScopedCodePhaseEndpointCertifiedTrace ReachableCaseTag
+        (ScopeIndex.empty.pushParams declaration.params) source target,
+      SamePhaseCorrectOn (Impure.semantics externals)
+        (singletonCodeProgram declaration source)
+        (singletonCodeProgram declaration target) entries
+        ((trace.trace.singletonProgramTrace parameterShape).Admissible
+          externals) :=
+  shadowCode_singletonProgramSamePhaseCorrectOn_of_upstreamBridge bridge
+    reachableCaseTag_selectionLaws certificates parameterShape run
 
 theorem scopedCodePhaseTracedTree_caseBoundary_iff_kernel :
     ScopedCaseBoundarySound
