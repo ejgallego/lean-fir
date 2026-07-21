@@ -3878,6 +3878,31 @@ structure ScopedFoldRuntimeTypeLaws
     left.alphaEqv right = true →
     CodeRuntimeTypesEq left right
 
+/-- Unary compiler-output invariant replacing handwritten pairwise runtime
+type compatibility. The recursive shadow traversal preserves this property;
+the transparent alpha checker then derives exact compatibility for each
+accepted fold pair. -/
+structure ScopedFoldRuntimeTypeCanonicalLaws
+    (validCase : LCNF.Cases .impure → Nat → Prop) : Prop where
+  canonical : ∀ {index : ScopeIndex} {code : LCNF.Code .impure},
+    ScopedCodeTargetCertificate validCase index code →
+    CodeRuntimeTypesCanonical code
+
+/-- Canonical endpoint metadata, endpoint self certificates, and the audited
+upstream/local correspondence jointly discharge every pairwise runtime-type
+obligation. -/
+theorem scopedFoldRuntimeTypeLaws_of_canonical
+    (bridge : UpstreamBridge)
+    (canonical : ScopedFoldRuntimeTypeCanonicalLaws validCase) :
+    ScopedFoldRuntimeTypeLaws validCase where
+  compatible := by
+    intro index left right leftCertificate rightCertificate accepted
+    exact codeRuntimeTypesEq_of_local_accepts
+      (canonical.canonical leftCertificate)
+      (canonical.canonical rightCertificate)
+      leftCertificate.side rightCertificate.side.target
+      (index.localAcceptsAtForward_of_upstream bridge left right accepted)
+
 /-- Certified fold transport consumes the actual endpoint certificates from
 the recursive alternatives instead of recovering them from a global law. -/
 structure ScopedFoldAlphaCertifiedTransportLaws
@@ -4379,6 +4404,15 @@ theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
   scopedCasePreparedCertifiedAlphaLaws_of_transport
     (scopedFoldAlphaCertifiedTransportLaws_of_upstreamBridge
       bridge runtimeTypes)
+
+/-- Preferred canonical preparation-alpha constructor. Pairwise runtime-type
+compatibility is derived internally from the unary compiler-output invariant. -/
+theorem scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridgeCanonical
+    (bridge : UpstreamBridge)
+    (canonical : ScopedFoldRuntimeTypeCanonicalLaws validCase) :
+    ScopedCasePreparedCertifiedAlphaLaws validCase :=
+  scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge bridge
+    (scopedFoldRuntimeTypeLaws_of_canonical bridge canonical)
 
 /-- Lift the pure alpha boundary to the fold presentation consumed by the
 three-phase constructor. No additional semantic premise is introduced. -/
@@ -6518,11 +6552,9 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared
     (scopedLocalCaseCertifiedPhaseLaws_of_prepared selection prepared)
     certificates run
 
-/-- Fully assembled certified traversal theorem. After the executable run and
-source certificate tree, the only semantic inputs are reachable-tag
-selection, runtime-type compatibility for accepted fold pairs, and the one
-audited upstream-alpha bridge. -/
-theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
+/-- Compatibility entry point retaining the older explicit pairwise
+runtime-type law. New callers should use the canonical endpoint theorem below. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridgeRuntimeTypes
     (bridge : UpstreamBridge)
     (runtimeTypes : ScopedFoldRuntimeTypeLaws validCase)
     (selection : ScopedCaseReachableSelectionLaws validCase)
@@ -6533,6 +6565,23 @@ theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
   shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared selection
     (scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridge
       bridge runtimeTypes)
+    certificates run
+
+/-- Fully assembled preferred certified traversal theorem. After the
+executable run and source certificate tree, callers supply only reachable-tag
+selection, unary canonical endpoint metadata, and the one audited upstream
+alpha bridge; pairwise runtime-type equality is kernel-derived. -/
+theorem shadowCode_scopedPhaseEndpointCertifiedTree_of_upstreamBridge
+    (bridge : UpstreamBridge)
+    (canonical : ScopedFoldRuntimeTypeCanonicalLaws validCase)
+    (selection : ScopedCaseReachableSelectionLaws validCase)
+    (certificates : ScopedCodeTargetCertificateTree validCase index source)
+    (run : shadowCode? fuel source = some target) :
+    Nonempty (ScopedCodePhaseEndpointCertifiedTrace
+      validCase index source target) :=
+  shadowCode_scopedPhaseEndpointCertifiedTree_of_prepared selection
+    (scopedCasePreparedCertifiedAlphaLaws_of_upstreamBridgeCanonical
+      bridge canonical)
     certificates run
 
 /-- A one-declaration program wrapper used to lift a scoped code trace to the
