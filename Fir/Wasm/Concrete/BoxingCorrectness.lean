@@ -207,7 +207,6 @@ theorem allocateBoxedScalar_objectRel
       scalarKind := rfl
       headerRead
       headerKind := rfl
-      ordinary := rfl
       allocationBytes := by simp [header, Header.forAllocation, target, headerBytes]
       kindCode := rfl
       payloadBytes := rfl
@@ -499,7 +498,7 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       have resultRel := BoxedScalar.valueRel witness actualScalar
       rw [objectRelated.scalarKind] at resultRel
       simpa [returned] using resultRel
-  case natural storedDescriptor objectEq headerRead headerKind ordinary marker extent
+  case natural storedDescriptor objectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor

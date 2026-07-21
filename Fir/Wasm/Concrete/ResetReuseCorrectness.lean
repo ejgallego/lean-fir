@@ -143,7 +143,6 @@ theorem ConstructorObjectRel.ofReuseConstructorMemory
       state.heapCursor)
     (replacementKind : replacement.kind = .constructor)
     (replacementLive : replacement.live = true)
-    (replacementPersistent : replacement.persistent = false)
     (replacementAllocation : replacement.allocationBytes = header.allocationBytes)
     (replacementTag : replacement.aux0.toNat =
       if updateHeader then info.cidx else old.tag)
@@ -211,7 +210,7 @@ theorem ConstructorObjectRel.ofReuseConstructorMemory
     rfl
   refine {
     header := ⟨replacement, finalHeader, replacementKind, ?_,
-      replacementPersistent, replacementTag, replacementObjectFields,
+      replacementTag, replacementObjectFields,
       replacementUSizeFields, replacementScalarBytes⟩
     headerOwned := related.headerOwned
     extent := ?_
@@ -519,8 +518,17 @@ theorem ConstructorObjectRel.resetPrefix
         (resetProtocolFieldKinds fieldKinds count))
       address info (resetProtocolFieldKinds fieldKinds count)
       (resetProtocolObject semantic count) := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   have headerAfter :
       ({ state with memory } : MemoryState).readLiveHeader address = .ok header := by
     rw [MemoryState.readLiveHeader_of_writeObjectFields state memory address 0
@@ -535,7 +543,7 @@ theorem ConstructorObjectRel.resetPrefix
     rw [objectCount]
     exact countFitsInfo
   refine {
-    header := ⟨header, headerAfter, headerKind, allocationBytes, persistent,
+    header := ⟨header, headerAfter, headerKind, allocationBytes,
       tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := related.headerOwned
     extent := related.extent
@@ -754,22 +762,22 @@ theorem LiveCellRel.rebindConstructor_other
             address reboundInfo reboundFieldKinds different]
           exact descriptor)
         objectEq objectRelated refCount persistent live
-  | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
       decoded refCount persistent live =>
       exact .natural
         (by
           rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
             address reboundInfo reboundFieldKinds different]
           exact descriptor)
-        objectEq headerRead headerKind ordinary marker extent limbsFit decoded refCount
+        objectEq headerRead headerKind marker extent limbsFit decoded refCount
           persistent live
   | closure closureRelated =>
       cases closureRelated with
-      | closure objectEq objectRelated headerRead headerKind descriptorLookup ordinary
+      | closure objectEq objectRelated headerRead headerKind descriptorLookup
           fixedCount extent refCount persistent live =>
           exact .closure (.closure objectEq
             (objectRelated.rebindConstructor_other different) headerRead headerKind
-            descriptorLookup ordinary fixedCount extent refCount persistent live)
+            descriptorLookup fixedCount extent refCount persistent live)
 
 /-- Rebinding one active descriptor leaves every whole-cell relation at a
 distinct physical address intact. -/
@@ -960,6 +968,7 @@ theorem LiveHeapRel.setCell_ofReuseConstructorMemory
     (_headerKind : header.kind = .constructor)
     (refCount : header.refCount.toNat = cell.rc)
     (persistent : header.persistent = cell.persistent)
+    (ordinary : cell.persistent = false)
     (cellLive : cell.live = true)
     (replacementKind : replacement.kind = .constructor)
     (replacementLive : replacement.live = true)
@@ -1016,7 +1025,7 @@ theorem LiveHeapRel.setCell_ofReuseConstructorMemory
   have targetObjectRelated := objectRelated.ofReuseConstructorMemory state memory
     scrubbed fieldMemory witness address oldInfo oldFieldKinds old info fieldKinds
       fields semanticFields updateHeader header replacement headerRead retainedExtent
-      replacementKind replacementLive replacementPersistent replacementAllocation
+      replacementKind replacementLive replacementAllocation
       replacementTag replacementObjectFields replacementUSizeFields
       replacementScalarBytes layoutFits arity semanticArity fieldKindsSize
       fieldKindsValid fieldRelated post
@@ -1036,13 +1045,6 @@ theorem LiveHeapRel.setCell_ofReuseConstructorMemory
       simp [headerMinimum, headerAligned, headerInBounds]
     rw [if_pos checks]
     rfl
-  obtain ⟨objectHeader, objectHeaderRead, _, _, objectHeaderPersistent,
-      _, _, _, _⟩ := objectRelated.header
-  rw [headerRead] at objectHeaderRead
-  have objectHeaderEq := Except.ok.inj objectHeaderRead
-  subst objectHeader
-  have cellOrdinary : cell.persistent = false :=
-    persistent.symm.trans objectHeaderPersistent
   have targetAfter : CellRel ({ state with memory } : MemoryState)
       (witness.rebindConstructor address info fieldKinds) address
       { cell with object := HeapObject.ctor (reusedConstructorObject old info
@@ -1053,7 +1055,7 @@ theorem LiveHeapRel.setCell_ofReuseConstructorMemory
       rfl targetObjectRelated finalHeader replacementKind
     · rw [replacementRefCount]
       exact refCount
-    · exact replacementPersistent.trans cellOrdinary.symm
+    · exact replacementPersistent.trans ordinary.symm
     · simpa using cellLive
   obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
     related.descriptorSpatial_of_reuseConstructorMemory info fieldKinds descriptor
@@ -1152,11 +1154,15 @@ theorem LiveHeapRel.writeObjectFields_resetPrefix
   have targetBefore : LiveCellRel state witness address cell :=
     .constructor descriptor objectEq objectRelated headerRead headerKind refCount
       persistent live
-  obtain ⟨relationHeader, relationRead, _, activeFits, _, _, _, _, _⟩ :=
-    objectRelated.header
+  let relationHeader := objectRelated.header.choose
+  obtain ⟨relationRead, _, activeFits, _, _, _, _⟩ :=
+    objectRelated.header.choose_spec
+  change state.readLiveHeader address = .ok relationHeader at relationRead
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    relationHeader.allocationBytes.toNat at activeFits
   rw [headerRead] at relationRead
   have relationHeaderEq := Except.ok.inj relationRead
-  subst relationHeader
+  rw [← relationHeaderEq] at activeFits
   obtain ⟨_, rawRead, _, headerMinimum, _, _⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have countFitsInfo : count ≤ info.size := by
@@ -1614,8 +1620,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique
   have cellEq := Option.some.inj mappedFound
   subst mappedCell
   have targetRelated := cellRelation.live_of_eq_true live
-  obtain ⟨header, headerRead, _, notPromoted, ordinary, refCount⟩ :=
-    targetRelated.ordinaryHeader
+  obtain ⟨header, headerRead, _, notPromoted, _, refCount⟩ :=
+    targetRelated.ownershipHeader
   have headerCountNe : header.refCount ≠ 1 := by
     intro one
     rw [one] at refCount
@@ -1623,13 +1629,13 @@ theorem LiveHeapRel.resetObject_refines_nonunique
     exact notUnique refCount.symm
   have fallback :
       (header.isPromotedTag || header.persistent || header.refCount != 1) = true := by
-    simp [notPromoted, ordinary, headerCountNe]
+    simp [notPromoted, headerCountNe]
   have semanticDec :
       Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime := by
     unfold Fir.LeanIR.Impure.reset at semanticOperation
     simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
       at semanticOperation
-    rw [if_pos (by simp [targetRelated.persistent_eq_false, notUnique])]
+    rw [if_pos (by simp [notUnique])]
       at semanticOperation
     cases decEq : Fir.LeanIR.Impure.decLocation runtime location with
     | error fault =>
@@ -1776,7 +1782,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         protocolOwnership.foldlM_public_refines protocolHeap semanticFoldList
       obtain ⟨addressHeap, _, _, _, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
-      obtain ⟨objectHeader, objectHeaderRead, _, _, _, _, objectCount, _, _⟩ :=
+      obtain ⟨objectHeader, objectHeaderRead, _, _, _, objectCount, _, _⟩ :=
         objectRelated.header
       rw [headerRead] at objectHeaderRead
       have objectHeaderEq := Except.ok.inj objectHeaderRead
@@ -1831,7 +1837,7 @@ theorem LiveHeapRel.resetObject_refines_unique
   | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
-  | natural descriptor objectEq headerRead headerKind ordinaryHeader marker extent
+  | natural descriptor objectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
@@ -1958,6 +1964,7 @@ theorem LiveHeapRel.reuseObject_some_refines
     (headerKind : header.kind = .constructor)
     (refCount : header.refCount.toNat = cell.rc)
     (persistent : header.persistent = cell.persistent)
+    (ordinary : cell.persistent = false)
     (cellLive : cell.live = true)
     (layoutFits : (ConstructorLayout.ofInfo info).allocationBytes ≤
       header.allocationBytes.toNat)
@@ -1985,11 +1992,14 @@ theorem LiveHeapRel.reuseObject_some_refines
         (.word32 address) (.object (.heap location)) := by
   obtain ⟨addressHeap, _, _, headerMinimum, _, headerInBounds⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
-  obtain ⟨objectHeader, objectHeaderRead, _, _, _, oldTag, _, _, _⟩ :=
-    objectRelated.header
+  let objectHeader := objectRelated.header.choose
+  obtain ⟨objectHeaderRead, _, _, oldTag, _, _, _⟩ :=
+    objectRelated.header.choose_spec
+  change state.readLiveHeader address = .ok objectHeader at objectHeaderRead
+  change objectHeader.aux0.toNat = old.tag at oldTag
   rw [headerRead] at objectHeaderRead
   have objectHeaderEq := Except.ok.inj objectHeaderRead
-  subst objectHeader
+  rw [← objectHeaderEq] at oldTag
   let tag : UInt32 :=
     if updateHeader then UInt32.ofNat info.cidx else header.aux0
   let replacement : Header := {
@@ -2039,7 +2049,7 @@ theorem LiveHeapRel.reuseObject_some_refines
     related.setCell_ofReuseConstructorMemory state memory scrubbed fieldMemory
       witness runtime location address cell oldInfo oldFieldKinds old info fieldKinds
       fields semanticFields updateHeader header replacement mapped found descriptor
-      objectEq objectRelated headerRead headerKind refCount persistent cellLive
+      objectEq objectRelated headerRead headerKind refCount persistent ordinary cellLive
       replacementKind replacementLive replacementPersistent replacementRefCount
       replacementAllocation replacementTag replacementObjectFields
       replacementUSizeFields replacementScalarBytes layoutFits arity semanticArity

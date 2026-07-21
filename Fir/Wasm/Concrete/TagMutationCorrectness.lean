@@ -18,8 +18,17 @@ theorem ConstructorObjectRel.writeTag
       Fir.Wasm.Concrete.writeTag state address tag = .ok result ∧
       ConstructorObjectRel result witness address info fieldKinds
         { semantic with tag := tag } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      oldTag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, oldTag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at oldTag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, _, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have headerInBounds : address.value + headerBytes ≤ state.memory.size := by
@@ -118,7 +127,6 @@ theorem ConstructorObjectRel.writeTag
   refine {
     header := ⟨updatedHeader, headerReadAfter, by simp [updatedHeader, headerKind],
       by simpa [updatedHeader] using allocationBytes,
-      by simpa [updatedHeader] using persistent,
       by simpa [updatedHeader] using tagToNat,
       by simpa [updatedHeader] using objectCount,
       by simpa [updatedHeader] using usizeCount,

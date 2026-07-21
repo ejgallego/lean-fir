@@ -20,8 +20,17 @@ theorem ConstructorObjectRel.writeUSizeField_targetFrame
       Header.read state.memory address = .ok header ∧
       state.TargetMutationFrame result address header.allocationBytes.toNat ∧
       result.FrontierInvariant := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeader : readConstructorHeader state address = .ok header := by
@@ -100,8 +109,17 @@ theorem ConstructorObjectRel.writeScalarUInt64Field_targetFrame
       Header.read state.memory address = .ok header ∧
       state.TargetMutationFrame result address header.allocationBytes.toNat ∧
       result.FrontierInvariant := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeader : readConstructorHeader state address = .ok header := by
@@ -177,8 +195,17 @@ theorem ConstructorObjectRel.writeScalarUInt32Field_targetFrame
       Header.read state.memory address = .ok header ∧
       state.TargetMutationFrame result address header.allocationBytes.toNat ∧
       result.FrontierInvariant := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeader : readConstructorHeader state address = .ok header := by
@@ -245,8 +272,17 @@ theorem ConstructorObjectRel.writeScalarUInt16Field_targetFrame
       Header.read state.memory address = .ok header ∧
       state.TargetMutationFrame result address header.allocationBytes.toNat ∧
       result.FrontierInvariant := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeader : readConstructorHeader state address = .ok header := by
@@ -313,8 +349,17 @@ theorem ConstructorObjectRel.writeScalarUInt8Field_targetFrame
       Header.read state.memory address = .ok header ∧
       state.TargetMutationFrame result address header.allocationBytes.toNat ∧
       result.FrontierInvariant := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, rawRead, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeader : readConstructorHeader state address = .ok header := by
@@ -486,7 +531,7 @@ theorem LiveHeapRel.writeTag_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -561,7 +606,7 @@ theorem LiveHeapRel.writeUSizeField_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -651,7 +696,7 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -739,7 +784,7 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -827,7 +872,7 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -915,7 +960,7 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction

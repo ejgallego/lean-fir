@@ -18,7 +18,6 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
     header.kind = .constructor ∧
     (ConstructorLayout.ofInfo info).allocationBytes ≤
       header.allocationBytes.toNat ∧
-    header.persistent = false ∧
     header.aux0.toNat = semantic.tag ∧
     header.aux1.toNat = info.size ∧
     header.aux2.toNat = info.usize ∧
@@ -85,8 +84,17 @@ theorem ConstructorObjectRel.prefixExtension
     (related : ConstructorObjectRel before witness address info fieldKinds semantic)
     (extension : before.PrefixExtension after) :
     ConstructorObjectRel after witness address info fieldKinds semantic := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change before.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   have headerAfter := extension.readLiveHeader_eq_ok address header
     related.headerOwned headerRead
   have heap := (MemoryState.PrefixExtension.readLiveHeader_facts
@@ -258,8 +266,8 @@ theorem ConstructorObjectRel.prefixExtension
         rw [operationEq]
         exact readBefore
   refine {
-    header := ⟨header, headerAfter, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩
+    header := ⟨header, headerAfter, headerKind, allocationBytes, tag,
+      objectCount, usizeCount, scalarCount⟩
     headerOwned := Nat.le_trans related.headerOwned extension.cursor
     extent := Nat.le_trans related.extent extension.cursor
     semanticObjectFields := related.semanticObjectFields
@@ -355,7 +363,6 @@ structure BoxedObjectRel (state : MemoryState) (address : Word32)
   scalarKind : scalar.kind = kind
   headerRead : state.readLiveHeader address = .ok header
   headerKind : header.kind = .boxed
-  ordinary : header.persistent = false
   allocationBytes : header.allocationBytes.toNat =
     align8 (headerBytes + target.semanticSlotBytes)
   kindCode : header.aux0 = kind.code
@@ -396,7 +403,6 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (objectEq : cell.object = .natural value)
       (headerRead : state.readLiveHeader address = .ok header)
       (headerKind : header.kind = .natural)
-      (ordinary : header.persistent = false)
       (marker : header.aux0 = bigNaturalMarker)
       (extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor)
       (limbsFit : headerBytes +
@@ -489,7 +495,6 @@ theorem BoxedObjectRel.prefixExtension
     scalarKind := related.scalarKind
     headerRead := headerAfter
     headerKind := related.headerKind
-    ordinary := related.ordinary
     allocationBytes := related.allocationBytes
     kindCode := related.kindCode
     payloadBytes := related.payloadBytes
@@ -518,7 +523,7 @@ theorem LiveCellRel.prefixExtension
   | boxed descriptor objectEq objectRelated refCount persistent live =>
       exact .boxed descriptor objectEq (objectRelated.prefixExtension extension)
         refCount persistent live
-  | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
         decoded refCount persistent live =>
       obtain ⟨heap, _, _, minimum, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts before address _ headerRead
@@ -534,7 +539,7 @@ theorem LiveCellRel.prefixExtension
         rw [extension.readNaturalLimbs address.value 0 _ (by
           simp [target] at limbsFit extent ⊢
           omega)]
-      apply LiveCellRel.natural descriptor objectEq headerAfter headerKind ordinary marker
+      apply LiveCellRel.natural descriptor objectEq headerAfter headerKind marker
         (Nat.le_trans extent extension.cursor) limbsFit
       · rw [decoderEq]
         exact decoded
@@ -560,10 +565,10 @@ theorem LiveCellRel.witnessExtension
   | boxed descriptor objectEq objectRelated refCount persistent live =>
       exact .boxed (extension.descriptors _ _ descriptor) objectEq objectRelated
         refCount persistent live
-  | natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+  | natural descriptor objectEq headerRead headerKind marker extent limbsFit
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
-        headerKind ordinary marker extent limbsFit decoded refCount persistent live
+        headerKind marker extent limbsFit decoded refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.witnessExtension extension)
 
@@ -593,7 +598,7 @@ theorem LiveCellRel.headerOwned
   cases related with
   | constructor _ _ objectRelated _ _ _ _ _ => exact objectRelated.headerOwned
   | boxed _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
-  | natural _ _ headerRead _ _ _ extent _ _ _ _ _ =>
+  | natural _ _ headerRead _ _ extent _ _ _ _ _ =>
       have minimum :=
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
       omega
@@ -629,10 +634,10 @@ theorem LiveCellRel.descriptor
   cases related with
   | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
-  | natural descriptor _ _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | natural descriptor _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | closure closureRelated =>
       cases closureRelated with
-      | closure _ objectRelated _ _ _ _ _ _ _ _ _ =>
+      | closure _ objectRelated _ _ _ _ _ _ _ _ =>
           exact ⟨_, objectRelated.descriptor⟩
 
 theorem CellRel.descriptor

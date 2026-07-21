@@ -95,7 +95,7 @@ theorem LiveHeapRel.scalarField_of_projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural descriptor objectEq headerRead headerKind ordinary marker extent
+  | natural descriptor objectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
@@ -194,7 +194,7 @@ theorem ConstructorObjectRel.readTag_refines
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic) :
     readTag state address = .ok (UInt64.ofNat semantic.tag) := by
-  obtain ⟨header, headerRead, headerKind, _, _, tag, _, _, _⟩ := related.header
+  obtain ⟨header, headerRead, headerKind, _, tag, _, _, _⟩ := related.header
   have heap := (MemoryState.PrefixExtension.readLiveHeader_facts
     state address header headerRead).1
   unfold readTag
@@ -261,7 +261,7 @@ theorem LiveHeapRel.readObjectField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       simp [getObjectField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -309,7 +309,7 @@ theorem LiveHeapRel.readUSizeField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -353,7 +353,7 @@ theorem LiveHeapRel.readTag_refines
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
       simp at semanticTag
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag

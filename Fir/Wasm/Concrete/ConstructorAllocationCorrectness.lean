@@ -311,7 +311,7 @@ theorem allocateConstructor_nonempty_objectRel
       (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize), exactHeader,
       rfl, (by simpa [layout, Header.forAllocation] using
-        Nat.le_of_eq allocationBytesToNat.symm), rfl, tagToNat, objectFieldsToNat,
+        Nat.le_of_eq allocationBytesToNat.symm), tagToNat, objectFieldsToNat,
       usizeFieldsToNat,
       scalarBytesToNat⟩
   · intro index kind value kindAt valueAt

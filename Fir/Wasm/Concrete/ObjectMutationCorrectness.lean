@@ -56,8 +56,17 @@ theorem ConstructorObjectRel.writeObjectField_targetFrame
       ConstructorObjectRel result witness address info fieldKinds
         { semantic with
           objectFields := semantic.objectFields.set index value indexValid } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes,
+      tag, objectCount, usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   have infoIndexValid : index < info.size := by
     rw [← related.semanticObjectFields]
     exact indexValid
@@ -315,7 +324,7 @@ theorem ConstructorObjectRel.writeObjectField_targetFrame
         exact readBefore
   refine ⟨result, operation, targetFrame, finalValid, ?_⟩
   refine {
-    header := ⟨header, headerAfter, headerKind, allocationBytes, persistent,
+    header := ⟨header, headerAfter, headerKind, allocationBytes,
       tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := related.headerOwned
     extent := related.extent
@@ -400,7 +409,7 @@ theorem LiveHeapRel.writeObjectField_refines
       obtain ⟨result, operation, targetFrame, finalValid, objectAfter⟩ :=
         objectRelated.writeObjectField_targetFrame related.frontier index kind value
           word indexValid kindAt valueRelated
-      obtain ⟨objectHeader, objectHeaderRead, _, retainedCapacity, _, _, _, _, _⟩ :=
+      obtain ⟨objectHeader, objectHeaderRead, _, retainedCapacity, _, _, _, _⟩ :=
         objectRelated.header
       rw [headerRead] at objectHeaderRead
       have objectHeaderEq := Except.ok.inj objectHeaderRead
@@ -432,7 +441,7 @@ theorem LiveHeapRel.writeObjectField_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction

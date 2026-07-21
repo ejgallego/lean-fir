@@ -20,8 +20,17 @@ theorem ConstructorObjectRel.writeUSizeField
           usizeFields := semantic.usizeFields.set index value (by
             rw [related.semanticUSizeFields]
             exact indexValid) } := by
-  obtain ⟨header, headerRead, headerKind, allocationBytes, persistent,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  let header := related.header.choose
+  obtain ⟨headerRead, headerKind, allocationBytes, tag, objectCount,
+      usizeCount, scalarCount⟩ := related.header.choose_spec
+  change state.readLiveHeader address = .ok header at headerRead
+  change header.kind = .constructor at headerKind
+  change (ConstructorLayout.ofInfo info).allocationBytes ≤
+    header.allocationBytes.toNat at allocationBytes
+  change header.aux0.toNat = semantic.tag at tag
+  change header.aux1.toNat = info.size at objectCount
+  change header.aux2.toNat = info.usize at usizeCount
+  change header.aux3.toNat = info.ssize at scalarCount
   obtain ⟨heap, decodedBefore, live, minimum, aligned, extentInMemory⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   have constructorHeaderBefore : readConstructorHeader state address = .ok header := by
@@ -173,7 +182,7 @@ theorem ConstructorObjectRel.writeUSizeField
   refine ⟨result, operation, ?_⟩
   refine {
     header := ⟨header, headerReadAfter, headerKind, allocationBytes,
-      persistent, tag, objectCount, usizeCount, scalarCount⟩
+      tag, objectCount, usizeCount, scalarCount⟩
     headerOwned := related.headerOwned
     extent := related.extent
     semanticObjectFields := related.semanticObjectFields

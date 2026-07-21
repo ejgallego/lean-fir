@@ -649,7 +649,7 @@ theorem allocateNatural_heap_liveHeapRel
       (RefinementWitness.lookup_bindNatural_descriptor witness runtime.nextLocation
         address value)
       (by rfl) objectRelated.headerRead objectRelated.headerKind
-        objectRelated.ordinary objectRelated.marker objectRelated.extent
+        objectRelated.marker objectRelated.extent
         objectRelated.limbsFit objectRelated.decoded
     · simpa [semanticNaturalCell] using objectRelated.refCountOne
     · simpa [semanticNaturalCell] using objectRelated.ordinary

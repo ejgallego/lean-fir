@@ -187,7 +187,7 @@ theorem ConstructorObjectRel.readOwnedReferences
     ∃ words,
       Fir.Wasm.Concrete.readOwnedReferences state address header = .ok words ∧
       OwnershipValuesRel witness words semantic.objectFields.toList := by
-  obtain ⟨actualHeader, actualRead, headerKind, _, _, _, objectCount, _, _⟩ :=
+  obtain ⟨actualHeader, actualRead, headerKind, _, _, objectCount, _, _⟩ :=
     related.header
   rw [headerRead] at actualRead
   have headerEq := Except.ok.inj actualRead
@@ -920,8 +920,8 @@ theorem ConstructorObjectRel.writeReferenceCount
       result.FrontierInvariant ∧
       result.readLiveHeader address = .ok updatedHeader ∧
       ConstructorObjectRel result witness address info fieldKinds semantic := by
-  obtain ⟨objectHeader, objectHeaderRead, headerKind, allocationBytes, ordinary,
-      tag, objectCount, usizeCount, scalarCount⟩ := related.header
+  obtain ⟨objectHeader, objectHeaderRead, headerKind, allocationBytes, tag,
+      objectCount, usizeCount, scalarCount⟩ := related.header
   rw [headerRead] at objectHeaderRead
   cases objectHeaderRead
   obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
@@ -1122,7 +1122,6 @@ theorem ConstructorObjectRel.writeReferenceCount
     header := ⟨updatedHeader, headerReadAfter,
       by simpa [updatedHeader] using headerKind,
       by simpa [updatedHeader] using allocationBytes,
-      by simpa [updatedHeader] using ordinary,
       by simpa [updatedHeader] using tag,
       by simpa [updatedHeader] using objectCount,
       by simpa [updatedHeader] using usizeCount,
@@ -1179,6 +1178,7 @@ theorem ConstructorObjectRel.incrementReference
     (valid : state.FrontierInvariant)
     (oldCount amount : Nat)
     (refCount : header.refCount.toNat = oldCount)
+    (ordinary : header.persistent = false)
     (fits : oldCount + amount < UInt32.size)
     (check : Bool) :
     ∃ result updatedHeader,
@@ -1191,7 +1191,7 @@ theorem ConstructorObjectRel.incrementReference
       objectAfter⟩ :=
     related.writeReferenceCount headerRead valid
       (UInt32.ofNat (oldCount + amount))
-  obtain ⟨objectHeader, objectHeaderRead, headerKind, _, ordinary, _, _, _, _⟩ :=
+  obtain ⟨objectHeader, objectHeaderRead, headerKind, _, _, _, _, _⟩ :=
     related.header
   rw [headerRead] at objectHeaderRead
   cases objectHeaderRead
@@ -1225,6 +1225,7 @@ theorem ConstructorObjectRel.decrementReferenceOnce_above_one
     (headerRead : state.readLiveHeader address = .ok header)
     (valid : state.FrontierInvariant)
     (oldCount : Nat) (refCount : header.refCount.toNat = oldCount)
+    (ordinary : header.persistent = false)
     (oneLt : 1 < oldCount) (check : Bool) :
     ∃ result updatedHeader,
       decrementReferenceOnce state address check = .ok result ∧
@@ -1235,7 +1236,7 @@ theorem ConstructorObjectRel.decrementReferenceOnce_above_one
   obtain ⟨result, updatedHeader, write, updatedEq, finalValid, headerReadAfter,
       objectAfter⟩ :=
     related.writeReferenceCount headerRead valid (UInt32.ofNat (oldCount - 1))
-  obtain ⟨objectHeader, objectHeaderRead, headerKind, _, ordinary, _, _, _, _⟩ :=
+  obtain ⟨objectHeader, objectHeaderRead, headerKind, _, _, _, _, _⟩ :=
     related.header
   rw [headerRead] at objectHeaderRead
   cases objectHeaderRead
@@ -1272,6 +1273,7 @@ theorem BoxedObjectRel.incrementReference
     (valid : state.FrontierInvariant)
     (oldCount amount : Nat)
     (refCount : header.refCount.toNat = oldCount)
+    (ordinary : header.persistent = false)
     (fits : oldCount + amount < UInt32.size)
     (check : Bool) :
     ∃ result updatedHeader,
@@ -1300,7 +1302,7 @@ theorem BoxedObjectRel.incrementReference
     rw [related.headerRead]
     simp only [Bind.bind, Except.bind, liftMemory]
     rw [if_neg (by simp [notPromoted])]
-    rw [if_neg (by simp [related.ordinary])]
+    rw [if_neg (by simp [ordinary])]
     rw [refCount]
     rw [uint32Field_eq_ok "reference count" (oldCount + amount) fits]
     unfold writeLiveHeader
@@ -1353,7 +1355,6 @@ theorem BoxedObjectRel.incrementReference
     scalarKind := related.scalarKind
     headerRead := headerReadAfter
     headerKind := by simpa [updatedHeader] using related.headerKind
-    ordinary := by simpa [updatedHeader] using related.ordinary
     allocationBytes := by simpa [updatedHeader] using related.allocationBytes
     kindCode := by simpa [updatedHeader] using related.kindCode
     payloadBytes := by simpa [updatedHeader] using related.payloadBytes
@@ -1429,7 +1430,6 @@ theorem BoxedObjectRel.writeReferenceCount
     scalarKind := related.scalarKind
     headerRead := headerReadAfter
     headerKind := by simpa [updatedHeader] using related.headerKind
-    ordinary := by simpa [updatedHeader] using related.ordinary
     allocationBytes := by simpa [updatedHeader] using related.allocationBytes
     kindCode := by simpa [updatedHeader] using related.kindCode
     payloadBytes := by simpa [updatedHeader] using related.payloadBytes
@@ -1446,6 +1446,7 @@ theorem BoxedObjectRel.decrementReferenceOnce_above_one
     (related : BoxedObjectRel state address kind scalar header)
     (valid : state.FrontierInvariant) (oldCount : Nat)
     (refCount : header.refCount.toNat = oldCount) (oneLt : 1 < oldCount)
+    (ordinary : header.persistent = false)
     (check : Bool) :
     ∃ result updatedHeader,
       decrementReferenceOnce state address check = .ok result ∧
@@ -1473,7 +1474,7 @@ theorem BoxedObjectRel.decrementReferenceOnce_above_one
     rw [related.headerRead]
     simp only [Bind.bind, Except.bind, liftMemory]
     rw [if_neg (by simp [notPromoted])]
-    rw [if_neg (by simp [related.ordinary])]
+    rw [if_neg (by simp [ordinary])]
     rw [if_neg (by simpa using refCountNe)]
     rw [refCount, if_pos oneLt]
     simpa [updatedEq] using write
@@ -1652,6 +1653,7 @@ theorem ClosureCellRel.incrementReference
     {address : Word32} {cell : HeapCell}
     (related : ClosureCellRel state witness address cell)
     (valid : state.FrontierInvariant)
+    (ordinary : cell.persistent = false)
     (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
     ∃ result,
       Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
@@ -1660,8 +1662,9 @@ theorem ClosureCellRel.incrementReference
   have headerOwned := related.headerOwned
   cases related with
   | @closure function arity captureKinds captures header _ objectEq objectRelated
-      headerRead headerKind descriptorLookup ordinary fixedCount extent refCount
+      headerRead headerKind descriptorLookup fixedCount extent refCount
       persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       obtain ⟨result, updatedHeader, write, updatedEq, finalValid,
           headerReadAfter, cursorEq, objectAfter⟩ :=
         objectRelated.writeReferenceCount headerRead headerKind descriptorLookup
@@ -1681,7 +1684,7 @@ theorem ClosureCellRel.incrementReference
         rw [headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
         rw [if_neg (by simp [notPromoted])]
-        rw [if_neg (by simp [ordinary])]
+        rw [if_neg (by simp [headerOrdinary])]
         rw [refCount]
         rw [uint32Field_eq_ok "reference count" (cell.rc + amount) fits]
         simpa [updatedEq] using write
@@ -1689,7 +1692,7 @@ theorem ClosureCellRel.incrementReference
       refine ⟨result, operation, finalValid, ?_⟩
       exact .closure (by simpa using objectEq) objectAfter headerReadAfter
         (by simpa using headerKind) (by simpa using descriptorLookup)
-        (by simpa using ordinary) (by simpa using fixedCount)
+        (by simpa using fixedCount)
         (by rw [cursorEq]; exact extent)
         (by
           simp only
@@ -1702,7 +1705,8 @@ theorem ClosureCellRel.decrementReferenceOnce_above_one
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : ClosureCellRel state witness address cell)
-    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
     ∃ result,
       decrementReferenceOnce state address check = .ok result ∧
       result.FrontierInvariant ∧
@@ -1710,8 +1714,9 @@ theorem ClosureCellRel.decrementReferenceOnce_above_one
   have headerOwned := related.headerOwned
   cases related with
   | @closure function arity captureKinds captures header _ objectEq objectRelated
-      headerRead headerKind descriptorLookup ordinary fixedCount extent refCount
+      headerRead headerKind descriptorLookup fixedCount extent refCount
       persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       obtain ⟨result, updatedHeader, write, updatedEq, finalValid,
           headerReadAfter, cursorEq, objectAfter⟩ :=
         objectRelated.writeReferenceCount headerRead headerKind descriptorLookup
@@ -1735,7 +1740,7 @@ theorem ClosureCellRel.decrementReferenceOnce_above_one
         rw [headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
         rw [if_neg (by simp [notPromoted])]
-        rw [if_neg (by simp [ordinary])]
+        rw [if_neg (by simp [headerOrdinary])]
         rw [if_neg (by simpa using refCountNe)]
         rw [refCount, if_pos oneLt]
         simpa [updatedEq] using write
@@ -1747,7 +1752,7 @@ theorem ClosureCellRel.decrementReferenceOnce_above_one
       refine ⟨result, operation, finalValid, ?_⟩
       exact .closure (by simpa using objectEq) objectAfter headerReadAfter
         (by simpa using headerKind) (by simpa using descriptorLookup)
-        (by simpa using ordinary) (by simpa using fixedCount)
+        (by simpa using fixedCount)
         (by rw [cursorEq]; exact extent)
         (by
           simp only
@@ -1762,7 +1767,8 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
     (related : LiveCellRel state witness address cell)
     (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
       cell.object = .boxed kind.semanticType scalar.semanticValue)
-    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
     ∃ result,
       decrementReferenceOnce state address check = .ok result ∧
       result.FrontierInvariant ∧
@@ -1773,9 +1779,11 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
       rw [objectEq] at boxedEq
       contradiction
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
           headerReadAfter, objectAfter⟩ :=
-        objectRelated.decrementReferenceOnce_above_one valid cell.rc refCount oneLt check
+        objectRelated.decrementReferenceOnce_above_one valid cell.rc refCount oneLt
+          headerOrdinary check
       subst updatedHeader
       have nextFits : cell.rc - 1 < UInt32.size := by
         have oldFits := UInt32.toNat_lt_size header.refCount
@@ -1787,7 +1795,7 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
         exact UInt32.toNat_ofNat_of_lt' nextFits
       · simpa using persistent
       · simpa using live
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
@@ -1804,7 +1812,7 @@ theorem LiveCellRel.incrementReference_boxed
     (related : LiveCellRel state witness address cell)
     (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
       cell.object = .boxed kind.semanticType scalar.semanticValue)
-    (valid : state.FrontierInvariant)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
     (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
     ∃ result,
       incrementReference state address amount check = .ok result ∧
@@ -1815,10 +1823,11 @@ theorem LiveCellRel.incrementReference_boxed
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
-  | boxed descriptor objectEq objectRelated refCount persistent live =>
+  | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
         objectAfter⟩ := objectRelated.incrementReference valid cell.rc amount
-          refCount fits check
+          refCount headerOrdinary fits check
       subst updatedHeader
       refine ⟨result, operation, finalValid, ?_⟩
       apply LiveCellRel.boxed descriptor (by simpa using objectEq) objectAfter
@@ -1826,7 +1835,7 @@ theorem LiveCellRel.incrementReference_boxed
         exact UInt32.toNat_ofNat_of_lt' fits
       · simpa using persistent
       · simpa using live
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
@@ -1843,7 +1852,7 @@ theorem LiveCellRel.incrementReference_constructor
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
     (constructorCell : ∃ semantic : ConstructorObject, cell.object = .ctor semantic)
-    (valid : state.FrontierInvariant)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
     (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
     ∃ result,
       incrementReference state address amount check = .ok result ∧
@@ -1852,9 +1861,11 @@ theorem LiveCellRel.incrementReference_constructor
   cases related with
   | constructor descriptor objectEq objectRelated headerRead headerKind refCount
         persistent live =>
+      have headerOrdinary : _ := persistent.trans ordinary
       obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
           headerReadAfter, objectAfter⟩ :=
-        objectRelated.incrementReference headerRead valid cell.rc amount refCount fits check
+        objectRelated.incrementReference headerRead valid cell.rc amount refCount
+          headerOrdinary fits check
       subst updatedHeader
       refine ⟨result, operation, finalValid, ?_⟩
       apply LiveCellRel.constructor descriptor (by simpa using objectEq) objectAfter
@@ -1868,7 +1879,7 @@ theorem LiveCellRel.incrementReference_constructor
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -1885,7 +1896,8 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
     (constructorCell : ∃ semantic : ConstructorObject, cell.object = .ctor semantic)
-    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
     ∃ result,
       decrementReferenceOnce state address check = .ok result ∧
       result.FrontierInvariant ∧
@@ -1893,10 +1905,11 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
   cases related with
   | @constructor info fieldKinds semantic header _ descriptor objectEq objectRelated
         headerRead headerKind refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       obtain ⟨result, updatedHeader, operation, updatedEq, finalValid,
           headerReadAfter, objectAfter⟩ :=
         objectRelated.decrementReferenceOnce_above_one headerRead valid cell.rc refCount
-          oneLt check
+          headerOrdinary oneLt check
       subst updatedHeader
       have nextFits : cell.rc - 1 < UInt32.size := by
         have oldFits := UInt32.toNat_lt_size header.refCount
@@ -1914,7 +1927,7 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
-  | natural _ objectEq _ _ _ _ _ _ _ _ _ _ =>
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -1931,7 +1944,7 @@ theorem LiveCellRel.incrementReference_natural
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
     (naturalCell : ∃ value : Nat, cell.object = .natural value)
-    (valid : state.FrontierInvariant)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
     (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
     ∃ result,
       incrementReference state address amount check = .ok result ∧
@@ -1947,13 +1960,14 @@ theorem LiveCellRel.incrementReference_natural
       obtain ⟨value, naturalEq⟩ := naturalCell
       rw [objectEq] at naturalEq
       contradiction
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : Header.isPromotedTag header = false := by
-        simp [Header.isPromotedTag, headerKind, ordinary]
+        simp [Header.isPromotedTag, headerKind, headerOrdinary]
       obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
           headerWrite, finalValid, headerReadAfter⟩ :=
-        incrementReference_header valid headerRead headerOwned notPromoted ordinary
+        incrementReference_header valid headerRead headerOwned notPromoted headerOrdinary
           cell.rc amount refCount fits check
       subst updatedHeader
       subst result
@@ -1976,7 +1990,6 @@ theorem LiveCellRel.incrementReference_natural
       refine ⟨{ state with memory }, operation, finalValid, ?_⟩
       apply LiveCellRel.natural descriptor (by simpa using objectEq) headerReadAfter
       · simpa using headerKind
-      · simpa using ordinary
       · simpa using marker
       · simpa using extent
       · simpa using limbsFit
@@ -1999,7 +2012,8 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
     (naturalCell : ∃ value : Nat, cell.object = .natural value)
-    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
     ∃ result,
       decrementReferenceOnce state address check = .ok result ∧
       result.FrontierInvariant ∧
@@ -2014,10 +2028,11 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
       obtain ⟨value, naturalEq⟩ := naturalCell
       rw [objectEq] at naturalEq
       contradiction
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : Header.isPromotedTag header = false := by
-        simp [Header.isPromotedTag, headerKind, ordinary]
+        simp [Header.isPromotedTag, headerKind, headerOrdinary]
       obtain ⟨result, updatedHeader, memory, write, updatedEq, resultEq,
           headerWrite, finalValid, headerReadAfter⟩ :=
         writeReferenceCount_header valid headerRead headerOwned
@@ -2039,7 +2054,7 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
         rw [headerRead]
         simp only [Bind.bind, Except.bind, liftMemory]
         rw [if_neg (by simp [notPromoted])]
-        rw [if_neg (by simp [ordinary])]
+        rw [if_neg (by simp [headerOrdinary])]
         rw [if_neg (by simpa using refCountNe)]
         rw [refCount, if_pos oneLt]
         exact write
@@ -2064,7 +2079,6 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
       refine ⟨{ state with memory }, operation, finalValid, ?_⟩
       apply LiveCellRel.natural descriptor (by simpa using objectEq) headerReadAfter
       · simpa using headerKind
-      · simpa using ordinary
       · simpa using marker
       · simpa using extent
       · simpa using limbsFit
@@ -2091,7 +2105,8 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
-    (valid : state.FrontierInvariant) (one : cell.rc = 1) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (one : cell.rc = 1) (check : Bool) :
     ∃ result header memory,
       decrementReferenceOnce state address check descriptors = .ok result ∧
       state.readLiveHeader address = .ok header ∧
@@ -2109,6 +2124,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
         rw [objectEq] at naturalEq
         contradiction
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : header.isPromotedTag = false := by
         have different : (ObjectKind.boxed == ObjectKind.natural) = false := by decide
         simp [Header.isPromotedTag, objectRelated.headerKind, different]
@@ -2120,13 +2136,14 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
           deadRelated⟩ :=
         Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid
           objectRelated.headerRead objectRelated.headerOwned notPromoted
-          objectRelated.ordinary countOne owned check
+          headerOrdinary countOne owned check
       exact ⟨result, header, memory, operation, objectRelated.headerRead,
         resultEq, headerWrite, finalValid, deadRelated⟩
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : header.isPromotedTag = false := by
-        simp [Header.isPromotedTag, headerKind, ordinary]
+        simp [Header.isPromotedTag, headerKind, headerOrdinary]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
       have owned : readOwnedReferences state address header descriptors = .ok [] := by
@@ -2134,9 +2151,9 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
       obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
           deadRelated⟩ :=
         Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid headerRead
-          (LiveCellRel.natural descriptor objectEq headerRead headerKind ordinary marker
+          (LiveCellRel.natural descriptor objectEq headerRead headerKind marker
             extent limbsFit decoded refCount persistent live).headerOwned
-          notPromoted ordinary countOne owned check
+          notPromoted headerOrdinary countOne owned check
       exact ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
         finalValid, deadRelated⟩
   | closure closureRelated =>
@@ -2160,6 +2177,7 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
+    (ordinary : cell.persistent = false)
     (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
     decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
       decrementReferenceOnce state address check descriptors := by
@@ -2173,6 +2191,7 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
         rw [objectEq] at naturalEq
         contradiction
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : header.isPromotedTag = false := by
         have different : (ObjectKind.boxed == ObjectKind.natural) = false := by decide
         simp [Header.isPromotedTag, objectRelated.headerKind, different]
@@ -2181,17 +2200,18 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
       have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, objectRelated.headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public
-        objectRelated.headerRead notPromoted objectRelated.ordinary countOne owned fuel check
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        objectRelated.headerRead notPromoted headerOrdinary countOne owned fuel check
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
       have notPromoted : header.isPromotedTag = false := by
-        simp [Header.isPromotedTag, headerKind, ordinary]
+        simp [Header.isPromotedTag, headerKind, headerOrdinary]
       have countOne : header.refCount.toNat = 1 := by
         rw [refCount, one]
       have owned : readOwnedReferences state address header descriptors = .ok [] := by
         simp [readOwnedReferences, headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public headerRead
-        notPromoted ordinary countOne owned fuel check
+        notPromoted headerOrdinary countOne owned fuel check
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       rcases leafCell with boxedCell | naturalCell
@@ -2208,7 +2228,7 @@ theorem LiveCellRel.incrementReference
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (valid : state.FrontierInvariant)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
     (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
     ∃ result,
       Fir.Wasm.Concrete.incrementReference state address amount check = .ok result ∧
@@ -2220,23 +2240,23 @@ theorem LiveCellRel.incrementReference
       let localRelated : LiveCellRel state witness address cell :=
         .constructor descriptor objectEq objectRelated headerRead headerKind refCount
           persistent live
-      exact localRelated.incrementReference_constructor ⟨semantic, objectEq⟩ valid
+      exact localRelated.incrementReference_constructor ⟨semantic, objectEq⟩ valid ordinary
         amount fits check
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
       let localRelated : LiveCellRel state witness address cell :=
         .boxed descriptor objectEq objectRelated refCount persistent live
-      exact localRelated.incrementReference_boxed ⟨kind, scalar, objectEq⟩ valid
+      exact localRelated.incrementReference_boxed ⟨kind, scalar, objectEq⟩ valid ordinary
         amount fits check
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
       let localRelated : LiveCellRel state witness address cell :=
-        .natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+        .natural descriptor objectEq headerRead headerKind marker extent limbsFit
           decoded refCount persistent live
-      exact localRelated.incrementReference_natural ⟨value, objectEq⟩ valid
+      exact localRelated.incrementReference_natural ⟨value, objectEq⟩ valid ordinary
         amount fits check
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
-        closureRelated.incrementReference valid amount fits check
+        closureRelated.incrementReference valid ordinary amount fits check
       exact ⟨result, operation, finalValid, .closure closureAfter⟩
 
 /-- Complete local above-one decrement theorem for every live-cell
@@ -2245,7 +2265,8 @@ theorem LiveCellRel.decrementReferenceOnce_above_one
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (valid : state.FrontierInvariant) (oneLt : 1 < cell.rc) (check : Bool) :
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
     ∃ result,
       Fir.Wasm.Concrete.decrementReferenceOnce state address check = .ok result ∧
       result.FrontierInvariant ∧
@@ -2257,22 +2278,22 @@ theorem LiveCellRel.decrementReferenceOnce_above_one
         .constructor descriptor objectEq objectRelated headerRead headerKind refCount
           persistent live
       exact localRelated.decrementReferenceOnce_constructor_above_one
-        ⟨semantic, objectEq⟩ valid oneLt check
+        ⟨semantic, objectEq⟩ valid ordinary oneLt check
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
       let localRelated : LiveCellRel state witness address cell :=
         .boxed descriptor objectEq objectRelated refCount persistent live
       exact localRelated.decrementReferenceOnce_boxed_above_one
-        ⟨kind, scalar, objectEq⟩ valid oneLt check
-  | @natural value header _ descriptor objectEq headerRead headerKind ordinary marker
+        ⟨kind, scalar, objectEq⟩ valid ordinary oneLt check
+  | @natural value header _ descriptor objectEq headerRead headerKind marker
         extent limbsFit decoded refCount persistent live =>
       let localRelated : LiveCellRel state witness address cell :=
-        .natural descriptor objectEq headerRead headerKind ordinary marker extent limbsFit
+        .natural descriptor objectEq headerRead headerKind marker extent limbsFit
           decoded refCount persistent live
       exact localRelated.decrementReferenceOnce_natural_above_one
-        ⟨value, objectEq⟩ valid oneLt check
+        ⟨value, objectEq⟩ valid ordinary oneLt check
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
-        closureRelated.decrementReferenceOnce_above_one valid oneLt check
+        closureRelated.decrementReferenceOnce_above_one valid ordinary oneLt check
       exact ⟨result, operation, finalValid, .closure closureAfter⟩
 
 theorem LiveCellRel.live_eq_true
@@ -2282,34 +2303,10 @@ theorem LiveCellRel.live_eq_true
   cases related with
   | constructor _ _ _ _ _ _ _ live => exact live
   | boxed _ _ _ _ _ live => exact live
-  | natural _ _ _ _ _ _ _ _ _ _ _ live => exact live
+  | natural _ _ _ _ _ _ _ _ _ _ live => exact live
   | closure closureRelated =>
       cases closureRelated with
-      | closure _ _ _ _ _ _ _ _ _ _ live => exact live
-
-theorem LiveCellRel.persistent_eq_false
-    {state : MemoryState} {witness : RefinementWitness}
-    {address : Word32} {cell : HeapCell}
-    (related : LiveCellRel state witness address cell) : cell.persistent = false := by
-  cases related with
-  | constructor _ _ objectRelated headerRead _ _ persistent _ =>
-      obtain ⟨objectHeader, objectHeaderRead, _, _, objectOrdinary, _, _, _, _⟩ :=
-        objectRelated.header
-      rw [headerRead] at objectHeaderRead
-      cases objectHeaderRead
-      rw [← persistent]
-      exact objectOrdinary
-  | boxed _ _ objectRelated _ persistent _ =>
-      rw [← persistent]
-      exact objectRelated.ordinary
-  | natural _ _ _ _ ordinary _ _ _ _ _ persistent _ =>
-      rw [← persistent]
-      exact ordinary
-  | closure closureRelated =>
-      cases closureRelated with
-      | closure _ _ _ _ _ ordinary _ _ _ persistent _ =>
-          rw [← persistent]
-          exact ordinary
+      | closure _ _ _ _ _ _ _ _ _ live => exact live
 
 /-- Above one, every positive semantic fuel budget takes the same
 nonrecursive count-rewrite step. -/
@@ -2317,6 +2314,7 @@ theorem LiveCellRel.decLocationFuel_above_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (oneLt : 1 < cell.rc) (fuel : Nat) :
@@ -2325,7 +2323,7 @@ theorem LiveCellRel.decLocationFuel_above_one_eq
   have nonzero : cell.rc ≠ 0 := by omega
   simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
     related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
-  rw [if_neg (by simp [related.persistent_eq_false])]
+  rw [if_neg (by simp [ordinary])]
   rw [if_neg nonzero, if_pos oneLt]
 
 /-- Above one, the public source ownership operation selects that same
@@ -2334,13 +2332,14 @@ theorem LiveCellRel.decValueOnce_above_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (oneLt : 1 < cell.rc) (check : Bool) :
     Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
       setCell runtime location { cell with rc := cell.rc - 1 } := by
   unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
-  exact related.decLocationFuel_above_one_eq runtime location found oneLt
+  exact related.decLocationFuel_above_one_eq ordinary runtime location found oneLt
     runtime.heap.length
 
 /-- At any positive fuel, source count-one release of a box or natural marks
@@ -2354,6 +2353,7 @@ theorem LiveCellRel.decLocationFuel_leaf_one_eq
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (one : cell.rc = 1) (fuel : Nat) :
@@ -2363,7 +2363,7 @@ theorem LiveCellRel.decLocationFuel_leaf_one_eq
   have notAboveOne : ¬1 < cell.rc := by omega
   simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
     related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
-  rw [if_neg (by simp [related.persistent_eq_false])]
+  rw [if_neg (by simp [ordinary])]
   rw [if_neg nonzero, if_neg notAboveOne]
   rcases leafCell with boxedCell | naturalCell
   · obtain ⟨kind, scalar, objectEq⟩ := boxedCell
@@ -2403,13 +2403,14 @@ theorem LiveCellRel.decValueOnce_leaf_one_eq
       (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (one : cell.rc = 1) (check : Bool) :
     Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
       setCell runtime location { cell with rc := 0, live := false } := by
   unfold Fir.LeanIR.Impure.decValueOnce Fir.LeanIR.Impure.decLocation
-  exact related.decLocationFuel_leaf_one_eq leafCell runtime location found one
+  exact related.decLocationFuel_leaf_one_eq leafCell ordinary runtime location found one
     runtime.heap.length
 
 /-- Complete local source/concrete composition for count-one boxes and heap
@@ -2424,6 +2425,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_refines_one
         cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
       (∃ value : Nat, cell.object = .natural value))
     (valid : state.FrontierInvariant)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (one : cell.rc = 1) (check : Bool) :
@@ -2434,9 +2436,9 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_refines_one
       result.FrontierInvariant ∧
       DeadCellRel result address := by
   obtain ⟨result, _, _, operation, _, _, _, finalValid, deadRelated⟩ :=
-    related.decrementReferenceOnce_leaf_one leafCell valid one check
+    related.decrementReferenceOnce_leaf_one leafCell valid ordinary one check
   exact ⟨result, operation,
-    related.decValueOnce_leaf_one_eq leafCell runtime location found one check,
+    related.decValueOnce_leaf_one_eq leafCell ordinary runtime location found one check,
     finalValid, deadRelated⟩
 
 /-- The boxed above-one decrement crosses the complete local refinement
@@ -2449,6 +2451,7 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_refines_above_one
     (boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
       cell.object = .boxed kind.semanticType scalar.semanticValue)
     (valid : state.FrontierInvariant)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (oneLt : 1 < cell.rc) (check : Bool) :
@@ -2459,9 +2462,9 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_refines_above_one
       result.FrontierInvariant ∧
       LiveCellRel result witness address { cell with rc := cell.rc - 1 } := by
   obtain ⟨result, operation, finalValid, relatedAfter⟩ :=
-    related.decrementReferenceOnce_boxed_above_one boxedCell valid oneLt check
+    related.decrementReferenceOnce_boxed_above_one boxedCell valid ordinary oneLt check
   exact ⟨result, operation,
-    related.decValueOnce_above_one_eq runtime location found oneLt check,
+    related.decValueOnce_above_one_eq ordinary runtime location found oneLt check,
     finalValid, relatedAfter⟩
 
 /-- Complete local source/concrete composition for the nonrecursive decrement
@@ -2471,6 +2474,7 @@ theorem LiveCellRel.decrementReferenceOnce_refines_above_one
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
     (valid : state.FrontierInvariant)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (oneLt : 1 < cell.rc) (check : Bool) :
@@ -2481,9 +2485,9 @@ theorem LiveCellRel.decrementReferenceOnce_refines_above_one
       result.FrontierInvariant ∧
       LiveCellRel result witness address { cell with rc := cell.rc - 1 } := by
   obtain ⟨result, operation, finalValid, relatedAfter⟩ :=
-    related.decrementReferenceOnce_above_one valid oneLt check
+    related.decrementReferenceOnce_above_one valid ordinary oneLt check
   exact ⟨result, operation,
-    related.decValueOnce_above_one_eq runtime location found oneLt check,
+    related.decValueOnce_above_one_eq ordinary runtime location found oneLt check,
     finalValid, relatedAfter⟩
 
 /-- Every currently represented ordinary live cell takes the same semantic
@@ -2493,13 +2497,14 @@ theorem LiveCellRel.incValue_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (amount : Nat) (check : Bool) :
     Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
       setCell runtime location { cell with rc := cell.rc + amount } := by
   unfold Fir.LeanIR.Impure.incValue Fir.LeanIR.Impure.incLocation
-  simp only [getLiveCell, found, related.live_eq_true, related.persistent_eq_false,
+  simp only [getLiveCell, found, related.live_eq_true, ordinary,
     ↓reduceIte, Bind.bind, Except.bind]
   congr 2
 
@@ -2511,15 +2516,15 @@ theorem LiveCellRel.incValue_boxed_eq
     (related : LiveCellRel state witness address cell)
     (_boxedCell : ∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
       cell.object = .boxed kind.semanticType scalar.semanticValue)
+    (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
     (amount : Nat) (check : Bool) :
     Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
       setCell runtime location { cell with rc := cell.rc + amount } := by
   have cellLive : cell.live = true := related.live_eq_true
-  have notPersistent : cell.persistent = false := related.persistent_eq_false
   unfold Fir.LeanIR.Impure.incValue Fir.LeanIR.Impure.incLocation
-  simp only [getLiveCell, found, cellLive, notPersistent, ↓reduceIte,
+  simp only [getLiveCell, found, cellLive, ordinary, ↓reduceIte,
     Bind.bind, Except.bind]
   congr 2
 

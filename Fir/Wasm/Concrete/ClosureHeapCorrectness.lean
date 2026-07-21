@@ -20,7 +20,6 @@ inductive ClosureCellRel (state : MemoryState) (witness : RefinementWitness)
       (headerKind : header.kind = .closure)
       (descriptorLookup : witness.closureDescriptors.lookup? header.aux3 =
         some captureKinds)
-      (ordinary : header.persistent = false)
       (fixedCount : header.aux2.toNat = captures.size)
       (extent : closureCaptureAddress address.value captures.size ≤
         state.heapCursor)
@@ -37,7 +36,7 @@ theorem ClosureCellRel.headerOwned
     (related : ClosureCellRel state witness address cell) :
     address.value + headerBytes ≤ state.heapCursor := by
   cases related with
-  | closure _ _ _ _ _ _ _ extent _ _ _ =>
+  | closure _ _ _ _ _ _ extent _ _ _ =>
       simp [closureCaptureAddress, target] at extent ⊢
       omega
 
@@ -51,7 +50,7 @@ theorem ClosureCellRel.descriptor
       witness.descriptors.lookup? address =
         some (.closure function arity captureKinds) := by
   cases related with
-  | closure _ objectRelated _ _ _ _ _ _ _ _ _ =>
+  | closure _ objectRelated _ _ _ _ _ _ _ _ =>
       exact ⟨_, _, _, objectRelated.descriptor⟩
 
 /-- A packaged closure exposes the exact semantic heap-object shape. -/
@@ -62,7 +61,7 @@ theorem ClosureCellRel.objectEq
     ∃ function arity captures,
       cell.object = .closure function arity captures := by
   cases related with
-  | closure objectEq _ _ _ _ _ _ _ _ _ _ => exact ⟨_, _, _, objectEq⟩
+  | closure objectEq _ _ _ _ _ _ _ _ _ => exact ⟨_, _, _, objectEq⟩
 
 /-- A live closure cell remains related when a fresh allocation preserves its
 complete header-and-capture prefix. -/
@@ -73,7 +72,7 @@ theorem ClosureCellRel.prefixExtension
     (extension : before.PrefixExtension after) :
     ClosureCellRel after witness address cell := by
   cases related with
-  | closure objectEq objectRelated headerRead headerKind descriptorLookup ordinary
+  | closure objectEq objectRelated headerRead headerKind descriptorLookup
       fixedCount extent refCount persistent live =>
       have headerOwned : address.value + headerBytes ≤ before.heapCursor := by
         simp [closureCaptureAddress, target] at extent ⊢
@@ -81,7 +80,7 @@ theorem ClosureCellRel.prefixExtension
       exact .closure objectEq
         (objectRelated.prefixExtension extension headerOwned extent)
         (extension.readLiveHeader_eq_ok address _ headerOwned headerRead)
-        headerKind descriptorLookup ordinary fixedCount
+        headerKind descriptorLookup fixedCount
         (Nat.le_trans extent extension.cursor) refCount persistent live
 
 /-- A live closure cell is monotone in proof-only witness metadata. Exact
@@ -94,12 +93,12 @@ theorem ClosureCellRel.witnessExtension
     (extension : before.Extends after) :
     ClosureCellRel state after address cell := by
   cases related with
-  | closure objectEq objectRelated headerRead headerKind descriptorLookup ordinary
+  | closure objectEq objectRelated headerRead headerKind descriptorLookup
       fixedCount extent refCount persistent live =>
       exact .closure objectEq (by
         rw [extension.closureDispatch, extension.closureDescriptors]
         exact objectRelated.witnessExtension extension) headerRead headerKind
-        (by rw [extension.closureDescriptors]; exact descriptorLookup) ordinary
+        (by rw [extension.closureDescriptors]; exact descriptorLookup)
         fixedCount extent refCount persistent live
 
 end Fir.Wasm.Concrete

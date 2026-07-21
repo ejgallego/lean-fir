@@ -34,14 +34,14 @@ theorem LiveHeapRel.closureMatches_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
       cases closureRelated with
       | @closure storedFunction storedArity captureKinds storedCaptures header _
-          storedObjectEq objectRelated headerRead headerKind descriptorLookup ordinary
+          storedObjectEq objectRelated headerRead headerKind descriptorLookup
           fixedCount extent refCount persistent cellLive =>
           rw [objectEq] at storedObjectEq
           have identity := HeapObject.closure.inj storedObjectEq
@@ -85,14 +85,14 @@ theorem LiveHeapRel.projectClosureCapture_refines
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
-  | natural descriptor storedObjectEq headerRead headerKind ordinary marker extent
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>
       cases closureRelated with
       | @closure storedFunction storedArity storedKinds storedCaptures header _
-          storedObjectEq objectRelated headerRead headerKind descriptorLookup ordinary
+          storedObjectEq objectRelated headerRead headerKind descriptorLookup
           fixedCount extent refCount persistent cellLive =>
           rw [objectEq] at storedObjectEq
           have identity := HeapObject.closure.inj storedObjectEq

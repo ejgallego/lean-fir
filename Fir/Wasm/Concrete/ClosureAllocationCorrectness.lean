@@ -712,7 +712,7 @@ theorem ClosureObjectRel.freshCellRel
     simp [header, Header.forAllocation,
       UInt32.toNat_ofNat_of_lt' fixedFits]
   exact .closure rfl tablesRelated (by simpa [header] using headerRead) rfl
-    descriptorAt rfl fixedCount extent rfl rfl rfl
+    descriptorAt fixedCount extent rfl rfl rfl
 
 /-- Successful allocation establishes both the concrete frontier invariant
 and the canonical fresh semantic closure cell under the module's tables. -/

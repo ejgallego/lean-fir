@@ -244,7 +244,7 @@ theorem ClosureCellRel.readOwnedReferences
         (closureOwnedValues captureKinds.toList captures.toList) := by
   cases related with
   | @closure function arity captureKinds captures header _ objectEq objectRelated
-      headerRead headerKind descriptorLookup ordinary fixedCount extent refCount
+      headerRead headerKind descriptorLookup fixedCount extent refCount
       persistent live =>
       obtain ⟨words, wordsRead, wordsRelated⟩ :=
         objectRelated.readClosureOwnedReferences
