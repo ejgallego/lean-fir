@@ -26,7 +26,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `usizeSet` | Yes | Heap theorem | Partial | Missing |
 | `scalarSet` | Four integer widths | Heap theorems | Partial | Missing; floats share the runtime gap |
 | `setTag` | Yes | Heap theorem | Partial | Missing |
-| `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Missing |
+| `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, and continuation compose; ordinary wasm32 count-fit premise retained; artifact pending |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Missing |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Missing |
 | `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP; artifact pending |
@@ -45,6 +45,9 @@ Cross-cutting W6.5 state:
 - lazy-cache hits and misses compose through the declaration-call termination
   boundary, typed host cache update, physical flag/value globals, and generated
   result-local write; and
+- reference-count increment composes through exact object-like local widening,
+  the concrete header/tagged operation, generated no-result host call, and
+  persistent compiler elision; and
 - the other supported operations still need that composition, while the
   generated V8 artifact lane continues to use the semantic host runtime.
 

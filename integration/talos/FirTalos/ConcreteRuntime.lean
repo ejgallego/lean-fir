@@ -51,6 +51,31 @@ theorem PhysicalValueRel.witnessExtension
   | float64Bits valueRelated =>
       exact .float64Bits (valueRelated.witnessExtension extension)
 
+/-- Any exact object-like ABI lane accepted by the compiler widens to the
+runtime's representation-polymorphic `tobject` input without changing bits. -/
+theorem PhysicalValueRel.toTObject
+    {witness : RefinementWitness} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness kind physical semantic)
+    (refines : kind.refines .tobject = true) :
+    PhysicalValueRel witness .tobject physical semantic := by
+  cases related with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | object heapRelated => exact .word32 (.tobject (.heap heapRelated))
+      | tagged taggedRelated => exact .word32 (.tobject (.tagged taggedRelated))
+      | tobject objectRelated => exact .word32 (.tobject objectRelated)
+      | erased => simp [AbiKind.refines] at refines
+      | reuseNone => simp [AbiKind.refines] at refines
+      | reuseSome heapRelated => simp [AbiKind.refines] at refines
+      | uint8 encoded => simp [AbiKind.refines] at refines
+      | uint16 encoded => simp [AbiKind.refines] at refines
+      | uint32 encoded => simp [AbiKind.refines] at refines
+  | word64 valueRelated =>
+      cases valueRelated <;> simp [AbiKind.refines] at refines
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
 /-- A concrete local write binds its semantic result while preserving every
 old binding under monotone proof-witness growth. -/
 theorem EnvLocalsRelated.bind
@@ -534,6 +559,35 @@ def cacheSetContract (declaration : Lean.Name) (kind : AbiKind) :
 theorem cacheSetFn_satisfies_contract (declaration kind initial args) :
     cacheSetContract declaration kind initial args
       ((cacheSetFn declaration kind).invoke initial args) := by
+  rfl
+
+/-- Executable concrete reference-count increment. Tagged and promoted-tag
+words retain their checked no-op behavior inside `incrementReference`; an
+ordinary heap object updates only its checked common header. -/
+def incrementStep (amount : Nat) (check : Bool) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [.i32 bits] =>
+      match incrementReference store.host.runtime.heap (Word32.ofUInt32 bits)
+          amount check with
+      | .ok heap => .Return [] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | [_] => trap store (.laneMismatch 0 .i32)
+  | args => trap store (.arityMismatch 1 args.length)
+
+def incrementFn (amount : Nat) (check : Bool) : Wasm.HostFn Host := {
+  params := [.i32]
+  results := []
+  invoke := incrementStep amount check }
+
+def incrementContract (amount : Nat) (check : Bool) :
+    Wasm.HostContract Host :=
+  fun initial args result => result = incrementStep amount check initial args
+
+theorem incrementFn_satisfies_contract (amount check initial args) :
+    incrementContract amount check initial args
+      ((incrementFn amount check).invoke initial args) := by
   rfl
 
 def decodePhysicalLanes : Nat → List AbiKind → List Wasm.Value →
@@ -1254,6 +1308,140 @@ theorem closureProjStep_of_refines
     rw [objectEq]
     rfl
 
+/-- A successful semantic heap-cell replacement changes only the heap field. -/
+theorem setCell_heapOnly
+    {before after : RuntimeState} {location : Location} {cell : HeapCell}
+    (updated : setCell before location cell = .ok after) :
+    ∃ heap, after = { before with heap := heap } := by
+  unfold setCell at updated
+  split at updated
+  · rename_i heap replaced
+    exact ⟨heap, (Except.ok.inj updated).symm⟩
+  · contradiction
+
+/-- A successful semantic increment changes at most the heap field of the
+runtime. This packages the auxiliary-state frame needed to lift a heap proof
+to `ConcreteRuntimeRel`. -/
+theorem incValue_heapOnly
+    {before after : RuntimeState} {value : Value} {amount : Nat} {check : Bool}
+    (updated : incValue before value amount check = .ok after) :
+    ∃ heap, after = { before with heap := heap } := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          cases check <;> simp [incValue] at updated
+          exact ⟨before.heap, updated.symm⟩
+      | heap location =>
+          simp only [incValue] at updated
+          unfold incLocation at updated
+          cases read : getLiveCell before location with
+          | error failure =>
+              simp only [read, Bind.bind, Except.bind] at updated
+              cases updated
+          | ok cell =>
+              simp only [read, Bind.bind, Except.bind] at updated
+              cases persistent : cell.persistent with
+              | false =>
+                  simp only [persistent, Bool.false_eq_true, ↓reduceIte] at updated
+                  exact setCell_heapOnly updated
+              | true =>
+                  simp only [persistent, ↓reduceIte] at updated
+                  have afterEq : before = after := Except.ok.inj updated
+                  exact ⟨before.heap, by simpa using afterEq.symm⟩
+  | usize value => simp [incValue] at updated
+  | scalar value => simp [incValue] at updated
+  | erased => simp [incValue] at updated
+  | reuseToken location => simp [incValue] at updated
+
+/-- Replace concrete memory after a heap-only source update while retaining
+the already-related globals, world token, and external trace. -/
+theorem ConcreteRuntimeRel.replaceHeap_of_heapOnly
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {witness : RefinementWitness} {before after : RuntimeState}
+    (related : ConcreteRuntimeRel initial.host.runtime witness before)
+    (heapRelated : LiveHeapRel heap witness after)
+    (heapOnly : ∃ semanticHeap, after = { before with heap := semanticHeap }) :
+    ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness after := by
+  rcases heapOnly with ⟨semanticHeap, rfl⟩
+  exact {
+    heap := by simpa [replaceHeap, clearFailure] using heapRelated
+    globals := by simpa [replaceHeap, clearFailure] using related.globals
+    world := by simpa [replaceHeap, clearFailure] using related.world
+    trace := by simpa [replaceHeap, clearFailure] using related.trace }
+
+/-- Successful concrete reference-count increment refines the exact semantic
+operation for both ordinary heap objects and checked tagged/promoted-tag
+values. `fits` is the wasm32 header-count side condition for the ordinary
+branch and is vacuous for tagged values. -/
+theorem incrementStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject : Value}
+    {word : Word32} {amount : Nat} {check : Bool}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (updated : incValue runtime sourceObject amount check = .ok nextRuntime)
+    (fits : ∀ (location : Location) (cell : HeapCell),
+      sourceObject = .object (.heap location) →
+      findCell? runtime.heap location = some cell →
+      cell.rc + amount < UInt32.size) :
+    ∃ heap,
+      incrementStep amount check initial
+          [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              rename_i location
+              obtain ⟨cell, found, _⟩ :=
+                runtimeRelated.heap.concreteToSemantic location word mapped
+              have live : cell.live = true := by
+                by_contra notLive
+                have dead : cell.live = false := Bool.eq_false_of_not_eq_true notLive
+                have readError : getLiveCell runtime location =
+                    .error (.deadObject location) := by
+                  simp [getLiveCell, found, dead]
+                have impossible := updated
+                simp only [incValue] at impossible
+                unfold incLocation at impossible
+                rw [readError] at impossible
+                cases impossible
+              have countFits := fits _ cell rfl found
+              obtain ⟨heap, semanticAfter, concreteOperation,
+                  semanticOperation, finalHeapRelated⟩ :=
+                runtimeRelated.heap.incrementReference_refines mapped found live
+                  amount countFits check
+              rw [updated] at semanticOperation
+              have afterEq := Except.ok.inj semanticOperation
+              subst semanticAfter
+              refine ⟨heap, ?_, ?_⟩
+              · simp [incrementStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
+              · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+                  finalHeapRelated (incValue_heapOnly updated)
+      | tagged taggedRelated =>
+          have concreteOperation :=
+            runtimeRelated.heap.incrementReference_tagged taggedRelated amount check
+          have checked : check = true := by
+            cases check
+            · simp [incValue] at updated
+            · rfl
+          subst check
+          have afterEq : nextRuntime = runtime := by
+            simpa [incValue] using updated.symm
+          subst nextRuntime
+          refine ⟨initial.host.runtime.heap, ?_, ?_⟩
+          · simp [incrementStep, clearFailure,
+              Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
+          · simpa [replaceHeap, clearFailure] using runtimeRelated
+
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and
 compiler-assigned locals contain related W6 lanes. -/
@@ -1265,6 +1453,33 @@ def StateRelated (sourceFunction : Fir.Wasm.Function)
     targetStore.host.failure? = none ∧
     EnvLocalsRelated witness (functionBindings sourceFunction) sourceEnv
       targetLocals
+
+/-- Resolve one source binding to its exact concrete ABI lane at an already
+known compiler-assigned local. -/
+theorem StateRelated.resolve
+    {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
+    {sourceEnv : Env} {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    {fvar : Lean.FVarId} {sourceValue : Value} {index : Nat} {kind : AbiKind}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (sourceLookup : lookup sourceEnv fvar = some sourceValue)
+    (found : findFVar? (functionBindings sourceFunction) fvar = some index)
+    (kindAt :
+      (functionBindings sourceFunction)[index]?.map Prod.snd = some kind) :
+    ∃ physical,
+      targetLocals.get index = some physical ∧
+      PhysicalValueRel witness kind physical sourceValue := by
+  rcases related.2.2 sourceLookup with
+    ⟨actualIndex, actualKind, physical, actualFound, actualKindAt,
+      targetLookup, valueRelated⟩
+  rw [found] at actualFound
+  injection actualFound with indexEq
+  subst actualIndex
+  rw [kindAt] at actualKindAt
+  injection actualKindAt with kindEq
+  subst actualKind
+  exact ⟨physical, targetLookup, valueRelated⟩
 
 theorem StateRelated.clearFailure
     {sourceFunction : Fir.Wasm.Function} {sourceRuntime : RuntimeState}
@@ -1392,6 +1607,57 @@ def CodeWP (context : Fir.Wasm.Context)
       witness ∧
     Wasm.wp module target Q targetStore
       { targetLocals with values := tail } hostEnv
+
+/-- Concrete semantic interface for one generated no-result effect prefix.
+Separate witnesses support later reset/reuse effects that change concrete
+representation metadata while preserving the source environment. -/
+def EffectStepSimulates (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module) (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (code continuation : Lean.Compiler.LCNF.Code .impure)
+    (target targetRest : Wasm.Program)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness nextWitness : RefinementWitness) : Prop :=
+  SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation ∧
+    CodeAdapted context sourceModule sourceFunction labels code target ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    StateRelated sourceFunction nextRuntime sourceEnv nextStore targetLocals
+      nextWitness ∧
+    ∀ (Q : Wasm.Assertion Host) (tail : List Wasm.Value),
+      Wasm.wp module targetRest Q nextStore
+          { targetLocals with values := tail } hostEnv →
+        Wasm.wp module target Q targetStore
+          { targetLocals with values := tail } hostEnv
+
+/-- Recursive concrete `CodeWP` rule for a successful no-result source
+effect followed by an already-composed continuation. -/
+theorem codeWP_effect
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals} {witness nextWitness : RefinementWitness}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (step : EffectStepSimulates context sourceModule sourceFunction labels
+      module hostEnv sourceRuntime nextRuntime sourceEnv code continuation
+      target targetRest targetStore nextStore targetLocals witness nextWitness)
+    (continued : CodeWP context sourceModule sourceFunction labels module
+      hostEnv nextRuntime sourceEnv continuation targetRest nextStore
+      targetLocals nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv code target targetStore targetLocals witness tail
+      Q := by
+  rcases step with ⟨_, adapted, initialRelated, _, stepWP⟩
+  exact ⟨adapted, initialRelated, stepWP Q tail continued.2.2⟩
 
 /-- Function-body postcondition over the concrete host. It retains the caller
 operand remainder exactly as prescribed by Wasm's direct-call convention. -/
@@ -1779,6 +2045,208 @@ theorem wp_localGets
       rw [hGetNext]
       apply ih (tail := value :: tail)
       simpa [List.reverse_cons, List.append_assoc] using continued
+
+/-- Host-polymorphic generated no-result effect prefix. Source-order local
+loads are reversed into Wasm operand order, consumed by one exact-contract
+host call, and the original operand tail is restored. -/
+theorem wp_effect_localGets
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {spec : Wasm.HostSpec host} {id : Nat} {imp : Wasm.ImportDecl}
+    {step : Wasm.Store host → List Wasm.Value → Wasm.HostResult host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {initial final : Wasm.Store host} {locals : Wasm.Locals}
+    {indices : List Nat} {physicalArgs tail : List Wasm.Value}
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 0)
+    (operation : step initial physicalArgs = .Return [] final)
+    (continued :
+      Wasm.wp module rest Q final { locals with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++ .call id :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_exact_host_call_of_return (physicalArgs := physicalArgs)
+    (results := []) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using continued
+
+/-- Generic unary concrete-host instance of the no-result effect boundary. -/
+theorem effectStepSimulates_unaryHost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial final : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {physicalObject : Wasm.Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness nextWitness : RefinementWitness}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    (sourceStep : SourceEffectResult context sourceRuntime nextRuntime sourceEnv
+      code continuation)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels code
+      ([.localGet objectIndex, .call id] ++ targetRest))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (finalRelated : StateRelated sourceFunction nextRuntime sourceEnv final
+      locals nextWitness)
+    (hObject : locals.get objectIndex = some physicalObject)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (operation : step initial [physicalObject] = .Return [] final) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime nextRuntime sourceEnv code continuation
+      ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial final
+      locals witness nextWitness := by
+  refine ⟨sourceStep, adapted, initialRelated, finalRelated, ?_⟩
+  intro Q tail continued
+  simpa using wp_effect_localGets
+    (indices := [objectIndex]) (physicalArgs := [physicalObject])
+    (tail := tail) (.cons hObject .nil) hImp hSat hi hContract hParams
+    hResults operation continued
+
+/-- A compiler-elided concrete source effect advances only source control. -/
+theorem effectStepSimulates_elided
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {sourceRuntime : RuntimeState} {targetRest : Wasm.Program}
+    {witness : RefinementWitness}
+    (sourceStep : SourceEffectResult context sourceRuntime sourceRuntime
+      sourceEnv code continuation)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels code
+      targetRest)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceRuntime sourceEnv code continuation targetRest
+      targetRest initial initial locals witness witness := by
+  exact ⟨sourceStep, adapted, initialRelated, initialRelated,
+    fun _ _ continued => continued⟩
+
+/-- Nonpersistent source increment composed through the real compiler,
+adapter, concrete runtime, and exact generated unary host-call prefix. -/
+theorem effectStepSimulates_inc
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : incValue sourceRuntime sourceObject amount check = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (objectRefines : objectKind.refines .tobject = true)
+    (callFound : callIndex? sourceModule (.runtime (.inc amount check)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (incrementContract amount check))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (fits : ∀ (location : Location) (cell : HeapCell),
+      sourceObject = .object (.heap location) →
+      findCell? sourceRuntime.heap location = some cell →
+      cell.rc + amount < UInt32.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.inc objectId amount check false continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated⟩ :=
+        incrementStep_of_refines initialRelated.1 objectRelated updated fits
+      refine ⟨heap, ?_⟩
+      apply effectStepSimulates_unaryHost
+        (step := incrementStep amount check)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_inc objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/-- Persistent increments are source and concrete control-flow no-ops. -/
+theorem effectStepSimulates_inc_persistent
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {sourceRuntime : RuntimeState} {targetRest : Wasm.Program}
+    {witness : RefinementWitness}
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest) :
+    EffectStepSimulates context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceRuntime sourceEnv
+      (.inc objectId amount check true continuation) continuation targetRest
+      targetRest initial initial locals witness witness := by
+  apply effectStepSimulates_elided
+  · intro externals
+    simp [executeStep, coreStep]
+  · exact codeAdapted_inc_persistent continuationAdapted
+  · exact initialRelated
 
 /-- Concrete-host WP for the generated object projection and destination
 write. Both the input and result are physical wasm32 words; their meanings are

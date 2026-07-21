@@ -166,6 +166,35 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _, _ => false
   | _ => false
 
+-- Ordinary objects update only their checked header reference count.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match incrementStep 2 true store [.i32 object] with
+      | .Return [] next =>
+          match next.host.runtime.heap.readLiveHeader (Word32.ofUInt32 object) with
+          | .ok header =>
+              header.refCount == 3 && next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | _ => false
+
+-- A tagged value promoted past wasm32's immediate range remains a checked
+-- no-op even though its concrete word is a heap address.
+#guard match naturalLiteralStep 2147483648 emptyHostStore [] with
+  | .Return [.i32 object] store =>
+      let cursor := store.host.runtime.heap.heapCursor
+      match incrementStep 7 true store [.i32 object] with
+      | .Return [] next =>
+          match readTag next.host.runtime.heap (Word32.ofUInt32 object) with
+          | .ok tag =>
+              tag.toNat == 2147483648 &&
+                next.host.runtime.heap.heapCursor == cursor &&
+                next.host.failure?.isNone
+          | .error _ => false
+      | _ => false
+  | _ => false
+
 private def cacheDeclaration : Lean.Name := `FirTalos.Concrete.cachedValue
 
 private def cacheStore : Wasm.Store Host := {

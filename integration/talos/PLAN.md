@@ -2040,6 +2040,21 @@ lazy-cache proof boundary. Supplying each declaration body's concrete
 termination/refinement proof and switching the emitted artifact to the
 concrete host remain integration work.
 
+W6.6p opens the no-result effect path and closes reference-count increment.
+`EffectStepSimulates` and its recursive `CodeWP` rule retain the exact source
+step, compiler/adapter witness, pre/post concrete state relation, and an
+operand-tail-polymorphic target transformer; the reusable host rule composes
+source-order local loads with a result-free exact-contract call. The concrete
+increment host now covers ordinary heap objects and both immediate and
+promoted tagged words, while persistent source increments use the compiler's
+proved elision path. Exact `.object` and `.tagged` locals widen to the
+`tobject` runtime input only through `AbiKind.refines`. Ordinary count growth
+retains the existing checked wasm32 side condition
+`cell.rc + amount < UInt32.size`; tagged values are checked no-ops and do not
+consume it. Executable guards cover an ordinary header update and the
+promoted-tag no-op. The same effect infrastructure is ready for mutation,
+decrement, delete, reset, and reuse.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
