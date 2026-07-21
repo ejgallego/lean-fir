@@ -152,6 +152,21 @@ const physicalResult = entry(...physicalArguments);
 const result = host.decode(manifest.result, physicalResult);
 ```
 
+The shipped semantic host and Format external registry are also free of Node
+built-ins. `fetch-pretty-format.mjs` therefore runs the same raw-layout and
+cache-reuse checks as the Node client inside a module Web Worker. The permanent
+headless-browser/worker regression is opt-in so the normal artifact lane does
+not require a proprietary browser package:
+
+```text
+./browser-check.sh google-chrome
+FIR_BROWSER=google-chrome ./check.sh
+```
+
+The initial browser validation used Google Chrome 150.0.7871.114. Chrome is
+not added to the repository's required tooling; any compatible headless
+Chromium-family executable may be passed explicitly.
+
 The client also retains the focused expected-failure regression for
 `FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads
 a cached heap `SpaceResult` after shared FIR cache semantics have allowed it to

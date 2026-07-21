@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import assert from "./wasm_assert.mjs";
 
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);

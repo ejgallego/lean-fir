@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import assert from "./wasm_assert.mjs";
 
 import {
   integerValue,
