@@ -38,9 +38,13 @@ def collectArg (used : UsedLocals) (argument : LCNF.Arg pu) : UsedLocals :=
   | .fvar fvarId => used.insert fvarId
   | .type _ _ | .erased => used
 
+def collectArgList (used : UsedLocals) : List (LCNF.Arg pu) → UsedLocals
+  | [] => used
+  | argument :: rest => collectArgList (collectArg used argument) rest
+
 def collectArgs (used : UsedLocals) (arguments : Array (LCNF.Arg pu)) :
     UsedLocals :=
-  arguments.foldl (init := used) collectArg
+  collectArgList used arguments.toList
 
 def collectLetValue (used : UsedLocals) (value : LCNF.LetValue pu) :
     UsedLocals :=

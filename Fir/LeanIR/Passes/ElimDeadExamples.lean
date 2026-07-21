@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.ElimDead
+import Fir.LeanIR.Passes.ElimDeadLiveness
 import Fir.LeanIR.InterpreterExamples
 import Lean.Compiler.LCNF.ElimDead
 import Lean.Elab.Command
@@ -128,6 +128,28 @@ def allocatingBeforeProgram : ImpureProgram :=
 
 def allocatingAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main allocatingAfter] }
+
+def liveEnv : Env :=
+  bind [] live .erased
+
+def deadExtendedEnv : Env :=
+  bind liveEnv dead (.usize 42)
+
+/-- A binding absent from the backwards used set can be added to one side
+without changing any lookup the transformed suffix is allowed to perform. -/
+theorem deadBindingOutsideCtorLiveness :
+    EnvsAgreeOn (collectLetValue {} deadCtorDecl.value)
+      deadExtendedEnv liveEnv := by
+  apply EnvsAgreeOn.bindLeft_of_absent (EnvsAgreeOn.refl _ liveEnv)
+  native_decide
+
+/-- The semantic counterpart of the concrete liveness regression: evaluating
+the constructor value is insensitive to the dead environment binding. -/
+theorem deadCtorEvalIgnoresDeadBinding (state : MachineState) :
+    evalLetValue { state with env := deadExtendedEnv } deadCtorDecl =
+      evalLetValue { state with env := liveEnv } deadCtorDecl := by
+  exact evalLetValue_eq_of_covered state deadBindingOutsideCtorLiveness
+    (collectLetValue_covers {} deadCtorDecl.value)
 
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
