@@ -1,5 +1,6 @@
 import FirTalos.Correctness.Semantics
 import Fir.Wasm.Concrete
+import Interpreter.Wasm.Spec.Termination
 
 namespace FirTalos.Concrete
 
@@ -1391,6 +1392,98 @@ def CodeWP (context : Fir.Wasm.Context)
       witness ∧
     Wasm.wp module target Q targetStore
       { targetLocals with values := tail } hostEnv
+
+/-- Function-body postcondition over the concrete host. It retains the caller
+operand remainder exactly as prescribed by Wasm's direct-call convention. -/
+def ConcreteFunctionBodyPost (function : Wasm.Function)
+    (args : List Wasm.Value)
+    (Post : Wasm.Store Host → List Wasm.Value → Prop) :
+    Wasm.Assertion Host :=
+  fun continuation =>
+    match continuation with
+    | .Fallthrough targetStore targetLocals =>
+        Post targetStore
+          (targetLocals.values.take function.results.length ++
+            args.drop function.numParams)
+    | .Return targetStore values =>
+        Post targetStore
+          (values.take function.results.length ++ args.drop function.numParams)
+    | _ => False
+
+/-- Store-specific bridge from a concrete body WP to Talos's fuel-free public
+function predicate. -/
+theorem concreteTerminatesWith_of_wp_body_at
+    {env : Wasm.HostEnv Host} {module : Wasm.Module}
+    {functionIndex : Nat} {function : Wasm.Function}
+    {initial : Wasm.Store Host} {args : List Wasm.Value}
+    {Post : Wasm.Store Host → List Wasm.Value → Prop}
+    (notImport : module.imports[functionIndex]? = none)
+    (found :
+      module.funcs[functionIndex - module.imports.length]? = some function)
+    (bodyWP :
+      Wasm.wp module function.body
+        (ConcreteFunctionBodyPost function args Post) initial
+        (function.toLocals (args.take function.numParams).reverse) env) :
+    Wasm.TerminatesWith env module functionIndex initial args Post := by
+  unfold Wasm.wp at bodyWP
+  rcases bodyWP with ⟨fuelBound, bodyWP⟩
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  have bodyPost := bodyWP fuel enoughFuel
+  rw [Wasm.run_eq notImport]
+  simp only [found]
+  cases execution : Wasm.exec fuel module initial
+      (function.toLocals (args.take function.numParams).reverse)
+      function.body env with
+  | Fallthrough final finalLocals =>
+      rw [execution] at bodyPost
+      exact ⟨finalLocals.values.take function.results.length ++
+          args.drop function.numParams, final, rfl, bodyPost⟩
+  | Return final values =>
+      rw [execution] at bodyPost
+      exact ⟨values.take function.results.length ++ args.drop function.numParams,
+        final, rfl, bodyPost⟩
+  | Break level final finalLocals =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+  | Trap final message =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+  | Invalid message =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+  | OutOfFuel =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+  | ReturnCall callee final values =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+  | Throwing tag values final finalLocals =>
+      rw [execution] at bodyPost
+      exact bodyPost.elim
+
+/-- A concrete semantic lowering proof for a callee body supplies the exact
+fuel-free theorem consumed by `wp_directCall_let`. -/
+theorem CodeWP.toConcreteTerminatesWith
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
+    {functionIndex : Nat} {initial : Wasm.Store Host}
+    {args : List Wasm.Value} {witness : RefinementWitness}
+    {Post : Wasm.Store Host → List Wasm.Value → Prop}
+    (notImport : module.imports[functionIndex]? = none)
+    (found :
+      module.funcs[functionIndex - module.imports.length]? = some function)
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code function.body initial
+        (function.toLocals (args.take function.numParams).reverse) witness []
+        (ConcreteFunctionBodyPost function args Post)) :
+    Wasm.TerminatesWith hostEnv module functionIndex initial args Post := by
+  apply concreteTerminatesWith_of_wp_body_at notImport found
+  simpa [Wasm.Function.toLocals] using correct.2.2
 
 /-- One direct source `let` step paired with its concrete host/local update.
 Separate witnesses allow later allocation operations to grow ghost metadata. -/

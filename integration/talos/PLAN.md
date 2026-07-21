@@ -2000,6 +2000,18 @@ ordinary Wasm calls and never reintroduces the excluded semantic
 concrete function-body `CodeWP`, and assembling the whole compiler candidate
 fold, remain follow-ups.
 
+W6.6m discharges the generic callee side of that boundary. A concrete-host
+function postcondition implements Wasm's exact parameter consumption, result
+truncation, caller-tail restoration, fallthrough, and explicit return cases.
+The corresponding body theorem converts any proved function-body WP into
+Talos's store-specific, fuel-free `TerminatesWith` predicate; a `CodeWP`
+corollary supplies it directly from the W6 source/compiler/state judgment.
+Together with W6.6l, a concrete callee proof can now feed a generated direct
+call and destination-local write without semantic handles. The remaining
+closure gap is structural assembly of all projected captures, new arguments,
+candidate branches, and the compiler's complete fold; recursive callees must
+still provide the usual well-founded family of body proofs.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
