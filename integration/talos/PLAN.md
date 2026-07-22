@@ -2451,6 +2451,20 @@ exact world increment and trace event. The Node/browser concrete host still
 retains its explicit external import gate for the next slice. No shared
 semantic contract changed.
 
+W6.6aw closes the matching concrete external-engine gate. The browser-safe
+JavaScript host now accepts an explicit reject-by-default external registry,
+decodes generated physical arguments through the same concrete heap/value
+representation used by runtime operations, invokes the selected handler,
+advances the world, records the exact source-shaped event, and encodes the
+declared result lane. The semantic and concrete artifact hosts share one
+registry definition while retaining independent runtime implementations.
+`external-echo` and the twice-called `cached-external` move into the concrete
+success inventory, bringing Node and Chrome to 38 artifacts with no remaining
+import-construction fragment gate; the latter confirms one foreign call, one
+world/trace update, and a physical cache hit. Both engines separately verify
+the structured missing-implementation fault. No shared semantic contract
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

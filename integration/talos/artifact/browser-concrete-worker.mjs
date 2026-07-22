@@ -7,9 +7,11 @@ import {
 } from "./concrete-host.mjs";
 import {
   CONCRETE_FIXTURES,
+  DEFAULT_EXTERNAL_FAULTS,
   EXPECTED_CONCRETE_FAULTS,
   REJECTED_FRAGMENT_FIXTURES,
 } from "./concrete-corpus.mjs";
+import { artifactExternalRegistry } from "./artifact-external-registry.mjs";
 
 const corpusPath = new URLSearchParams(globalThis.location.search)
   .get("corpus") ?? "_build/concrete-corpus";
@@ -36,7 +38,8 @@ async function runConcreteArtifact(fixture) {
   const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
   assert.ok(WebAssembly.validate(bytes), `${fixture}.wasm failed WebAssembly validation`);
 
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    artifactExternalRegistry);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -56,7 +59,8 @@ async function runConcreteArtifact(fixture) {
 
 async function checkFragmentGate(fixture) {
   const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    artifactExternalRegistry);
   let rejected = false;
   try {
     host.imports(manifest.imports);
@@ -69,7 +73,8 @@ async function checkFragmentGate(fixture) {
 async function checkExpectedFault(fixture, expectedFault) {
   const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
   const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    artifactExternalRegistry);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   let actual;
   try {
@@ -83,6 +88,23 @@ async function checkExpectedFault(fixture, expectedFault) {
     `${fixture} did not retain its exact concrete expected failure`);
 }
 
+async function checkDefaultExternalFault(fixture, expectedFault) {
+  const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
+  const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  let actual;
+  try {
+    instance.exports[manifest.entry]();
+    actual = undefined;
+  } catch (error) {
+    if (!(error instanceof ConcreteFault)) throw error;
+    actual = error.fault;
+  }
+  assert.deepStrictEqual(actual, expectedFault,
+    `${fixture} did not reject its missing concrete external implementation`);
+}
+
 async function runInitialRuntimeSource() {
   const sourceBase = new URL("./_build/", import.meta.url);
   const name = "source-nat-list-case.wasm";
@@ -93,7 +115,8 @@ async function runInitialRuntimeSource() {
   assert.equal(manifest.result, "uint64");
   assert.ok(WebAssembly.validate(bytes), "nat-list source failed WebAssembly validation");
 
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    artifactExternalRegistry);
   for (const cell of manifest.initialRuntime.heap) {
     const address = host.locationAddresses.get(cell.location);
     assert.notEqual(address, undefined, `initial location ${cell.location} was not loaded`);
@@ -127,7 +150,8 @@ async function runInitialRuntimeStringSource() {
   assert.equal(manifest.result, "uint64");
   assert.ok(WebAssembly.validate(bytes), "string source failed WebAssembly validation");
 
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    artifactExternalRegistry);
   for (const cell of manifest.initialRuntime.heap) {
     const address = host.locationAddresses.get(cell.location);
     assert.notEqual(address, undefined, `initial location ${cell.location} was not loaded`);
@@ -157,6 +181,9 @@ async function runConcreteBrowserCorpus() {
   for (const fixture of REJECTED_FRAGMENT_FIXTURES) {
     await checkFragmentGate(fixture);
   }
+  for (const [fixture, expectedFault] of DEFAULT_EXTERNAL_FAULTS) {
+    await checkDefaultExternalFault(fixture, expectedFault);
+  }
   for (const [fixture, expectedFault] of EXPECTED_CONCRETE_FAULTS) {
     await checkExpectedFault(fixture, expectedFault);
   }
@@ -166,6 +193,7 @@ async function runConcreteBrowserCorpus() {
   return `PASS browser Worker concrete Wasm corpus ` +
     `(${CONCRETE_FIXTURES.length} artifacts, ` +
     `${fragmentCount} fragment gate${fragmentCount === 1 ? "" : "s"}, ` +
+    `${DEFAULT_EXTERNAL_FAULTS.length} default external fault, ` +
     `${EXPECTED_CONCRETE_FAULTS.length} expected failure, ` +
     `2 initial-runtime sources)`;
 }

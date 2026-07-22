@@ -10,6 +10,7 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "box-roundtrip",
   "case",
   "cached-constructor",
+  "cached-external",
   "closure-call",
   "closure-underapply",
   "compiler-shaped-mutation",
@@ -20,6 +21,7 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "default-case",
   "direct-call",
   "erased",
+  "external-echo",
   "literal",
   "natural-heap",
   "nested-heap",
@@ -37,8 +39,14 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "usize-max",
 ]);
 
-export const REJECTED_FRAGMENT_FIXTURES = Object.freeze([
-  "external-echo",
+export const REJECTED_FRAGMENT_FIXTURES = Object.freeze([]);
+
+export const DEFAULT_EXTERNAL_FAULTS = Object.freeze([
+  Object.freeze(["external-echo", Object.freeze({
+    kind: "externalFailure",
+    name: "external",
+    message: "no concrete external implementation installed",
+  })]),
 ]);
 
 export const EXPECTED_CONCRETE_FAULTS = Object.freeze([

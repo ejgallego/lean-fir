@@ -43,8 +43,10 @@ Cross-cutting W6.5 state:
   have `ConcreteRuntimeRel`/trap boundaries; validated singleton-result source
   externals now also resolve to an executable concrete Talos host, decode and
   encode exact physical lanes, reject mismatched response lanes structurally,
-  and pass a whole-module UInt64 world/trace fixture; the Node/browser concrete
-  external-engine handler remains pending;
+  and pass a whole-module UInt64 world/trace fixture; the shared Node/browser
+  concrete host executes the matching external artifact with the same
+  return/world/trace, executes a twice-called cached external with exactly one
+  effect, and separately verifies reject-by-default behavior;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
@@ -114,13 +116,16 @@ Cross-cutting W6.5 state:
   resolution; and
 - a browser-safe external-engine host now mirrors the proved concrete word,
   header, slot, natural, constructor, closure, mutation, ownership, and reuse
-  layouts; the same frozen inventory of 36 closed artifacts passes its live
+  layouts and explicit foreign registry; the same frozen inventory of 38
+  closed artifacts passes its live
   FIR oracle in Node/V8 and a Fetch-only browser Worker without runtime
   handles, including cache miss/persistence/hit, maximum-width heap
   boxing/unboxing, UTF-8 string allocation, and a mixed string/natural
-  constructor graph; both engines also preserve the remaining external
-  import-construction fragment gate and the exact malformed-layout expected
-  failure; and
+  constructor graph, external world/trace effect, and cached external
+  miss/effect/hit sequence; both engines also
+  preserve the structured default external rejection and exact malformed-
+  layout expected failure, with no remaining import-construction fragment
+  gate; and
 - the concrete external-engine host reserves and reconstructs the represented
   object-field constructor/natural `initialRuntime` subset before invocation,
   preserving all semantic locations and cell metadata; Node and the browser

@@ -107,13 +107,17 @@ export function concreteManifestValue(argument) {
  * to normalize final observations against the source oracle.
  */
 export class ConcreteHost {
-  constructor(manifestImports = [], initialRuntime = undefined) {
+  constructor(manifestImports = [], initialRuntime = undefined,
+    externalRegistry = undefined) {
     this.buffer = new ArrayBuffer(PAGE_BYTES);
     this.view = new DataView(this.buffer);
     this.heapCursor = HEAP_BASE;
     this.globals = new Map();
     this.world = 0;
     this.trace = [];
+    this.externalRegistry = externalRegistry instanceof Map
+      ? new Map(externalRegistry)
+      : new Map(Object.entries(externalRegistry ?? {}));
 
     this.nextLocation = 0;
     this.addressLocations = new Map();
@@ -1163,6 +1167,45 @@ export class ConcreteHost {
     return signed32(token);
   }
 
+  external(operation, physicalArgs) {
+    assert.equal(physicalArgs.length, operation.params.length,
+      "external host arity mismatch");
+    assert.equal(operation.results.length, 1,
+      "concrete external host requires exactly one result");
+    const args = operation.params.map((kind, index) =>
+      this.decode(kind, physicalArgs[index]));
+    const implementation = this.externalRegistry.get(operation.declaration);
+    if (implementation === undefined) {
+      throw new ConcreteFault({
+        kind: "externalFailure",
+        name: operation.declaration,
+        message: "no concrete external implementation installed",
+      });
+    }
+    const response = implementation({
+      declaration: operation.declaration,
+      args,
+      host: this,
+      world: this.world,
+    });
+    assert.ok(response && typeof response === "object",
+      `concrete external ${operation.declaration} returned no response`);
+    assert.ok(response.value && typeof response.value === "object",
+      `concrete external ${operation.declaration} returned no semantic value`);
+    assert.ok(response.world === undefined ||
+      (Number.isSafeInteger(response.world) && response.world >= 0),
+    `concrete external ${operation.declaration} returned an invalid world`);
+    if (response.world !== undefined) {
+      this.world = response.world;
+    }
+    this.trace.push({
+      name: operation.declaration,
+      args: args.map((value) => this.valueJson(value)),
+      result: this.valueJson(response.value),
+    });
+    return this.encode(operation.results[0], response.value);
+  }
+
   importFunction(operation) {
     switch (operation.kind) {
       case "naturalLiteral":
@@ -1211,6 +1254,8 @@ export class ConcreteHost {
         return (...args) => this.reset(operation, args);
       case "reuse":
         return (...args) => this.reuse(operation, args);
+      case "external":
+        return (...args) => this.external(operation, args);
       default:
         throw new Error(`unsupported concrete artifact operation: ${operation.kind}`);
     }

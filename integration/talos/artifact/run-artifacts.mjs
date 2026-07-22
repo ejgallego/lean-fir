@@ -8,14 +8,7 @@ import {
   SemanticHost,
   manifestValue,
 } from "../../../scripts/wasm_semantic_host.mjs";
-
-const artifactExternalRegistry = {
-  external: ({ args, world }) => ({ value: args[0], world: world + 1 }),
-  cachedBinaryExternal: ({ world }) => ({
-    value: { kind: "scalar", scalarKind: "uint64", value: 91n },
-    world: world + 1,
-  }),
-};
+import { artifactExternalRegistry } from "./artifact-external-registry.mjs";
 
 export async function runArtifact(manifestPath) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
