@@ -1,4 +1,5 @@
-import Fir.LeanIR.Passes.ElimDead
+import Fir.LeanIR.Passes.ElimDeadLiveness
+import Fir.LeanIR.Passes.Structural
 
 namespace Fir.LeanIR.Passes.ElimDead
 
@@ -6,6 +7,8 @@ open Lean
 open Lean.Compiler
 open Fir.LeanIR
 open Fir.LeanIR.Impure
+open Fir.LeanIR.Passes.NonLockstep.Structural
+open Fir.LeanIR.Passes.AlphaEqv
 
 /-!
 Reachability-aware runtime infrastructure for `elimDeadVars`.
@@ -481,6 +484,117 @@ def outcomeRoots : Outcome → List Value
 runtime contributes globals and the already observable external trace. -/
 def runtimeRoots (runtime : RuntimeState) (extra : List Value) : List Value :=
   extra ++ runtime.globals.map Prod.snd ++ traceRoots runtime.trace
+
+/-- Environments agree relationally on precisely the variables retained by
+the backwards liveness graph. -/
+def EnvRelOn (rho : AddressRenaming) (used : UsedLocals)
+    (left right : Env) : Prop :=
+  ∀ fvarId, used.contains fvarId = true →
+    OptionalRel (ValueRel rho) (lookup left fvarId) (lookup right fvarId)
+
+/-- Canonical runtime roots contributed by the live portion of an
+environment.  `filterMap` drops malformed/missing live lookups symmetrically. -/
+def envRootsOn (used : UsedLocals) (env : Env) : List Value :=
+  used.toList.filterMap (lookup env)
+
+theorem lookupRoots_related
+    (keys : List FVarId)
+    (agree : ∀ key, key ∈ keys →
+      OptionalRel (ValueRel rho) (lookup left key) (lookup right key)) :
+    ListRel (ValueRel rho)
+      (keys.filterMap (lookup left)) (keys.filterMap (lookup right)) := by
+  induction keys with
+  | nil => exact .nil
+  | cons key rest ih =>
+      have head := agree key (by simp)
+      have tail : ∀ candidate, candidate ∈ rest →
+          OptionalRel (ValueRel rho) (lookup left candidate)
+            (lookup right candidate) := by
+        intro candidate member
+        exact agree candidate (by simp [member])
+      cases leftLookup : lookup left key with
+      | none =>
+          cases rightLookup : lookup right key with
+          | none => simpa [List.filterMap, leftLookup, rightLookup] using ih tail
+          | some rightValue =>
+              rw [leftLookup, rightLookup] at head
+              cases head
+      | some leftValue =>
+          cases rightLookup : lookup right key with
+          | none =>
+              rw [leftLookup, rightLookup] at head
+              cases head
+          | some rightValue =>
+              rw [leftLookup, rightLookup] at head
+              cases head with
+              | some related =>
+                  simpa [List.filterMap, leftLookup, rightLookup] using
+                    ListRel.cons related (ih tail)
+
+theorem envRootsOn_related
+    (agree : EnvRelOn rho used left right) :
+    ListRel (ValueRel rho) (envRootsOn used left) (envRootsOn used right) := by
+  apply lookupRoots_related
+  intro key member
+  apply agree key
+  change key ∈ used
+  exact Std.HashSet.mem_toList.mp member
+
+theorem envRelOn_monoRenaming
+    (extension : RenamingExtends smaller larger)
+    (agree : EnvRelOn smaller used left right) :
+    EnvRelOn larger used left right := by
+  intro fvarId member
+  have related := agree fvarId member
+  generalize leftLookup : lookup left fvarId = leftValue at related ⊢
+  generalize rightLookup : lookup right fvarId = rightValue at related ⊢
+  cases related with
+  | none => exact .none
+  | some value => exact .some (valueRel_mono extension value)
+
+theorem EnvRelOn.mono
+    (subset : UsedSubset smaller larger)
+    (agree : EnvRelOn rho larger left right) :
+    EnvRelOn rho smaller left right := by
+  intro fvarId member
+  exact agree fvarId (subset fvarId member)
+
+theorem EnvRelOn.bindLeft_of_absent
+    (agree : EnvRelOn rho used left right)
+    (absent : used.contains binder = false) :
+    EnvRelOn rho used (bind left binder value) right := by
+  intro fvarId member
+  rw [lookup_bind_of_name_ne
+    (fvarId_name_ne_of_contains_of_absent used fvarId binder member absent)]
+  exact agree fvarId member
+
+theorem EnvRelOn.bindRight_of_absent
+    (agree : EnvRelOn rho used left right)
+    (absent : used.contains binder = false) :
+    EnvRelOn rho used left (bind right binder value) := by
+  intro fvarId member
+  rw [lookup_bind_of_name_ne
+    (fvarId_name_ne_of_contains_of_absent used fvarId binder member absent)]
+  exact agree fvarId member
+
+/-- Binding related values under the same compiler identifier preserves all
+live lookups, including a live lookup of the newly bound identifier itself. -/
+theorem EnvRelOn.bindBoth
+    (agree : EnvRelOn rho used left right)
+    (related : ValueRel rho leftValue rightValue) :
+    EnvRelOn rho used
+      (bind left binder leftValue) (bind right binder rightValue) := by
+  intro fvarId member
+  by_cases sameName : binder.name = fvarId.name
+  · have sameId : binder = fvarId := by
+      cases binder with
+      | mk binderName =>
+          cases fvarId with
+          | mk fvarName => simp_all
+    subst fvarId
+    simpa using OptionalRel.some related
+  · rw [lookup_bind_of_name_ne sameName, lookup_bind_of_name_ne sameName]
+    exact agree fvarId member
 
 /-- Runtime states agree observationally on all supplied live roots, while
 allowing different unreachable heap cells and fresh-location counters. -/
