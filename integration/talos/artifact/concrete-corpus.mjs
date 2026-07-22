@@ -19,6 +19,7 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "constructor-reference-counting",
   "ctor-projection",
   "default-case",
+  "delete-fault",
   "direct-call",
   "erased",
   "external-echo",
@@ -28,6 +29,7 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "object-mutation",
   "projection-fault",
   "recursive-call",
+  "reference-counting",
   "reset-reuse",
   "scalar-uint16-mutation",
   "scalar-uint32-mutation",
@@ -58,4 +60,21 @@ export const EXPECTED_CONCRETE_FAULTS = Object.freeze([
     width: 1,
     offset: 0,
   })]),
+]);
+
+/** Compiler-produced source artifacts audited by the concrete-switch preflight. */
+export const CONCRETE_SOURCE_PROBES = Object.freeze([
+  "source-nat",
+  "source-nat-list-case",
+  "source-pretty-format",
+  "source-pretty-format-coverage",
+  "source-pretty-format-module",
+  "source-string-input",
+  "source-uint16-id",
+  "source-uint32-id",
+  "source-uint64",
+  "source-uint64-id",
+  "source-uint8-id",
+  "source-usize-id",
+  "source-usize-id-module",
 ]);

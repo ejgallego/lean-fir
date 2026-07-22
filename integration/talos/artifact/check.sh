@@ -11,20 +11,11 @@ lake build
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
-source_artifacts=(
-  source-uint64
-  source-nat
-  source-usize-id
-  source-usize-id-module
-  source-uint8-id
-  source-uint16-id
-  source-uint32-id
-  source-uint64-id
-  source-string-input
-  source-nat-list-case
-  source-pretty-format
-  source-pretty-format-coverage
-  source-pretty-format-module
+mapfile -t source_artifacts < <(
+  node --input-type=module -e '
+    import { CONCRETE_SOURCE_PROBES } from "./concrete-corpus.mjs";
+    console.log(CONCRETE_SOURCE_PROBES.join("\n"));
+  '
 )
 for source in "${source_artifacts[@]}"; do
   test -s "_build/$source.wasm"
@@ -166,6 +157,15 @@ for manifest in "$first"/*.wasm.json; do
   cmp "$first/$name.wasm.json" "$second/$name.wasm.json"
   cmp "$first/$name.expected.json" "$second/$name.expected.json"
 done
+
+node concrete-readiness.mjs \
+  "$first" _build ../W6-COVERAGE.md "$first/concrete-readiness.json" \
+  --require-artifact-ready
+node concrete-readiness.mjs \
+  "$second" _build ../W6-COVERAGE.md "$second/concrete-readiness.json" \
+  --require-artifact-ready
+cmp "$first/concrete-readiness.json" "$second/concrete-readiness.json"
+node test-concrete-readiness.mjs "$first/concrete-readiness.json"
 
 node run-artifacts.mjs "$first"
 node run-concrete-artifacts.mjs "$first"

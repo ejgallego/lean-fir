@@ -18,7 +18,7 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runners currently execute 41 closed artifacts through raw scalar
+The concrete runners currently execute 43 closed artifacts through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
 slots, natural, UTF-8 string, and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
@@ -75,6 +75,32 @@ executes `main`, and compares the V8 observation with FIR. It requires Lean 4.32
 worktree-local Talos setup, and Node; no external WAT or WebAssembly CLI is required. The
 oracle uses `lean --run` so a fresh worktree does not native-compile the full upstream Wasm
 semantics just to check this corpus.
+
+The check also writes a deterministic, fail-closed concrete-switch readiness
+report into each temporary artifact directory and byte-compares the two
+copies. The current emitted corpus is fully classified and concrete-resolvable:
+43 fixtures match the live FIR oracle, and the historical `mutation` fixture
+retains its one exact expected concrete-layout fault. Two previously omitted
+but already executable fixtures, `reference-counting` and `delete-fault`, are
+part of that oracle-matched corpus.
+
+The same report preflights all 13 compiler-produced source artifacts. Ten are
+concrete-resolvable. The three `prettyM` forms remain blocked by the same 20
+unimplemented concrete external declarations; the coverage invocation also
+requires packed initial-constructor loading. Every module-local import site is
+mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
+artifact/readiness audit: it deliberately does not claim W6 proof completion,
+concrete execution of merely preflight-ready source, or concrete execution of
+the shared 64-case validation product.
+
+A standalone report can be generated after the source and artifact manifests
+exist with:
+
+```text
+node concrete-readiness.mjs ARTIFACT_DIR _build ../W6-COVERAGE.md readiness.json \
+  --require-artifact-ready
+node test-concrete-readiness.mjs readiness.json
+```
 
 To emit one fixture manually:
 
@@ -219,7 +245,7 @@ make -C ../../.. validate-v8
 
 Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
 the complete shared-product Worker. It also materializes the live-oracle
-artifact corpus under `_build`, then runs the same 41 concrete artifacts, one
+artifact corpus under `_build`, then runs the same 43 concrete artifacts, one
 default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
 `List Nat` and Unicode string sources.
