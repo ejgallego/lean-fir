@@ -151,6 +151,13 @@ theorem neutralProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?, neutralBeforeProgram,
     neutralAfterProgram, fixtureDecl, decl, neutralShadowRun]
 
+theorem neutralInitialShadowRelated (entry : Name)
+    (arguments : Array Value) :
+    ShadowMachineRelated 3
+      (initialState neutralBeforeProgram entry arguments)
+      (initialState neutralAfterProgram entry arguments) :=
+  shadowInitialState_related neutralProgramShadowRelated
+
 def liveEnv : Env :=
   bind [] live .erased
 
