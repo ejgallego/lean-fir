@@ -636,6 +636,24 @@ theorem EnvsAgreeOn.bindRight_of_absent
     EnvsAgreeOn used left (bind right binder value) :=
   (agree.symm.bindLeft_of_absent absent).symm
 
+/-- Binding the same value under the same identifier preserves agreement,
+including when that identifier itself is live. -/
+theorem EnvsAgreeOn.bindBoth
+    (agree : EnvsAgreeOn used left right) :
+    EnvsAgreeOn used (bind left binder value) (bind right binder value) := by
+  intro fvarId member
+  by_cases sameName : binder.name = fvarId.name
+  · have sameId : binder = fvarId := by
+      cases binder with
+      | mk binderName =>
+          cases fvarId with
+          | mk candidateName => simp_all
+    subst fvarId
+    simp [lookupValue]
+  · rw [lookupValue_bind_of_name_ne left binder fvarId value sameName,
+      lookupValue_bind_of_name_ne right binder fvarId value sameName]
+    exact agree fvarId member
+
 theorem evalArg_eq_of_covered
     (agree : EnvsAgreeOn used leftEnv rightEnv)
     (covered : ArgCovered used argument) :

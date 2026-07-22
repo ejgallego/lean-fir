@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.ElimDeadLiveness
+import Fir.LeanIR.Passes.ElimDeadRelation
 import Fir.LeanIR.InterpreterExamples
 import Lean.Compiler.LCNF.ElimDead
 import Lean.Elab.Command
@@ -164,6 +164,31 @@ theorem neutralShadowCovered
     (result : shadowCode? 64 {} neutralBefore = some output) :
     CodeCovered output.2 output.1 :=
   (shadowCode_spec result).1
+
+theorem neutralAfterCovered :
+    CodeCovered (({} : UsedLocals).insert live) neutralAfter := by
+  apply CodeCovered.letE
+  · trivial
+  · exact .ret (by simp)
+
+def neutralLiveState : MachineState :=
+  { program := neutralAfterProgram
+    control := .code neutralAfter
+    env := liveEnv }
+
+/-- The liveness-indexed machine relation accepts the concrete environment
+difference introduced by executing and then deleting the dead binding. -/
+theorem deadBindingMachineRelated :
+    LiveMachineRelated
+      { neutralLiveState with env := deadExtendedEnv }
+      neutralLiveState := by
+  simpa [neutralLiveState, deadExtendedEnv] using
+    liveMachineRelated_bindLeft_of_absent
+      (used := ({} : UsedLocals).insert live)
+      (state := neutralLiveState) (binder := dead) (value := .usize 42)
+      (code := neutralAfter) neutralAfterCovered
+      (by simp [neutralLiveState, JoinEnvCovered])
+      (by native_decide)
 
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
