@@ -431,6 +431,255 @@ theorem enterInternalDecl_reachableRelated
         programs, .code body (.empty fuel used) envRelated,
         preparedFrames, nextRuntime⟩
 
+/-- A successful, fully applied call to related internal declarations takes
+one interpreter step on each side and enters states covered by the reachable
+machine relation.  Lookup and binding equations are kept explicit so the
+later `coreStep` matcher can recover them from source progress. -/
+theorem invokeDecl_code_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (body : ShadowCodeGraph fuel used sourceCode targetCode)
+    (paramsEq : sourceDeclaration.params = targetDeclaration.params)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (targetFound : targetState.program.findDecl? name =
+      some targetDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (targetValue : targetDeclaration.value = .code targetCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (targetBinding : bindParams targetDeclaration.params
+      (targetArguments.extract 0 targetDeclaration.params.size) =
+        .ok targetEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    let sourceExtraArguments := sourceArguments.extract
+      sourceDeclaration.params.size sourceArguments.size
+    let targetExtraArguments := targetArguments.extract
+      targetDeclaration.params.size targetArguments.size
+    let sourcePreparedFrames :=
+      let frames := if sourceExtraArguments.isEmpty then sourceState.frames
+        else .apply sourceExtraArguments :: sourceState.frames
+      if sourceDeclaration.params.isEmpty && sourceArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    let targetPreparedFrames :=
+      let frames := if targetExtraArguments.isEmpty then targetState.frames
+        else .apply targetExtraArguments :: targetState.frames
+      if targetDeclaration.params.isEmpty && targetArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    let sourceAfter := {
+      sourceState with
+      env := sourceEnv
+      joins := []
+      frames := sourcePreparedFrames
+      control := .code sourceCode }
+    let targetAfter := {
+      targetState with
+      env := targetEnv
+      joins := []
+      frames := targetPreparedFrames
+      control := .code targetCode }
+    invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  dsimp only
+  have argumentSize := arrayRel_size_eq arguments
+  have targetEnough :
+      ¬ targetArguments.size < targetDeclaration.params.size := by
+    rw [← paramsEq, ← argumentSize]
+    exact sourceEnough
+  have sourceStep : invokeDecl sourceState name sourceArguments =
+      .next {
+        sourceState with
+        env := sourceEnv
+        joins := []
+        frames :=
+          (let extraArguments := sourceArguments.extract
+              sourceDeclaration.params.size sourceArguments.size
+           let frames := if extraArguments.isEmpty then sourceState.frames
+             else .apply extraArguments :: sourceState.frames
+           if sourceDeclaration.params.isEmpty && sourceArguments.isEmpty then
+             .cache name :: frames
+           else frames)
+        control := .code sourceCode } := by
+    unfold invokeDecl
+    rw [sourceFound]
+    simp only
+    rw [if_neg sourceEnough, sourceBinding, sourceValue]
+  have targetStep : invokeDecl targetState name targetArguments =
+      .next {
+        targetState with
+        env := targetEnv
+        joins := []
+        frames :=
+          (let extraArguments := targetArguments.extract
+              targetDeclaration.params.size targetArguments.size
+           let frames := if extraArguments.isEmpty then targetState.frames
+             else .apply extraArguments :: targetState.frames
+           if targetDeclaration.params.isEmpty && targetArguments.isEmpty then
+             .cache name :: frames
+           else frames)
+        control := .code targetCode } := by
+    unfold invokeDecl
+    rw [targetFound]
+    simp only
+    rw [if_neg targetEnough, targetBinding, targetValue]
+  refine ⟨sourceStep, targetStep, ?_⟩
+  have targetBinding' : bindParams sourceDeclaration.params
+      (targetArguments.extract 0 sourceDeclaration.params.size) =
+        .ok targetEnv := by
+    simpa [paramsEq] using targetBinding
+  have entered := enterInternalDecl_reachableRelated
+    (fuel := fuel) (rho := rho) (used := used) (name := name)
+    sourceState targetState programs frames arguments body
+    sourceBinding targetBinding' runtime
+  simpa [paramsEq] using entered
+
+/-- Program relatedness turns a successful source lookup of an internal
+declaration into the matching target lookup, body graph, and parameter
+binding needed by `invokeDecl_code_reachableRelated`. -/
+theorem invokeDecl_foundCode_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetDeclaration targetCode, ∃ targetEnv : Env,
+      ∃ sourceAfter targetAfter,
+      targetState.program.findDecl? name = some targetDeclaration ∧
+      targetDeclaration.value = .code targetCode ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have found := programs.findDecl? name
+  rw [sourceFound] at found
+  generalize targetFound : targetState.program.findDecl? name = targetResult
+    at found
+  cases found with
+  | some declarations =>
+      rename_i targetDeclaration
+      have valueRelated := declarations.value
+      generalize targetValueEq : targetDeclaration.value = targetDeclValue
+        at valueRelated
+      rw [sourceValue] at valueRelated
+      cases valueRelated with
+      | code bodyRelated =>
+          rename_i targetCode
+          rcases bodyRelated with ⟨used, body⟩
+          have callArguments : ArrayRel (ValueRel rho)
+              (sourceArguments.extract 0 sourceDeclaration.params.size)
+              (targetArguments.extract 0 sourceDeclaration.params.size) :=
+            arrayRel_extract arguments 0 sourceDeclaration.params.size
+          have binding := bindParams_relOn (rho := rho)
+            (params := sourceDeclaration.params) used callArguments
+          rw [sourceBinding] at binding
+          generalize targetBinding : bindParams sourceDeclaration.params
+              (targetArguments.extract 0 sourceDeclaration.params.size) =
+                targetBindingResult at binding
+          cases targetBindingResult with
+          | error fault => cases binding
+          | ok targetEnv =>
+              cases binding with
+              | ok envRelated =>
+                  have targetBinding' : bindParams targetDeclaration.params
+                      (targetArguments.extract 0
+                        targetDeclaration.params.size) = .ok targetEnv := by
+                    simpa [← declarations.params_eq] using targetBinding
+                  have progress := invokeDecl_code_reachableRelated
+                    (fuel := fuel) (rho := rho) (used := used)
+                    sourceState targetState programs frames arguments body
+                    declarations.params_eq sourceFound targetFound
+                    sourceValue targetValueEq sourceEnough sourceBinding
+                    targetBinding'
+                    runtime
+                  rcases progress with
+                    ⟨sourceStep, targetStep, nextRelated⟩
+                  exact ⟨targetDeclaration, targetCode, targetEnv, _, _,
+                    rfl, targetValueEq, sourceStep, targetStep,
+                    nextRelated⟩
+
+/-- A nonempty named call bypasses the global cache on both sides.  When its
+source declaration is an internal body and parameter binding succeeds, the
+actual `coreStep` transitions enter related transformed declaration bodies. -/
+theorem coreStep_invokeName_nonempty_foundCode_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceNonempty : sourceArguments.isEmpty = false)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ sourceAfter targetAfter,
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundCode_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceValue sourceEnough sourceBinding
+      invokeRuntime with
+    ⟨targetDeclaration, targetCode, targetEnv, sourceAfter, targetAfter,
+      targetFound, targetValue, sourceStep, targetStep, nextRelated⟩
+  have argumentSize := arrayRel_size_eq arguments
+  have targetNonempty : targetArguments.isEmpty = false := by
+    simpa [Array.isEmpty, argumentSize] using sourceNonempty
+  refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
+  · simpa [sourceInvoke, coreStep, sourceNonempty] using sourceStep
+  · simpa [targetInvoke, coreStep, targetNonempty] using targetStep
+
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/
 theorem ReachableMachineRelated.monoRenaming
