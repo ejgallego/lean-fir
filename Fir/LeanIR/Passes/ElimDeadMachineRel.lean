@@ -329,6 +329,82 @@ theorem coreStep_deletedPap_of_ready
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
 
+/-- Proof-visible successful operand shape for a deleted box operation. -/
+inductive DeletedBoxReadyAt (state : MachineState) (input : FVarId) : Prop where
+  | scalar (value : ScalarValue)
+      (inputRead : lookupValue state.env input = .ok (.scalar value)) :
+      DeletedBoxReadyAt state input
+  | usize (value : UInt64)
+      (inputRead : lookupValue state.env input = .ok (.usize value)) :
+      DeletedBoxReadyAt state input
+
+/-- A deleted box is immediate or allocates one unreachable boxed cell,
+according to the payload range; both shapes permit target stuttering. -/
+theorem coreStep_deletedBox_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedBoxReadyAt sourceState input) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type := resultType
+      value := .box boxedType input }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  cases ready with
+  | scalar scalar inputRead =>
+      rcases runtime.boxScalarLeftGarbage boxedType scalar with
+        ⟨nextRuntime, value, boxed, next⟩
+      have evaluated : evalLetValue sourceState {
+          fvarId
+          binderName
+          type := resultType
+          value := .box boxedType input
+        } = .ok (nextRuntime, .value value) := by
+        simp only [evalLetValue, inputRead, Bind.bind, Except.bind]
+        rw [boxed]
+        rfl
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_reachableRelated sourceState targetState
+          programs frames continuation joins env absent evaluated next⟩
+  | usize word inputRead =>
+      rcases runtime.boxUSizeLeftGarbage boxedType word with
+        ⟨nextRuntime, value, boxed, next⟩
+      have evaluated : evalLetValue sourceState {
+          fvarId
+          binderName
+          type := resultType
+          value := .box boxedType input
+        } = .ok (nextRuntime, .value value) := by
+        simp only [evalLetValue, inputRead, Bind.bind, Except.bind]
+        rw [boxed]
+        rfl
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_reachableRelated sourceState targetState
+          programs frames continuation joins env absent evaluated next⟩
+
 /-- Resume related residual continuations after a source-only runtime update
 whose reachable roots are unchanged. -/
 theorem continueCode_reachableRelated

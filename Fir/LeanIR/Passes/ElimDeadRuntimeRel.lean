@@ -1359,6 +1359,50 @@ theorem ShadowRuntimeRel.evalLetValuePapLeftGarbage
     rfl
   · exact related.allocLeftGarbage object false
 
+/-- Boxing a scalar is immediate when the payload fits the tagged range and
+otherwise contributes one unreachable boxed allocation. -/
+theorem ShadowRuntimeRel.boxScalarLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (type : Expr) (scalar : ScalarValue) :
+    ∃ nextRuntime value,
+      box left type (.scalar scalar) = .ok (nextRuntime, value) ∧
+      ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
+  let payload := scalar.toUInt64
+  by_cases small : payload.toNat ≤ maxTaggedPayload
+  · refine ⟨left, .object (.tagged payload), ?_, related⟩
+    unfold box
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos (by simpa [payload] using small)]
+    rfl
+  · let object : HeapObject := .boxed type (.scalar scalar)
+    refine ⟨(alloc left object).1, .object (alloc left object).2, ?_,
+      related.allocLeftGarbage object false⟩
+    unfold box
+    simp only [Bind.bind, Except.bind]
+    rw [if_neg (by simpa [payload] using small)]
+    rfl
+
+/-- The unboxed-word case has the same immediate/allocation split. -/
+theorem ShadowRuntimeRel.boxUSizeLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (type : Expr) (word : UInt64) :
+    ∃ nextRuntime value,
+      box left type (.usize word) = .ok (nextRuntime, value) ∧
+      ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
+  by_cases small : word.toNat ≤ maxTaggedPayload
+  · refine ⟨left, .object (.tagged word), ?_, related⟩
+    unfold box
+    simp only [Bind.bind, Except.bind]
+    rw [if_pos small]
+    rfl
+  · let object : HeapObject := .boxed type (.usize word)
+    refine ⟨(alloc left object).1, .object (alloc left object).2, ?_,
+      related.allocLeftGarbage object false⟩
+    unfold box
+    simp only [Bind.bind, Except.bind]
+    rw [if_neg small]
+    rfl
+
 /-- Related retained allocations may choose different fresh locations.  The
 address renaming is extended with that pair, the returned references become
 new live roots, and all old runtime components are transported monotonically. -/

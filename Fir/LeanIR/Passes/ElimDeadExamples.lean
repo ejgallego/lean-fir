@@ -22,6 +22,7 @@ def reuseTokenVar : FVarId := ⟨`reuseToken⟩
 def reuseArgVar : FVarId := ⟨`reuseArg⟩
 def resetObjectVar : FVarId := ⟨`resetObject⟩
 def papArgVar : FVarId := ⟨`papArg⟩
+def boxInputVar : FVarId := ⟨`boxInput⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -101,6 +102,15 @@ def deletedPapBefore : LCNF.Code .impure :=
 def deletedPapAfter : LCNF.Code .impure :=
   .return live
 
+def deadBoxDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.box u64Type boxInputVar)
+
+def deletedBoxBefore : LCNF.Code .impure :=
+  .let deadBoxDecl (.return live)
+
+def deletedBoxAfter : LCNF.Code .impure :=
+  .return live
+
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
 #guard !safeToElim deadCopyDecl.value
@@ -169,6 +179,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadLargeNat
     deletedLargeNatBefore deletedLargeNatAfter
   checkActualElimDead `elimDeadPap deletedPapBefore deletedPapAfter
+  checkActualElimDead `elimDeadBox deletedBoxBefore deletedBoxAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -217,6 +228,12 @@ def deletedPapBeforeProgram : ImpureProgram :=
 
 def deletedPapAfterProgram : ImpureProgram :=
   { decls := #[firstDecl, fixtureDecl `main deletedPapAfter] }
+
+def deletedBoxBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedBoxBefore] }
+
+def deletedBoxAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedBoxAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -312,6 +329,16 @@ theorem deletedPapShadowRun :
   simp [deletedPapBefore, deletedPapAfter, deadPapDecl, letDecl,
     neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem deletedBoxShadowRun :
+    shadowCode? 2 {} deletedBoxBefore =
+      some (deletedBoxAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedBoxBefore, deletedBoxAfter, deadBoxDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -375,6 +402,14 @@ theorem deletedPapProgramShadowRelated :
   apply shadowProgram_related
   simp [shadowProgram?, shadowDecls?, deletedPapBeforeProgram,
     deletedPapAfterProgram, firstDeclShadowRun, deletedPapMainDeclShadowRun]
+
+theorem deletedBoxProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 2)
+      deletedBoxBeforeProgram deletedBoxAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    deletedBoxBeforeProgram, deletedBoxAfterProgram,
+    fixtureDecl, decl, deletedBoxShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -504,6 +539,19 @@ def deletedPapSourceState : MachineState :=
 def deletedPapTargetState : MachineState :=
   { program := deletedPapAfterProgram
     control := .code deletedPapAfter
+    env := liveEnv }
+
+def deletedBoxSourceEnv : Env :=
+  bind liveEnv boxInputVar (.scalar (.uint64 18446744073709551615))
+
+def deletedBoxSourceState : MachineState :=
+  { program := deletedBoxBeforeProgram
+    control := .code deletedBoxBefore
+    env := deletedBoxSourceEnv }
+
+def deletedBoxTargetState : MachineState :=
+  { program := deletedBoxAfterProgram
+    control := .code deletedBoxAfter
     env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
@@ -766,6 +814,27 @@ theorem deletedPapReady :
     rfl
   · rfl
   · simp [firstDecl, decl]
+
+theorem deletedBoxEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedBoxSourceEnv liveEnv := by
+  unfold deletedBoxSourceEnv
+  apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+  native_decide
+
+theorem deletedBoxRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      deletedBoxSourceState.runtime deletedBoxTargetState.runtime
+      (envRootsOn neutralUsed deletedBoxSourceState.env)
+      (envRootsOn neutralUsed deletedBoxTargetState.env) := by
+  simpa [deletedBoxSourceState, deletedBoxTargetState] using
+    emptyRuntime_shadowRelated_of_roots
+      (envRootsOn_related deletedBoxEnvReachableRelated)
+
+theorem deletedBoxReady :
+    DeletedBoxReadyAt deletedBoxSourceState boxInputVar := by
+  apply DeletedBoxReadyAt.scalar (.uint64 18446744073709551615)
+  simp [deletedBoxSourceState, deletedBoxSourceEnv,
+    lookupValue, Impure.bind, lookup, boxInputVar]
 
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
@@ -1185,6 +1254,48 @@ theorem deletedPapSourceOnlyMachineStep :
     runtime deletedPapReady
   simpa [deletedPapSourceState, deletedPapTargetState,
     deletedPapBefore, deletedPapAfter, deadPapDecl, letDecl] using progress
+
+/-- A large scalar box allocates one source-only heap cell.  Because the
+binding is dead and the cell is absent from every live root, the target may
+stutter at the retained return. -/
+theorem deletedBoxSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        deletedBoxSourceState with
+        runtime := nextRuntime
+        env := bind deletedBoxSourceState.env dead value
+        control := .code (.return live) }
+      coreStep deletedBoxSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedBoxTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedBoxSourceState.program deletedBoxTargetState.program := by
+    simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedBoxSourceState.frames deletedBoxTargetState.frames [] [] := .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedBoxSourceState.env deletedBoxTargetState.env := by
+    simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedBoxSourceState.runtime deletedBoxTargetState.runtime
+      (envRootsOn neutralUsed deletedBoxSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedBoxTargetState.env ++ []) := by
+    simpa using deletedBoxRuntimeRelated
+  have progress := coreStep_deletedBox_of_ready
+    (sourceState := deletedBoxSourceState)
+    (targetState := deletedBoxTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name)
+    (resultType := objType) (boxedType := u64Type)
+    (input := boxInputVar)
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime deletedBoxReady
+  simpa [deletedBoxSourceState, deletedBoxTargetState,
+    deletedBoxBefore, deletedBoxAfter, deadBoxDecl, letDecl] using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/
