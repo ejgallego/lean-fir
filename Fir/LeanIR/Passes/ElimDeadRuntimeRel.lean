@@ -1166,6 +1166,101 @@ theorem EnvRelOn.bindPairsBoth
           simp only [List.zip, List.foldl_cons]
           exact ih (agree.bindBoth (binder := param.fvarId) value) params
 
+/-- An interpreter computation either raises the same address-free runtime
+fault on both sides or returns values related by its result relation. -/
+inductive RuntimeResultRel (relation : α → β → Prop) :
+    Except RuntimeFault α → Except RuntimeFault β → Prop where
+  | error (fault : RuntimeFault) :
+      RuntimeResultRel relation (.error fault) (.error fault)
+  | ok (value : relation source target) :
+      RuntimeResultRel relation (.ok source) (.ok target)
+
+/-- Evaluation of one covered argument produces the same lookup fault or a
+pair of address-related runtime values. -/
+theorem evalArg_relOn
+    (agree : EnvRelOn rho used sourceEnv targetEnv)
+    (covered : ArgCovered used argument) :
+    RuntimeResultRel (ValueRel rho)
+      (evalArg sourceEnv argument) (evalArg targetEnv argument) := by
+  cases argument with
+  | erased => exact .ok .erased
+  | fvar fvarId =>
+      have related := agree fvarId covered
+      generalize sourceLookup : lookup sourceEnv fvarId = sourceResult
+        at related
+      generalize targetLookup : lookup targetEnv fvarId = targetResult
+        at related
+      cases related with
+      | none =>
+          simpa [evalArg, sourceLookup, targetLookup] using
+            (RuntimeResultRel.error (relation := ValueRel rho)
+              (.unknownVar fvarId))
+      | some value =>
+          simpa [evalArg, sourceLookup, targetLookup] using
+            (RuntimeResultRel.ok value)
+  | type type impossible => nomatch impossible
+
+/-- Pointwise covered argument-list evaluation short-circuits on the same
+fault or returns pointwise address-related values. -/
+theorem evalArgList_relOn
+    (arguments : List (LCNF.Arg .impure))
+    (agree : EnvRelOn rho used sourceEnv targetEnv)
+    (covered : ∀ argument, argument ∈ arguments →
+      ArgCovered used argument) :
+    RuntimeResultRel (ListRel (ValueRel rho))
+      (arguments.mapM (evalArg sourceEnv))
+      (arguments.mapM (evalArg targetEnv)) := by
+  induction arguments with
+  | nil => exact .ok .nil
+  | cons head tail ih =>
+      have headResult := evalArg_relOn agree (covered head (by simp))
+      have tailCovered : ∀ argument, argument ∈ tail →
+          ArgCovered used argument := by
+        intro argument member
+        exact covered argument (by simp [member])
+      have tailResult := ih tailCovered
+      generalize sourceHeadEq : evalArg sourceEnv head = sourceHead
+        at headResult
+      generalize targetHeadEq : evalArg targetEnv head = targetHead
+        at headResult
+      cases headResult with
+      | error fault =>
+          rw [List.mapM_cons, List.mapM_cons, sourceHeadEq, targetHeadEq]
+          exact .error fault
+      | ok headValue =>
+          generalize sourceTailEq : tail.mapM (evalArg sourceEnv) = sourceTail
+            at tailResult
+          generalize targetTailEq : tail.mapM (evalArg targetEnv) = targetTail
+            at tailResult
+          cases tailResult with
+          | error fault =>
+              rw [List.mapM_cons, List.mapM_cons, sourceHeadEq, targetHeadEq,
+                sourceTailEq, targetTailEq]
+              exact .error fault
+          | ok tailValues =>
+              rw [List.mapM_cons, List.mapM_cons, sourceHeadEq, targetHeadEq,
+                sourceTailEq, targetTailEq]
+              exact .ok (ListRel.cons headValue tailValues)
+
+/-- Covered argument-array evaluation is relational under `EnvRelOn`. -/
+theorem evalArgs_relOn
+    (agree : EnvRelOn rho used sourceEnv targetEnv)
+    (covered : ArgsCovered used arguments) :
+    RuntimeResultRel (ArrayRel (ValueRel rho))
+      (evalArgs sourceEnv arguments) (evalArgs targetEnv arguments) := by
+  unfold evalArgs
+  rw [Array.mapM_eq_mapM_toList, Array.mapM_eq_mapM_toList]
+  have evaluated := evalArgList_relOn arguments.toList agree covered
+  generalize sourceListEq : arguments.toList.mapM (evalArg sourceEnv) =
+      sourceList at evaluated
+  generalize targetListEq : arguments.toList.mapM (evalArg targetEnv) =
+      targetList at evaluated
+  cases evaluated with
+  | error fault =>
+      exact .error fault
+  | ok values =>
+      exact .ok (by simpa [ArrayRel] using values)
+
 inductive EnvResultRelOn (rho : AddressRenaming) (used : UsedLocals) :
     Except RuntimeFault Env → Except RuntimeFault Env → Prop where
   | error (fault : RuntimeFault) :
@@ -1190,6 +1285,22 @@ theorem bindParams_relOn (used : UsedLocals)
   | true =>
       exact .ok ((EnvRelOn.empty rho used).bindPairsBoth
         params.toList values)
+
+/-- Relational parameter binding over already-live environments, as used by
+join-point entry. -/
+theorem bindParamsOver_relOn (used : UsedLocals)
+    (agree : EnvRelOn rho used sourceEnv targetEnv)
+    (values : ArrayRel (ValueRel rho) sourceArguments targetArguments) :
+    EnvResultRelOn rho used
+      (bindParamsOver sourceEnv params sourceArguments)
+      (bindParamsOver targetEnv params targetArguments) := by
+  have sizeEq := arrayRel_size_eq values
+  unfold bindParamsOver
+  rw [← sizeEq]
+  generalize arityEq : (params.size == sourceArguments.size) = arity
+  cases arity with
+  | false => exact .error _
+  | true => exact .ok (agree.bindPairsBoth params.toList values)
 
 /-- Runtime states agree observationally on all supplied live roots, while
 allowing different unreachable heap cells and fresh-location counters. -/

@@ -2110,6 +2110,120 @@ theorem coreStep_unreach_terminal
     (by simpa [sourceUnreach] using done)
   simpa [targetUnreach] using terminal
 
+/-- Every terminal branch of a retained jump is address-free.  Extensional
+join lookup, covered argument evaluation, and relational parameter binding
+show that the target raises the same unknown-join, unknown-variable, or arity
+fault.  Successful binding is impossible under the source `done` premise. -/
+theorem coreStep_jump_terminal
+    (sourceState targetState : MachineState)
+    (graph : ShadowCodeGraph fuel used (.jmp join arguments) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .code (.jmp join arguments) } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with control := .code targetCode }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have targetEq := graph.jumpTarget
+  subst targetCode
+  have covered := graph.covered
+  cases covered with
+  | jump targetMember argumentsCovered =>
+      let sourceJump := {
+        sourceState with control := .code (.jmp join arguments) }
+      let targetJump := {
+        targetState with control := .code (.jmp join arguments) }
+      have jumpRuntime : ShadowRuntimeRel rho
+          sourceJump.runtime targetJump.runtime
+          (envRootsOn used sourceState.env ++ sourceFrameRoots)
+          (envRootsOn used targetState.env ++ targetFrameRoots) := by
+        simpa [sourceJump, targetJump] using runtime
+      have found := joins join targetMember
+      generalize sourceFoundEq :
+        findJoinPoint? sourceState.joins join = sourceFound at found
+      generalize targetFoundEq :
+        findJoinPoint? targetState.joins join = targetFound at found
+      cases found with
+      | none =>
+          have sourceFault : coreStep sourceJump =
+              .done (observe sourceJump
+                (.fault (.unknownJoinPoint join))) := by
+            simp [sourceJump, coreStep, sourceFoundEq, fail]
+          have targetFault : coreStep targetJump =
+              .done (observe targetJump
+                (.fault (.unknownJoinPoint join))) := by
+            simp [targetJump, coreStep, targetFoundEq, fail]
+          have terminal := relatedFault_terminal
+            (externals := externals) jumpRuntime sourceFault targetFault
+            (by simpa [sourceJump] using done)
+          simpa [targetJump] using terminal
+      | some declarations =>
+          rename_i sourceDeclaration targetDeclaration
+          have evaluated := evalArgs_relOn env argumentsCovered
+          generalize sourceArgumentsEq :
+            evalArgs sourceState.env arguments = sourceArguments at evaluated
+          generalize targetArgumentsEq :
+            evalArgs targetState.env arguments = targetArguments at evaluated
+          cases evaluated with
+          | error fault =>
+              have sourceFault : coreStep sourceJump =
+                  .done (observe sourceJump (.fault fault)) := by
+                simp [sourceJump, coreStep, sourceFoundEq,
+                  sourceArgumentsEq, fail]
+              have targetFault : coreStep targetJump =
+                  .done (observe targetJump (.fault fault)) := by
+                simp [targetJump, coreStep, targetFoundEq,
+                  targetArgumentsEq, fail]
+              have terminal := relatedFault_terminal
+                (externals := externals) jumpRuntime sourceFault targetFault
+                (by simpa [sourceJump] using done)
+              simpa [targetJump] using terminal
+          | @ok sourceArguments targetArguments values =>
+              have binding := bindParamsOver_relOn (rho := rho) used env values
+                (params := sourceDeclaration.params)
+              generalize sourceBindingEq :
+                bindParamsOver sourceState.env sourceDeclaration.params
+                  sourceArguments = sourceBinding at binding
+              generalize targetBindingEq :
+                bindParamsOver targetState.env sourceDeclaration.params
+                  targetArguments = targetBinding at binding
+              cases binding with
+              | error fault =>
+                  have targetBindingActual :
+                      bindParamsOver targetState.env targetDeclaration.params
+                        targetArguments = .error fault := by
+                    simpa [← declarations.params_eq] using targetBindingEq
+                  have sourceFault : coreStep sourceJump =
+                      .done (observe sourceJump (.fault fault)) := by
+                    simp [sourceJump, coreStep, sourceFoundEq,
+                      sourceArgumentsEq, sourceBindingEq, fail]
+                  have targetFault : coreStep targetJump =
+                      .done (observe targetJump (.fault fault)) := by
+                    simp [targetJump, coreStep, targetFoundEq,
+                      targetArgumentsEq, targetBindingActual, fail]
+                  have terminal := relatedFault_terminal
+                    (externals := externals) jumpRuntime sourceFault targetFault
+                    (by simpa [sourceJump] using done)
+                  simpa [targetJump] using terminal
+              | @ok sourceNextEnv targetNextEnv nextEnv =>
+                  have sourceStep : coreStep sourceJump = .next {
+                      sourceJump with
+                      env := sourceNextEnv
+                      control := .code sourceDeclaration.value } := by
+                    simp [sourceJump, coreStep, sourceFoundEq,
+                      sourceArgumentsEq, sourceBindingEq]
+                  have sourceDone : coreStep sourceJump =
+                      .done sourceObservation := by
+                    simpa [sourceJump] using done
+                  rw [sourceStep] at sourceDone
+                  contradiction
+
 /-- Machine-level source-only rule for a deleted value-producing `let`.
 The caller supplies the operation-specific reachable-runtime theorem; binder
 absence then proves that resuming the source continuation does not change its
