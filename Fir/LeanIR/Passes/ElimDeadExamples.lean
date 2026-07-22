@@ -1404,6 +1404,97 @@ theorem deletedBoxStepMatchesTargetStutter (externals : ExternalSpec)
     runtime deletedBoxUnifiedReady sourceStep
   simpa [deletedBoxTargetState, deletedBoxAfter] using matched
 
+/-- The source-only allocation followed by the retained return reaches
+related yielded states, and the shared terminal projection ignores precisely
+the unreachable boxed cell. -/
+theorem deletedBoxReturnObservationRelated :
+    ∃ nextRuntime boxValue targetValue,
+      let sourceAfterLet := {
+        deletedBoxSourceState with
+        runtime := nextRuntime
+        env := bind deletedBoxSourceState.env dead boxValue
+        control := .code (.return live) }
+      let sourceYielded := {
+        sourceAfterLet with control := .yielded .erased }
+      let targetYielded := {
+        deletedBoxTargetState with control := .yielded targetValue }
+      coreStep deletedBoxSourceState = .next sourceAfterLet ∧
+        coreStep sourceAfterLet = .next sourceYielded ∧
+        coreStep deletedBoxTargetState = .next targetYielded ∧
+        ReachableMachineRelated 2 emptyAddressRenaming
+          sourceYielded targetYielded ∧
+        ObservationRel
+          (observe sourceYielded (.returned .erased))
+          (observe targetYielded (.returned targetValue)) := by
+  rcases deletedBoxSourceOnlyMachineStep with
+    ⟨nextRuntime, boxValue, firstStep, afterRelated⟩
+  let sourceAfterLet : MachineState := {
+    deletedBoxSourceState with
+    runtime := nextRuntime
+    env := bind deletedBoxSourceState.env dead boxValue
+    control := .code (.return live) }
+  have firstStep' : coreStep deletedBoxSourceState = .next sourceAfterLet := by
+    simpa [sourceAfterLet] using firstStep
+  have afterRelated' : ReachableMachineRelated 2 emptyAddressRenaming
+      sourceAfterLet deletedBoxTargetState := by
+    simpa [sourceAfterLet] using afterRelated
+  have sourceRead : lookup sourceAfterLet.env live = some .erased := by
+    simp [sourceAfterLet, deletedBoxSourceState, deletedBoxSourceEnv,
+      liveEnv, Impure.bind, lookup, live, dead, boxInputVar]
+  rcases afterRelated'.returnStep rfl rfl sourceRead with
+    ⟨targetValue, targetRead, values,
+      sourceReturn, targetReturn, yieldedRelated⟩
+  let sourceYielded : MachineState := {
+    sourceAfterLet with control := .yielded .erased }
+  let targetYielded : MachineState := {
+    deletedBoxTargetState with control := .yielded targetValue }
+  have yieldedRelated' : ReachableMachineRelated 2 emptyAddressRenaming
+      sourceYielded targetYielded := by
+    simpa [sourceYielded, targetYielded] using yieldedRelated
+  have observations : ObservationRel
+      (observe sourceYielded (.returned .erased))
+      (observe targetYielded (.returned targetValue)) := by
+    exact yieldedRelated'.yieldedObservation rfl rfl rfl rfl
+  refine ⟨nextRuntime, boxValue, targetValue, ?_⟩
+  dsimp only
+  exact ⟨firstStep', sourceReturn, targetReturn,
+    yieldedRelated', observations⟩
+
+/-- End-to-end finite evaluations for the concrete state pair produce
+possibly different observations related by reachable semantics. -/
+theorem deletedBoxEvaluationsRelated (externals : ExternalSpec) :
+    ∃ sourceObservation targetObservation,
+      EvaluatesState externals deletedBoxSourceState sourceObservation ∧
+        EvaluatesState externals deletedBoxTargetState targetObservation ∧
+        ObservationRel sourceObservation targetObservation := by
+  rcases deletedBoxReturnObservationRelated with
+    ⟨nextRuntime, boxValue, targetValue,
+      firstStep, sourceReturn, targetReturn, yieldedRelated, observations⟩
+  let sourceAfterLet : MachineState := {
+    deletedBoxSourceState with
+    runtime := nextRuntime
+    env := bind deletedBoxSourceState.env dead boxValue
+    control := .code (.return live) }
+  let sourceYielded : MachineState := {
+    sourceAfterLet with control := .yielded .erased }
+  let targetYielded : MachineState := {
+    deletedBoxTargetState with control := .yielded targetValue }
+  have sourceDone : coreStep sourceYielded =
+      .done (observe sourceYielded (.returned .erased)) := by
+    simp [sourceYielded, sourceAfterLet, deletedBoxSourceState, coreStep]
+  have targetDone : coreStep targetYielded =
+      .done (observe targetYielded (.returned targetValue)) := by
+    simp [targetYielded, deletedBoxTargetState, coreStep]
+  refine ⟨observe sourceYielded (.returned .erased),
+    observe targetYielded (.returned targetValue), ?_, ?_, observations⟩
+  · exact ⟨2, sourceYielded,
+      .step (.internal firstStep) <|
+        .step (.internal sourceReturn) (.refl sourceYielded),
+      sourceDone⟩
+  · exact ⟨1, targetYielded,
+      .step (.internal targetReturn) (.refl targetYielded),
+      targetDone⟩
+
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/
 theorem deadCtorSourceOnlyMachineStep :

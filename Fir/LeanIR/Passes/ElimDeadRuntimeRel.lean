@@ -790,6 +790,16 @@ runtime contributes globals and the already observable external trace. -/
 def runtimeRoots (runtime : RuntimeState) (extra : List Value) : List Value :=
   extra ++ runtime.globals.map Prod.snd ++ traceRoots runtime.trace
 
+theorem runtimeRoots_monoExtra
+    (subset : RootSubset smaller larger) :
+    RootSubset (runtimeRoots runtime smaller) (runtimeRoots runtime larger) := by
+  intro value member
+  simp only [runtimeRoots, List.mem_append] at member ⊢
+  rcases member with (member | member) | member
+  · exact Or.inl (Or.inl (subset value member))
+  · exact Or.inl (Or.inr member)
+  · exact Or.inr member
+
 /-- Environments agree relationally on precisely the variables retained by
 the backwards liveness graph. -/
 def EnvRelOn (rho : AddressRenaming) (used : UsedLocals)
@@ -801,6 +811,14 @@ def EnvRelOn (rho : AddressRenaming) (used : UsedLocals)
 environment.  `filterMap` drops malformed/missing live lookups symmetrically. -/
 def envRootsOn (used : UsedLocals) (env : Env) : List Value :=
   used.toList.filterMap (lookup env)
+
+theorem lookup_mem_envRootsOn
+    (member : used.contains fvarId = true)
+    (found : lookup env fvarId = some value) :
+    value ∈ envRootsOn used env := by
+  unfold envRootsOn
+  simp only [List.mem_filterMap]
+  exact ⟨fvarId, Std.HashSet.mem_toList.mpr member, found⟩
 
 theorem filterMap_eq_of_mem_eq
     (keys : List α) (left right : α → Option β)
@@ -956,6 +974,28 @@ theorem ShadowRuntimeRel.roots
   exact listRel_append
     (listRel_append related.extra (globalsRoots_related related.globals))
     (traceRoots_related related.trace)
+
+/-- Forgetting live roots is sound when the replacement roots remain
+pointwise related and are subsets of the previously published extras. -/
+theorem ShadowRuntimeRel.restrictExtra
+    (related : ShadowRuntimeRel rho left right leftLarger rightLarger)
+    (extra : ListRel (ValueRel rho) leftSmaller rightSmaller)
+    (leftSubset : RootSubset leftSmaller leftLarger)
+    (rightSubset : RootSubset rightSmaller rightLarger) :
+    ShadowRuntimeRel rho left right leftSmaller rightSmaller := by
+  exact {
+    extra
+    globals := related.globals
+    world_eq := related.world_eq
+    trace := related.trace
+    heap := heapRel_monoRoots related.heap
+      (runtimeRoots_monoExtra leftSubset)
+      (runtimeRoots_monoExtra rightSubset)
+    leftMappingFresh := related.leftMappingFresh
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := related.leftHeapFresh
+    rightHeapFresh := related.rightHeapFresh
+  }
 
 /-- Observable frame condition for a possibly multi-cell runtime update.
 The operation may rewrite unreachable garbage, but every cell reachable from

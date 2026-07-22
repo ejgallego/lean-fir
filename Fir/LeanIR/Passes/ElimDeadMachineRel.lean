@@ -147,6 +147,23 @@ theorem ReachableFramesRelated.monoRenaming
   | cons head tail ih =>
       exact .cons (head.monoRenaming extension) ih
 
+theorem ReachableFrameRelated.roots
+    (related : ReachableFrameRelated fuel rho
+      source target sourceRoots targetRoots) :
+    ListRel (ValueRel rho) sourceRoots targetRoots := by
+  cases related with
+  | bind graph joins env => exact envRootsOn_related env
+  | apply arguments => exact arguments
+  | cache name => exact .nil
+
+theorem ReachableFramesRelated.roots
+    (related : ReachableFramesRelated fuel rho
+      source target sourceRoots targetRoots) :
+    ListRel (ValueRel rho) sourceRoots targetRoots := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih => exact listRel_append head.roots ih
+
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/
 theorem ReachableMachineRelated.monoRenaming
@@ -187,6 +204,116 @@ theorem initialState_reachableMachineRelated
       (ReachableFramesRelated.nil :
         ReachableFramesRelated fuel emptyAddressRenaming [] [] [] [])
   · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
+/-- A retained return narrows the active runtime roots from the complete live
+environment to the returned value, while keeping all saved-frame roots. -/
+theorem coreStep_return_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (member : used.contains result = true)
+    (sourceRead : lookup sourceState.env result = some sourceValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetValue,
+      let sourceAfter := {
+        sourceState with control := .yielded sourceValue }
+      let targetAfter := {
+        targetState with control := .yielded targetValue }
+      lookup targetState.env result = some targetValue ∧
+        ValueRel rho sourceValue targetValue ∧
+        coreStep { sourceState with control := .code (.return result) } =
+          .next sourceAfter ∧
+        coreStep { targetState with control := .code (.return result) } =
+          .next targetAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have looked := env result member
+  rw [sourceRead] at looked
+  generalize targetRead : lookup targetState.env result = targetResult at looked
+  cases targetResult with
+  | none => cases looked
+  | some targetValue =>
+      cases looked with
+      | some values =>
+          dsimp only
+          have sourceRoot : sourceValue ∈
+              envRootsOn used sourceState.env :=
+            lookup_mem_envRootsOn member sourceRead
+          have targetRoot : targetValue ∈
+              envRootsOn used targetState.env :=
+            lookup_mem_envRootsOn member targetRead
+          have extra : ListRel (ValueRel rho)
+              ([sourceValue] ++ sourceFrameRoots)
+              ([targetValue] ++ targetFrameRoots) :=
+            listRel_append (.cons values .nil) frames.roots
+          have sourceSubset : RootSubset
+              ([sourceValue] ++ sourceFrameRoots)
+              (envRootsOn used sourceState.env ++ sourceFrameRoots) := by
+            intro value live
+            simp only [List.mem_append, List.mem_singleton] at live ⊢
+            rcases live with same | framed
+            · subst value
+              exact Or.inl sourceRoot
+            · exact Or.inr framed
+          have targetSubset : RootSubset
+              ([targetValue] ++ targetFrameRoots)
+              (envRootsOn used targetState.env ++ targetFrameRoots) := by
+            intro value live
+            simp only [List.mem_append, List.mem_singleton] at live ⊢
+            rcases live with same | framed
+            · subst value
+              exact Or.inl targetRoot
+            · exact Or.inr framed
+          have nextRuntime := runtime.restrictExtra extra
+            sourceSubset targetSubset
+          refine ⟨targetValue, rfl, values, ?_, ?_, ?_⟩
+          · simp [coreStep, lookupValue, sourceRead]
+          · simp [coreStep, lookupValue, targetRead]
+          · unfold ReachableMachineRelated
+            exact ⟨[sourceValue], [targetValue],
+              sourceFrameRoots, targetFrameRoots,
+              programs, .yielded values, frames, nextRuntime⟩
+
+/-- State-level retained-return rule obtained by inverting the existential
+roots carried by `ReachableMachineRelated`. -/
+theorem ReachableMachineRelated.returnStep
+    (related : ReachableMachineRelated fuel rho source target)
+    (sourceControl : source.control = .code (.return result))
+    (targetControl : target.control = .code (.return result))
+    (sourceRead : lookup source.env result = some sourceValue) :
+    ∃ targetValue,
+      let sourceAfter := { source with control := .yielded sourceValue }
+      let targetAfter := { target with control := .yielded targetValue }
+      lookup target.env result = some targetValue ∧
+        ValueRel rho sourceValue targetValue ∧
+        coreStep source = .next sourceAfter ∧
+        coreStep target = .next targetAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases related with
+    ⟨sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [sourceControl, targetControl] at control
+  cases control with
+  | code graph joins env =>
+      cases graph.covered with
+      | ret member =>
+          have progress := coreStep_return_reachableRelated source target
+            programs frames env member sourceRead runtime
+          have sourceSame :
+              { source with control := .code (.return result) } = source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code (.return result) } = target := by
+            cases target
+            simp_all
+          rw [sourceSame, targetSame] at progress
+          exact progress
 
 /-- Machine-level source-only rule for a deleted value-producing `let`.
 The caller supplies the operation-specific reachable-runtime theorem; binder
