@@ -38,6 +38,7 @@ from validation_harness import (
     checked_record,
     comparison_artifact_path,
     compare_backend_results,
+    compare_verified_evidence,
     compare_success,
     corpus_artifact_bytes,
     external_adapter_from_config,
@@ -48,6 +49,7 @@ from validation_harness import (
     product_bundle_receipt_findings,
     product_bundle_receipt_value,
     records_from_output,
+    render_evidence_comparison,
     render_validation_coverage,
     retain_evidence_blob,
     result_domain_findings,
@@ -64,6 +66,7 @@ from validation_harness import (
     validation_evidence_sha256,
     verify_matrix_artifact,
     verify_evidence_manifest,
+    verify_evidence_snapshot,
     validation_plan_from_config,
     validation_run_sha256,
     validation_selection_sha256,
@@ -296,11 +299,31 @@ def main() -> int:
         type=Path,
         help="verify an immutable evidence manifest without running backends",
     )
+    parser.add_argument(
+        "--compare-evidence",
+        nargs=2,
+        type=Path,
+        metavar=("BEFORE", "AFTER"),
+        help="verify and compare two immutable evidence manifests",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit --compare-evidence as stable JSON",
+    )
     args = parser.parse_args()
 
-    if args.verify_matrix is not None or args.verify_evidence is not None:
+    evidence_modes = sum(
+        int(option is not None)
+        for option in (
+            args.verify_matrix,
+            args.verify_evidence,
+            args.compare_evidence,
+        )
+    )
+    if evidence_modes:
         if (
-            (args.verify_matrix is not None and args.verify_evidence is not None)
+            evidence_modes != 1
             or args.cases
             or args.tag
             or args.out_dir is not None
@@ -311,12 +334,24 @@ def main() -> int:
             or args.adapter_config
             or args.provider_config
             or args.plan
+            or (args.json and args.compare_evidence is None)
         ):
             raise ValidationError(
-                "evidence verification options are mutually exclusive and "
+                "evidence inspection options are mutually exclusive and "
                 "cannot be combined with validation run options"
             )
-        if args.verify_matrix is not None:
+        if args.compare_evidence is not None:
+            before_path, after_path = args.compare_evidence
+            comparison = compare_verified_evidence(
+                verify_evidence_snapshot(before_path),
+                verify_evidence_snapshot(after_path),
+            )
+            if args.json:
+                print(json.dumps(comparison, indent=2, sort_keys=True))
+            else:
+                for line in render_evidence_comparison(comparison):
+                    print(line)
+        elif args.verify_matrix is not None:
             matrix = verify_matrix_artifact(args.verify_matrix)
             print(
                 f"verified validation matrix {args.verify_matrix}: "
@@ -337,6 +372,9 @@ def main() -> int:
             for line in render_validation_coverage(manifest["coverage"]):
                 print(line)
         return 0
+
+    if args.json:
+        raise ValidationError("--json requires --compare-evidence")
 
     args.out_dir = args.out_dir or DEFAULT_OUT
 

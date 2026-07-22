@@ -581,6 +581,35 @@ class HarnessTests(unittest.TestCase):
                     out_dir, "inputs", harness.sha256_bytes(b"other"), b"other"
                 )
 
+    def test_evidence_comparison_preserves_order_and_multiplicity(self) -> None:
+        ordered = core.ordered_evidence_delta(["a", "b"], ["b", "a"])
+        self.assertTrue(ordered["changed"])
+        self.assertTrue(ordered["orderChanged"])
+        self.assertEqual(ordered["added"], [])
+        self.assertEqual(ordered["removed"], [])
+
+        first = {"phase": "comparison", "message": "first"}
+        second = {"phase": "comparison", "message": "second"}
+        findings = core.evidence_findings_delta(
+            [first, first], [first, second]
+        )
+        self.assertEqual(
+            findings,
+            {
+                "added": [{"finding": second, "count": 1}],
+                "removed": [{"finding": first, "count": 1}],
+            },
+        )
+
+        with mock.patch.object(
+            sys, "argv", ["validate_interpreters.py", "--json"]
+        ):
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "--json requires --compare-evidence",
+            ):
+                harness.main()
+
     def test_backend_artifact_inventory_is_sorted_and_content_addressed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             out_dir = Path(directory)
@@ -2479,6 +2508,15 @@ class HarnessTests(unittest.TestCase):
             self.assertIn(
                 "opened 1/1 unique products with strace",
                 "\n".join(core.render_validation_coverage(coverage)),
+            )
+            telemetry_only = json.loads(json.dumps(coverage))
+            telemetry_only["consumers"][0]["executionAccess"][
+                "traceAccessCount"
+            ] += 1
+            self.assertNotEqual(coverage, telemetry_only)
+            self.assertEqual(
+                core.evidence_coverage_claim(coverage),
+                core.evidence_coverage_claim(telemetry_only),
             )
 
             with self.assertRaisesRegex(
@@ -4449,6 +4487,8 @@ class HarnessTests(unittest.TestCase):
             matrix_path.write_bytes(matrix_content)
 
     def test_plan_drives_external_adapter_through_cli_and_matrix(self) -> None:
+        native_value = {"value": 42}
+
         class FakeNativeAdapter:
             name = "native"
 
@@ -4462,7 +4502,11 @@ class HarnessTests(unittest.TestCase):
                 return harness.BackendRun(
                     self.name,
                     list(context.selected),
-                    {"case": success("case", self.name)},
+                    {
+                        "case": success(
+                            "case", self.name, native_value["value"]
+                        )
+                    },
                 )
 
             def audit(
@@ -4917,6 +4961,167 @@ class HarnessTests(unittest.TestCase):
                 harness.verify_evidence_manifest(moved_evidence)["identity"],
                 evidence["identity"],
             )
+            same_comparison = core.compare_verified_evidence(
+                core.verify_evidence_snapshot(evidence_path),
+                core.verify_evidence_snapshot(moved_evidence),
+            )
+            self.assertFalse(any(same_comparison["classification"].values()))
+            self.assertEqual(same_comparison["semanticResults"], [])
+            self.assertIn(
+                "contract same",
+                "\n".join(core.render_evidence_comparison(same_comparison)),
+            )
+
+            native_value["value"] = 43
+            with (
+                mock.patch.object(
+                    harness,
+                    "BACKEND_ADAPTERS",
+                    {"native": FakeNativeAdapter()},
+                ),
+                mock.patch.object(
+                    harness,
+                    "corpus_manifest",
+                    return_value=[descriptor("case")],
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
+                ),
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(harness.main(), 1)
+            changed_matrix_bytes = matrix_path.read_bytes()
+            changed_matrix = json.loads(changed_matrix_bytes)
+            changed_evidence_path = harness.validation_evidence_manifest_path(
+                out_dir,
+                changed_matrix["identity"]["run"],
+                harness.sha256_bytes(changed_matrix_bytes),
+            )
+            semantic_comparison = core.compare_verified_evidence(
+                core.verify_evidence_snapshot(evidence_path),
+                core.verify_evidence_snapshot(changed_evidence_path),
+            )
+            self.assertFalse(
+                semantic_comparison["classification"]["runChanged"]
+            )
+            self.assertFalse(
+                semantic_comparison["classification"]["contractChanged"]
+            )
+            self.assertTrue(
+                semantic_comparison["classification"][
+                    "semanticResultsChanged"
+                ]
+            )
+            self.assertTrue(
+                semantic_comparison["classification"][
+                    "semanticObservationsChanged"
+                ]
+            )
+            self.assertTrue(
+                semantic_comparison["classification"]["coverageClaimChanged"]
+            )
+            self.assertTrue(
+                semantic_comparison["classification"]["findingsChanged"]
+            )
+            self.assertEqual(
+                [
+                    (
+                        item["backend"],
+                        item["caseId"],
+                        item["change"],
+                    )
+                    for item in semantic_comparison["semanticResults"]
+                ],
+                [("native", "case", "changed")],
+            )
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "validate_interpreters.py",
+                        "--compare-evidence",
+                        str(evidence_path),
+                        str(changed_evidence_path),
+                        "--json",
+                    ],
+                ),
+                contextlib.redirect_stdout(io.StringIO()) as comparison_stdout,
+            ):
+                self.assertEqual(harness.main(), 0)
+            cli_comparison = json.loads(comparison_stdout.getvalue())
+            self.assertEqual(
+                cli_comparison["classification"],
+                semantic_comparison["classification"],
+            )
+            matrix_path.write_bytes(original_matrix_bytes)
+            native_value["value"] = 42
+
+            original_plan_bytes = plan_path.read_bytes()
+            reversed_plan = json.loads(original_plan_bytes)
+            reversed_plan["pairs"] = [
+                {"reference": "v8", "candidate": "native"}
+            ]
+            plan_path.write_text(
+                json.dumps(reversed_plan), encoding="utf-8"
+            )
+            with (
+                mock.patch.object(
+                    harness,
+                    "BACKEND_ADAPTERS",
+                    {"native": FakeNativeAdapter()},
+                ),
+                mock.patch.object(
+                    harness,
+                    "corpus_manifest",
+                    return_value=[descriptor("case")],
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
+                ),
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(harness.main(), 0)
+            contract_matrix_bytes = matrix_path.read_bytes()
+            contract_matrix = json.loads(contract_matrix_bytes)
+            contract_evidence_path = harness.validation_evidence_manifest_path(
+                out_dir,
+                contract_matrix["identity"]["run"],
+                harness.sha256_bytes(contract_matrix_bytes),
+            )
+            contract_comparison = core.compare_verified_evidence(
+                core.verify_evidence_snapshot(evidence_path),
+                core.verify_evidence_snapshot(contract_evidence_path),
+            )
+            self.assertTrue(
+                contract_comparison["classification"]["runChanged"]
+            )
+            self.assertTrue(
+                contract_comparison["classification"]["contractChanged"]
+            )
+            self.assertFalse(
+                contract_comparison["classification"][
+                    "semanticResultsChanged"
+                ]
+            )
+            self.assertTrue(contract_comparison["pairGraph"]["changed"])
+            self.assertEqual(
+                contract_comparison["summary"]["inventoryCounts"]["inputs"],
+                {"added": 0, "removed": 0, "changed": 1},
+            )
+            self.assertIn(
+                "pairGraph: +1 -1",
+                "\n".join(
+                    core.render_evidence_comparison(contract_comparison)
+                ),
+            )
+            plan_path.write_bytes(original_plan_bytes)
+            matrix_path.write_bytes(original_matrix_bytes)
             self.assertEqual(
                 harness.verify_matrix_artifact(matrix_path)["identity"],
                 matrix["identity"],

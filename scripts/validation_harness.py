@@ -299,6 +299,14 @@ class ValidationArtifact:
         }
 
 
+@dataclass(frozen=True)
+class VerifiedEvidence:
+    manifest_path: Path
+    report_root: Path
+    manifest: dict
+    matrix: dict
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -8587,8 +8595,8 @@ def verify_matrix_artifact(
     return value
 
 
-def verify_evidence_manifest(path: Path) -> dict:
-    """Verify one append-only evidence manifest and its retained matrix."""
+def verify_evidence_snapshot(path: Path) -> VerifiedEvidence:
+    """Verify and return one append-only manifest with its retained matrix."""
     absolute = Path(os.path.abspath(path))
     run_directory = absolute.parent
     runs_directory = run_directory.parent
@@ -8691,7 +8699,401 @@ def verify_evidence_manifest(path: Path) -> dict:
         raise ValidationError(
             "validation evidence coverage disagrees with retained matrix"
         )
-    return manifest
+    return VerifiedEvidence(absolute, report_root, manifest, verified_matrix)
+
+
+def verify_evidence_manifest(path: Path) -> dict:
+    """Verify one append-only evidence manifest and its retained matrix."""
+    return verify_evidence_snapshot(path).manifest
+
+
+def ordered_evidence_delta(before: list, after: list) -> dict:
+    """Compare ordered, unique JSON values while exposing set and order drift."""
+    def key(value: object) -> str:
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+    before_keys = [key(value) for value in before]
+    after_keys = [key(value) for value in after]
+    before_set = set(before_keys)
+    after_set = set(after_keys)
+    return {
+        "changed": before != after,
+        "before": before,
+        "after": after,
+        "added": [
+            value for value, item_key in zip(after, after_keys)
+            if item_key not in before_set
+        ],
+        "removed": [
+            value for value, item_key in zip(before, before_keys)
+            if item_key not in after_set
+        ],
+        "orderChanged": (
+            before_set == after_set and before_keys != after_keys
+        ),
+    }
+
+
+def evidence_inventory_delta(
+    before: list[dict],
+    after: list[dict],
+    identity_fields: tuple[str, ...],
+) -> dict:
+    """Compare a verified logical inventory independently of list position."""
+    def item_key(item: dict) -> tuple[str, ...]:
+        return tuple(str(item[field]) for field in identity_fields)
+
+    before_items = {item_key(item): item for item in before}
+    after_items = {item_key(item): item for item in after}
+    added = [after_items[key] for key in sorted(after_items.keys() - before_items)]
+    removed = [
+        before_items[key] for key in sorted(before_items.keys() - after_items)
+    ]
+    changed = [
+        {
+            "identity": {
+                field: before_items[key][field]
+                for field in identity_fields
+            },
+            "before": before_items[key],
+            "after": after_items[key],
+        }
+        for key in sorted(before_items.keys() & after_items)
+        if before_items[key] != after_items[key]
+    ]
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def evidence_findings_delta(before: list[dict], after: list[dict]) -> dict:
+    """Compare the verified findings as a multiset."""
+    def counted(findings: list[dict]) -> dict[str, tuple[dict, int]]:
+        result: dict[str, tuple[dict, int]] = {}
+        for finding in findings:
+            key = json.dumps(finding, separators=(",", ":"), sort_keys=True)
+            previous = result.get(key)
+            result[key] = (
+                finding,
+                1 if previous is None else previous[1] + 1,
+            )
+        return result
+
+    before_counts = counted(before)
+    after_counts = counted(after)
+    added = []
+    removed = []
+    for key in sorted(before_counts.keys() | after_counts.keys()):
+        before_count = before_counts.get(key, ({}, 0))[1]
+        after_count = after_counts.get(key, ({}, 0))[1]
+        if after_count > before_count:
+            added.append(
+                {
+                    "finding": after_counts[key][0],
+                    "count": after_count - before_count,
+                }
+            )
+        elif before_count > after_count:
+            removed.append(
+                {
+                    "finding": before_counts[key][0],
+                    "count": before_count - after_count,
+                }
+            )
+    return {"added": added, "removed": removed}
+
+
+def retained_result_outcomes(
+    evidence: VerifiedEvidence,
+) -> dict[tuple[str, str], dict]:
+    """Load semantic outcomes from an already verified evidence graph."""
+    outcomes: dict[tuple[str, str], dict] = {}
+    for artifact in evidence.matrix["artifacts"]:
+        if artifact["kind"] != "backend-result":
+            continue
+        content = verify_evidence_file(
+            evidence.report_root,
+            artifact["artifact"],
+            artifact["sha256"],
+            f"compared backend result {artifact['name']}",
+        )
+        try:
+            record = json.loads(content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValidationError(
+                "compared backend result is not JSON"
+            ) from error
+        if not isinstance(record, dict):
+            raise ValidationError("compared backend result is malformed")
+        backend = validate_backend_name(
+            record.get("backend"), "compared result backend"
+        )
+        case_id, outcome = checked_record(record, backend)
+        key = (backend, case_id)
+        if key in outcomes:
+            raise ValidationError("compared evidence has duplicate results")
+        outcomes[key] = outcome
+    return outcomes
+
+
+def evidence_coverage_claim(coverage: dict) -> dict:
+    """Remove explicitly operational telemetry from canonical coverage."""
+    claim = json.loads(json.dumps(coverage))
+    for consumer in claim["consumers"]:
+        consumer["executionAccess"].pop("traceAccessCount")
+    return claim
+
+
+def compare_verified_evidence(
+    before: VerifiedEvidence,
+    after: VerifiedEvidence,
+) -> dict:
+    """Classify exact differences between two verified evidence graphs."""
+    before_matrix = before.matrix
+    after_matrix = after.matrix
+    selected_cases = ordered_evidence_delta(
+        before_matrix["selectedCases"], after_matrix["selectedCases"]
+    )
+    backends = ordered_evidence_delta(
+        before_matrix["backends"], after_matrix["backends"]
+    )
+    providers = ordered_evidence_delta(
+        before_matrix.get("providers", []),
+        after_matrix.get("providers", []),
+    )
+    before_pairs = [
+        {"reference": item["reference"], "candidate": item["candidate"]}
+        for item in before_matrix["pairs"]
+    ]
+    after_pairs = [
+        {"reference": item["reference"], "candidate": item["candidate"]}
+        for item in after_matrix["pairs"]
+    ]
+    pair_graph = ordered_evidence_delta(before_pairs, after_pairs)
+
+    inventory_specs = {
+        "inputs": ("kind", "name"),
+        "products": ("backend", "kind", "name"),
+        "tools": ("backend", "kind", "name"),
+        "buildInputs": ("backend", "kind", "name"),
+        "artifacts": ("kind", "name"),
+        "comparisons": ("reference", "candidate"),
+        "productBundles": ("provider",),
+        "productConsumers": ("backend",),
+        "productReceipts": ("backend", "caseId"),
+    }
+    before_inventories = {
+        **before_matrix,
+        "comparisons": before_matrix["pairs"],
+    }
+    after_inventories = {
+        **after_matrix,
+        "comparisons": after_matrix["pairs"],
+    }
+    inventories = {
+        name: evidence_inventory_delta(
+            before_inventories.get(name, []),
+            after_inventories.get(name, []),
+            fields,
+        )
+        for name, fields in inventory_specs.items()
+    }
+
+    before_outcomes = retained_result_outcomes(before)
+    after_outcomes = retained_result_outcomes(after)
+    semantic_results: list[dict[str, object]] = []
+    for backend, case_id in sorted(before_outcomes.keys() | after_outcomes.keys()):
+        before_outcome = before_outcomes.get((backend, case_id))
+        after_outcome = after_outcomes.get((backend, case_id))
+        if before_outcome == after_outcome:
+            continue
+        change = (
+            "added" if before_outcome is None
+            else "removed" if after_outcome is None
+            else "changed"
+        )
+        semantic_results.append(
+            {
+                "backend": backend,
+                "caseId": case_id,
+                "change": change,
+                "before": before_outcome,
+                "after": after_outcome,
+            }
+        )
+
+    findings = evidence_findings_delta(
+        before_matrix["findings"], after_matrix["findings"]
+    )
+    coverage_before = before_matrix["coverage"]
+    coverage_after = after_matrix["coverage"]
+    coverage_changed = coverage_before != coverage_after
+    coverage_claim_changed = (
+        evidence_coverage_claim(coverage_before)
+        != evidence_coverage_claim(coverage_after)
+    )
+    before_telemetry = {
+        consumer["backend"]: consumer["executionAccess"]["traceAccessCount"]
+        for consumer in coverage_before["consumers"]
+    }
+    after_telemetry = {
+        consumer["backend"]: consumer["executionAccess"]["traceAccessCount"]
+        for consumer in coverage_after["consumers"]
+    }
+
+    def inventory_changed(name: str) -> bool:
+        return any(inventories[name][field] for field in inventories[name])
+
+    contract_inventory_names = {
+        "inputs",
+        "products",
+        "tools",
+        "buildInputs",
+        "productBundles",
+        "productConsumers",
+    }
+    contract_changed = (
+        selected_cases["changed"]
+        or backends["changed"]
+        or providers["changed"]
+        or pair_graph["changed"]
+        or any(
+            inventory_changed(name) for name in contract_inventory_names
+        )
+    )
+    findings_changed = bool(findings["added"] or findings["removed"])
+    receipt_bindings_changed = inventory_changed("productReceipts")
+    artifacts_changed = inventory_changed("artifacts")
+    comparisons_changed = inventory_changed("comparisons")
+    result_counts = {
+        change: sum(
+            int(item["change"] == change) for item in semantic_results
+        )
+        for change in ("added", "removed", "changed")
+    }
+    inventory_counts = {
+        name: {
+            field: len(delta[field])
+            for field in ("added", "removed", "changed")
+        }
+        for name, delta in inventories.items()
+    }
+    classification = {
+        "runChanged": (
+            before.manifest["identity"]["run"]
+            != after.manifest["identity"]["run"]
+        ),
+        "evidenceChanged": (
+            before.manifest["identity"]["evidence"]
+            != after.manifest["identity"]["evidence"]
+        ),
+        "contractChanged": contract_changed,
+        "semanticResultsChanged": bool(semantic_results),
+        "semanticObservationsChanged": any(
+            item["change"] == "changed" for item in semantic_results
+        ),
+        "coverageChanged": coverage_changed,
+        "coverageClaimChanged": coverage_claim_changed,
+        "executionTelemetryChanged": before_telemetry != after_telemetry,
+        "findingsChanged": findings_changed,
+        "receiptBindingsChanged": receipt_bindings_changed,
+        "artifactsChanged": artifacts_changed,
+        "comparisonsChanged": comparisons_changed,
+    }
+    return {
+        "version": PROTOCOL_VERSION,
+        "before": {
+            "run": before.manifest["identity"]["run"],
+            "evidence": before.manifest["identity"]["evidence"],
+            "matrix": before.manifest["matrix"]["sha256"],
+        },
+        "after": {
+            "run": after.manifest["identity"]["run"],
+            "evidence": after.manifest["identity"]["evidence"],
+            "matrix": after.manifest["matrix"]["sha256"],
+        },
+        "classification": classification,
+        "summary": {
+            "semanticResultAddedCount": result_counts["added"],
+            "semanticResultRemovedCount": result_counts["removed"],
+            "semanticResultChangedCount": result_counts["changed"],
+            "findingAddedCount": sum(
+                item["count"] for item in findings["added"]
+            ),
+            "findingRemovedCount": sum(
+                item["count"] for item in findings["removed"]
+            ),
+            "inventoryCounts": inventory_counts,
+        },
+        "selectedCases": selected_cases,
+        "backends": backends,
+        "providers": providers,
+        "pairGraph": pair_graph,
+        "inventories": inventories,
+        "semanticResults": semantic_results,
+        "findings": findings,
+        "coverage": {"before": coverage_before, "after": coverage_after},
+        "executionTelemetry": {
+            "before": before_telemetry,
+            "after": after_telemetry,
+        },
+    }
+
+
+def render_evidence_comparison(comparison: dict) -> list[str]:
+    """Render the stable evidence comparison report for humans."""
+    before = comparison["before"]
+    after = comparison["after"]
+    classification = comparison["classification"]
+
+    def state(field: str) -> str:
+        return "changed" if classification[field] else "same"
+
+    lines = [
+        f"evidence comparison: {before['evidence']} -> {after['evidence']}",
+        "classification: "
+        f"contract {state('contractChanged')}, "
+        f"semantic results {state('semanticResultsChanged')}, "
+        f"coverage claim {state('coverageClaimChanged')}, "
+        f"telemetry {state('executionTelemetryChanged')}, "
+        f"findings {state('findingsChanged')}, "
+        f"exact evidence {state('evidenceChanged')}",
+        "bindings: "
+        f"run identity {state('runChanged')}, "
+        f"receipts {state('receiptBindingsChanged')}, "
+        f"comparisons {state('comparisonsChanged')}, "
+        f"artifacts {state('artifactsChanged')}",
+    ]
+    summary = comparison["summary"]
+    lines.append(
+        "semantic results: "
+        f"+{summary['semanticResultAddedCount']} "
+        f"-{summary['semanticResultRemovedCount']} "
+        f"~{summary['semanticResultChangedCount']}"
+    )
+    for result in comparison["semanticResults"]:
+        lines.append(
+            f"semantic {result['change']}: "
+            f"{result['backend']}/{result['caseId']}"
+        )
+    for name in ("selectedCases", "backends", "providers", "pairGraph"):
+        delta = comparison[name]
+        if delta["changed"]:
+            lines.append(
+                f"{name}: +{len(delta['added'])} "
+                f"-{len(delta['removed'])} "
+                f"order={'changed' if delta['orderChanged'] else 'same'}"
+            )
+    for name, counts in summary["inventoryCounts"].items():
+        if any(counts.values()):
+            lines.append(
+                f"{name}: +{counts['added']} -{counts['removed']} "
+                f"~{counts['changed']}"
+            )
+    lines.append(
+        "findings: "
+        f"+{summary['findingAddedCount']} "
+        f"-{summary['findingRemovedCount']}"
+    )
+    return lines
 
 
 def build_product_providers(

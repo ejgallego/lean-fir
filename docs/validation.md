@@ -169,6 +169,36 @@ The full process-tree trace-path count is operational telemetry and may vary
 with the engine or host toolchain; the receipted/opened product counts are the
 portable validation claim.
 
+Two immutable executions can be compared after independently verifying both
+complete evidence graphs:
+
+```sh
+python3 scripts/validate_interpreters.py \
+  --compare-evidence <before-evidence.json> <after-evidence.json>
+
+python3 scripts/validate_interpreters.py \
+  --compare-evidence <before-evidence.json> <after-evidence.json> --json
+```
+
+The human report is concise; `--json` emits the stable versioned comparison
+object for CI and downstream analysis. The comparator distinguishes:
+
+- contract drift in selection/backend/pair graphs, retained inputs, products,
+  tools, build inputs, provider bundles, and consumer assignments;
+- added, removed, and changed semantic outcomes by exact backend/case key;
+- portable coverage-claim drift from full operational coverage drift, so a
+  changed strace path count is not presented as changed product consumption;
+- finding multiset, product-receipt binding, comparison, and exact artifact
+  inventory changes; and
+- semantic run identity from exact evidence identity.
+
+Changed JSON results contain both retained outcomes rather than only digests.
+Inventory changes retain their logical identity and before/after records.
+Paths to the two manifests are deliberately absent from the comparison object,
+so relocating an evidence tree produces an all-`same` comparison. Differences
+are reported data and do not by themselves make the comparison command fail;
+failure means that one of the two evidence graphs was structurally invalid.
+
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run. `make validate-v8` does the same for the three-way
 native/LCNF/V8 matrix.
