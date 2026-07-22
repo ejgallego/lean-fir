@@ -1962,6 +1962,50 @@ theorem coreStep_return_reachableRelated
               sourceFrameRoots, targetFrameRoots,
               programs, .yielded values, frames, nextRuntime⟩
 
+/-- A retained return whose covered result is absent from the source
+environment has an absent target lookup as well.  Both machines therefore
+terminate with the same address-free `unknownVar` fault. -/
+theorem coreStep_return_unknown_terminal
+    (sourceState targetState : MachineState)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (member : used.contains result = true)
+    (sourceRead : lookup sourceState.env result = none)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .code (.return result) } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with control := .code (.return result) }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have looked := env result member
+  rw [sourceRead] at looked
+  generalize targetRead : lookup targetState.env result = targetResult at looked
+  cases targetResult with
+  | some targetValue => cases looked
+  | none =>
+      let sourceReturn := {
+        sourceState with control := .code (.return result) }
+      let targetReturn := {
+        targetState with control := .code (.return result) }
+      have sourceFault : coreStep sourceReturn =
+          .done (observe sourceReturn (.fault (.unknownVar result))) := by
+        simp [sourceReturn, coreStep, lookupValue, sourceRead, fail]
+      have targetFault : coreStep targetReturn =
+          .done (observe targetReturn (.fault (.unknownVar result))) := by
+        simp [targetReturn, coreStep, lookupValue, targetRead, fail]
+      have returnRuntime : ShadowRuntimeRel rho
+          sourceReturn.runtime targetReturn.runtime
+          (envRootsOn used sourceState.env ++ sourceFrameRoots)
+          (envRootsOn used targetState.env ++ targetFrameRoots) := by
+        simpa [sourceReturn, targetReturn] using runtime
+      have terminal := relatedFault_terminal
+        (externals := externals) returnRuntime sourceFault targetFault
+        (by simpa [sourceReturn] using done)
+      simpa [targetReturn] using terminal
+
 /-- State-level retained-return rule obtained by inverting the existential
 roots carried by `ReachableMachineRelated`. -/
 theorem ReachableMachineRelated.returnStep
@@ -1998,6 +2042,73 @@ theorem ReachableMachineRelated.returnStep
             simp_all
           rw [sourceSame, targetSame] at progress
           exact progress
+
+/-- State-level terminal rule for a retained return whose covered result is
+missing from both related environments. -/
+theorem ReachableMachineRelated.returnFault_terminal
+    (related : ReachableMachineRelated fuel rho source target)
+    (sourceControl : source.control = .code (.return result))
+    (targetControl : target.control = .code (.return result))
+    (sourceRead : lookup source.env result = none)
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with
+    ⟨sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [sourceControl, targetControl] at control
+  cases control with
+  | code graph joins env =>
+      cases graph.covered with
+      | ret member =>
+          have sourceSame :
+              { source with control := .code (.return result) } = source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code (.return result) } = target := by
+            cases target
+            simp_all
+          have terminal := coreStep_return_unknown_terminal
+            (externals := externals) source target env member sourceRead runtime
+            (by simpa [sourceSame] using done)
+          simpa [targetSame] using terminal
+
+/-- An explicit `unreach` node is retained by the transparent pass graph and
+terminates both related machines with the same address-free fault. -/
+theorem coreStep_unreach_terminal
+    (sourceState targetState : MachineState)
+    (graph : ShadowCodeGraph fuel used (.unreach type) targetCode)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots)
+    (done : coreStep { sourceState with
+      control := .code (.unreach type) } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with control := .code targetCode }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have targetEq := graph.unreachTarget
+  subst targetCode
+  let sourceUnreach := {
+    sourceState with control := .code (.unreach type) }
+  let targetUnreach := {
+    targetState with control := .code (.unreach type) }
+  have sourceFault : coreStep sourceUnreach =
+      .done (observe sourceUnreach (.fault .unreachable)) := by
+    simp [sourceUnreach, coreStep, fail]
+  have targetFault : coreStep targetUnreach =
+      .done (observe targetUnreach (.fault .unreachable)) := by
+    simp [targetUnreach, coreStep, fail]
+  have unreachRuntime : ShadowRuntimeRel rho
+      sourceUnreach.runtime targetUnreach.runtime sourceRoots targetRoots := by
+    simpa [sourceUnreach, targetUnreach] using runtime
+  have terminal := relatedFault_terminal
+    (externals := externals) unreachRuntime sourceFault targetFault
+    (by simpa [sourceUnreach] using done)
+  simpa [targetUnreach] using terminal
 
 /-- Machine-level source-only rule for a deleted value-producing `let`.
 The caller supplies the operation-specific reachable-runtime theorem; binder
@@ -3709,5 +3820,47 @@ theorem SomeReachableMachineRelated.yieldedObservation
   rcases related with ⟨rho, related⟩
   exact related.yieldedObservation sourceControl targetControl
     sourceFrames targetFrames
+
+/-- A related yielded value on empty stacks discharges the relational
+terminal contract with zero target steps. -/
+theorem ReachableMachineRelated.yielded_terminal
+    (related : ReachableMachineRelated fuel rho source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (targetControl : target.control = .yielded targetValue)
+    (sourceFrames : source.frames = [])
+    (targetFrames : target.frames = [])
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have sourceDone : coreStep source =
+      .done (observe source (.returned sourceValue)) := by
+    simp [coreStep, sourceControl, sourceFrames]
+  have targetDone : coreStep target =
+      .done (observe target (.returned targetValue)) := by
+    simp [coreStep, targetControl, targetFrames]
+  have observations := related.yieldedObservation sourceControl targetControl
+    sourceFrames targetFrames
+  have observationEq : sourceObservation =
+      observe source (.returned sourceValue) := by
+    rw [sourceDone] at done
+    exact (CoreResult.done.inj done).symm
+  refine ⟨observe target (.returned targetValue), ?_, ?_⟩
+  · exact ⟨0, target, .refl target, targetDone⟩
+  · simpa [observationEq] using observations
+
+theorem SomeReachableMachineRelated.yielded_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (targetControl : target.control = .yielded targetValue)
+    (sourceFrames : source.frames = [])
+    (targetFrames : target.frames = [])
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, related⟩
+  exact related.yielded_terminal sourceControl targetControl
+    sourceFrames targetFrames done
 
 end Fir.LeanIR.Passes.ElimDead
