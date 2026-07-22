@@ -14,7 +14,7 @@ import {
   EXPECTED_CONCRETE_FAULTS,
   REJECTED_FRAGMENT_FIXTURES,
 } from "./concrete-corpus.mjs";
-import { artifactExternalRegistry } from "./artifact-external-registry.mjs";
+import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
 
 export async function runConcreteArtifact(manifestPath) {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -25,7 +25,7 @@ export async function runConcreteArtifact(manifestPath) {
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed WebAssembly validation`);
 
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    artifactExternalRegistry);
+    concreteArtifactExternalRegistry);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -52,7 +52,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifest = JSON.parse(await readFile(
       join(artifactDirectory, `${fixture}.wasm.json`), "utf8"));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-      artifactExternalRegistry);
+      concreteArtifactExternalRegistry);
     assert.throws(() => host.imports(manifest.imports),
       /unsupported concrete artifact operation/,
       `${fixture} unexpectedly crossed its concrete fragment gate`);
@@ -81,7 +81,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const bytes = await readFile(manifestPath.slice(0, -".json".length));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-      artifactExternalRegistry);
+      concreteArtifactExternalRegistry);
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {

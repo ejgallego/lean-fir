@@ -560,18 +560,14 @@ export class ConcreteHost {
         if (value.location === null) return 0;
         assert.ok(Number.isSafeInteger(value.location) && value.location >= 0,
           "reuse-token location must be a nonnegative safe integer");
-        const address = this.locationAddresses.get(value.location);
-        assert.notEqual(address, undefined,
-          `reuse-token references unknown concrete location ${value.location}`);
+        const address = this.addressOf(value.location);
         return signed32(this.checkedWord("reuseToken", address));
       case "object":
       case "tagged":
       case "tobject": {
         if (value.kind === "tagged") return signed32(this.encodeTagged(value.payload));
         assert.equal(value.kind, "heap", `${kind} requires an object-like value`);
-        const address = this.locationAddresses.get(value.location);
-        assert.notEqual(address, undefined,
-          `${kind} argument references unknown concrete location ${value.location}`);
+        const address = this.addressOf(value.location);
         return signed32(this.checkedWord(kind, address));
       }
       default:
@@ -624,6 +620,14 @@ export class ConcreteHost {
     const location = this.addressLocations.get(unsigned32(address));
     assert.notEqual(location, undefined, `concrete address ${unsigned32(address)} has no logical location`);
     return location;
+  }
+
+  addressOf(location) {
+    assert.ok(Number.isSafeInteger(location) && location >= 0,
+      "concrete location must be a nonnegative safe integer");
+    const address = this.locationAddresses.get(location);
+    assert.notEqual(address, undefined, `concrete location ${location} has no physical address`);
+    return address;
   }
 
   naturalLiteral(operation, args) {

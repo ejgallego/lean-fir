@@ -85,9 +85,13 @@ but already executable fixtures, `reference-counting` and `delete-fault`, are
 part of that oracle-matched corpus.
 
 The same report preflights all 13 compiler-produced source artifacts. Ten are
-concrete-resolvable. The three `prettyM` forms remain blocked by the same 20
-unimplemented concrete external declarations; the coverage invocation also
-requires packed initial-constructor loading. Every module-local import site is
+concrete-resolvable. The concrete registry now executes all five natural,
+eight UTF-8/string, and two unreachable-fallback declarations retained by
+`prettyM`; focused tests cover large heap naturals, Unicode byte/code-point
+navigation, fresh string results, stale inputs, and exact fallback traps. The
+three `prettyM` forms now remain blocked only by their five integer declarations;
+the coverage invocation also requires packed initial-constructor loading.
+Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
 artifact/readiness audit: it deliberately does not claim W6 proof completion,
 concrete execution of merely preflight-ready source, or concrete execution of

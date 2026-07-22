@@ -3,7 +3,7 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { artifactExternalRegistry } from "./artifact-external-registry.mjs";
+import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
 import {
   CONCRETE_FIXTURES,
   CONCRETE_SOURCE_PROBES,
@@ -165,7 +165,7 @@ function preflightManifest(manifest) {
   const missingExternals = sortedUnique(manifest.imports
     .filter((descriptor) => descriptor.operation.kind === "external")
     .map((descriptor) => descriptor.operation.declaration)
-    .filter((declaration) => !Object.hasOwn(artifactExternalRegistry, declaration)));
+    .filter((declaration) => !Object.hasOwn(concreteArtifactExternalRegistry, declaration)));
   if (missingExternals.length > 0) {
     blockers.push({ kind: "external-implementations", declarations: missingExternals });
   }

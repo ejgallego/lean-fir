@@ -37,21 +37,6 @@ const expectedMissingExternals = [
   "Int.natAbs",
   "Int.ofNat",
   "Int.sub",
-  "Nat.add",
-  "Nat.decEq",
-  "Nat.decLe",
-  "Nat.decLt",
-  "Nat.sub",
-  "String.Internal.append",
-  "String.Internal.extract",
-  "String.Internal.length",
-  "String.Internal.next",
-  "String.Internal.offsetOfPos",
-  "String.Internal.posOf",
-  "String.Internal.pushn",
-  "String.utf8ByteSize",
-  "instInhabitedOfMonad._redArg",
-  "panicCore",
 ];
 for (const probe of blocked) {
   const externalBlocker = probe.blockers.find((item) =>

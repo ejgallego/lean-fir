@@ -1,10 +1,4 @@
-import assert from "./wasm_assert.mjs";
-
-import {
-  integerValue,
-  naturalValue,
-  validationExternalRegistry,
-} from "./wasm_validation_externals.mjs";
+import assert from "../../../scripts/wasm_assert.mjs";
 import {
   stringAppend,
   stringExtract,
@@ -14,17 +8,31 @@ import {
   stringPosOf,
   stringPushn,
   stringUtf8ByteSize,
-} from "./wasm_format_external_algorithms.mjs";
+} from "../../../scripts/wasm_format_external_algorithms.mjs";
+
+import { ConcreteFault } from "./concrete-host.mjs";
+
+function naturalValue(host, value, context) {
+  if (value.kind === "tagged") return value.payload;
+  assert.equal(value.kind, "heap", `${context} must be a tagged or heap natural`);
+  const address = host.addressOf(value.location);
+  return host.readNatural(address);
+}
+
+function naturalResult(host, value) {
+  const natural = BigInt(value);
+  assert.ok(natural >= 0n, "concrete natural result must be nonnegative");
+  return host.decode("tobject", host.allocateNatural(natural));
+}
 
 function stringValue(host, value, context) {
   assert.equal(value.kind, "heap", `${context} must be a heap string`);
-  const object = host.liveCell(value.location).object;
-  assert.equal(object.kind, "string", `${context} heap object must be a string`);
-  return object.value;
+  const address = host.addressOf(value.location);
+  return host.readString(address);
 }
 
 function stringResult(host, value) {
-  return host.alloc({ kind: "string", value });
+  return host.decode("object", host.allocateString(value));
 }
 
 function scalarUInt32(value, context) {
@@ -38,27 +46,19 @@ function boolResult(value) {
 }
 
 function unreachablePanicHelper({ declaration }) {
-  throw new Error(`unreachable Lean pretty-printing panic helper executed: ${declaration}`);
+  throw new ConcreteFault({
+    kind: "externalFailure",
+    name: declaration,
+    message: "unreachable Lean pretty-printing panic helper executed",
+  });
 }
 
-export const formatExternalRegistry = {
-  ...validationExternalRegistry,
-  "Int.natAbs": ({ args, host, world }) => {
-    assert.equal(args.length, 1, "Int.natAbs external arity mismatch");
-    const value = integerValue(host, args[0], "Int.natAbs operand");
-    return { value: host.natural(value < 0n ? -value : value), world };
-  },
-  "Int.sub": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Int.sub external arity mismatch");
-    const left = integerValue(host, args[0], "Int.sub left operand");
-    const right = integerValue(host, args[1], "Int.sub right operand");
-    return { value: host.integer(left - right), world };
-  },
-  "Int.add": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Int.add external arity mismatch");
-    const left = integerValue(host, args[0], "Int.add left operand");
-    const right = integerValue(host, args[1], "Int.add right operand");
-    return { value: host.integer(left + right), world };
+export const concreteFormatExternalRegistry = Object.freeze({
+  "Nat.add": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Nat.add external arity mismatch");
+    const left = naturalValue(host, args[0], "Nat.add left operand");
+    const right = naturalValue(host, args[1], "Nat.add right operand");
+    return { value: naturalResult(host, left + right), world };
   },
   "Nat.decEq": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Nat.decEq external arity mismatch");
@@ -73,7 +73,7 @@ export const formatExternalRegistry = {
     assert.equal(args.length, 2, "Nat.sub external arity mismatch");
     const left = naturalValue(host, args[0], "Nat.sub left operand");
     const right = naturalValue(host, args[1], "Nat.sub right operand");
-    return { value: host.natural(left < right ? 0n : left - right), world };
+    return { value: naturalResult(host, left < right ? 0n : left - right), world };
   },
   "Nat.decLt": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Nat.decLt external arity mismatch");
@@ -109,19 +109,19 @@ export const formatExternalRegistry = {
   "String.Internal.length": ({ args, host, world }) => {
     assert.equal(args.length, 1, "String.Internal.length external arity mismatch");
     const source = stringValue(host, args[0], "String.Internal.length source");
-    return { value: host.natural(stringLength(source)), world };
+    return { value: naturalResult(host, stringLength(source)), world };
   },
   "String.Internal.posOf": ({ args, host, world }) => {
     assert.equal(args.length, 2, "String.Internal.posOf external arity mismatch");
     const source = stringValue(host, args[0], "String.Internal.posOf source");
     const codePoint = scalarUInt32(args[1], "String.Internal.posOf character");
-    return { value: host.natural(stringPosOf(source, codePoint)), world };
+    return { value: naturalResult(host, stringPosOf(source, codePoint)), world };
   },
   "String.Internal.offsetOfPos": ({ args, host, world }) => {
     assert.equal(args.length, 2, "String.Internal.offsetOfPos external arity mismatch");
     const source = stringValue(host, args[0], "String.Internal.offsetOfPos source");
     const position = naturalValue(host, args[1], "String.Internal.offsetOfPos position");
-    return { value: host.natural(stringOffsetOfPos(source, position)), world };
+    return { value: naturalResult(host, stringOffsetOfPos(source, position)), world };
   },
   "String.utf8ByteSize": ({ args, host, world }) => {
     assert.equal(args.length, 1, "String.utf8ByteSize external arity mismatch");
@@ -139,8 +139,8 @@ export const formatExternalRegistry = {
     assert.equal(args.length, 2, "String.Internal.next external arity mismatch");
     const source = stringValue(host, args[0], "String.Internal.next source");
     const position = naturalValue(host, args[1], "String.Internal.next position");
-    return { value: host.natural(stringNext(source, position)), world };
+    return { value: naturalResult(host, stringNext(source, position)), world };
   },
   panicCore: unreachablePanicHelper,
   "instInhabitedOfMonad._redArg": unreachablePanicHelper,
-};
+});
