@@ -2653,6 +2653,12 @@ or stores; the Talos theorems retain `ConcreteErrorSourceRel`. The deleted-cell
 guard supplies invalid indices and confirms both trapped stores leave linear
 memory byte-for-byte unchanged. No shared contract or runtime behavior changes.
 
+W6.6br closes the analogous stale-reference path for constructor-tag mutation.
+The checked header writer, FIR `setTag`, and Talos host all preserve the exact
+address/location `deadObject` pair before tag-width conversion or any header
+store. The deleted-cell guard confirms the trapped operation leaves linear
+memory unchanged. No shared contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

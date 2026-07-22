@@ -25,7 +25,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `objectSet` | Yes | Live and stale mapped-heap theorems | Bounds and dead-object source-address faults exact with no post-state; remainder partial | Concrete two-i32 host, exact source-classified bounds and stale-object traps/no-write guards, FVar and erased-constant source steps, compiler/adapter, generated binary or local/constant call, continuation, whole-module mutation/readback including canonical erased zero, and Node/V8 plus browser-Worker checked-slot execution compose for every `LCNF.Arg` form and supported object-field kind |
 | `usizeSet` | Yes | Live and stale mapped-heap theorems | Bounds and dead-object source-address faults exact with no post-state; remainder partial | Concrete i32/i64 host, exact source-classified bounds and stale-object traps/no-write guards, source step, compiler/adapter, generated binary call, continuation, whole-module write, and compiler-shaped Node/V8 plus browser-Worker write/read execution compose |
 | `scalarSet` | Four integer widths | Heap theorems, including same-coordinate replacement and disjoint retained-field framing for every integer width | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose; repeated same-coordinate writes refine the source replacement filter and execute twice in one module; disjoint two-coordinate Talos modules for all four widths preserve the first coordinate after the second write; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
-| `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
+| `setTag` | Yes | Live and stale mapped-heap theorems | Dead-object source-address fault exact with no post-state; remainder partial | Concrete header host, exact stale-object trap/no-write guard, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
 | `dec` | Yes | Complete recursive heap theorem for either outer check bit | Partial | Concrete checked/unchecked ordinary recursive host, checked tagged/promoted no-op, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked and unchecked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, continuation, ordinary-object whole-module deletion, and exact dead-object Node/V8 plus browser-Worker execution compose without weakening ordinary object decoding |
@@ -63,9 +63,10 @@ Cross-cutting W6.5 state:
   reusable `DeadCellRel` and `LiveHeapRel` lemmas plus the `isShared`, `getTag`,
   object-, `USize`-, and four-width scalar-projection Talos theorems preserve it
   against FIR's `deadObject location`, with `HeapReferenceRel` carrying the
-  exact fault translation; stale object- and `USize`-mutation theorems add the
-  same no-post-state boundary; closed sharing and direct tag/projection/mutation
-  guards cover execution, while the fixed classification is tracked by
+  exact fault translation; stale object-, `USize`-, and tag-mutation theorems
+  add the same no-post-state boundary; closed sharing and direct
+  tag/projection/mutation guards cover execution, while the fixed
+  classification is tracked by
   `FIR-BUG-wasm-none-dead-object-fault-classification`;
 - invalid constructor arities are `malformed` in FIR but dedicated source
   `arityMismatch` faults in the concrete allocator; exact guards and the

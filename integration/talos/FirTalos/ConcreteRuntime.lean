@@ -3576,6 +3576,33 @@ theorem setTagStep_of_refines
             apply modifyConstructor_heapOnly
             simpa [setTag] using updated
 
+/-- Stale tag mutation preserves the exact mapped dead-object fault and has no
+successor heap. -/
+theorem setTagStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32}
+    {location : Location} {cell : HeapCell} (tag : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    setTagStep tag initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setTag runtime (.object (.heap location)) tag =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.writeTag_deadObject heapRelated found dead tag
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
 /-- Successful concrete object-slot mutation refines the matching semantic
 constructor update and preserves all nonheap runtime components. -/
 theorem objectSetStep_of_refines

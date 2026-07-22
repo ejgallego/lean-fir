@@ -376,6 +376,15 @@ theorem DeadCellRel.writeUSizeField_eq
   rw [related.readConstructorHeader_eq]
   rfl
 
+theorem DeadCellRel.writeTag_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (tag : Nat) :
+    writeTag state address tag =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeTag
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 theorem DeadCellRel.readScalarUInt8Field_eq
     {state : MemoryState} {address : Word32}
     (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
@@ -919,6 +928,23 @@ theorem LiveHeapRel.writeUSizeField_deadObject
   exact ⟨deadRelated.writeUSizeField_eq index field, by
     simp [setUSizeField, modifyConstructor, getConstructor, getLiveCell,
       found, dead]
+    rfl⟩
+
+/-- Stale constructor-tag mutation fails before tag encoding or header write. -/
+theorem LiveHeapRel.writeTag_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (tag : Nat) :
+    writeTag state address tag =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setTag runtime (.object (.heap location)) tag =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeTag_eq tag, by
+    simp [setTag, modifyConstructor, getConstructor, getLiveCell, found, dead]
     rfl⟩
 
 /-- All supported packed-integer readers share one stale-reference boundary;
