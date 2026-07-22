@@ -82,6 +82,15 @@ def deletedResetBefore : LCNF.Code .impure :=
 def deletedResetAfter : LCNF.Code .impure :=
   .return live
 
+def deadLargeNatDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.lit (.nat 9223372036854775808))
+
+def deletedLargeNatBefore : LCNF.Code .impure :=
+  .let deadLargeNatDecl (.return live)
+
+def deletedLargeNatAfter : LCNF.Code .impure :=
+  .return live
+
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
 #guard !safeToElim deadCopyDecl.value
@@ -147,6 +156,8 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
+  checkActualElimDead `elimDeadLargeNat
+    deletedLargeNatBefore deletedLargeNatAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -183,6 +194,12 @@ def deletedResetBeforeProgram : ImpureProgram :=
 
 def deletedResetAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedResetAfter] }
+
+def deletedLargeNatBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedLargeNatBefore] }
+
+def deletedLargeNatAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedLargeNatAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -258,6 +275,16 @@ theorem deletedResetShadowRun :
   simp [deletedResetBefore, deletedResetAfter, deadResetDecl, letDecl,
     neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem deletedLargeNatShadowRun :
+    shadowCode? 2 {} deletedLargeNatBefore =
+      some (deletedLargeNatAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedLargeNatBefore, deletedLargeNatAfter, deadLargeNatDecl,
+    letDecl, neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -297,6 +324,14 @@ theorem deletedResetProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedResetBeforeProgram, deletedResetAfterProgram,
     fixtureDecl, decl, deletedResetShadowRun]
+
+theorem deletedLargeNatProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 2)
+      deletedLargeNatBeforeProgram deletedLargeNatAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    deletedLargeNatBeforeProgram, deletedLargeNatAfterProgram,
+    fixtureDecl, decl, deletedLargeNatShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -403,6 +438,16 @@ def deletedResetSourceState : MachineState :=
 def deletedResetTargetState : MachineState :=
   { program := deletedResetAfterProgram
     control := .code deletedResetAfter
+    env := liveEnv }
+
+def deletedLargeNatSourceState : MachineState :=
+  { program := deletedLargeNatBeforeProgram
+    control := .code deletedLargeNatBefore
+    env := liveEnv }
+
+def deletedLargeNatTargetState : MachineState :=
+  { program := deletedLargeNatAfterProgram
+    control := .code deletedLargeNatAfter
     env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
@@ -977,6 +1022,49 @@ theorem deletedResetSourceOnlyMachineStep :
     runtime (by simpa using deletedResetReady)
   simpa [deletedResetSourceState, deletedResetTargetState,
     deletedResetBefore, deletedResetAfter, deadResetDecl, letDecl] using progress
+
+/-- The large natural crosses the tagged-immediate boundary and allocates a
+heap object, yet deleting its dead binding is still a valid source-only step. -/
+theorem deletedLargeNatSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        deletedLargeNatSourceState with
+        runtime := nextRuntime
+        env := bind deletedLargeNatSourceState.env dead value
+        control := .code (.return live) }
+      coreStep deletedLargeNatSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedLargeNatTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedLargeNatSourceState.program deletedLargeNatTargetState.program := by
+    simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+      deletedLargeNatProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedLargeNatSourceState.frames deletedLargeNatTargetState.frames [] [] :=
+    .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedLargeNatSourceState.env deletedLargeNatTargetState.env := by
+    simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+      liveEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedLargeNatSourceState.runtime deletedLargeNatTargetState.runtime
+      (envRootsOn neutralUsed deletedLargeNatSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedLargeNatTargetState.env ++ []) := by
+    simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+  have progress := coreStep_deletedLiteral_reachableRelated
+    (sourceState := deletedLargeNatSourceState)
+    (targetState := deletedLargeNatTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (literalValue := .nat 9223372036854775808)
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide) runtime
+  simpa [deletedLargeNatSourceState, deletedLargeNatTargetState,
+    deletedLargeNatBefore, deletedLargeNatAfter, deadLargeNatDecl, letDecl]
+    using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/

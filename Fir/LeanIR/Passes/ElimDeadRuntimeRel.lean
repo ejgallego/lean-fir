@@ -1298,6 +1298,40 @@ theorem ShadowRuntimeRel.allocLeftGarbage
     rightHeapFresh := related.rightHeapFresh
   }
 
+/-- Dead literals are either immediate values or one source-only allocation;
+in both cases their evaluation preserves reachable runtime semantics. -/
+theorem ShadowRuntimeRel.literalLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (literalValue : LCNF.LitValue) :
+    ShadowRuntimeRel rho (literal left literalValue).1 right
+      leftExtra rightExtra := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · simpa [literal, small] using related
+      · simpa [literal, small] using
+          related.allocLeftGarbage (.natural value) false
+  | str value =>
+      simpa [literal] using related.allocLeftGarbage (.string value) false
+  | uint8 value | uint16 value | uint32 value | uint64 value | usize value =>
+      simpa [literal] using related
+
+theorem ShadowRuntimeRel.evalLetValueLiteralLeftGarbage
+    (related : ShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra) :
+    ∃ nextRuntime value,
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .lit literalValue
+      } = .ok (nextRuntime, .value value) ∧
+      ShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra := by
+  refine ⟨(literal state.runtime literalValue).1,
+    (literal state.runtime literalValue).2, ?_,
+    related.literalLeftGarbage literalValue⟩
+  rfl
+
 /-- Related retained allocations may choose different fresh locations.  The
 address renaming is extended with that pair, the returned references become
 new live roots, and all old runtime components are transported monotonically. -/

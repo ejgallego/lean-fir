@@ -232,6 +232,47 @@ theorem coreStep_deletedLet_reachableRelated
     · exact frames
     · simpa [envRootsOn_bind_of_absent absent] using runtime
 
+/-- Every deleted literal is machine-safe under reachable observations:
+immediates are neutral and heap-backed literals allocate only dead garbage. -/
+theorem coreStep_deletedLiteral_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .lit literalValue }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases runtime.evalLetValueLiteralLeftGarbage
+      (fvarId := fvarId) (binderName := binderName) (type := type) with
+    ⟨nextRuntime, value, evaluated, next⟩
+  exact ⟨nextRuntime, value,
+    coreStep_deletedLet_reachableRelated sourceState targetState
+      programs frames continuation joins env absent evaluated next⟩
+
 /-- Resume related residual continuations after a source-only runtime update
 whose reachable roots are unchanged. -/
 theorem continueCode_reachableRelated
