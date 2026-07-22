@@ -848,6 +848,32 @@ theorem envRootsOn_bind_of_absent
     exact Std.HashSet.mem_toList.mp member
   · exact absent
 
+/-- Every root published after a binding is either the newly bound value or
+an old environment root.  This is the root-set fact used when a yielded value
+is installed into a saved bind frame. -/
+theorem envRootsOn_bind_subset :
+    RootSubset (envRootsOn used (bind env binder value))
+      (value :: envRootsOn used env) := by
+  intro root member
+  unfold envRootsOn at member
+  simp only [List.mem_filterMap] at member
+  rcases member with ⟨fvarId, keyMember, found⟩
+  by_cases sameName : binder.name = fvarId.name
+  · have sameId : binder = fvarId := by
+      cases binder with
+      | mk binderName =>
+          cases fvarId with
+          | mk fvarName => simp_all
+    subst fvarId
+    rw [lookup_bind_self] at found
+    cases found
+    simp
+  · right
+    unfold envRootsOn
+    apply List.mem_filterMap.mpr
+    exact ⟨fvarId, keyMember,
+      by simpa [lookup_bind_of_name_ne sameName] using found⟩
+
 theorem lookupRoots_related
     (keys : List FVarId)
     (agree : ∀ key, key ∈ keys →

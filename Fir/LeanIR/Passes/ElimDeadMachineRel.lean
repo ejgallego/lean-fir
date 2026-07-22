@@ -1525,6 +1525,191 @@ theorem match_internalCoreSteps
       rw [sourceTransition] at actual
       contradiction
 
+/-- Restoring related bind frames installs the yielded values in the saved
+environments and narrows the runtime extras to the resumed code and remaining
+stack. -/
+theorem coreStep_yieldedBind_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used sourceJoins targetJoins)
+    (env : EnvRelOn rho used sourceEnv targetEnv)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots))
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots))) :
+    let sourceAfter := {
+      sourceState with
+      env := bind sourceEnv binder sourceValue
+      joins := sourceJoins
+      frames := sourceFrames
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with
+      env := bind targetEnv binder targetValue
+      joins := targetJoins
+      frames := targetFrames
+      control := .code targetContinuation }
+    coreStep { sourceState with
+        frames := .bind binder sourceContinuation sourceEnv sourceJoins ::
+          sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .bind binder targetContinuation targetEnv targetJoins ::
+          targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  have nextEnv := env.bindBoth (binder := binder) value
+  have extra : ListRel (ValueRel rho)
+      (envRootsOn used (bind sourceEnv binder sourceValue) ++
+        sourceFrameRoots)
+      (envRootsOn used (bind targetEnv binder targetValue) ++
+        targetFrameRoots) :=
+    listRel_append (envRootsOn_related nextEnv) frames.roots
+  have sourceSubset : RootSubset
+      (envRootsOn used (bind sourceEnv binder sourceValue) ++
+        sourceFrameRoots)
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots)) := by
+    intro root member
+    simp only [List.mem_append, List.mem_singleton] at member ⊢
+    rcases member with changed | framed
+    · have rooted := envRootsOn_bind_subset root changed
+      simp only [List.mem_cons] at rooted
+      rcases rooted with same | old
+      · exact Or.inl same
+      · exact Or.inr (Or.inl old)
+    · exact Or.inr (Or.inr framed)
+  have targetSubset : RootSubset
+      (envRootsOn used (bind targetEnv binder targetValue) ++
+        targetFrameRoots)
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots)) := by
+    intro root member
+    simp only [List.mem_append, List.mem_singleton] at member ⊢
+    rcases member with changed | framed
+    · have rooted := envRootsOn_bind_subset root changed
+      simp only [List.mem_cons] at rooted
+      rcases rooted with same | old
+      · exact Or.inl same
+      · exact Or.inr (Or.inl old)
+    · exact Or.inr (Or.inr framed)
+  have nextRuntime := runtime.restrictExtra extra sourceSubset targetSubset
+  unfold ReachableMachineRelated
+  exact ⟨envRootsOn used (bind sourceEnv binder sourceValue),
+    envRootsOn used (bind targetEnv binder targetValue),
+    sourceFrameRoots, targetFrameRoots,
+    programs, .code continuation joins nextEnv, frames, nextRuntime⟩
+
+/-- Restoring related apply frames turns the yielded values into related
+function positions and retains the saved argument roots. -/
+theorem coreStep_yieldedApply_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ (sourceArguments.toList ++ sourceFrameRoots))
+      ([targetValue] ++ (targetArguments.toList ++ targetFrameRoots))) :
+    let sourceAfter := {
+      sourceState with
+      frames := sourceFrames
+      control := .invokeValue sourceValue sourceArguments }
+    let targetAfter := {
+      targetState with
+      frames := targetFrames
+      control := .invokeValue targetValue targetArguments }
+    coreStep { sourceState with
+        frames := .apply sourceArguments :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .apply targetArguments :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  unfold ReachableMachineRelated
+  exact ⟨sourceValue :: sourceArguments.toList,
+    targetValue :: targetArguments.toList,
+    sourceFrameRoots, targetFrameRoots,
+    programs, .invokeValue value arguments, frames, by simpa using runtime⟩
+
+/-- Semantic-step wrapper for restoring related bind frames. -/
+theorem match_yieldedBindStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used sourceJoins targetJoins)
+    (env : EnvRelOn rho used sourceEnv targetEnv)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots))
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots)))
+    (step : Step externals
+      { sourceState with
+        frames := .bind binder sourceContinuation sourceEnv sourceJoins ::
+          sourceFrames
+        control := .yielded sourceValue } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          frames := .bind binder targetContinuation targetEnv targetJoins ::
+            targetFrames
+          control := .yielded targetValue } targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_yieldedBind_reachableRelated sourceState targetState
+      programs frames continuation joins env value runtime with
+    ⟨sourceTransition, targetTransition, afterRelated⟩
+  exact ⟨_, match_internalCoreSteps sourceTransition targetTransition
+    afterRelated step⟩
+
+/-- Semantic-step wrapper for restoring related apply frames. -/
+theorem match_yieldedApplyStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ (sourceArguments.toList ++ sourceFrameRoots))
+      ([targetValue] ++ (targetArguments.toList ++ targetFrameRoots)))
+    (step : Step externals
+      { sourceState with
+        frames := .apply sourceArguments :: sourceFrames
+        control := .yielded sourceValue } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          frames := .apply targetArguments :: targetFrames
+          control := .yielded targetValue } targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_yieldedApply_reachableRelated sourceState targetState
+      programs frames value arguments runtime with
+    ⟨sourceTransition, targetTransition, afterRelated⟩
+  exact ⟨_, match_internalCoreSteps sourceTransition targetTransition
+    afterRelated step⟩
+
 /-- A retained join declaration takes the same administrative step on both
 sides and installs related declaration bodies under the common identifier. -/
 theorem coreStep_retainedJoin_reachableRelated
