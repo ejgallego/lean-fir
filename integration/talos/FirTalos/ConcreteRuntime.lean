@@ -1,5 +1,6 @@
 import FirTalos.Correctness.Semantics
 import Fir.Wasm.Concrete
+import Fir.Wasm.Concrete.StringAllocationCorrectness
 import Interpreter.Wasm.Spec.Termination
 
 namespace FirTalos.Concrete

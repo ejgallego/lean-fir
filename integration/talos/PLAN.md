@@ -2392,6 +2392,18 @@ This slice establishes the executable boundary; integrating string cells into
 `LiveHeapRel` and proving fresh-allocation framing remains the next proof
 slice. No shared semantic contract changed.
 
+W6.6ar establishes the concrete string allocation proof boundary. The new
+proof module shows that the recursive UTF-8 writer installs every byte in
+source order, frames every address outside the payload, preserves the common
+header and old heap prefix, and retains the allocator frontier invariant. A
+successful `allocateString` now yields an exact `StringObjectRel`, including
+the version marker, byte count, reserved metadata, aligned extent, reference
+count, raw byte decoder, and checked public decoder. The Talos concrete runtime
+imports this module so the proof is in its ordinary dependency cone. This is a
+foundational allocation slice: descriptor binding, `LiveCellRel`/`LiveHeapRel`
+extension, and generated literal composition remain separate follow-ups. No
+shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
