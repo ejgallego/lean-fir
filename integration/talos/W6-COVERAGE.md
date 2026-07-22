@@ -21,7 +21,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Partial | Concrete Talos host plus all three source/compiler/adapter branches, arbitrary-arity token/field call, descriptor transport, result-local write, arbitrary continuation, in-place/fresh whole-module executions, and in-place/fresh Node/V8 plus browser-Worker concrete execution |
 | `box` | Five integer/USize kinds | Tagged and heap theorems | Partial | Witness-growing concrete host, source/compiler/adapter composition, exact unary call, object local write, maximum-`UInt64` whole-module execution, and Node/V8 plus browser-Worker heap-box/round-trip execution compose; floats share the runtime gap |
 | `unbox` | Five integer/USize kinds | Tagged and heap theorems | Partial | ABI-indexed concrete host, representation-indexed source step, compiler/adapter, generated unary result call, exact i32/i64 local write, continuation, maximum-`UInt64` whole-module execution, and Node/V8 plus browser-Worker heap-box/round-trip execution compose; heap descriptor/result-kind match stays explicit; floats share the runtime gap |
-| `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Partial; stale-reference classification blocked by `FIR-BUG-wasm-none-dead-object-fault-classification` | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, continuation, tagged/unique whole-module executions, and ordinary-object Node/V8 plus browser-Worker execution compose |
+| `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Dead-object source-address classification exact; remainder partial | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, continuation, tagged/unique whole-module executions, and ordinary-object Node/V8 plus browser-Worker execution compose; stale-reference classification fixed by `FIR-BUG-wasm-none-dead-object-fault-classification` |
 | `objectSet` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete two-i32 host, exact source-classified bounds trap/no-write guard, FVar and erased-constant source steps, compiler/adapter, generated binary or local/constant call, continuation, whole-module mutation/readback including canonical erased zero, and Node/V8 plus browser-Worker checked-slot execution compose for every `LCNF.Arg` form and supported object-field kind |
 | `usizeSet` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete i32/i64 host, exact source-classified bounds trap/no-write guard, source step, compiler/adapter, generated binary call, continuation, whole-module write, and compiler-shaped Node/V8 plus browser-Worker write/read execution compose |
 | `scalarSet` | Four integer widths | Heap theorems, including same-coordinate replacement and disjoint retained-field framing for every integer width | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose; repeated same-coordinate writes refine the source replacement filter and execute twice in one module; disjoint two-coordinate Talos modules for all four widths preserve the first coordinate after the second write; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
@@ -59,10 +59,9 @@ Cross-cutting W6.5 state:
 - the matching object and `USize` setters preserve those exact source faults
   before either concrete or semantic state changes, and executable Talos guards
   reread the original payload after each trap;
-- stale mapped references currently disagree only in structured
-  classification/payload domain: FIR emits source `deadObject location`, while
-  generic concrete memory lifting emits target `deadObject address`; the closed
-  `isShared` reproducer and coordinated ABI fix are tracked by
+- stale mapped references now use a source-address `deadObject address` trap,
+  related through `HeapReferenceRel` to FIR's `deadObject location`; the closed
+  `isShared` regression and fixed classification are tracked by
   `FIR-BUG-wasm-none-dead-object-fault-classification`;
 - invalid constructor arities are `malformed` in FIR but dedicated source
   `arityMismatch` faults in the concrete allocator; exact guards and the

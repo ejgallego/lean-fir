@@ -12,6 +12,11 @@ theorem ConcreteError.toTrap_injective : Function.Injective ConcreteError.toTrap
 whole-heap witness identifies the semantic location represented by the word. -/
 inductive ConcreteAddressFaultRel (witness : RefinementWitness) :
     ConcreteAddressFault → RuntimeFault → Prop where
+  | deadObject
+      (related : HeapReferenceRel witness address location) :
+      ConcreteAddressFaultRel witness
+        (.deadObject address)
+        (.deadObject location)
   | referenceCountUnderflow
       (related : HeapReferenceRel witness address location) :
       ConcreteAddressFaultRel witness

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-dead-object-fault-classification
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -73,4 +73,8 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved in W6.6bl by adding `ConcreteAddressFault.deadObject`, mapping
+`MemoryError.deadObject address` through `liftMemory` to `sourceAddress`, and
+relating that address fault to `RuntimeFault.deadObject location` through
+`HeapReferenceRel`. The closed `deletedProgram` regression now requires the
+Talos host's source-address trap rather than the former target-memory trap.

@@ -2600,6 +2600,16 @@ validated compiler-produced calls remain aligned. Resolving the chosen fault
 constructor requires a coordinated source/concrete contract commit, so this
 slice adds no workaround or shared-contract change.
 
+W6.6bl resolves W6.6bj as an isolated semantic-Wasm-ABI contract change.
+`ConcreteAddressFault` now includes dead-object addresses, `liftMemory` maps a
+dead live-header read into that source-address channel, and
+`ConcreteAddressFaultRel` translates it to FIR's location-indexed
+`RuntimeFault.deadObject` through `HeapReferenceRel`. The closed deleted-object
+fixture now requires the source-address Talos trap, and
+`FIR-BUG-wasm-none-dead-object-fault-classification` is fixed. Other memory
+decoder failures remain target-classified. Both feature branches must rebase
+on this contract before dependent work continues.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

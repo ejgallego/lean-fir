@@ -67,14 +67,14 @@ private def fixtureReturnsI64? (program : Fir.LeanIR.ImpureProgram)
           result == expected && store.host.failure?.isNone
       | _ => false
 
-private def fixtureDeadObjectClassifiesAsTarget?
+private def fixtureDeadObjectClassifiesAsSourceAddress?
     (program : Fir.LeanIR.ImpureProgram) : Bool :=
   (runtimeFixture? program).any fun fixture =>
     fixture.importsResolveExactly &&
       match fixture.runMain with
       | .Trap store _ =>
           match store.host.failure? with
-          | some (.runtime (.target (.memory (.deadObject _)))) => true
+          | some (.runtime (.source (.address (.deadObject _)))) => true
           | _ => false
       | _ => false
 
@@ -121,12 +121,12 @@ private def uninitializedScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsI64? uninitializedScalarProjectionProgram 0
 
--- FIR identifies a deleted semantic location as a source `deadObject` fault,
--- while the current concrete live-header decoder classifies the corresponding
--- address-bearing failure as target memory machinery.
+-- FIR identifies a deleted semantic location as a source `deadObject` fault;
+-- the concrete host retains its physical address in the source-address channel
+-- for witness-indexed translation back to that location.
 #guard faulted? (runMain deletedProgram) (.deadObject 0)
 
-#guard fixtureDeadObjectClassifiesAsTarget? deletedProgram
+#guard fixtureDeadObjectClassifiesAsSourceAddress? deletedProgram
 
 /-- The positive scalar-mutation fixture uses the exact slot index emitted by
 Lean 4.32's `ToImpure`: object fields plus `USize` fields. -/

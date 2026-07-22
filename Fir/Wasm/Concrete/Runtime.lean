@@ -8,6 +8,7 @@ open Fir.LeanIR.Impure
 /-- Concrete execution keeps source-semantic failures distinct from checked
 memory/target failures, matching the W2 structured-trap boundary. -/
 inductive ConcreteAddressFault where
+  | deadObject (address : Word32)
   | referenceCountUnderflow (address : Word32)
   deriving BEq, Repr
 
@@ -55,6 +56,7 @@ def ConcreteError.toTrap : ConcreteError → ConcreteTrap
 
 def liftMemory {α : Type} : Except MemoryError α → Except ConcreteError α
   | .ok value => .ok value
+  | .error (.deadObject address) => .error (.sourceAddress (.deadObject address))
   | .error failure => .error (.target failure)
 
 /-- Checked conversion for object-header metadata.  It is public so operation
