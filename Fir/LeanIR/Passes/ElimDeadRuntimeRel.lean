@@ -306,6 +306,164 @@ theorem heapRel_consLeft_of_forward_unmapped
     exact ⟨mapped, rightCell, leftCell, mapping, rightFound,
       by simpa [findCell?, different] using leftFound, cell⟩
 
+/-- Adding a fresh root and its cell exposes either that new location or a
+location already reachable through the old roots, provided every child of the
+new cell was already live. -/
+theorem reachable_cons_root_cases_forward
+    (related : HeapRel rho heap other roots otherRoots)
+    (unmapped : rho.forward fresh = none)
+    (owned : RootSubset newCell.object.ownedValues.toList roots)
+    (reachable : Reachable ((fresh, newCell) :: heap)
+      (.object (.heap fresh) :: roots) location) :
+    location = fresh ∨ Reachable heap roots location := by
+  induction reachable with
+  | root member =>
+      simp only [List.mem_cons] at member
+      cases member with
+      | inl same =>
+          simp at same
+          exact .inl same
+      | inr old => exact .inr (.root old)
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      cases ih with
+      | inl parentNew =>
+          subst parent
+          have cellEq : cell = newCell := by
+            symm
+            simpa [findCell?] using cellFound
+          subst cell
+          subst value
+          exact .inr (.root (owned _ member))
+      | inr parentOld =>
+          have parentDifferent : fresh ≠ parent := by
+            intro same
+            subst parent
+            rcases related.1 fresh parentOld with
+              ⟨mapped, leftCell, rightCell, mapping, leftFound, rightFound,
+                cellRelated⟩
+            rw [unmapped] at mapping
+            contradiction
+          have oldFound : findCell? heap parent = some cell := by
+            simpa [findCell?, parentDifferent] using cellFound
+          exact .inr (.child parentOld oldFound member reference)
+
+/-- Reverse-oriented companion of `reachable_cons_root_cases_forward`. -/
+theorem reachable_cons_root_cases_reverse
+    (related : HeapRel rho other heap otherRoots roots)
+    (unmapped : rho.reverse fresh = none)
+    (owned : RootSubset newCell.object.ownedValues.toList roots)
+    (reachable : Reachable ((fresh, newCell) :: heap)
+      (.object (.heap fresh) :: roots) location) :
+    location = fresh ∨ Reachable heap roots location := by
+  induction reachable with
+  | root member =>
+      simp only [List.mem_cons] at member
+      cases member with
+      | inl same =>
+          simp at same
+          exact .inl same
+      | inr old => exact .inr (.root old)
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      cases ih with
+      | inl parentNew =>
+          subst parent
+          have cellEq : cell = newCell := by
+            symm
+            simpa [findCell?] using cellFound
+          subst cell
+          subst value
+          exact .inr (.root (owned _ member))
+      | inr parentOld =>
+          have parentDifferent : fresh ≠ parent := by
+            intro same
+            subst parent
+            rcases related.2 fresh parentOld with
+              ⟨mapped, rightCell, leftCell, mapping, rightFound, leftFound,
+                cellRelated⟩
+            rw [unmapped] at mapping
+            contradiction
+          have oldFound : findCell? heap parent = some cell := by
+            simpa [findCell?, parentDifferent] using cellFound
+          exact .inr (.child parentOld oldFound member reference)
+
+/-- Simultaneous allocation extends the address bijection at the two fresh
+locations.  New object children must already occur among the old live roots;
+all old mappings and reachable cells are preserved. -/
+theorem heapRel_consBoth
+    (related : HeapRel rho leftHeap rightHeap leftRoots rightRoots)
+    (leftUnmapped : rho.forward leftLocation = none)
+    (rightUnmapped : rho.reverse rightLocation = none)
+    (cells : HeapCellRel rho leftCell rightCell)
+    (leftOwned : RootSubset leftCell.object.ownedValues.toList leftRoots)
+    (rightOwned : RootSubset rightCell.object.ownedValues.toList rightRoots) :
+    HeapRel
+      (AddressRenaming.extend rho leftLocation rightLocation
+        leftUnmapped rightUnmapped)
+      ((leftLocation, leftCell) :: leftHeap)
+      ((rightLocation, rightCell) :: rightHeap)
+      (.object (.heap leftLocation) :: leftRoots)
+      (.object (.heap rightLocation) :: rightRoots) := by
+  let larger := AddressRenaming.extend rho leftLocation rightLocation
+    leftUnmapped rightUnmapped
+  have extension : RenamingExtends rho larger :=
+    renamingExtend_extends leftUnmapped rightUnmapped
+  have largerCells : HeapCellRel larger leftCell rightCell :=
+    heapCellRel_mono extension cells
+  change HeapRel larger _ _ _ _
+  constructor
+  · intro location reachable
+    rcases reachable_cons_root_cases_forward related leftUnmapped leftOwned
+      reachable with new | old
+    · subst location
+      exact ⟨rightLocation, leftCell, rightCell,
+        renamingExtend_forward_new leftUnmapped rightUnmapped,
+        by simp [findCell?], by simp [findCell?], largerCells⟩
+    · rcases related.1 location old with
+        ⟨mapped, oldLeftCell, oldRightCell, mapping, leftFound, rightFound,
+          oldCells⟩
+      have leftDifferent : leftLocation ≠ location := by
+        intro same
+        subst location
+        rw [leftUnmapped] at mapping
+        contradiction
+      have rightDifferent : rightLocation ≠ mapped := by
+        intro same
+        subst mapped
+        have inverse := rho.leftInverse mapping
+        rw [rightUnmapped] at inverse
+        contradiction
+      exact ⟨mapped, oldLeftCell, oldRightCell, extension.forward mapping,
+        by simpa [findCell?, leftDifferent] using leftFound,
+        by simpa [findCell?, rightDifferent] using rightFound,
+        heapCellRel_mono extension oldCells⟩
+  · intro location reachable
+    rcases reachable_cons_root_cases_reverse related rightUnmapped rightOwned
+      reachable with new | old
+    · subst location
+      exact ⟨leftLocation, rightCell, leftCell,
+        renamingExtend_reverse_new leftUnmapped rightUnmapped,
+        by simp [findCell?], by simp [findCell?], largerCells⟩
+    · rcases related.2 location old with
+        ⟨mapped, oldRightCell, oldLeftCell, mapping, rightFound, leftFound,
+          oldCells⟩
+      have rightDifferent : rightLocation ≠ location := by
+        intro same
+        subst location
+        rw [rightUnmapped] at mapping
+        contradiction
+      have leftDifferent : leftLocation ≠ mapped := by
+        intro same
+        subst mapped
+        have inverse := rho.rightInverse mapping
+        rw [leftUnmapped] at inverse
+        contradiction
+      exact ⟨mapped, oldRightCell, oldLeftCell, extension.reverse mapping,
+        by simpa [findCell?, rightDifferent] using rightFound,
+        by simpa [findCell?, leftDifferent] using leftFound,
+        heapCellRel_mono extension oldCells⟩
+
 theorem not_reachable_from_empty
     (reachable : Reachable heap [] location) : False := by
   induction reachable with
@@ -431,6 +589,63 @@ theorem ShadowRuntimeRel.allocLeftGarbage
     leftHeapFresh := heapFresh_succ related.leftHeapFresh
     rightHeapFresh := related.rightHeapFresh
   }
+
+/-- Related retained allocations may choose different fresh locations.  The
+address renaming is extended with that pair, the returned references become
+new live roots, and all old runtime components are transported monotonically. -/
+theorem ShadowRuntimeRel.allocBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objects : HeapObjectRel rho leftObject rightObject)
+    (leftOwned : RootSubset leftObject.ownedValues.toList
+      (runtimeRoots left leftExtra))
+    (rightOwned : RootSubset rightObject.ownedValues.toList
+      (runtimeRoots right rightExtra))
+    (persistent : Bool) :
+    ∃ larger,
+      ValueRel larger (.object (alloc left leftObject persistent).2)
+        (.object (alloc right rightObject persistent).2) ∧
+      ShadowRuntimeRel larger
+        (alloc left leftObject persistent).1
+        (alloc right rightObject persistent).1
+        (.object (alloc left leftObject persistent).2 :: leftExtra)
+        (.object (alloc right rightObject persistent).2 :: rightExtra) := by
+  let leftUnmapped := related.leftMappingFresh left.nextLocation (Nat.le_refl _)
+  let rightUnmapped :=
+    related.rightMappingFresh right.nextLocation (Nat.le_refl _)
+  let larger := AddressRenaming.extend rho left.nextLocation right.nextLocation
+    leftUnmapped rightUnmapped
+  have extension : RenamingExtends rho larger :=
+    renamingExtend_extends leftUnmapped rightUnmapped
+  have mapping : larger.forward left.nextLocation = some right.nextLocation :=
+    renamingExtend_forward_new leftUnmapped rightUnmapped
+  refine ⟨larger, ?_, ?_⟩
+  · exact .heap mapping
+  · simp only [alloc]
+    have cells : HeapCellRel rho
+        { object := leftObject
+          persistent
+          rc := if persistent then 0 else 1 }
+        { object := rightObject
+          persistent
+          rc := if persistent then 0 else 1 } :=
+      ⟨rfl, rfl, rfl, objects⟩
+    exact {
+      extra := .cons (.heap mapping)
+        (listRel_mono (valueRel_mono extension) related.extra)
+      globals := listRel_mono (namedValueRel_mono extension) related.globals
+      world_eq := related.world_eq
+      trace := arrayRel_mono (eventRel_mono extension) related.trace
+      heap := by
+        simpa [runtimeRoots] using
+          heapRel_consBoth related.heap leftUnmapped rightUnmapped cells
+            leftOwned rightOwned
+      leftMappingFresh := renamingExtend_leftMappingFresh
+        related.leftMappingFresh rightUnmapped
+      rightMappingFresh := renamingExtend_rightMappingFresh leftUnmapped
+        related.rightMappingFresh
+      leftHeapFresh := heapFresh_succ related.leftHeapFresh
+      rightHeapFresh := heapFresh_succ related.rightHeapFresh
+    }
 
 /-- A well-formed dead constructor evaluation either produces an immediate
 tag without changing the runtime, or allocates source-only unreachable
