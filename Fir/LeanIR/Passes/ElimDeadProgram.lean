@@ -51,6 +51,24 @@ theorem ShadowCodeGraph.mono
   rcases graph with ⟨remaining, initial, final, bounded, result, coveredBy⟩
   exact ⟨remaining, initial, final, bounded, result, coveredBy.trans subset⟩
 
+theorem ShadowCodeGraph.jumpTarget
+    (graph : ShadowCodeGraph fuel used (.jmp join arguments) target) :
+    target = .jmp join arguments := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining <;> simp [shadowCode?] at result <;> exact result.1.symm
+
+theorem ShadowCodeGraph.returnTarget
+    (graph : ShadowCodeGraph fuel used (.return value) target) :
+    target = .return value := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining <;> simp [shadowCode?] at result <;> exact result.1.symm
+
+theorem ShadowCodeGraph.unreachTarget
+    (graph : ShadowCodeGraph fuel used (.unreach type) target) :
+    target = .unreach type := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining <;> simp [shadowCode?] at result <;> exact result.1.symm
+
 /-- The two residual shapes produced when the source graph starts with a let:
 the declaration is retained on both sides, or it is absent from the target
 and only the recursively transformed continuation remains. -/
@@ -788,6 +806,127 @@ theorem coreStep_join_shadowProgress
   | deleted targetContinuation continuation absent =>
       exact coreStep_deletedJoin_shadowProgress sourceState targetState
         programs runtimeEq framesRelated continuation joins agree absent
+
+/-- Return nodes are unchanged by the pass.  Coverage makes their value
+lookup equal even when dead source bindings make the environments differ. -/
+theorem coreStep_return_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used (.return value) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control := .code (.return value) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  have targetEq := graph.returnTarget
+  subst targetCode
+  have covered := graph.covered
+  cases covered with
+  | ret member =>
+      simp only [coreStep]
+      rw [agree value member]
+      generalize valueRead : lookupValue targetState.env value = result
+      cases result with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok result =>
+          exact .next {
+            programs
+            runtime_eq := runtimeEq
+            frames := framesRelated
+            control := .yielded result
+          }
+
+/-- Unreachable nodes are unchanged and expose the same terminal fault because
+raw observations depend only on the equal runtime states. -/
+theorem coreStep_unreach_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used (.unreach type) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control := .code (.unreach type) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  have targetEq := graph.unreachTarget
+  subst targetCode
+  exact shadowFail_related runtimeEq .unreachable
+
+/-- Jump nodes are unchanged.  Extensional join lookup supplies related
+declarations, covered arguments evaluate equally, and parameter binding
+preserves agreement on the active liveness index. -/
+theorem coreStep_jump_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used (.jmp join arguments) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control := .code (.jmp join arguments) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  have targetEq := graph.jumpTarget
+  subst targetCode
+  have covered := graph.covered
+  cases covered with
+  | jump targetMember argumentsCovered =>
+      have found := joins join targetMember
+      generalize sourceFoundEq :
+        findJoinPoint? sourceState.joins join = sourceFound at found
+      generalize targetFoundEq :
+        findJoinPoint? targetState.joins join = targetFound at found
+      simp only [coreStep]
+      rw [sourceFoundEq, targetFoundEq]
+      cases found with
+      | none => exact shadowFail_related runtimeEq (.unknownJoinPoint join)
+      | some declarations =>
+          rename_i sourceDeclaration targetDeclaration
+          dsimp
+          have argumentsEq : evalArgs sourceState.env arguments =
+              evalArgs targetState.env arguments :=
+            evalArgs_eq_of_covered agree argumentsCovered
+          rw [argumentsEq]
+          generalize argumentsRead :
+            evalArgs targetState.env arguments = argumentResult
+          cases argumentResult with
+          | error fault =>
+              simp only
+              exact shadowFail_related runtimeEq fault
+          | ok values =>
+              simp only
+              rw [declarations.params_eq]
+              have binding := bindParamsOver_liveRelated
+                (used := used) (params := targetDeclaration.params)
+                (arguments := values) agree
+              generalize sourceBindingEq : bindParamsOver sourceState.env
+                targetDeclaration.params values = sourceBinding at binding ⊢
+              generalize targetBindingEq : bindParamsOver targetState.env
+                targetDeclaration.params values = targetBinding at binding ⊢
+              cases binding with
+              | error fault =>
+                  simp only
+                  exact shadowFail_related runtimeEq fault
+              | ok nextAgree =>
+                  simp only
+                  exact .next {
+                    programs
+                    runtime_eq := runtimeEq
+                    frames := framesRelated
+                    control := .code declarations.value joins nextAgree
+                  }
 
 /-- Equal external responses preserve related waiting stacks and restore the
 same yielded value. -/
