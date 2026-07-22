@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.ElimDeadProgram
+import Fir.LeanIR.Passes.ElimDeadMachineRel
 import Fir.LeanIR.InterpreterExamples
 import Lean.Compiler.LCNF.ElimDead
 import Lean.Elab.Command
@@ -142,6 +142,17 @@ theorem neutralShadowRun :
   simp [neutralBefore, neutralAfter, liveDecl, deadErasedDecl, letDecl,
     shadowCode?, safeToElim, collectLetValue, liveMember, deadAbsent]
 
+theorem allocatingShadowRun :
+    shadowCode? 3 {} allocatingBefore =
+      some (allocatingAfter, neutralUsed) := by
+  change shadowCode? 3 {} allocatingBefore =
+    some (allocatingAfter, ({} : UsedLocals).insert live)
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by native_decide
+  simp [allocatingBefore, allocatingAfter, neutralAfter, liveDecl,
+    deadCtorDecl, letDecl, shadowCode?, safeToElim, collectLetValue,
+    collectArgs, collectArgList, collectArg, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -150,6 +161,13 @@ theorem neutralProgramShadowRelated :
   apply shadowProgram_related
   simp [shadowProgram?, shadowDecls?, shadowDecl?, neutralBeforeProgram,
     neutralAfterProgram, fixtureDecl, decl, neutralShadowRun]
+
+theorem allocatingProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 3)
+      allocatingBeforeProgram allocatingAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?, allocatingBeforeProgram,
+    allocatingAfterProgram, fixtureDecl, decl, allocatingShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -230,6 +248,81 @@ theorem deadCtorEvalPreservesReachableRuntime :
       (binderName := dead.name) (type := objType) (info := oneFieldInfo)
       (arguments := #[.fvar live]) (values := #[.erased])
       argumentsResult arity)
+
+def allocatingSourceInnerState : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .code (.let deadCtorDecl (.return live))
+    env := liveEnv }
+
+def allocatingTargetInnerState : MachineState :=
+  { program := allocatingAfterProgram
+    control := .code (.return live)
+    env := liveEnv }
+
+theorem returnLiveShadowGraph :
+    ShadowCodeGraph 3 neutralUsed (.return live) (.return live) := by
+  refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
+  simp [shadowCode?, neutralUsed]
+
+theorem liveEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed liveEnv liveEnv := by
+  intro fvarId member
+  have same : live = fvarId := by
+    simpa [neutralUsed] using member
+  subst fvarId
+  exact .some .erased
+
+/-- The concrete dead-constructor fixture now reaches the generalized
+machine relation after one source interpreter step and zero target steps. -/
+theorem deadCtorSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        allocatingSourceInnerState with
+        runtime := nextRuntime
+        env := bind allocatingSourceInnerState.env dead value
+        control := .code (.return live) }
+      coreStep allocatingSourceInnerState = .next sourceAfter ∧
+        ReachableMachineRelated 3 emptyAddressRenaming sourceAfter
+          allocatingTargetInnerState := by
+  have roots := envRootsOn_related liveEnvReachableRelated
+  have base : ShadowRuntimeRel emptyAddressRenaming
+      allocatingSourceInnerState.runtime allocatingTargetInnerState.runtime
+      (envRootsOn neutralUsed allocatingSourceInnerState.env)
+      (envRootsOn neutralUsed allocatingTargetInnerState.env) := by
+    simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      emptyRuntime_shadowRelated_of_roots roots
+  have argumentsResult :
+      evalArgs allocatingSourceInnerState.env #[.fvar live] =
+        .ok #[.erased] := by
+    simp [allocatingSourceInnerState, liveEnv, evalArgs, evalArg]
+    rfl
+  have arity : (#[.erased] : Array Value).size = oneFieldInfo.size := by
+    rfl
+  rcases base.evalLetValueCtorLeftGarbage
+      (state := allocatingSourceInnerState) (fvarId := dead)
+      (binderName := dead.name) (type := objType) (info := oneFieldInfo)
+      (arguments := #[.fvar live]) (values := #[.erased])
+      argumentsResult arity with
+    ⟨nextRuntime, value, evaluated, runtime⟩
+  refine ⟨nextRuntime, value, ?_⟩
+  have programs : ProgramRelated (ShadowCodeRelated 3)
+      allocatingSourceInnerState.program
+      allocatingTargetInnerState.program := by
+    simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      allocatingProgramShadowRelated
+  have progress := coreStep_deletedLet_reachableRelated
+    (sourceState := allocatingSourceInnerState)
+    (targetState := allocatingTargetInnerState)
+    programs
+    (ReachableFramesRelated.nil :
+      ReachableFramesRelated 3 emptyAddressRenaming [] [] [] [])
+    returnLiveShadowGraph
+    (ShadowJoinEnvRelated.empty 3 neutralUsed)
+    liveEnvReachableRelated
+    (by native_decide)
+    evaluated (by simpa using runtime)
+  simpa [allocatingSourceInnerState, allocatingTargetInnerState,
+    deadCtorDecl, letDecl] using progress
 
 /-- The liveness-indexed machine relation accepts the concrete environment
 difference introduced by executing and then deleting the dead binding. -/

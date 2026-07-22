@@ -497,6 +497,34 @@ environment.  `filterMap` drops malformed/missing live lookups symmetrically. -/
 def envRootsOn (used : UsedLocals) (env : Env) : List Value :=
   used.toList.filterMap (lookup env)
 
+theorem filterMap_eq_of_mem_eq
+    (keys : List α) (left right : α → Option β)
+    (equal : ∀ key, key ∈ keys → left key = right key) :
+    keys.filterMap left = keys.filterMap right := by
+  induction keys with
+  | nil => rfl
+  | cons key rest ih =>
+      have head := equal key (by simp)
+      have tail : ∀ candidate, candidate ∈ rest →
+          left candidate = right candidate := by
+        intro candidate member
+        exact equal candidate (by simp [member])
+      simp [List.filterMap, head, ih tail]
+
+/-- Binding a variable excluded by the active liveness set leaves the
+canonical environment roots definitionally unchanged. -/
+theorem envRootsOn_bind_of_absent
+    (absent : used.contains binder = false) :
+    envRootsOn used (bind env binder value) = envRootsOn used env := by
+  unfold envRootsOn
+  apply filterMap_eq_of_mem_eq
+  intro fvarId member
+  apply lookup_bind_of_name_ne
+  apply fvarId_name_ne_of_contains_of_absent used fvarId binder
+  · change fvarId ∈ used
+    exact Std.HashSet.mem_toList.mp member
+  · exact absent
+
 theorem lookupRoots_related
     (keys : List FVarId)
     (agree : ∀ key, key ∈ keys →
@@ -878,5 +906,79 @@ theorem emptyRuntime_shadowRelated :
     exact (not_reachable_from_empty reachable).elim
   · intro location reachable
     exact (not_reachable_from_empty reachable).elim
+
+theorem valueRel_empty_noHeapLeft
+    (related : ValueRel emptyAddressRenaming left right) :
+    left ≠ .object (.heap location) := by
+  intro same
+  subst left
+  cases related with
+  | heap mapped => simp [emptyAddressRenaming] at mapped
+
+theorem valueRel_empty_noHeapRight
+    (related : ValueRel emptyAddressRenaming left right) :
+    right ≠ .object (.heap location) := by
+  intro same
+  subst right
+  cases related with
+  | heap mapped => simp [emptyAddressRenaming] at mapped
+
+theorem listRel_empty_noHeapLeft
+    (related : ListRel (ValueRel emptyAddressRenaming) left right) :
+    .object (.heap location) ∉ left := by
+  induction related with
+  | nil => simp
+  | cons head tail ih =>
+      simp only [List.mem_cons, not_or]
+      exact ⟨(valueRel_empty_noHeapLeft head).symm, ih⟩
+
+theorem listRel_empty_noHeapRight
+    (related : ListRel (ValueRel emptyAddressRenaming) left right) :
+    .object (.heap location) ∉ right := by
+  induction related with
+  | nil => simp
+  | cons head tail ih =>
+      simp only [List.mem_cons, not_or]
+      exact ⟨(valueRel_empty_noHeapRight head).symm, ih⟩
+
+theorem not_reachable_from_emptyHeap
+    (noHeapRoot : ∀ candidate,
+      Value.object (.heap candidate) ∉ roots)
+    (reachable : Reachable [] roots location) : False := by
+  cases reachable with
+  | root member => exact noHeapRoot _ member
+  | child parentReachable cellFound member reference =>
+      simp [findCell?] at cellFound
+
+/-- Empty runtimes support arbitrary pointwise-related entry roots.  Under
+the empty renaming such roots cannot contain heap locations, so the empty
+heaps have no reachable cells to match. -/
+theorem emptyRuntime_shadowRelated_of_roots
+    (roots : ListRel (ValueRel emptyAddressRenaming)
+      leftRoots rightRoots) :
+    ShadowRuntimeRel emptyAddressRenaming ({} : RuntimeState)
+      ({} : RuntimeState) leftRoots rightRoots := by
+  refine {
+    extra := roots
+    globals := .nil
+    world_eq := rfl
+    trace := .nil
+    heap := ?_
+    leftMappingFresh := by simp [emptyAddressRenaming]
+    rightMappingFresh := by simp [emptyAddressRenaming]
+    leftHeapFresh := by simp [findCell?]
+    rightHeapFresh := by simp [findCell?]
+  }
+  constructor
+  · intro location reachable
+    have reduced : Reachable [] leftRoots location := by
+      simpa [runtimeRoots, traceRoots] using reachable
+    exact (not_reachable_from_emptyHeap
+      (fun candidate => listRel_empty_noHeapLeft roots) reduced).elim
+  · intro location reachable
+    have reduced : Reachable [] rightRoots location := by
+      simpa [runtimeRoots, traceRoots] using reachable
+    exact (not_reachable_from_emptyHeap
+      (fun candidate => listRel_empty_noHeapRight roots) reduced).elim
 
 end Fir.LeanIR.Passes.ElimDead
