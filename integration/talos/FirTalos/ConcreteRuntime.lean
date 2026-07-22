@@ -3619,8 +3619,10 @@ theorem scalarSetStep_uint8_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (replaced : semantic.scalarFields.filter (fun old =>
-      old.width != slotIndex || old.offset != byteOffset) = [])
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 1 ≤ old.offset)
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 1 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3641,8 +3643,8 @@ theorem scalarSetStep_uint8_of_refines
               obtain ⟨heap, semanticAfter, concreteOperation,
                   semanticOperation, finalHeapRelated⟩ :=
                 runtimeRelated.heap.writeScalarUInt8Field_refines mapped found
-                  live objectEq descriptorFound slotIndex byteOffset field replaced
-                  slotIndexEq fieldFits
+                  live objectEq descriptorFound slotIndex byteOffset field
+                  retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
@@ -5235,9 +5237,8 @@ theorem effectStepSimulates_usizeSet
 
 /-- Packed-integer field mutation composed through exact compiler-assigned
 locals, the real compiler and adapter, the width-indexed concrete writer, and
-the generated binary host-call prefix. `UInt16`, `UInt32`, and `UInt64` writes
-preserve every retained field whose byte interval is disjoint; `UInt8` still
-requires every earlier write to name the replaced coordinate. -/
+the generated binary host-call prefix. Every supported packed-integer write
+preserves each retained field whose byte interval is disjoint. -/
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -5291,6 +5292,10 @@ theorem effectStepSimulates_scalarSet
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
     (historySafe : match fieldKind with
+      | .uint8 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 1 ≤ old.offset
       | .uint16 => ∀ old ∈ semantic.scalarFields,
           old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
           old.offset + scalarValueByteSize old.value ≤ byteOffset ∨

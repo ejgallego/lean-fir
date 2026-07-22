@@ -2546,6 +2546,15 @@ above it. A two-coordinate module writes offsets zero and two and rereads the
 first halfword. Only the `UInt8` writer remains on the same-coordinate-only
 boundary. No executable layout or shared semantic contract changed.
 
+W6.6bf completes retained packed-integer framing with `UInt8`. The single-byte
+store now preserves every disjoint retained 8/16/32/64-bit observation, and
+the invariant composes through the complete heap, concrete Talos host, and
+generated `sset` call. A closed module writes adjacent byte coordinates and
+rereads the first. All four supported integer writers now accept arbitrary
+histories whose retained byte intervals do not overlap the new write; repeated
+same-coordinate histories remain a vacuous special case. No executable layout
+or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

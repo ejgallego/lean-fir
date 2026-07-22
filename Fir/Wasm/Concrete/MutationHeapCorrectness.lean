@@ -919,8 +919,10 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
     (descriptorFound : witness.descriptors.lookup? address =
       some (.constructor info fieldKinds))
     (slotIndex byteOffset : Nat) (value : UInt8)
-    (replaced : semantic.scalarFields.filter (fun old =>
-      old.width != slotIndex || old.offset != byteOffset) = [])
+    (retainedDisjoint : ∀ field ∈ semantic.scalarFields,
+      field.width ≠ slotIndex ∨ field.offset ≠ byteOffset →
+      field.offset + scalarValueByteSize field.value ≤ byteOffset ∨
+        byteOffset + 1 ≤ field.offset)
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 1 ≤ info.ssize) :
     ∃ result nextRuntime,
@@ -957,8 +959,8 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
         objectRelated.writeScalarUInt8Field_targetFrame related.frontier
           slotIndex byteOffset value slotIndexEq fieldFits
       obtain ⟨localResult, localOperation, objectAfter⟩ :=
-        objectRelated.writeScalarUInt8Field slotIndex byteOffset value replaced
-          slotIndexEq fieldFits
+        objectRelated.writeScalarUInt8Field slotIndex byteOffset value
+          retainedDisjoint slotIndexEq fieldFits
       rw [operation] at localOperation
       have resultMatch := Except.ok.inj localOperation
       subst localResult

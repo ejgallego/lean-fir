@@ -24,7 +24,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Partial | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, continuation, tagged/unique whole-module executions, and ordinary-object Node/V8 plus browser-Worker execution compose |
 | `objectSet` | Yes | Heap theorem | Partial | Concrete two-i32 host, FVar and erased-constant source steps, compiler/adapter, generated binary or local/constant call, continuation, whole-module mutation/readback including canonical erased zero, and Node/V8 plus browser-Worker checked-slot execution compose for every `LCNF.Arg` form and supported object-field kind |
 | `usizeSet` | Yes | Heap theorem | Partial | Concrete i32/i64 host, source step, compiler/adapter, generated binary call, continuation, whole-module write, and compiler-shaped Node/V8 plus browser-Worker write/read execution compose |
-| `scalarSet` | Four integer widths | Heap theorems, including same-coordinate replacement and disjoint retained-field framing for `UInt16`/`UInt32`/`UInt64` writes | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose; repeated same-coordinate writes refine the source replacement filter and execute twice in one module; disjoint two-coordinate `UInt16`/`UInt32`/`UInt64` Talos modules preserve the first coordinate after the second write; byte-write retained-field framing remains pending; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
+| `scalarSet` | Four integer widths | Heap theorems, including same-coordinate replacement and disjoint retained-field framing for every integer width | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose; repeated same-coordinate writes refine the source replacement filter and execute twice in one module; disjoint two-coordinate Talos modules for all four widths preserve the first coordinate after the second write; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
 | `dec` | Yes | Complete recursive heap theorem for either outer check bit | Partial | Concrete checked/unchecked ordinary recursive host, checked tagged/promoted no-op, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked and unchecked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity |
@@ -107,11 +107,11 @@ Cross-cutting W6.5 state:
 - all four supported packed-integer mutations compose through their exact
   i32/i64 lanes and generated binary host calls; same-coordinate writes may
   replace any prior history at that coordinate, and a two-write module returns
-  the second value; disjoint `UInt16`, `UInt32`, and `UInt64` writes preserve
-  retained scalar observations of every supported width, and corresponding
-  two-coordinate modules reread the first value after the second write; each
-  width crosses compiler-shaped whole-module, Node/V8, and browser-Worker
-  mutation/readback execution; `UInt8` write framing remains open; and
+  the second value; every supported integer write preserves retained scalar
+  observations of every supported width when their byte intervals are
+  disjoint, and corresponding two-coordinate modules reread the first value
+  after the second write; each width crosses compiler-shaped whole-module,
+  Node/V8, and browser-Worker mutation/readback execution; and
 - a validated positional resolver now instantiates complete lowered Talos
   modules with the concrete host, derives its typed cache declarations from
   source initializers and its closure dispatch/descriptor tables from generated

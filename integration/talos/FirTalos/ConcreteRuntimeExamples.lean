@@ -181,6 +181,20 @@ private def disjointUInt16ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? disjointUInt16ScalarMutationProgram 66
 
+/-- The byte writer completes disjoint retained-coordinate execution. -/
+private def disjointUInt8ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u8Type (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl s u8Type (.lit (.uint8 66))) <|
+      .sset p 2 0 s u8Type <|
+      .let (letDecl u u8Type (.lit (.uint8 77))) <|
+      .sset p 2 1 u u8Type <|
+      .let (letDecl r u8Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? disjointUInt8ScalarMutationProgram 66
+
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|
