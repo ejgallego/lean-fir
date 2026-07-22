@@ -421,6 +421,46 @@ theorem DeadCellRel.readScalarUInt64Field_eq
   rw [related.readConstructorHeader_eq]
   rfl
 
+theorem DeadCellRel.writeScalarUInt8Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat)
+    (field : UInt8) :
+    writeScalarUInt8Field state address slotIndex byteOffset field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeScalarUInt8Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.writeScalarUInt16Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat)
+    (field : UInt16) :
+    writeScalarUInt16Field state address slotIndex byteOffset field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeScalarUInt16Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.writeScalarUInt32Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat)
+    (field : UInt32) :
+    writeScalarUInt32Field state address slotIndex byteOffset field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeScalarUInt32Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.writeScalarUInt64Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat)
+    (field : UInt64) :
+    writeScalarUInt64Field state address slotIndex byteOffset field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeScalarUInt64Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 /-- Exact tagged references decode through `readTag`, whether their physical
 word is immediate or a promoted-tag allocation. -/
 theorem LiveHeapRel.readTaggedReferenceTag_refines
@@ -973,6 +1013,83 @@ theorem LiveHeapRel.readScalarFields_deadObject
     deadRelated.readScalarUInt64Field_eq slotIndex byteOffset, ?_⟩
   simp [getScalarField, getConstructor, getLiveCell, found, dead]
   rfl
+
+/-- A stale packed-byte mutation fails before scalar-coordinate validation or
+memory writes, with no post-state on either side. -/
+theorem LiveHeapRel.writeScalarUInt8Field_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slotIndex byteOffset : Nat) (field : UInt8) :
+    writeScalarUInt8Field state address slotIndex byteOffset field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint8 field)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeScalarUInt8Field_eq slotIndex byteOffset field, by
+    simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
+
+/-- The stale packed-UInt16 mutation has the same exact boundary. -/
+theorem LiveHeapRel.writeScalarUInt16Field_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slotIndex byteOffset : Nat) (field : UInt16) :
+    writeScalarUInt16Field state address slotIndex byteOffset field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint16 field)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeScalarUInt16Field_eq slotIndex byteOffset field, by
+    simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
+
+/-- The stale packed-UInt32 mutation has the same exact boundary. -/
+theorem LiveHeapRel.writeScalarUInt32Field_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slotIndex byteOffset : Nat) (field : UInt32) :
+    writeScalarUInt32Field state address slotIndex byteOffset field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint32 field)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeScalarUInt32Field_eq slotIndex byteOffset field, by
+    simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
+
+/-- The stale packed-UInt64 mutation has the same exact boundary. -/
+theorem LiveHeapRel.writeScalarUInt64Field_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slotIndex byteOffset : Nat) (field : UInt64) :
+    writeScalarUInt64Field state address slotIndex byteOffset field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint64 field)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeScalarUInt64Field_eq slotIndex byteOffset field, by
+    simp [setScalarField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
 
 /-- Complete `.getTag` wrapper for its representation-polymorphic object ABI.
 Mapped constructors use the heap theorem above; exact tagged values use the

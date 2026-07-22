@@ -1097,9 +1097,34 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
             | .Trap failed _ => failed.host.failure? == expected &&
                 failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
             | _ => false
+          let scalar8SetFault :=
+            match scalarSetStep 99 99 .uint8 deleted
+                [.i32 object, .i32 255] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
+          let scalar16SetFault :=
+            match scalarSetStep 99 99 .uint16 deleted
+                [.i32 object, .i32 65535] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
+          let scalar32SetFault :=
+            match scalarSetStep 99 99 .uint32 deleted
+                [.i32 object, .i32 4294967295] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
+          let scalar64SetFault :=
+            match scalarSetStep 99 99 .uint64 deleted
+                [.i32 object, .i64 18446744073709551615] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
           objectFault && usizeFault && scalar8Fault && scalar16Fault &&
             scalar32Fault && scalar64Fault && objectSetFault && usizeSetFault &&
-            tagSetFault
+            tagSetFault && scalar8SetFault && scalar16SetFault &&
+            scalar32SetFault && scalar64SetFault
       | _ => false
   | _ => false
 

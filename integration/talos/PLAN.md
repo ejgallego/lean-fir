@@ -2659,6 +2659,15 @@ address/location `deadObject` pair before tag-width conversion or any header
 store. The deleted-cell guard confirms the trapped operation leaves linear
 memory unchanged. No shared contract or runtime behavior changes.
 
+W6.6bs closes the stale-reference path for packed-integer mutation at all four
+supported widths. The UInt8/16/32/64 checked writers, matching FIR
+`setScalarField` calls, and width-specific Talos hosts preserve the exact
+address/location `deadObject` pair before scalar-coordinate validation or any
+store. The deleted-cell guard checks each exact trap at deliberately invalid
+coordinates and confirms byte-for-byte memory preservation. This remains
+orthogonal to the live uninitialized-projection discrepancy; no shared
+contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

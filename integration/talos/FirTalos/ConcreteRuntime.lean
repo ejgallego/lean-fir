@@ -3826,6 +3826,137 @@ theorem usizeSetStep_deadObject_of_refines
       simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
         concrete, ConcreteError.toTrap]
 
+/-- A stale UInt64 scalar mutation preserves the exact source-address fault
+through the Talos host and has no concrete or semantic post-state. -/
+theorem scalarSetStep_uint64_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {field : UInt64}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint64 (.word64 field)
+      (.scalar (.uint64 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .uint64 initial
+        [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint64 field)) = .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.writeScalarUInt64Field_deadObject heapRelated found
+          dead slotIndex byteOffset field
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
+/-- The UInt32 scalar host has the same stale-reference boundary. -/
+theorem scalarSetStep_uint32_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord fieldWord : Word32} {field : UInt32}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint32 (.word32 fieldWord)
+      (.scalar (.uint32 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .uint32 initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint32 field)) = .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated with
+  | uint32 encoded =>
+      cases objectRelated with
+      | object heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.writeScalarUInt32Field_deadObject heapRelated
+              found dead slotIndex byteOffset field
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            encoded, concrete, ConcreteError.toTrap]
+
+/-- The UInt16 scalar host has the same stale-reference boundary. -/
+theorem scalarSetStep_uint16_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord fieldWord : Word32} {field : UInt16}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint16 (.word32 fieldWord)
+      (.scalar (.uint16 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .uint16 initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint16 field)) = .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated with
+  | uint16 encoded =>
+      cases objectRelated with
+      | object heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.writeScalarUInt16Field_deadObject heapRelated
+              found dead slotIndex byteOffset field
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            encoded, concrete, ConcreteError.toTrap]
+
+/-- The UInt8 scalar host has the same stale-reference boundary. -/
+theorem scalarSetStep_uint8_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord fieldWord : Word32} {field : UInt8}
+    {location : Location} {cell : HeapCell} {slotIndex byteOffset : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint8 (.word32 fieldWord)
+      (.scalar (.uint8 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarSetStep slotIndex byteOffset .uint8 initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar (.uint8 field)) = .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases fieldRelated with
+  | uint8 encoded =>
+      cases objectRelated with
+      | object heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.writeScalarUInt8Field_deadObject heapRelated
+              found dead slotIndex byteOffset field
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            encoded, concrete, ConcreteError.toTrap]
+
 theorem scalarSetStep_uint64_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
