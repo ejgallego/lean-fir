@@ -153,6 +153,160 @@ theorem ShadowCodeGraph.deleteResidual
             continuationResult bounded subset
           exact ⟨targetContinuation, rfl, continuation, member⟩
 
+/-- The pass retains an object-field write exactly when its destination is
+live in the transformed continuation; otherwise only that continuation
+remains. -/
+inductive ShadowObjectSetResidual (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : LCNF.Arg .impure)
+    (sourceContinuation : LCNF.Code .impure) :
+    LCNF.Code .impure → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldCovered : ArgCovered used field) :
+      ShadowObjectSetResidual fuel used object index field sourceContinuation
+        (.oset object index field targetContinuation)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowObjectSetResidual fuel used object index field sourceContinuation
+        targetContinuation
+
+theorem ShadowCodeGraph.objectSetResidual
+    (graph : ShadowCodeGraph fuel used
+      (.oset object index field sourceContinuation) target) :
+    ShadowObjectSetResidual fuel used object index field sourceContinuation
+      target := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          have continuationBound : nextFuel ≤ fuel :=
+            Nat.le_trans (Nat.le_succ nextFuel) bounded
+          by_cases keep : continuationUsed.contains object = true
+          · have keepProp : object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            have growth := collectArg_subset continuationUsed field
+            exact .retained targetContinuation
+              ⟨nextFuel, initial, continuationUsed, continuationBound,
+                continuationResult, growth.trans subset⟩
+              (subset object (growth object keep))
+              ((argCovered_collectArg continuationUsed field).mono subset)
+          · have keepProp : ¬object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            exact .deleted targetContinuation ⟨nextFuel, initial,
+              continuationUsed, continuationBound, continuationResult, subset⟩
+
+/-- Unboxed-field writes have the same residual split, with a local field
+identifier instead of an argument. -/
+inductive ShadowUSizeSetResidual (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : FVarId)
+    (sourceContinuation : LCNF.Code .impure) :
+    LCNF.Code .impure → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ShadowUSizeSetResidual fuel used object index field sourceContinuation
+        (.uset object index field targetContinuation)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowUSizeSetResidual fuel used object index field sourceContinuation
+        targetContinuation
+
+theorem ShadowCodeGraph.usizeSetResidual
+    (graph : ShadowCodeGraph fuel used
+      (.uset object index field sourceContinuation) target) :
+    ShadowUSizeSetResidual fuel used object index field sourceContinuation
+      target := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          have continuationBound : nextFuel ≤ fuel :=
+            Nat.le_trans (Nat.le_succ nextFuel) bounded
+          by_cases keep : continuationUsed.contains object = true
+          · have keepProp : object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            have growth := usedSubset_insert continuationUsed field
+            exact .retained targetContinuation
+              ⟨nextFuel, initial, continuationUsed, continuationBound,
+                continuationResult, growth.trans subset⟩
+              (subset object (growth object keep))
+              (subset field (by simp))
+          · have keepProp : ¬object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            exact .deleted targetContinuation ⟨nextFuel, initial,
+              continuationUsed, continuationBound, continuationResult, subset⟩
+
+/-- Scalar-field writes also expose their retained/deleted residual split. -/
+inductive ShadowScalarSetResidual (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (width offset : Nat) (field : FVarId) (type : Expr)
+    (sourceContinuation : LCNF.Code .impure) :
+    LCNF.Code .impure → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ShadowScalarSetResidual fuel used object width offset field type
+        sourceContinuation
+        (.sset object width offset field type targetContinuation)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowScalarSetResidual fuel used object width offset field type
+        sourceContinuation targetContinuation
+
+theorem ShadowCodeGraph.scalarSetResidual
+    (graph : ShadowCodeGraph fuel used
+      (.sset object width offset field type sourceContinuation) target) :
+    ShadowScalarSetResidual fuel used object width offset field type
+      sourceContinuation target := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          have continuationBound : nextFuel ≤ fuel :=
+            Nat.le_trans (Nat.le_succ nextFuel) bounded
+          by_cases keep : continuationUsed.contains object = true
+          · have keepProp : object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            have growth := usedSubset_insert continuationUsed field
+            exact .retained targetContinuation
+              ⟨nextFuel, initial, continuationUsed, continuationBound,
+                continuationResult, growth.trans subset⟩
+              (subset object (growth object keep))
+              (subset field (by simp))
+          · have keepProp : ¬object ∈ continuationUsed := keep
+            simp [shadowCode?, continuationResult, keepProp] at result
+            rcases result with ⟨rfl, rfl⟩
+            exact .deleted targetContinuation ⟨nextFuel, initial,
+              continuationUsed, continuationBound, continuationResult, subset⟩
+
 theorem ShadowCodeGraph.jumpTarget
     (graph : ShadowCodeGraph fuel used (.jmp join arguments) target) :
     target = .jmp join arguments := by
@@ -680,6 +834,58 @@ inductive ShadowJoinReadyAt (fuel : Nat) (used : UsedLocals)
       ShadowJoinReadyAt fuel used sourceDeclaration sourceContinuation
         (.deleted targetContinuation continuation)
 
+/-- Under exact runtime equality, an object-field write is executable only
+on the retained residual.  The deleted residual will acquire its semantic
+constructor from reachable-heap equivalence. -/
+inductive ShadowObjectSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : LCNF.Arg .impure)
+    (sourceContinuation : LCNF.Code .impure) :
+    {target : LCNF.Code .impure} →
+      ShadowObjectSetResidual fuel used object index field sourceContinuation
+        target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldCovered : ArgCovered used field) :
+      ShadowObjectSetReadyAt fuel used object index field sourceContinuation
+        (.retained targetContinuation continuation objectMember
+          fieldCovered)
+
+/-- Exact-runtime readiness for an unboxed-field write likewise selects only
+the retained residual. -/
+inductive ShadowUSizeSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : FVarId)
+    (sourceContinuation : LCNF.Code .impure) :
+    {target : LCNF.Code .impure} →
+      ShadowUSizeSetResidual fuel used object index field sourceContinuation
+        target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ShadowUSizeSetReadyAt fuel used object index field sourceContinuation
+        (.retained targetContinuation continuation objectMember
+          fieldMember)
+
+/-- Exact-runtime readiness for a scalar-field write selects its retained
+residual. -/
+inductive ShadowScalarSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (width offset : Nat) (field : FVarId) (type : Expr)
+    (sourceContinuation : LCNF.Code .impure) :
+    {target : LCNF.Code .impure} →
+      ShadowScalarSetResidual fuel used object width offset field type
+        sourceContinuation target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ShadowScalarSetReadyAt fuel used object width offset field type
+        sourceContinuation
+        (.retained targetContinuation continuation objectMember fieldMember)
+
 /-- The currently certified exact-runtime fragment of the shadow graph.
 Unconditionally retained heap-effect nodes are included.  Conditionally
 eliminated field writes remain outside this fragment until the runtime
@@ -727,6 +933,24 @@ inductive ShadowCodeReadyAt (fuel : Nat) (used : UsedLocals)
       ShadowCodeReadyAt fuel used state graph
   | delete
       (graph : ShadowCodeGraph fuel used (.del object continuation) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | objectSet
+      (graph : ShadowCodeGraph fuel used
+        (.oset object index field continuation) target)
+      (ready : ShadowObjectSetReadyAt fuel used object index field continuation
+        graph.objectSetResidual) :
+      ShadowCodeReadyAt fuel used state graph
+  | usizeSet
+      (graph : ShadowCodeGraph fuel used
+        (.uset object index field continuation) target)
+      (ready : ShadowUSizeSetReadyAt fuel used object index field continuation
+        graph.usizeSetResidual) :
+      ShadowCodeReadyAt fuel used state graph
+  | scalarSet
+      (graph : ShadowCodeGraph fuel used
+        (.sset object width offset field type continuation) target)
+      (ready : ShadowScalarSetReadyAt fuel used object width offset field type
+        continuation graph.scalarSetResidual) :
       ShadowCodeReadyAt fuel used state graph
 
 /-- Readiness for an arbitrary control override.  Only code controls impose an
@@ -1126,6 +1350,174 @@ theorem coreStep_join_shadowProgress
   | deleted targetContinuation continuation absent =>
       exact coreStep_deletedJoin_shadowProgress sourceState targetState
         programs runtimeEq framesRelated continuation joins agree absent
+
+/-- A retained object-field write reads equal live operands and performs the
+same runtime update on both machines. -/
+theorem coreStep_objectSet_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.oset object index field sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (ready : ShadowObjectSetReadyAt fuel used object index field
+      sourceContinuation graph.objectSetResidual) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.oset object index field sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  cases ready with
+  | retained targetContinuation continuation objectMember fieldCovered =>
+      let sourceCurrent := { sourceState with control :=
+        (.code (.oset object index field sourceContinuation)) }
+      let targetCurrent := { targetState with control :=
+        (.code (.oset object index field targetContinuation)) }
+      have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      simp only [coreStep]
+      rw [agree object objectMember,
+        evalArg_eq_of_covered agree fieldCovered]
+      generalize objectRead : lookupValue targetState.env object = objectResult
+      generalize fieldRead : evalArg targetState.env field = fieldResult
+      cases objectResult with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault => exact shadowFail_related runtimeEq fault
+          | ok fieldValue =>
+              dsimp
+              have effectEq :
+                  setObjectField sourceState.runtime objectValue index
+                      fieldValue =
+                    setObjectField targetState.runtime objectValue index
+                      fieldValue :=
+                congrArg
+                  (fun runtime =>
+                    setObjectField runtime objectValue index fieldValue)
+                  runtimeEq
+              rw [effectEq]
+              exact shadowRuntimeResult_related current continuation joins agree
+                (setObjectField targetState.runtime objectValue index fieldValue)
+
+/-- A retained unboxed-field write executes in lockstep. -/
+theorem coreStep_usizeSet_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.uset object index field sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (ready : ShadowUSizeSetReadyAt fuel used object index field
+      sourceContinuation graph.usizeSetResidual) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.uset object index field sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  cases ready with
+  | retained targetContinuation continuation objectMember fieldMember =>
+      let sourceCurrent := { sourceState with control :=
+        (.code (.uset object index field sourceContinuation)) }
+      let targetCurrent := { targetState with control :=
+        (.code (.uset object index field targetContinuation)) }
+      have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      simp only [coreStep]
+      rw [agree object objectMember, agree field fieldMember]
+      generalize objectRead : lookupValue targetState.env object = objectResult
+      generalize fieldRead : lookupValue targetState.env field = fieldResult
+      cases objectResult with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault => exact shadowFail_related runtimeEq fault
+          | ok fieldValue =>
+              dsimp
+              have effectEq :
+                  setUSizeField sourceState.runtime objectValue index
+                      fieldValue =
+                    setUSizeField targetState.runtime objectValue index
+                      fieldValue :=
+                congrArg
+                  (fun runtime =>
+                    setUSizeField runtime objectValue index fieldValue)
+                  runtimeEq
+              rw [effectEq]
+              exact shadowRuntimeResult_related current continuation joins agree
+                (setUSizeField targetState.runtime objectValue index fieldValue)
+
+/-- A retained scalar-field write executes in lockstep. -/
+theorem coreStep_scalarSet_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.sset object width offset field type sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (ready : ShadowScalarSetReadyAt fuel used object width offset field type
+      sourceContinuation graph.scalarSetResidual) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.sset object width offset field type sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  cases ready with
+  | retained targetContinuation continuation objectMember fieldMember =>
+      let sourceCurrent := { sourceState with control :=
+        (.code (.sset object width offset field type sourceContinuation)) }
+      let targetCurrent := { targetState with control :=
+        (.code (.sset object width offset field type targetContinuation)) }
+      have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      simp only [coreStep]
+      rw [agree object objectMember, agree field fieldMember]
+      generalize objectRead : lookupValue targetState.env object = objectResult
+      generalize fieldRead : lookupValue targetState.env field = fieldResult
+      cases objectResult with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault => exact shadowFail_related runtimeEq fault
+          | ok fieldValue =>
+              dsimp
+              have effectEq :
+                  setScalarField sourceState.runtime objectValue width offset
+                      fieldValue =
+                    setScalarField targetState.runtime objectValue width offset
+                      fieldValue :=
+                congrArg
+                  (fun runtime =>
+                    setScalarField runtime objectValue width offset fieldValue)
+                  runtimeEq
+              rw [effectEq]
+              exact shadowRuntimeResult_related current continuation joins agree
+                (setScalarField targetState.runtime objectValue width offset
+                  fieldValue)
 
 /-- Tag mutation is always retained by the transparent pass.  Its object is
 live, so both environments select the same value and runtime equality makes
@@ -1831,6 +2223,19 @@ theorem shadowMachineProgress_withControl
       | join graph headReady =>
           exact coreStep_join_shadowProgress source target related.programs
             related.runtime_eq related.frames graph joins agree headReady
+      | objectSet graph headReady =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_objectSet_shadowRelated source target
+            related.programs related.runtime_eq related.frames graph joins
+              agree headReady
+      | usizeSet graph headReady =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_usizeSet_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree headReady
+      | scalarSet graph headReady =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_scalarSet_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree headReady
       | cases graph =>
           apply ShadowMachineProgress.lockstep
           exact coreStep_casesInfo_shadowRelated source target
@@ -2067,8 +2472,9 @@ theorem shadowLockstepNormalizes_of_results
     ShadowLockstepNormalizes externals fuel invariant source target :=
   ⟨source, NonLockstep.reaches_refl source, refined, results⟩
 
-/-- Structural recursion over the source code normalizes any finite prefix of
-runtime-neutral deleted lets and dead join declarations. -/
+/-- Structural recursion over the source code normalizes runtime-neutral
+deleted lets, dead join declarations, and every retained effect node accepted
+by exact-runtime readiness. -/
 theorem shadowCode_lockstepNormalizes
     (laws : ShadowInvariantLaws externals fuel invariant)
     (sourceState targetState : MachineState)
@@ -2087,37 +2493,6 @@ theorem shadowCode_lockstepNormalizes
     ShadowLockstepNormalizes externals fuel invariant
       { sourceState with control := .code sourceCode }
       { targetState with control := .code targetCode } := by
-  have unsupported {used : UsedLocals}
-      {sourceCode targetCode : LCNF.Code .impure}
-      (sourceState targetState : MachineState)
-      (programs : ProgramRelated (ShadowCodeRelated fuel)
-        sourceState.program targetState.program)
-      (runtimeEq : sourceState.runtime = targetState.runtime)
-      (framesRelated : ShadowFramesRelated fuel
-        sourceState.frames targetState.frames)
-      (graph : ShadowCodeGraph fuel used sourceCode targetCode)
-      (joins : ShadowJoinEnvRelated fuel used
-        sourceState.joins targetState.joins)
-      (agree : EnvsAgreeOn used sourceState.env targetState.env)
-      (invariantAt : invariant
-        { sourceState with control := .code sourceCode }
-        { targetState with control := .code targetCode })
-      (impossible : ShadowCodeReadyAt fuel used
-        { sourceState with control := .code sourceCode } graph → False) :
-      False := by
-    have structural : ShadowMachineRelated fuel
-        { sourceState with control := .code sourceCode }
-        { targetState with control := .code targetCode } := {
-      programs
-      runtime_eq := runtimeEq
-      frames := framesRelated
-      control := .code graph joins agree
-    }
-    have ready : ShadowControlReadyAt fuel
-        { sourceState with control := .code sourceCode }
-        (.code sourceCode) (.code targetCode) :=
-      laws.ready structural invariantAt
-    exact impossible (ready rfl rfl graph)
   cases sourceCode with
   | «let» declaration sourceContinuation =>
       let sourceCurrent := { sourceState with
@@ -2338,12 +2713,66 @@ theorem shadowCode_lockstepNormalizes
         (refined := { structural, invariant := invariantAt })
       exact coreStep_delete_shadowRelated sourceState targetState programs
         runtimeEq framesRelated graph joins agree
-  | oset object index field continuation
-  | uset object index field continuation
+  | oset object index field continuation =>
+      let sourceCurrent := { sourceState with control :=
+        (.code (.oset object index field continuation)) }
+      let targetCurrent := { targetState with control := .code targetCode }
+      have structural : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      have ready : ShadowControlReadyAt fuel sourceCurrent
+          sourceCurrent.control targetCurrent.control :=
+        laws.ready structural invariantAt
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | objectSet graph headReady =>
+          apply shadowLockstepNormalizes_of_results
+            (refined := { structural, invariant := invariantAt })
+          exact coreStep_objectSet_shadowRelated sourceState targetState
+            programs runtimeEq framesRelated graph joins agree headReady
+  | uset object index field continuation =>
+      let sourceCurrent := { sourceState with control :=
+        (.code (.uset object index field continuation)) }
+      let targetCurrent := { targetState with control := .code targetCode }
+      have structural : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      have ready : ShadowControlReadyAt fuel sourceCurrent
+          sourceCurrent.control targetCurrent.control :=
+        laws.ready structural invariantAt
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | usizeSet graph headReady =>
+          apply shadowLockstepNormalizes_of_results
+            (refined := { structural, invariant := invariantAt })
+          exact coreStep_usizeSet_shadowRelated sourceState targetState programs
+            runtimeEq framesRelated graph joins agree headReady
   | sset object width offset field type continuation =>
-      exact (unsupported sourceState targetState programs runtimeEq
-        framesRelated graph joins agree invariantAt
-          (by intro ready; cases ready)).elim
+      let sourceCurrent := { sourceState with control :=
+        (.code (.sset object width offset field type continuation)) }
+      let targetCurrent := { targetState with control := .code targetCode }
+      have structural : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      have ready : ShadowControlReadyAt fuel sourceCurrent
+          sourceCurrent.control targetCurrent.control :=
+        laws.ready structural invariantAt
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | scalarSet graph headReady =>
+          apply shadowLockstepNormalizes_of_results
+            (refined := { structural, invariant := invariantAt })
+          exact coreStep_scalarSet_shadowRelated sourceState targetState
+            programs runtimeEq framesRelated graph joins agree headReady
   | «fun» declaration continuation impossible =>
       nomatch impossible
 termination_by sizeOf sourceCode
