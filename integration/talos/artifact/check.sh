@@ -166,3 +166,4 @@ for manifest in "$first"/*.wasm.json; do
 done
 
 node run-artifacts.mjs "$first"
+node run-concrete-artifacts.mjs "$first"

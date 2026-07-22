@@ -2322,6 +2322,20 @@ Wasm trampoline while retaining legacy `closureApply` as a resolver gate. The
 complete candidate-fold proof and external-engine artifact switch remain
 separate. No shared contract changed.
 
+W6.6am opens the concrete external-engine lane. A browser-safe JavaScript host
+implements the proved wasm32 word classification, 32-byte checked header,
+eight-byte semantic slots, natural/constructor allocation, and typed closure
+capture ABI without runtime handles. Observation-only allocation descriptors
+and logical-location identities normalize the physical heap against the live
+FIR oracle but are not consulted by generated runtime operations. A dedicated
+Node runner now executes 23 closed artifacts covering all direct scalar and
+argument lanes, tagged and heap naturals, constructors/cases/projection,
+ordinary and recursive direct calls, and single/multi-stage closure
+application. Unsupported operations fail during concrete import construction;
+the semantic runner remains in parallel for the wider corpus while mutation,
+ownership, reset/reuse, strings, externals, initial heaps, and the browser
+client are ported in subsequent slices. No shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
