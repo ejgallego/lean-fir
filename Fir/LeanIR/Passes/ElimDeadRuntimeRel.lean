@@ -1332,6 +1332,33 @@ theorem ShadowRuntimeRel.evalLetValueLiteralLeftGarbage
     related.literalLeftGarbage literalValue⟩
   rfl
 
+/-- A well-formed dead partial application allocates one unreachable closure
+after reading its fixed arguments and target arity. -/
+theorem ShadowRuntimeRel.evalLetValuePapLeftGarbage
+    (related : ShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra)
+    (argumentsResult : evalArgs state.env arguments = .ok values)
+    (targetFound : state.program.findDecl? name = some target)
+    (underapplied : values.size < target.params.size) :
+    ∃ nextRuntime value,
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .pap name arguments
+      } = .ok (nextRuntime, .value value) ∧
+      ShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra := by
+  let object : HeapObject := .closure name target.params.size values
+  let nextRuntime := (alloc state.runtime object).1
+  let value : Value := .object (alloc state.runtime object).2
+  refine ⟨nextRuntime, value, ?_, ?_⟩
+  · simp only [evalLetValue, argumentsResult, Bind.bind, Except.bind]
+    rw [targetFound]
+    simp only
+    rw [if_neg (Nat.not_le_of_lt underapplied)]
+    rfl
+  · exact related.allocLeftGarbage object false
+
 /-- Related retained allocations may choose different fresh locations.  The
 address renaming is extended with that pair, the returned references become
 new live roots, and all old runtime components are transported monotonically. -/

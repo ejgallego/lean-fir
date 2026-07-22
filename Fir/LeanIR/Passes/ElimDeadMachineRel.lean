@@ -273,6 +273,62 @@ theorem coreStep_deletedLiteral_reachableRelated
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
 
+/-- Operational well-formedness needed to execute a deleted partial
+application: its fixed arguments resolve, its declaration exists, and the
+application is genuinely partial. -/
+inductive DeletedPapReadyAt (state : MachineState) (name : Name)
+    (arguments : Array (LCNF.Arg .impure)) : Prop where
+  | mk (target : LCNF.Decl .impure) (values : Array Value)
+      (argumentsRead : evalArgs state.env arguments = .ok values)
+      (targetFound : state.program.findDecl? name = some target)
+      (underapplied : values.size < target.params.size) :
+      DeletedPapReadyAt state name arguments
+
+/-- A deleted partial application takes one source step, allocates only
+unreachable closure garbage, and leaves the target at its continuation. -/
+theorem coreStep_deletedPap_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedPapReadyAt sourceState name arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .pap name arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases ready with
+    ⟨declaration, values, argumentsRead, targetFound, underapplied⟩
+  rcases runtime.evalLetValuePapLeftGarbage
+      (fvarId := fvarId) (binderName := binderName) (type := type)
+      argumentsRead targetFound underapplied with
+    ⟨nextRuntime, value, evaluated, next⟩
+  exact ⟨nextRuntime, value,
+    coreStep_deletedLet_reachableRelated sourceState targetState
+      programs frames continuation joins env absent evaluated next⟩
+
 /-- Resume related residual continuations after a source-only runtime update
 whose reachable roots are unchanged. -/
 theorem continueCode_reachableRelated

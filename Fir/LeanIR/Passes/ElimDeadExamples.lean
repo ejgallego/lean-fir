@@ -21,6 +21,7 @@ def scalarField : FVarId := ⟨`scalarField⟩
 def reuseTokenVar : FVarId := ⟨`reuseToken⟩
 def reuseArgVar : FVarId := ⟨`reuseArg⟩
 def resetObjectVar : FVarId := ⟨`resetObject⟩
+def papArgVar : FVarId := ⟨`papArg⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -91,6 +92,15 @@ def deletedLargeNatBefore : LCNF.Code .impure :=
 def deletedLargeNatAfter : LCNF.Code .impure :=
   .return live
 
+def deadPapDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.pap `first #[.fvar papArgVar])
+
+def deletedPapBefore : LCNF.Code .impure :=
+  .let deadPapDecl (.return live)
+
+def deletedPapAfter : LCNF.Code .impure :=
+  .return live
+
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
 #guard !safeToElim deadCopyDecl.value
@@ -158,6 +168,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualElimDead `elimDeadLargeNat
     deletedLargeNatBefore deletedLargeNatAfter
+  checkActualElimDead `elimDeadPap deletedPapBefore deletedPapAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -200,6 +211,12 @@ def deletedLargeNatBeforeProgram : ImpureProgram :=
 
 def deletedLargeNatAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedLargeNatAfter] }
+
+def deletedPapBeforeProgram : ImpureProgram :=
+  { decls := #[firstDecl, fixtureDecl `main deletedPapBefore] }
+
+def deletedPapAfterProgram : ImpureProgram :=
+  { decls := #[firstDecl, fixtureDecl `main deletedPapAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -285,6 +302,16 @@ theorem deletedLargeNatShadowRun :
   simp [deletedLargeNatBefore, deletedLargeNatAfter, deadLargeNatDecl,
     letDecl, neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem deletedPapShadowRun :
+    shadowCode? 2 {} deletedPapBefore =
+      some (deletedPapAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedPapBefore, deletedPapAfter, deadPapDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -332,6 +359,22 @@ theorem deletedLargeNatProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedLargeNatBeforeProgram, deletedLargeNatAfterProgram,
     fixtureDecl, decl, deletedLargeNatShadowRun]
+
+theorem firstDeclShadowRun :
+    shadowDecl? 2 firstDecl = some firstDecl := by
+  simp [shadowDecl?, firstDecl, decl, shadowCode?]
+
+theorem deletedPapMainDeclShadowRun :
+    shadowDecl? 2 (fixtureDecl `main deletedPapBefore) =
+      some (fixtureDecl `main deletedPapAfter) := by
+  simp [shadowDecl?, fixtureDecl, decl, deletedPapShadowRun]
+
+theorem deletedPapProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 2)
+      deletedPapBeforeProgram deletedPapAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, deletedPapBeforeProgram,
+    deletedPapAfterProgram, firstDeclShadowRun, deletedPapMainDeclShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -448,6 +491,19 @@ def deletedLargeNatSourceState : MachineState :=
 def deletedLargeNatTargetState : MachineState :=
   { program := deletedLargeNatAfterProgram
     control := .code deletedLargeNatAfter
+    env := liveEnv }
+
+def deletedPapSourceEnv : Env :=
+  bind liveEnv papArgVar .erased
+
+def deletedPapSourceState : MachineState :=
+  { program := deletedPapBeforeProgram
+    control := .code deletedPapBefore
+    env := deletedPapSourceEnv }
+
+def deletedPapTargetState : MachineState :=
+  { program := deletedPapAfterProgram
+    control := .code deletedPapAfter
     env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
@@ -686,6 +742,30 @@ theorem deletedResetReady :
       lookupValue, Impure.bind, lookup, resetObjectVar]
   · simpa [deletedResetSourceState] using deletedResetEffect
   · exact deletedResetRuntimeFrame
+
+theorem deletedPapEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedPapSourceEnv liveEnv := by
+  unfold deletedPapSourceEnv
+  apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+  native_decide
+
+theorem deletedPapRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      deletedPapSourceState.runtime deletedPapTargetState.runtime
+      (envRootsOn neutralUsed deletedPapSourceState.env)
+      (envRootsOn neutralUsed deletedPapTargetState.env) := by
+  simpa [deletedPapSourceState, deletedPapTargetState] using
+    emptyRuntime_shadowRelated_of_roots
+      (envRootsOn_related deletedPapEnvReachableRelated)
+
+theorem deletedPapReady :
+    DeletedPapReadyAt deletedPapSourceState `first #[.fvar papArgVar] := by
+  apply DeletedPapReadyAt.mk firstDecl #[.erased]
+  · simp [deletedPapSourceState, deletedPapSourceEnv, evalArgs, evalArg,
+      Impure.bind, lookup, papArgVar]
+    rfl
+  · rfl
+  · simp [firstDecl, decl]
 
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
@@ -1065,6 +1145,46 @@ theorem deletedLargeNatSourceOnlyMachineStep :
   simpa [deletedLargeNatSourceState, deletedLargeNatTargetState,
     deletedLargeNatBefore, deletedLargeNatAfter, deadLargeNatDecl, letDecl]
     using progress
+
+/-- The complete two-declaration regression resolves `first`, fixes one of
+its two parameters, allocates an unreachable closure, and stutters the target. -/
+theorem deletedPapSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        deletedPapSourceState with
+        runtime := nextRuntime
+        env := bind deletedPapSourceState.env dead value
+        control := .code (.return live) }
+      coreStep deletedPapSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedPapTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedPapSourceState.program deletedPapTargetState.program := by
+    simpa [deletedPapSourceState, deletedPapTargetState] using
+      deletedPapProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedPapSourceState.frames deletedPapTargetState.frames [] [] := .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedPapSourceState.env deletedPapTargetState.env := by
+    simpa [deletedPapSourceState, deletedPapTargetState] using
+      deletedPapEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedPapSourceState.runtime deletedPapTargetState.runtime
+      (envRootsOn neutralUsed deletedPapSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedPapTargetState.env ++ []) := by
+    simpa using deletedPapRuntimeRelated
+  have progress := coreStep_deletedPap_of_ready
+    (sourceState := deletedPapSourceState)
+    (targetState := deletedPapTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (name := `first) (arguments := #[.fvar papArgVar])
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime deletedPapReady
+  simpa [deletedPapSourceState, deletedPapTargetState,
+    deletedPapBefore, deletedPapAfter, deadPapDecl, letDecl] using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/
