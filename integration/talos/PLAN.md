@@ -2476,6 +2476,16 @@ source external call through concrete runtime/world/trace execution to the
 compiler-assigned local without introducing semantic handles. No executable
 layout or shared semantic contract changed.
 
+W6.6ay closes concrete whole-module and external-engine coverage for the
+supported packed-integer width matrix. Three compiler-shaped fixtures add
+`UInt8`, `UInt16`, and `UInt32` mutation/readback at the exact scalar slot
+following one object and one `USize` field; together with the existing
+`UInt64` case they exercise every proved integer `scalarSet`/`scalarProj`
+branch through lowering, adaptation, positional host resolution, standard
+WebAssembly execution, and the live FIR oracle. The concrete Node/browser
+inventory grows from 38 to 41 artifacts. Float scalars remain excluded by
+`FIR-BUG-wasm-none-float-runtime-gap`. No shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

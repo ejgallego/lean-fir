@@ -18,14 +18,16 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runners currently execute 38 closed artifacts through raw scalar
+The concrete runners currently execute 41 closed artifacts through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
 slots, natural, UTF-8 string, and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
 mutation, balanced and recursive ownership updates, deletion, unique/shared
 reset/reuse, recursive cache publication, and maximum-width integer
 boxing/unboxing, an effect-producing external echo, and a twice-called cached
-external with one physical miss/effect/hit sequence. Their
+external with one physical miss/effect/hit sequence. The packed-scalar corpus
+includes compiler-shaped mutation/readback for all four supported integer
+widths. Their
 logical-location map and allocation descriptors are observation-only data;
 runtime imports exchange physical words and consult the byte-level heap. Node
 and a Fetch-only browser Worker import the same host, explicit foreign
@@ -217,7 +219,7 @@ make -C ../../.. validate-v8
 
 Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
 the complete shared-product Worker. It also materializes the live-oracle
-artifact corpus under `_build`, then runs the same 38 concrete artifacts, one
+artifact corpus under `_build`, then runs the same 41 concrete artifacts, one
 default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
 `List Nat` and Unicode string sources.

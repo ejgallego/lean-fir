@@ -11,7 +11,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
-| `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP, compiler-shaped `UInt64` whole-module and Node/V8 plus browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; other widths pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
+| `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, natural, or string graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, local write, twice-called cached constructor-graph whole-module execution, and Node/V8 plus browser-Worker miss/persistence/hit execution compose; per-declaration body proofs pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, continuation, module-derived metadata tables, ordinary/erased/multi-stage whole-module executions, and Node/V8 plus browser-Worker concrete closure allocation compose; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Concrete interprocedural judgment, body-WP-to-termination bridge, candidate and direct-call/local-write rules, plus ordinary/erased/multi-stage whole-module Node/V8 and browser-Worker executions; complete compiler candidate-fold proof pending |
@@ -24,7 +24,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `isShared` | Yes | Immediate, promoted, and ordinary heap theorem | Partial | Concrete object-like host, source step, compiler/adapter, generated unary result call, direct UInt8 local write, continuation, tagged/unique whole-module executions, and ordinary-object Node/V8 plus browser-Worker execution compose |
 | `objectSet` | Yes | Heap theorem | Partial | Concrete two-i32 host, FVar source step, compiler/adapter, generated binary call, continuation, whole-module mutation/readback, and Node/V8 plus browser-Worker checked-slot execution compose for supported object-field kinds; non-FVar arguments pending |
 | `usizeSet` | Yes | Heap theorem | Partial | Concrete i32/i64 host, source step, compiler/adapter, generated binary call, continuation, whole-module write, and compiler-shaped Node/V8 plus browser-Worker write/read execution compose |
-| `scalarSet` | Four integer widths | Heap theorems | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, compiler-shaped `UInt64` whole-module and Node/V8 plus browser-Worker write/readback compose for initially empty semantic packed fields; repeated/disjoint field frame and other widths pending; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
+| `scalarSet` | Four integer widths | Heap theorems | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose for initially empty semantic packed fields; repeated/disjoint field framing remains pending; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
 | `dec` | Yes | Complete checked recursive heap theorem | Partial | Concrete checked ordinary/tagged/promoted recursive host, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity; unchecked nonpersistent composition pending |
@@ -106,7 +106,9 @@ Cross-cutting W6.5 state:
   and
 - all four supported packed-integer mutations compose through their exact
   i32/i64 lanes and generated binary host calls for the initial-empty-field
-  theorem fragment; repeated/disjoint scalar framing remains open; and
+  theorem fragment, and each width crosses compiler-shaped whole-module,
+  Node/V8, and browser-Worker mutation/readback execution;
+  repeated/disjoint scalar framing remains open; and
 - a validated positional resolver now instantiates complete lowered Talos
   modules with the concrete host, derives its typed cache declarations from
   source initializers and its closure dispatch/descriptor tables from generated
@@ -119,7 +121,7 @@ Cross-cutting W6.5 state:
   resolution; and
 - a browser-safe external-engine host now mirrors the proved concrete word,
   header, slot, natural, constructor, closure, mutation, ownership, and reuse
-  layouts and explicit foreign registry; the same frozen inventory of 38
+  layouts and explicit foreign registry; the same frozen inventory of 41
   closed artifacts passes its live
   FIR oracle in Node/V8 and a Fetch-only browser Worker without runtime
   handles, including cache miss/persistence/hit, maximum-width heap

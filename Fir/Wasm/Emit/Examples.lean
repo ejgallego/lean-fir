@@ -103,6 +103,29 @@ def abiCompilerShapedMutationProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r u64Type (.sproj 2 0 p)) <|
       .return r)] }
 
+/-- Compiler-shaped packed-scalar mutation/readback at the first scalar slot
+after one object and one `USize` field. This parameterized fixture keeps the
+three wasm32 integer widths on the same lowering path as the UInt64 corpus
+case above. -/
+def abiPackedScalarMutationProgram (type : Lean.Expr)
+    (literal : LCNF.LitValue) : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl s type (.lit literal)) <|
+      .sset p 2 0 s type <|
+      .let (letDecl r type (.sproj 2 0 p)) <|
+      .return r)] }
+
+def abiUInt8MutationProgram : Fir.LeanIR.ImpureProgram :=
+  abiPackedScalarMutationProgram u8Type (.uint8 255)
+
+def abiUInt16MutationProgram : Fir.LeanIR.ImpureProgram :=
+  abiPackedScalarMutationProgram LCNF.ImpureType.uint16 (.uint16 65535)
+
+def abiUInt32MutationProgram : Fir.LeanIR.ImpureProgram :=
+  abiPackedScalarMutationProgram LCNF.ImpureType.uint32 (.uint32 4294967295)
+
 def abiCachedConstructorDecl : LCNF.Decl .impure :=
   decl `abiCachedConstructor #[] objType (.code <|
     .let (letDecl x tobjectType (.lit (.nat 42))) <|
@@ -194,6 +217,9 @@ def initialFixtures : List CorpusFixture := [
   { name := "constructor-graph-release",
     program := abiConstructorGraphReleaseProgram },
   { name := "compiler-shaped-mutation", program := abiCompilerShapedMutationProgram },
+  { name := "scalar-uint8-mutation", program := abiUInt8MutationProgram },
+  { name := "scalar-uint16-mutation", program := abiUInt16MutationProgram },
+  { name := "scalar-uint32-mutation", program := abiUInt32MutationProgram },
   { name := "cached-constructor", program := abiCachedConstructorProgram },
   { name := "box-roundtrip", program := abiMaxUInt64BoxRoundtripProgram },
   { name := "box-heap", program := abiMaxUInt64HeapBoxProgram },

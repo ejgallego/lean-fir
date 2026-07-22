@@ -1,6 +1,7 @@
 import FirTalos.ConcreteResolver
 import FirTalos.DifferentialExamples
 import Fir.Wasm.Examples
+import Fir.Wasm.Emit.Examples
 import Interpreter.Wasm.Semantics
 
 namespace FirTalos.Concrete
@@ -111,6 +112,15 @@ private def compilerShapedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
       .return r)] }
 
 #guard fixtureReturnsI64? compilerShapedScalarMutationProgram 66
+
+-- The remaining packed-integer widths cross the same complete
+-- lowering/adapter/resolver/concrete-host path and return on wasm32 lanes.
+#guard fixtureReturnsWord? Fir.Wasm.Emit.Examples.abiUInt8MutationProgram 255
+
+#guard fixtureReturnsWord? Fir.Wasm.Emit.Examples.abiUInt16MutationProgram 65535
+
+#guard fixtureReturnsWord? Fir.Wasm.Emit.Examples.abiUInt32MutationProgram
+  4294967295
 
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
