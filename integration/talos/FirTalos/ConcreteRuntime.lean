@@ -3223,6 +3223,33 @@ theorem deleteStep_of_refines
   | uint16 encoded => simp [deleteValue] at updated
   | uint32 encoded => simp [deleteValue] at updated
 
+/-- Repeating explicit deletion on a stale mapped ordinary object preserves
+the exact address/location dead-object fault and has no post-state. -/
+theorem deleteStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    deleteStep initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      deleteValue runtime (.object (.heap location)) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.deleteObject_deadObject heapRelated found dead
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

@@ -2290,6 +2290,55 @@ theorem LiveHeapRel.decrementReference_refines
           rw [firstConcrete]
           exact restConcrete
 
+/-- Explicitly deleting an already released ordinary allocation fails at the
+live-header read; the physical-zero sentinel exception is unreachable because
+every `DeadCellRel` address classifies as a heap word. -/
+theorem DeadCellRel.deleteObject_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) :
+    deleteObject state address =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  have addressNeZero : address ≠ Word32.zero := by
+    intro equal
+    subst address
+    change ObjectWordClass.sentinel = ObjectWordClass.heap at addressHeap
+    contradiction
+  have addressValueNeZero : address.value ≠ 0 := by
+    intro equal
+    have sentinel : address.classify = .sentinel := by
+      simp [Word32.classify, equal]
+    rw [sentinel] at addressHeap
+    contradiction
+  have addressZeroCheck : (address == Word32.zero) = false := by
+    change (address.value == 0) = false
+    simp [addressValueNeZero]
+  unfold deleteObject
+  rw [if_neg (by simp [addressZeroCheck])]
+  rw [addressHeap]
+  simp only [↓reduceIte, Bind.bind, Except.bind]
+  rw [related.readLiveHeader_eq]
+  rfl
+
+/-- Stale explicit deletion preserves the exact concrete-address/source-location
+fault and produces no post-state. -/
+theorem LiveHeapRel.deleteObject_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    deleteObject state address =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.deleteValue runtime (.object (.heap location)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.deleteObject_eq, by
+    simp [Fir.LeanIR.Impure.deleteValue, getLiveCell, found, dead]
+    rfl⟩
+
 /-- The erased failed-reset sentinel is a delete-specific no-op in both the
 source and concrete runtimes. This does not introduce an ordinary object
 relation for physical zero. -/

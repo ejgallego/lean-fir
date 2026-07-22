@@ -28,7 +28,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `setTag` | Yes | Live and stale mapped-heap theorems | Dead-object source-address fault exact with no post-state; remainder partial | Concrete header host, exact stale-object trap/no-write guard, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
 | `inc` | Yes | Ordinary, tagged, and stale mapped-heap theorems | Dead-object source-address fault exact with no post-state; remainder partial | Concrete ordinary/tagged/promoted host, exact stale-object trap/no-write guard, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
 | `dec` | Yes | Complete recursive heap theorem for either outer check bit plus stale mapped-heap theorem for every positive amount | Positive-count dead-object source-address fault exact with no post-state; zero count is the specified empty-fold no-op; remainder partial | Concrete checked/unchecked ordinary recursive host, checked tagged/promoted no-op, exact stale-object trap/no-write guard, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked and unchecked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity |
-| `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, continuation, ordinary-object whole-module deletion, and exact dead-object Node/V8 plus browser-Worker execution compose without weakening ordinary object decoding |
+| `delete` | Yes | Ordinary live/stale mapped-heap and erased-sentinel theorems | Dead-object source-address fault exact with no post-state; physical zero remains the delete-specific erased no-op; remainder partial | Concrete canonical-delete/erased-zero host, exact repeated-delete trap/no-write guard, representation-indexed source step, compiler/adapter, generated unary call, continuation, ordinary-object whole-module deletion, and exact dead-object Node/V8 plus browser-Worker execution compose without weakening ordinary object decoding |
 | `getTag` | Yes | Complete `.tobject` constructor/tagged success theorem plus mapped stale-heap theorem | Dead-object source-address fault exact through `LiveHeapRel`, `ConcreteErrorSourceRel`, and the Talos host; remainder partial | Concrete Talos host plus generated constructor-case WP, whole-module concrete Talos execution, a direct allocate/delete/tag trap guard, and Node/V8 plus browser-Worker constructor-case execution |
 
 Cross-cutting W6.5 state:
@@ -64,8 +64,9 @@ Cross-cutting W6.5 state:
   object-, `USize`-, and four-width scalar-projection Talos theorems preserve it
   against FIR's `deadObject location`, with `HeapReferenceRel` carrying the
   exact fault translation; stale object-, `USize`-, tag-, and four-width
-  scalar-mutation and ownership theorems add the same no-post-state boundary
-  (for positive-count `dec`; zero remains an empty fold); closed sharing and direct
+  scalar-mutation, ownership, and repeated-delete theorems add the same
+  no-post-state boundary (for positive-count `dec`; zero remains an empty
+  fold); closed sharing and direct
   tag/projection/mutation guards cover execution, while the fixed
   classification is tracked by
   `FIR-BUG-wasm-none-dead-object-fault-classification`;

@@ -2676,6 +2676,13 @@ descriptor processing, recursion, or any header write; the Talos hosts retain
 memory preservation. Zero-count decrement remains the intentionally specified
 empty-fold no-op on both sides. No shared contract or runtime behavior changes.
 
+W6.6bu closes the stale-reference path for explicit deletion. A second delete
+on an ordinary released allocation preserves the exact address/location
+`deadObject` pair through the checked runtime and Talos host before any header
+write, and the executable guard confirms complete memory preservation. This
+does not weaken the distinct physical-zero erased-sentinel no-op. No shared
+contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
