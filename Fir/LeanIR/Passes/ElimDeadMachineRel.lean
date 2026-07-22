@@ -17,6 +17,10 @@ publishes the values that can still be inspected.  These roots feed
 objects remain related through an address renaming.
 -/
 
+def withCodeControl (state : MachineState) (code : LCNF.Code .impure) :
+    MachineState :=
+  { state with control := .code code }
+
 /-- A related control together with its complete runtime roots. -/
 inductive ReachableControlRelated (fuel : Nat) (rho : AddressRenaming) :
     Env → JoinEnv → Control → Env → JoinEnv → Control →
@@ -217,7 +221,7 @@ theorem coreStep_deletedLet_reachableRelated
         { targetState with control := .code targetContinuation } := by
   dsimp only
   constructor
-  · simp only [coreStep]
+  · simp only [withCodeControl, coreStep]
     rw [evalLetValue_control_eq, evaluated]
   · unfold ReachableMachineRelated
     refine ⟨envRootsOn used (bind sourceState.env declaration.fvarId value),
@@ -227,6 +231,297 @@ theorem coreStep_deletedLet_reachableRelated
     · exact .code continuation joins (env.bindLeft_of_absent absent)
     · exact frames
     · simpa [envRootsOn_bind_of_absent absent] using runtime
+
+/-- Resume related residual continuations after a source-only runtime update
+whose reachable roots are unchanged. -/
+theorem continueCode_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ReachableMachineRelated fuel rho
+      { sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      { targetState with control := .code targetContinuation } := by
+  unfold ReachableMachineRelated
+  exact ⟨envRootsOn used sourceState.env,
+    envRootsOn used targetState.env,
+    sourceFrameRoots, targetFrameRoots,
+    programs, .code continuation joins env, frames, runtime⟩
+
+/-- Deleted object-field write: the source updates an unreachable cell and
+the target stutters at the transformed continuation. -/
+theorem coreStep_deletedObjectSet_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : evalArg sourceState.env field = .ok fieldValue)
+    (effect : setObjectField sourceState.runtime objectValue index fieldValue =
+      .ok nextRuntime)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := nextRuntime
+      control := .code sourceContinuation }
+    coreStep (withCodeControl sourceState
+        (.oset object index field sourceContinuation)) =
+        .next sourceAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · unfold withCodeControl
+    simp only [coreStep]
+    rw [objectRead, fieldRead]
+    simp only
+    rw [effect]
+  · exact continueCode_reachableRelated sourceState targetState programs
+      frames continuation joins env runtime
+
+/-- Deleted unboxed-word write under the same unreachable-target premise. -/
+theorem coreStep_deletedUSizeSet_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : lookupValue sourceState.env field = .ok fieldValue)
+    (effect : setUSizeField sourceState.runtime objectValue index fieldValue =
+      .ok nextRuntime)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := nextRuntime
+      control := .code sourceContinuation }
+    coreStep (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) =
+        .next sourceAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · unfold withCodeControl
+    simp only [coreStep]
+    rw [objectRead, fieldRead]
+    simp only
+    rw [effect]
+  · exact continueCode_reachableRelated sourceState targetState programs
+      frames continuation joins env runtime
+
+/-- Deleted scalar-field write under the same unreachable-target premise. -/
+theorem coreStep_deletedScalarSet_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : lookupValue sourceState.env field = .ok fieldValue)
+    (effect : setScalarField sourceState.runtime objectValue width offset
+      fieldValue = .ok nextRuntime)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := nextRuntime
+      control := .code sourceContinuation }
+    coreStep (withCodeControl sourceState
+        (.sset object width offset field type sourceContinuation)) =
+        .next sourceAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · unfold withCodeControl
+    simp only [coreStep]
+    rw [objectRead, fieldRead]
+    simp only
+    rw [effect]
+  · exact continueCode_reachableRelated sourceState targetState programs
+      frames continuation joins env runtime
+
+/-- Proof-visible well-formedness/ownership obligation for deleting an
+object-field write.  In particular, dead syntactic liveness alone is not used
+as a substitute for semantic unreachability in the presence of aliases. -/
+def DeletedObjectSetReadyAt (state : MachineState) (roots : List Value)
+    (object : FVarId) (index : Nat) (field : LCNF.Arg .impure) : Prop :=
+  ∃ location cell constructor fieldValue,
+    lookupValue state.env object = .ok (.object (.heap location)) ∧
+    evalArg state.env field = .ok fieldValue ∧
+    findCell? state.runtime.heap location = some cell ∧
+    cell.live = true ∧
+    cell.object = .ctor constructor ∧
+    index < constructor.objectFields.size ∧
+    ¬Reachable state.runtime.heap roots location
+
+def DeletedUSizeSetReadyAt (state : MachineState) (roots : List Value)
+    (object : FVarId) (index : Nat) (field : FVarId) : Prop :=
+  ∃ location cell constructor fieldValue,
+    lookupValue state.env object = .ok (.object (.heap location)) ∧
+    lookupValue state.env field = .ok (.usize fieldValue) ∧
+    findCell? state.runtime.heap location = some cell ∧
+    cell.live = true ∧
+    cell.object = .ctor constructor ∧
+    index < constructor.usizeFields.size ∧
+    ¬Reachable state.runtime.heap roots location
+
+def DeletedScalarSetReadyAt (state : MachineState) (roots : List Value)
+    (object field : FVarId) : Prop :=
+  ∃ location cell constructor fieldValue,
+    lookupValue state.env object = .ok (.object (.heap location)) ∧
+    lookupValue state.env field = .ok (.scalar fieldValue) ∧
+    findCell? state.runtime.heap location = some cell ∧
+    cell.live = true ∧
+    cell.object = .ctor constructor ∧
+    ¬Reachable state.runtime.heap roots location
+
+theorem coreStep_deletedObjectSet_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedObjectSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.oset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, bounded, unreachable⟩
+  rcases runtime.setObjectFieldLeftUnreachable found live objectEq bounded
+      unreachable fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  exact ⟨nextRuntime,
+    coreStep_deletedObjectSet_reachableRelated sourceState targetState
+      programs frames continuation joins env objectRead fieldRead effect next⟩
+
+theorem coreStep_deletedUSizeSet_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.uset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, bounded, unreachable⟩
+  rcases runtime.setUSizeFieldLeftUnreachable found live objectEq bounded
+      unreachable fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  exact ⟨nextRuntime,
+    coreStep_deletedUSizeSet_reachableRelated sourceState targetState
+      programs frames continuation joins env objectRead fieldRead effect next⟩
+
+theorem coreStep_deletedScalarSet_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedScalarSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object field) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.sset object width offset field type sourceContinuation)) =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, unreachable⟩
+  rcases runtime.setScalarFieldLeftUnreachable found live objectEq
+      unreachable width offset fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  exact ⟨nextRuntime,
+    coreStep_deletedScalarSet_reachableRelated sourceState targetState
+      programs frames continuation joins env objectRead fieldRead effect next⟩
 
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/

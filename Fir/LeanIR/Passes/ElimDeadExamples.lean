@@ -16,6 +16,8 @@ open Fir.LeanIR.Passes.NonLockstep.Structural
 
 def live : FVarId := ⟨`live⟩
 def dead : FVarId := ⟨`dead⟩
+def usizeField : FVarId := ⟨`usizeField⟩
+def scalarField : FVarId := ⟨`scalarField⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -48,6 +50,15 @@ def allocatingBefore : LCNF.Code .impure :=
   .let liveDecl <| .let deadCtorDecl <| .return live
 
 def allocatingAfter : LCNF.Code .impure := neutralAfter
+
+def deletedWritesBefore : LCNF.Code .impure :=
+  .oset dead 0 .erased <|
+  .uset dead 0 usizeField <|
+  .sset dead 8 0 scalarField u8Type <|
+  .return live
+
+def deletedWritesAfter : LCNF.Code .impure :=
+  .return live
 
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
@@ -111,6 +122,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadUsed usedBefore usedBefore
   checkActualElimDead `elimDeadUnsafe unsafeBefore unsafeBefore
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
+  checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -129,6 +141,12 @@ def allocatingBeforeProgram : ImpureProgram :=
 
 def allocatingAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main allocatingAfter] }
+
+def deletedWritesBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedWritesBefore] }
+
+def deletedWritesAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedWritesAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -153,6 +171,37 @@ theorem allocatingShadowRun :
     deadCtorDecl, letDecl, shadowCode?, safeToElim, collectLetValue,
     collectArgs, collectArgList, collectArg, liveMember, deadAbsent]
 
+theorem deletedWritesShadowRun :
+    shadowCode? 4 {} deletedWritesBefore =
+      some (deletedWritesAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedWritesBefore, deletedWritesAfter, neutralUsed, shadowCode?,
+    liveMember, deadAbsent]
+
+theorem deletedUSizeScalarShadowRun :
+    shadowCode? 3 {}
+        (.uset dead 0 usizeField <|
+          .sset dead 8 0 scalarField u8Type <| .return live) =
+      some (.return live, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [neutralUsed, shadowCode?, liveMember, deadAbsent]
+
+theorem deletedScalarShadowRun :
+    shadowCode? 2 {}
+        (.sset dead 8 0 scalarField u8Type <| .return live) =
+      some (.return live, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [neutralUsed, shadowCode?, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -169,6 +218,14 @@ theorem allocatingProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?, allocatingBeforeProgram,
     allocatingAfterProgram, fixtureDecl, decl, allocatingShadowRun]
 
+theorem deletedWritesProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 4)
+      deletedWritesBeforeProgram deletedWritesAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    deletedWritesBeforeProgram, deletedWritesAfterProgram,
+    fixtureDecl, decl, deletedWritesShadowRun]
+
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
     ShadowMachineRelated 3
@@ -181,6 +238,43 @@ def liveEnv : Env :=
 
 def deadExtendedEnv : Env :=
   bind liveEnv dead (.usize 42)
+
+def deletedWriteObject : ConstructorObject :=
+  { tag := 0
+    objectFields := #[.erased]
+    usizeFields := #[0]
+    scalarFields := [] }
+
+def deletedWriteSourceRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) (.ctor deletedWriteObject)).1
+
+def deletedWriteSourceEnv : Env :=
+  bind (bind (bind liveEnv dead (.object (.heap 0)))
+    usizeField (.usize 7)) scalarField (.scalar (.uint8 9))
+
+def deletedObjectSetSourceState : MachineState :=
+  { program := deletedWritesBeforeProgram
+    control := .code deletedWritesBefore
+    env := deletedWriteSourceEnv
+    runtime := deletedWriteSourceRuntime }
+
+def deletedUSizeSetSourceState : MachineState :=
+  { program := deletedWritesBeforeProgram
+    control := .code (.uset dead 0 usizeField <|
+      .sset dead 8 0 scalarField u8Type <| .return live)
+    env := deletedWriteSourceEnv
+    runtime := deletedWriteSourceRuntime }
+
+def deletedScalarSetSourceState : MachineState :=
+  { program := deletedWritesBeforeProgram
+    control := .code (.sset dead 8 0 scalarField u8Type <| .return live)
+    env := deletedWriteSourceEnv
+    runtime := deletedWriteSourceRuntime }
+
+def deletedWritesTargetState : MachineState :=
+  { program := deletedWritesAfterProgram
+    control := .code deletedWritesAfter
+    env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
 without changing any lookup the transformed suffix is allowed to perform. -/
@@ -264,6 +358,26 @@ theorem returnLiveShadowGraph :
   refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
   simp [shadowCode?, neutralUsed]
 
+theorem returnLiveShadowGraph4 :
+    ShadowCodeGraph 4 neutralUsed (.return live) (.return live) := by
+  refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
+  simp [shadowCode?, neutralUsed]
+
+theorem deletedUSizeScalarShadowGraph :
+    ShadowCodeGraph 4 neutralUsed
+      (.uset dead 0 usizeField <|
+        .sset dead 8 0 scalarField u8Type <| .return live)
+      (.return live) := by
+  exact ⟨3, {}, neutralUsed, by omega,
+    deletedUSizeScalarShadowRun, .refl neutralUsed⟩
+
+theorem deletedScalarShadowGraph :
+    ShadowCodeGraph 4 neutralUsed
+      (.sset dead 8 0 scalarField u8Type <| .return live)
+      (.return live) := by
+  exact ⟨2, {}, neutralUsed, by omega,
+    deletedScalarShadowRun, .refl neutralUsed⟩
+
 theorem liveEnvReachableRelated :
     EnvRelOn emptyAddressRenaming neutralUsed liveEnv liveEnv := by
   intro fvarId member
@@ -271,6 +385,194 @@ theorem liveEnvReachableRelated :
     simpa [neutralUsed] using member
   subst fvarId
   exact .some .erased
+
+theorem deletedWriteEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedWriteSourceEnv liveEnv := by
+  unfold deletedWriteSourceEnv
+  apply EnvRelOn.bindLeft_of_absent
+  · apply EnvRelOn.bindLeft_of_absent
+    · apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+      native_decide
+    · native_decide
+  · native_decide
+
+theorem deletedWriteRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming deletedWriteSourceRuntime
+      ({} : RuntimeState)
+      (envRootsOn neutralUsed deletedWriteSourceEnv)
+      (envRootsOn neutralUsed liveEnv) := by
+  have base := emptyRuntime_shadowRelated_of_roots
+    (envRootsOn_related deletedWriteEnvReachableRelated)
+  simpa [deletedWriteSourceRuntime] using
+    base.allocLeftGarbage (.ctor deletedWriteObject) false
+
+theorem deletedWriteDestinationUnreachable :
+    ¬Reachable deletedWriteSourceRuntime.heap
+      (runtimeRoots deletedWriteSourceRuntime
+        (envRootsOn neutralUsed deletedWriteSourceEnv)) 0 := by
+  apply deletedWriteRuntimeRelated.leftUnreachable_of_forward_unmapped
+  simp [emptyAddressRenaming]
+
+theorem deletedObjectSetReady :
+    DeletedObjectSetReadyAt deletedObjectSetSourceState
+      (runtimeRoots deletedObjectSetSourceState.runtime
+        (envRootsOn neutralUsed deletedObjectSetSourceState.env))
+      dead 0 .erased := by
+  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
+    deletedWriteObject, .erased, ?_, rfl, ?_, rfl, rfl, ?_, ?_⟩
+  · simp [deletedObjectSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · simp [deletedWriteObject]
+  · simpa [deletedObjectSetSourceState] using
+      deletedWriteDestinationUnreachable
+
+theorem deletedUSizeSetReady :
+    DeletedUSizeSetReadyAt deletedUSizeSetSourceState
+      (runtimeRoots deletedUSizeSetSourceState.runtime
+        (envRootsOn neutralUsed deletedUSizeSetSourceState.env))
+      dead 0 usizeField := by
+  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
+    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · simp [deletedWriteObject]
+  · simpa [deletedUSizeSetSourceState] using
+      deletedWriteDestinationUnreachable
+
+theorem deletedScalarSetReady :
+    DeletedScalarSetReadyAt deletedScalarSetSourceState
+      (runtimeRoots deletedScalarSetSourceState.runtime
+        (envRootsOn neutralUsed deletedScalarSetSourceState.env))
+      dead scalarField := by
+  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
+    deletedWriteObject, .uint8 9, ?_, ?_, ?_, rfl, rfl, ?_⟩
+  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · simpa [deletedScalarSetSourceState] using
+      deletedWriteDestinationUnreachable
+
+/-- The first mutation in the closed regression takes one source step while
+the transformed target stutters at the live return. -/
+theorem deletedObjectSetSourceOnlyMachineStep :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        deletedObjectSetSourceState with
+        runtime := nextRuntime
+        control := .code (.uset dead 0 usizeField <|
+          .sset dead 8 0 scalarField u8Type <| .return live) }
+      coreStep deletedObjectSetSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 4 emptyAddressRenaming sourceAfter
+          deletedWritesTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 4)
+      deletedObjectSetSourceState.program deletedWritesTargetState.program := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramShadowRelated
+  have frames : ReachableFramesRelated 4 emptyAddressRenaming
+      deletedObjectSetSourceState.frames deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedObjectSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedObjectSetSourceState.runtime deletedWritesTargetState.runtime
+      (envRootsOn neutralUsed deletedObjectSetSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  have progress := coreStep_deletedObjectSet_of_ready
+    (sourceState := deletedObjectSetSourceState)
+    (targetState := deletedWritesTargetState)
+    (sourceContinuation := .uset dead 0 usizeField <|
+      .sset dead 8 0 scalarField u8Type <| .return live)
+    (targetContinuation := .return live)
+    programs frames deletedUSizeScalarShadowGraph
+    (ShadowJoinEnvRelated.empty 4 neutralUsed) env runtime
+    (by simpa using deletedObjectSetReady)
+  simpa [deletedObjectSetSourceState, deletedWritesTargetState,
+    deletedWritesBefore, deletedWritesAfter, withCodeControl] using progress
+
+theorem deletedUSizeSetSourceOnlyMachineStep :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        deletedUSizeSetSourceState with
+        runtime := nextRuntime
+        control := .code (.sset dead 8 0 scalarField u8Type <| .return live) }
+      coreStep deletedUSizeSetSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 4 emptyAddressRenaming sourceAfter
+          deletedWritesTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 4)
+      deletedUSizeSetSourceState.program deletedWritesTargetState.program := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramShadowRelated
+  have frames : ReachableFramesRelated 4 emptyAddressRenaming
+      deletedUSizeSetSourceState.frames deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedUSizeSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedUSizeSetSourceState.runtime deletedWritesTargetState.runtime
+      (envRootsOn neutralUsed deletedUSizeSetSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  have progress := coreStep_deletedUSizeSet_of_ready
+    (sourceState := deletedUSizeSetSourceState)
+    (targetState := deletedWritesTargetState)
+    (sourceContinuation := .sset dead 8 0 scalarField u8Type <| .return live)
+    (targetContinuation := .return live)
+    programs frames deletedScalarShadowGraph
+    (ShadowJoinEnvRelated.empty 4 neutralUsed) env runtime
+    (by simpa using deletedUSizeSetReady)
+  simpa [deletedUSizeSetSourceState, deletedWritesTargetState,
+    deletedWritesAfter, withCodeControl] using progress
+
+theorem deletedScalarSetSourceOnlyMachineStep :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        deletedScalarSetSourceState with
+        runtime := nextRuntime
+        control := .code (.return live) }
+      coreStep deletedScalarSetSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 4 emptyAddressRenaming sourceAfter
+          deletedWritesTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 4)
+      deletedScalarSetSourceState.program deletedWritesTargetState.program := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramShadowRelated
+  have frames : ReachableFramesRelated 4 emptyAddressRenaming
+      deletedScalarSetSourceState.frames deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedScalarSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedScalarSetSourceState.runtime deletedWritesTargetState.runtime
+      (envRootsOn neutralUsed deletedScalarSetSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  have progress := coreStep_deletedScalarSet_of_ready
+    (sourceState := deletedScalarSetSourceState)
+    (targetState := deletedWritesTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    programs frames returnLiveShadowGraph4
+    (ShadowJoinEnvRelated.empty 4 neutralUsed) env runtime
+    (width := 8) (offset := 0) (type := u8Type)
+    (by simpa using deletedScalarSetReady)
+  simpa [deletedScalarSetSourceState, deletedWritesTargetState,
+    deletedWritesAfter, withCodeControl] using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/

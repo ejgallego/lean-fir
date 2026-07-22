@@ -154,6 +154,57 @@ theorem listRel_mono
   | nil => exact .nil
   | cons head tail ih => exact .cons (element head) ih
 
+theorem listRel_append
+    (first : ListRel relation leftFirst rightFirst)
+    (second : ListRel relation leftSecond rightSecond) :
+    ListRel relation (leftFirst ++ leftSecond) (rightFirst ++ rightSecond) := by
+  induction first with
+  | nil => exact second
+  | cons head tail ih => exact .cons head ih
+
+theorem listRel_flatMap
+    (related : ListRel relation left right)
+    (elements : ∀ {leftValue rightValue}, relation leftValue rightValue →
+      ListRel output (leftItems leftValue) (rightItems rightValue)) :
+    ListRel output
+      (left.flatMap leftItems) (right.flatMap rightItems) := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact listRel_append (elements head) ih
+
+theorem listRel_exists_right_of_mem
+    (related : ListRel relation left right)
+    (member : value ∈ left) :
+    ∃ target, target ∈ right ∧ relation value target := by
+  induction related with
+  | nil => simp at member
+  | cons head tail ih =>
+      simp only [List.mem_cons] at member
+      cases member with
+      | inl same =>
+          subst value
+          exact ⟨_, List.mem_cons_self, head⟩
+      | inr member =>
+          rcases ih member with ⟨target, targetMember, targetRelated⟩
+          exact ⟨target, List.mem_cons_of_mem _ targetMember, targetRelated⟩
+
+theorem listRel_exists_left_of_mem
+    (related : ListRel relation left right)
+    (member : value ∈ right) :
+    ∃ source, source ∈ left ∧ relation source value := by
+  induction related with
+  | nil => simp at member
+  | cons head tail ih =>
+      simp only [List.mem_cons] at member
+      cases member with
+      | inl same =>
+          subst value
+          exact ⟨_, List.mem_cons_self, head⟩
+      | inr member =>
+          rcases ih member with ⟨source, sourceMember, sourceRelated⟩
+          exact ⟨source, List.mem_cons_of_mem _ sourceMember, sourceRelated⟩
+
 theorem arrayRel_mono
     (element : ∀ {left right}, relation left right → larger left right)
     (related : ArrayRel relation left right) :
@@ -183,6 +234,23 @@ theorem heapCellRel_mono
     HeapCellRel larger left right := by
   rcases related with ⟨rc, persistent, live, object⟩
   exact ⟨rc, persistent, live, heapObjectRel_mono extension object⟩
+
+theorem heapObjectRel_ownedValues
+    (related : HeapObjectRel rho left right) :
+    ListRel (ValueRel rho)
+      left.ownedValues.toList right.ownedValues.toList := by
+  cases related with
+  | ctor tag objects usizes scalars => exact objects
+  | closure fixed => exact fixed
+  | boxed value => exact .cons value .nil
+  | string value | natural value | integer value | byteArray value
+  | «opaque» value => exact .nil
+
+theorem heapCellRel_ownedValues
+    (related : HeapCellRel rho left right) :
+    ListRel (ValueRel rho)
+      left.object.ownedValues.toList right.object.ownedValues.toList :=
+  heapObjectRel_ownedValues related.2.2.2
 
 /-- Values retained by globals must remain available to later declarations. -/
 def NamedValueRel (rho : AddressRenaming)
@@ -255,6 +323,164 @@ theorem heapRel_monoRoots
     exact related.1 location (reachable_monoRoots leftSubset reachable)
   · intro location reachable
     exact related.2 location (reachable_monoRoots rightSubset reachable)
+
+/-- Related roots and heap cells transport every reachable source location
+to its renamed reachable target location. -/
+theorem reachable_forward
+    (roots : ListRel (ValueRel rho) leftRoots rightRoots)
+    (related : HeapRel rho left right leftRoots rightRoots)
+    (reachable : Reachable left leftRoots location) :
+    ∃ target, rho.forward location = some target ∧
+      Reachable right rightRoots target := by
+  induction reachable with
+  | root member =>
+      rcases listRel_exists_right_of_mem roots member with
+        ⟨targetValue, targetMember, value⟩
+      cases value with
+      | heap mapped => exact ⟨_, mapped, .root targetMember⟩
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      subst value
+      rcases ih with ⟨targetParent, parentMapping, targetParentReachable⟩
+      rcases related.1 parent parentReachable with
+        ⟨mappedParent, sourceCell, targetCell, mapped, sourceFound,
+          targetFound, cells⟩
+      have parentEq : mappedParent = targetParent := by
+        rw [parentMapping] at mapped
+        exact (Option.some.inj mapped).symm
+      subst mappedParent
+      have cellEq : sourceCell = cell := by
+        rw [cellFound] at sourceFound
+        exact (Option.some.inj sourceFound).symm
+      subst sourceCell
+      rcases listRel_exists_right_of_mem
+          (heapCellRel_ownedValues cells) member with
+        ⟨targetValue, targetMember, value⟩
+      cases value with
+      | heap childMapping =>
+          exact ⟨_, childMapping,
+            .child targetParentReachable targetFound targetMember rfl⟩
+
+/-- Symmetric reachable-location transport, stated with the reverse map. -/
+theorem reachable_reverse
+    (roots : ListRel (ValueRel rho) leftRoots rightRoots)
+    (related : HeapRel rho left right leftRoots rightRoots)
+    (reachable : Reachable right rightRoots location) :
+    ∃ source, rho.reverse location = some source ∧
+      Reachable left leftRoots source := by
+  induction reachable with
+  | root member =>
+      rcases listRel_exists_left_of_mem roots member with
+        ⟨sourceValue, sourceMember, value⟩
+      cases value with
+      | heap mapped =>
+          exact ⟨_, rho.leftInverse mapped, .root sourceMember⟩
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      subst value
+      rcases ih with ⟨sourceParent, parentMapping, sourceParentReachable⟩
+      rcases related.2 parent parentReachable with
+        ⟨mappedParent, targetCell, sourceCell, mapped, targetFound,
+          sourceFound, cells⟩
+      have parentEq : mappedParent = sourceParent := by
+        rw [parentMapping] at mapped
+        exact (Option.some.inj mapped).symm
+      subst mappedParent
+      have cellEq : targetCell = cell := by
+        rw [cellFound] at targetFound
+        exact (Option.some.inj targetFound).symm
+      subst targetCell
+      rcases listRel_exists_left_of_mem
+          (heapCellRel_ownedValues cells) member with
+        ⟨sourceValue, sourceMember, value⟩
+      cases value with
+      | heap childMapping =>
+          exact ⟨_, rho.leftInverse childMapping,
+            .child sourceParentReachable sourceFound sourceMember rfl⟩
+
+/-- Replacing an unreachable cell cannot create a new path from the existing
+roots: every traversed parent is either different from the replacement point
+or would itself contradict unreachability. -/
+theorem reachable_of_heapFrame_of_unreachable
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (unreachable : ¬Reachable before roots modified)
+    (reachable : Reachable after roots location) :
+    Reachable before roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have different : parent ≠ modified := by
+        intro same
+        subst parent
+        exact unreachable ih
+      have beforeFound : findCell? before parent = some cell := by
+        rw [← frame parent different]
+        exact cellFound
+      exact .child ih beforeFound member reference
+
+/-- Existing reachability is likewise preserved by a heap update outside the
+reachable subgraph. -/
+theorem reachable_heapFrame_of_unreachable
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (unreachable : ¬Reachable before roots modified)
+    (reachable : Reachable before roots location) :
+    Reachable after roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have different : parent ≠ modified := by
+        intro same
+        subst parent
+        exact unreachable parentReachable
+      have afterFound : findCell? after parent = some cell := by
+        rw [frame parent different]
+        exact cellFound
+      exact .child ih afterFound member reference
+
+/-- Updating a source cell outside the reachable subgraph preserves the
+reachable-heap relation.  Target-to-source reachability transport is what
+rules out the modified cell in the reverse half of `HeapRel`. -/
+theorem heapRel_frameLeft_of_unreachable
+    (roots : ListRel (ValueRel rho) leftRoots rightRoots)
+    (related : HeapRel rho before right leftRoots rightRoots)
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (unreachable : ¬Reachable before leftRoots modified) :
+    HeapRel rho after right leftRoots rightRoots := by
+  constructor
+  · intro location afterReachable
+    have beforeReachable :=
+      reachable_of_heapFrame_of_unreachable frame unreachable afterReachable
+    rcases related.1 location beforeReachable with
+      ⟨mapped, sourceCell, targetCell, mapping, sourceFound,
+        targetFound, cells⟩
+    have different : location ≠ modified := by
+      intro same
+      subst location
+      exact unreachable beforeReachable
+    exact ⟨mapped, sourceCell, targetCell, mapping,
+      by simpa [frame location different] using sourceFound,
+      targetFound, cells⟩
+  · intro location targetReachable
+    rcases related.2 location targetReachable with
+      ⟨mapped, targetCell, sourceCell, mapping, targetFound,
+        sourceFound, cells⟩
+    rcases reachable_reverse roots related targetReachable with
+      ⟨reachableSource, reachableMapping, sourceReachable⟩
+    have sourceEq : reachableSource = mapped := by
+      rw [mapping] at reachableMapping
+      exact (Option.some.inj reachableMapping).symm
+    subst reachableSource
+    have different : mapped ≠ modified := by
+      intro same
+      subst mapped
+      exact unreachable sourceReachable
+    exact ⟨mapped, targetCell, sourceCell, mapping, targetFound,
+      by simpa [frame mapped different] using sourceFound, cells⟩
 
 /-- Prepending a cell at an unmapped source location cannot make it reachable
 from roots already governed by the old heap relation. -/
@@ -476,6 +702,23 @@ theorem not_reachable_from_empty
 def traceRoots (trace : Array ExternalEvent) : List Value :=
   trace.toList.flatMap fun event => event.result :: event.args.toList
 
+theorem globalsRoots_related
+    (related : ListRel (NamedValueRel rho) left right) :
+    ListRel (ValueRel rho)
+      (left.map Prod.snd) (right.map Prod.snd) := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih => exact .cons head.2 ih
+
+theorem traceRoots_related
+    (related : ArrayRel (EventRel rho) left right) :
+    ListRel (ValueRel rho) (traceRoots left) (traceRoots right) := by
+  unfold ArrayRel at related
+  unfold traceRoots
+  apply listRel_flatMap related
+  intro leftEvent rightEvent event
+  exact .cons event.2.2 event.2.1
+
 def outcomeRoots : Outcome → List Value
   | .returned value => [value]
   | .fault _ => []
@@ -642,6 +885,181 @@ structure ShadowRuntimeRel (rho : AddressRenaming)
     findCell? left.heap location = none
   rightHeapFresh : ∀ location, right.nextLocation ≤ location →
     findCell? right.heap location = none
+
+theorem ShadowRuntimeRel.roots
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
+    ListRel (ValueRel rho)
+      (runtimeRoots left leftExtra) (runtimeRoots right rightExtra) := by
+  unfold runtimeRoots
+  exact listRel_append
+    (listRel_append related.extra (globalsRoots_related related.globals))
+    (traceRoots_related related.trace)
+
+theorem ShadowRuntimeRel.leftUnreachable_of_forward_unmapped
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (unmapped : rho.forward location = none) :
+    ¬Reachable left.heap (runtimeRoots left leftExtra) location := by
+  intro reachable
+  rcases related.heap.1 location reachable with
+    ⟨mapped, leftCell, rightCell, mapping, leftFound, rightFound, cells⟩
+  rw [unmapped] at mapping
+  contradiction
+
+theorem ShadowRuntimeRel.rightUnreachable_of_reverse_unmapped
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (unmapped : rho.reverse location = none) :
+    ¬Reachable right.heap (runtimeRoots right rightExtra) location := by
+  intro reachable
+  rcases related.heap.2 location reachable with
+    ⟨mapped, rightCell, leftCell, mapping, rightFound, leftFound, cells⟩
+  rw [unmapped] at mapping
+  contradiction
+
+/-- Replacing an unreachable source cell preserves the complete runtime
+relation.  The semantic heap update also preserves the fresh counter and all
+non-heap runtime components. -/
+theorem ShadowRuntimeRel.setCellLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some current)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (replacement : HeapCell) :
+    ∃ result,
+      setCell left location replacement = .ok result ∧
+      ShadowRuntimeRel rho result right leftExtra rightExtra := by
+  rcases setCell_spec_of_find left location current replacement found with
+    ⟨result, effect, target, frame, length, nextLocation,
+      globals, world, trace⟩
+  have locationLt : location < left.nextLocation := by
+    apply Nat.lt_of_not_ge
+    intro bounded
+    have fresh := related.leftHeapFresh location bounded
+    rw [found] at fresh
+    contradiction
+  refine ⟨result, effect, ?_⟩
+  exact {
+    extra := related.extra
+    globals := by
+      rw [globals]
+      exact related.globals
+    world_eq := world.trans related.world_eq
+    trace := by
+      rw [trace]
+      exact related.trace
+    heap := by
+      have framed : HeapRel rho result.heap right.heap
+          (runtimeRoots left leftExtra) (runtimeRoots right rightExtra) :=
+        heapRel_frameLeft_of_unreachable related.roots related.heap frame
+          unreachable
+      simpa [runtimeRoots, globals, trace] using framed
+    leftMappingFresh := by
+      intro candidate bounded
+      exact related.leftMappingFresh candidate (nextLocation ▸ bounded)
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := by
+      intro candidate bounded
+      have oldBounded : left.nextLocation ≤ candidate :=
+        nextLocation ▸ bounded
+      have different : candidate ≠ location :=
+        (Nat.ne_of_lt (Nat.lt_of_lt_of_le locationLt oldBounded)).symm
+      rw [frame candidate different]
+      exact related.leftHeapFresh candidate oldBounded
+    rightHeapFresh := related.rightHeapFresh
+  }
+
+/-- A well-formed object-field write to an unreachable source constructor is
+an observationally silent source-only heap update. -/
+theorem ShadowRuntimeRel.setObjectFieldLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor object)
+    (bounded : index < object.objectFields.size)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (field : Value) :
+    ∃ result,
+      setObjectField left (.object (.heap location)) index field = .ok result ∧
+      ShadowRuntimeRel rho result right leftExtra rightExtra := by
+  let replacement : HeapCell :=
+    { cell with object := .ctor {
+        object with objectFields := object.objectFields.set index field } }
+  rcases related.setCellLeftUnreachable found unreachable replacement with
+    ⟨result, effect, next⟩
+  refine ⟨result, ?_, next⟩
+  have constructor : getConstructor left (.object (.heap location)) =
+      .ok (location, cell, object) := by
+    simp [getConstructor, getLiveCell, found, live, objectEq,
+      Bind.bind, Except.bind]
+    rfl
+  unfold setObjectField modifyConstructor
+  rw [constructor]
+  simp only [Bind.bind, Except.bind]
+  rw [dif_pos bounded]
+  simpa [replacement] using effect
+
+/-- The corresponding unboxed-word write changes only an unreachable cell. -/
+theorem ShadowRuntimeRel.setUSizeFieldLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor object)
+    (bounded : index < object.usizeFields.size)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (field : UInt64) :
+    ∃ result,
+      setUSizeField left (.object (.heap location)) index (.usize field) =
+        .ok result ∧
+      ShadowRuntimeRel rho result right leftExtra rightExtra := by
+  let replacement : HeapCell :=
+    { cell with object := .ctor {
+        object with usizeFields := object.usizeFields.set index field } }
+  rcases related.setCellLeftUnreachable found unreachable replacement with
+    ⟨result, effect, next⟩
+  refine ⟨result, ?_, next⟩
+  have constructor : getConstructor left (.object (.heap location)) =
+      .ok (location, cell, object) := by
+    simp [getConstructor, getLiveCell, found, live, objectEq,
+      Bind.bind, Except.bind]
+    rfl
+  unfold setUSizeField modifyConstructor
+  rw [constructor]
+  simp only [Bind.bind, Except.bind]
+  rw [dif_pos bounded]
+  simpa [replacement] using effect
+
+/-- Scalar writes replace the `(width, offset)` entry only inside the
+unreachable source cell. -/
+theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor object)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (width offset : Nat) (field : ScalarValue) :
+    ∃ result,
+      setScalarField left (.object (.heap location)) width offset
+          (.scalar field) = .ok result ∧
+      ShadowRuntimeRel rho result right leftExtra rightExtra := by
+  let entry : ScalarField := { width, offset, value := field }
+  let fields := entry :: object.scalarFields.filter fun old =>
+    old.width != width || old.offset != offset
+  let replacement : HeapCell :=
+    { cell with object := .ctor { object with scalarFields := fields } }
+  rcases related.setCellLeftUnreachable found unreachable replacement with
+    ⟨result, effect, next⟩
+  refine ⟨result, ?_, next⟩
+  have constructor : getConstructor left (.object (.heap location)) =
+      .ok (location, cell, object) := by
+    simp [getConstructor, getLiveCell, found, live, objectEq,
+      Bind.bind, Except.bind]
+    rfl
+  unfold setScalarField modifyConstructor
+  rw [constructor]
+  simp only [Bind.bind, Except.bind]
+  simpa [entry, fields, replacement] using effect
 
 theorem shadowRuntimeRel_monoRenaming
     (extension : RenamingExtends smaller larger)
