@@ -167,6 +167,20 @@ private def disjointUInt32ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? disjointUInt32ScalarMutationProgram 66
 
+/-- The halfword writer likewise preserves an earlier disjoint halfword. -/
+private def disjointUInt16ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.uint16 (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl s LCNF.ImpureType.uint16 (.lit (.uint16 66))) <|
+      .sset p 2 0 s LCNF.ImpureType.uint16 <|
+      .let (letDecl u LCNF.ImpureType.uint16 (.lit (.uint16 77))) <|
+      .sset p 2 2 u LCNF.ImpureType.uint16 <|
+      .let (letDecl r LCNF.ImpureType.uint16 (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? disjointUInt16ScalarMutationProgram 66
+
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|

@@ -2539,6 +2539,13 @@ four, then projects the first `UInt32` after the second write. `UInt8` and
 `UInt16` writers still use the same-coordinate replacement boundary. No
 executable layout or shared semantic contract changed.
 
+W6.6be carries the same interval invariant through `UInt16`. The byte-level
+halfword proof frames disjoint retained `UInt8`, `UInt16`, `UInt32`, and
+`UInt64` reads, with complete-heap, Talos-host, and generated-call composition
+above it. A two-coordinate module writes offsets zero and two and rereads the
+first halfword. Only the `UInt8` writer remains on the same-coordinate-only
+boundary. No executable layout or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
