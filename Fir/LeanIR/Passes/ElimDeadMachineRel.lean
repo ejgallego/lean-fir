@@ -1488,6 +1488,187 @@ theorem match_deletedLetStep_of_ready
       rw [transition] at actual
       contradiction
 
+/-- Determinism turns any exhibited source-only core transition into the
+zero-target-step branch of the relational simulation. -/
+theorem match_sourceOnlyCoreStep
+    (transition : coreStep source = .next expectedSourceAfter)
+    (related : ReachableMachineRelated fuel rho expectedSourceAfter target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact ⟨target, NonLockstep.reaches_refl target, related⟩
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
+
+/-- A deleted join declaration installs one source-only join entry.  Its
+identifier is absent from the active liveness set, so all resumable join
+lookups and all reachable runtime roots remain unchanged. -/
+theorem coreStep_deletedJoin_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      joins := (declaration.fvarId, declaration) :: sourceState.joins
+      control := .code sourceContinuation }
+    coreStep { sourceState with
+        control := .code (.jp declaration sourceContinuation) } =
+        .next sourceAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · rfl
+  · unfold ReachableMachineRelated
+    exact ⟨envRootsOn used sourceState.env,
+      envRootsOn used targetState.env,
+      sourceFrameRoots, targetFrameRoots,
+      programs, .code continuation (joins.consSourceOfAbsent absent) env,
+      frames, runtime⟩
+
+/-- Semantic-step form of the deleted-join rule. -/
+theorem match_deletedJoinStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.jp declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have progress := coreStep_deletedJoin_reachableRelated
+    sourceState targetState programs frames continuation joins env absent
+      runtime
+  exact match_sourceOnlyCoreStep progress.1 progress.2 step
+
+/-- Semantic-step form of a certified deleted object-field write. -/
+theorem match_deletedObjectSetStep_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedObjectSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.oset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_deletedObjectSet_of_ready sourceState targetState
+      programs frames continuation joins env runtime ready with
+    ⟨nextRuntime, transition, related⟩
+  exact match_sourceOnlyCoreStep transition related step
+
+/-- Semantic-step form of a certified deleted unboxed-field write. -/
+theorem match_deletedUSizeSetStep_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_deletedUSizeSet_of_ready sourceState targetState
+      programs frames continuation joins env runtime ready with
+    ⟨nextRuntime, transition, related⟩
+  exact match_sourceOnlyCoreStep transition related step
+
+/-- Semantic-step form of a certified deleted scalar-field write. -/
+theorem match_deletedScalarSetStep_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedScalarSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object field)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.sset object width offset field type sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_deletedScalarSet_of_ready sourceState targetState
+      programs frames continuation joins env runtime ready with
+    ⟨nextRuntime, transition, related⟩
+  exact match_sourceOnlyCoreStep transition related step
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation
