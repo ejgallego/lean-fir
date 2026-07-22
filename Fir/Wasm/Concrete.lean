@@ -14,6 +14,7 @@ import Fir.Wasm.Concrete.ObjectFieldsCorrectness
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import Fir.Wasm.Concrete.HeapRefinement
 import Fir.Wasm.Concrete.NaturalAllocationCorrectness
+import Fir.Wasm.Concrete.IntegerAllocationCorrectness
 import Fir.Wasm.Concrete.PromotedTagCorrectness
 import Fir.Wasm.Concrete.ConstructorAllocationCorrectness
 import Fir.Wasm.Concrete.ConstructorHeapCorrectness

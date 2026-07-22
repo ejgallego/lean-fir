@@ -17,6 +17,7 @@ inductive MemoryError where
   | invalidAllocationSize (bytes : Nat)
   | malformedHeader (address allocationBytes : Nat)
   | malformedBoxedHeader (address : Nat)
+  | malformedIntegerHeader (address : Nat)
   | deadObject (address : Word32)
   | unsupportedOwnershipKind (kind : ObjectKind)
   | releaseFuelExhausted

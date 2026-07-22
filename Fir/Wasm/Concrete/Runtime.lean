@@ -71,6 +71,10 @@ def promotedTagMarker : UInt32 := 1
 
 def bigNaturalMarker : UInt32 := 2
 
+/-- Experimental version marker for the current arbitrary-precision heap-Int
+layout. Clients may rely on the checked API, not on long-term layout stability. -/
+def integerSignMagnitudeMarker : UInt32 := 1
+
 /-- Version marker for the W6 string payload. Strings store their canonical
 UTF-8 bytes contiguously after the common header; `aux1` records the exact byte
 count and `aux2`/`aux3` remain reserved. -/
@@ -548,6 +552,60 @@ def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError N
   unless header.kind == .natural && header.aux0 == bigNaturalMarker do
     throw (.source .expectedObject)
   liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
+
+/-- Unsigned magnitude represented by a semantic arbitrary-precision integer. -/
+def integerMagnitude : Int → Nat
+  | .ofNat value => value
+  | .negSucc value => value + 1
+
+/-- Header sign lane for the current experimental Int layout: zero is
+nonnegative and one is negative. -/
+def integerSign : Int → UInt32
+  | .ofNat _ => 0
+  | .negSucc _ => 1
+
+def integerOfSignMagnitude (negative : Bool) (magnitude : Nat) : Int :=
+  if negative then -(Int.ofNat magnitude) else Int.ofNat magnitude
+
+/-- Allocate one ordinary arbitrary-precision integer as canonical
+little-endian base-`2^64` magnitude limbs. Header auxiliaries currently carry
+`(version, limbCount, sign, reserved)`. This is an experimental concrete
+surface and may evolve with the backend. -/
+def allocateInteger (state : MemoryState) (value : Int) :
+    Except ConcreteError (MemoryState × Word32) := do
+  let limbs := naturalLimbs (integerMagnitude value)
+  let limbCount ← uint32Field "integer limb count" limbs.length
+  let (state, address) ← liftMemory <|
+    state.allocateObject .integer (target.semanticSlotBytes * limbs.length)
+      false integerSignMagnitudeMarker limbCount (integerSign value) 0
+  let memory ← liftMemory <|
+    writeNaturalLimbs state.memory address.value 0 limbs
+  return ({ state with memory }, address)
+
+/-- Decode the current checked arbitrary-precision heap-Int layout. The
+decoder rejects unknown versions, invalid signs, empty magnitudes, negative
+zero, reserved metadata, and noncanonical allocation extents. -/
+def readInteger (state : MemoryState) (object : Word32) : Except ConcreteError Int := do
+  unless object.classify = .heap do
+    throw (.source .expectedObject)
+  let header ← liftMemory <| state.readLiveHeader object
+  unless header.kind == .integer &&
+      header.aux0 == integerSignMagnitudeMarker do
+    throw (.source .expectedObject)
+  let limbCount := header.aux1.toNat
+  unless (header.aux2 == 0 || header.aux2 == 1) && header.aux3 == 0 &&
+      0 < limbCount && header.allocationBytes.toNat =
+        align8 (headerBytes + target.semanticSlotBytes * limbCount) do
+    throw (.target (.malformedIntegerHeader object.value))
+  let magnitude ← liftMemory <|
+    readNaturalLimbs state.memory object.value 0 limbCount
+  if header.aux2 == 1 then
+    if magnitude == 0 then
+      throw (.target (.malformedIntegerHeader object.value))
+    else
+      return integerOfSignMagnitude true magnitude
+  else
+    return integerOfSignMagnitude false magnitude
 
 /-- Canonical byte sequence stored by one concrete string allocation. Keeping
 this conversion public lets the refinement layer compare the payload directly

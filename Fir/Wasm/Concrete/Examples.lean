@@ -923,6 +923,33 @@ covered by `allocateNatural_heap_liveHeapRel`. -/
             value == UInt64.size + 5
       | _, _ => false
 
+/- These exercise the current experimental heap-Int boundary. The layout is
+allowed to evolve; clients should depend on `allocateInteger_objectRel` and
+`readInteger`, not on these auxiliary lanes as a stable ABI. -/
+#guard match allocateInteger MemoryState.initial (.ofNat (UInt64.size + 5)) with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readInteger state object with
+      | .ok header, .ok value =>
+          header.kind == .integer && !header.persistent &&
+            header.refCount == 1 &&
+            header.aux0 == integerSignMagnitudeMarker &&
+            header.aux1 == 2 && header.aux2 == 0 && header.aux3 == 0 &&
+            value == .ofNat (UInt64.size + 5)
+      | _, _ => false
+
+#guard match allocateInteger MemoryState.initial (.negSucc UInt64.size) with
+  | .error _ => false
+  | .ok (state, object) =>
+      match state.readLiveHeader object, readInteger state object with
+      | .ok header, .ok value =>
+          header.kind == .integer && !header.persistent &&
+            header.refCount == 1 &&
+            header.aux0 == integerSignMagnitudeMarker &&
+            header.aux1 == 2 && header.aux2 == 1 && header.aux3 == 0 &&
+            value == .negSucc UInt64.size
+      | _, _ => false
+
 def semanticMixedConstructor :=
   Fir.LeanIR.Impure.allocCtor (runtime := {}) mixedConstructorInfo
     #[.object (.tagged 11)]
