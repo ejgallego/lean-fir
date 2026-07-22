@@ -1031,6 +1031,20 @@ theorem envRootsOn_bindParams_subset
       · exact inArguments
       · simp [envRootsOn, lookup] at inEmpty
 
+/-- Binding join parameters over an existing environment publishes only
+argument values or roots that were already published by that environment. -/
+theorem envRootsOn_bindParamsOver_subset
+    (bound : bindParamsOver sourceEnv params arguments = .ok targetEnv) :
+    RootSubset (envRootsOn used targetEnv)
+      (arguments.toList ++ envRootsOn used sourceEnv) := by
+  unfold bindParamsOver at bound
+  cases arityEq : params.size == arguments.size with
+  | false => simp [arityEq] at bound
+  | true =>
+      simp [arityEq] at bound
+      subst targetEnv
+      exact envRootsOn_bindPairs_subset params.toList arguments.toList
+
 /-- The call and extra-argument slices used by `invokeDecl` partition the
 original argument array. -/
 theorem array_extract_partition (values : Array α) (split : Nat) :
@@ -1261,6 +1275,80 @@ theorem evalArgs_relOn
   | ok values =>
       exact .ok (by simpa [ArrayRel] using values)
 
+/-- A successfully evaluated covered argument is either the interpreter's
+synthetic erased value or an existing live environment root. -/
+theorem evalArg_value_rooted
+    (covered : ArgCovered used argument)
+    (evaluated : evalArg env argument = .ok value) :
+    value = .erased ∨ value ∈ envRootsOn used env := by
+  cases argument with
+  | erased =>
+      simp [evalArg] at evaluated
+      subst value
+      exact Or.inl rfl
+  | fvar fvarId =>
+      cases found : lookup env fvarId with
+      | none => simp [evalArg, found] at evaluated
+      | some foundValue =>
+          simp [evalArg, found] at evaluated
+          subst value
+          exact Or.inr (lookup_mem_envRootsOn covered found)
+  | type type impossible => nomatch impossible
+
+/-- Every value returned by covered list evaluation is rooted by the old
+environment, apart from `.erased`, which carries no heap address. -/
+theorem evalArgList_values_subset
+    (arguments : List (LCNF.Arg .impure))
+    (covered : ∀ argument, argument ∈ arguments →
+      ArgCovered used argument)
+    (evaluated : arguments.mapM (evalArg env) = .ok values) :
+    RootSubset values (.erased :: envRootsOn used env) := by
+  induction arguments generalizing values with
+  | nil =>
+      simp [Pure.pure, Except.pure] at evaluated
+      subst values
+      exact fun value member => by simp at member
+  | cons head tail ih =>
+      rw [List.mapM_cons] at evaluated
+      cases headResult : evalArg env head with
+      | error fault =>
+          simp [headResult, Bind.bind, Except.bind] at evaluated
+      | ok headValue =>
+          cases tailResult : tail.mapM (evalArg env) with
+          | error fault =>
+              simp [headResult, tailResult, Bind.bind, Except.bind] at evaluated
+          | ok tailValues =>
+              simp [headResult, tailResult, Bind.bind, Except.bind,
+                Pure.pure, Except.pure] at evaluated
+              subst values
+              intro value member
+              simp only [List.mem_cons] at member ⊢
+              rcases member with same | tailMember
+              · subst value
+                exact evalArg_value_rooted
+                  (covered head (by simp)) headResult
+              · simpa only [List.mem_cons] using
+                  ih (fun argument member =>
+                    covered argument (by simp [member]))
+                    tailResult value tailMember
+
+/-- Array form of `evalArgList_values_subset`. -/
+theorem evalArgs_values_subset
+    (covered : ArgsCovered used arguments)
+    (evaluated : evalArgs env arguments = .ok values) :
+    RootSubset values.toList (.erased :: envRootsOn used env) := by
+  unfold evalArgs at evaluated
+  rw [Array.mapM_eq_mapM_toList] at evaluated
+  generalize listResultEq : arguments.toList.mapM (evalArg env) = listResult
+    at evaluated
+  cases listResult with
+  | error fault => simp [Functor.map, Except.map] at evaluated
+  | ok listValues =>
+      simp [Functor.map, Except.map] at evaluated
+      subst values
+      simpa using
+        evalArgList_values_subset arguments.toList covered listResultEq
+
 inductive EnvResultRelOn (rho : AddressRenaming) (used : UsedLocals) :
     Except RuntimeFault Env → Except RuntimeFault Env → Prop where
   | error (fault : RuntimeFault) :
@@ -1381,6 +1469,34 @@ theorem ShadowRuntimeRel.reindexExtra
     leftHeapFresh := related.leftHeapFresh
     rightHeapFresh := related.rightHeapFresh
   }
+
+/-- Adding `.erased` to a root set does not make any heap location
+reachable. -/
+theorem reachable_without_erased_root
+    (reachable : Reachable heap (.erased :: roots) location) :
+    Reachable heap roots location := by
+  induction reachable with
+  | root member =>
+      simp only [List.mem_cons] at member
+      rcases member with impossible | member
+      · cases impossible
+      · exact .root member
+  | child parent found owned reference ih =>
+      exact .child ih found owned reference
+
+/-- The runtime relation may publish `.erased` as an additional direct root:
+it is related to itself and carries no heap address. -/
+theorem ShadowRuntimeRel.prependErased
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
+    ShadowRuntimeRel rho left right
+      (.erased :: leftExtra) (.erased :: rightExtra) := by
+  apply related.reindexExtra (.cons .erased related.extra)
+  · intro location reachable
+    apply reachable_without_erased_root
+    simpa [runtimeRoots] using reachable
+  · intro location reachable
+    apply reachable_without_erased_root
+    simpa [runtimeRoots] using reachable
 
 theorem closureCallRoots_reachable
     (found : findCell? runtime.heap closureLocation = some cell)
