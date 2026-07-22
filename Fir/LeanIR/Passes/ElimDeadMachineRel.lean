@@ -1146,6 +1146,245 @@ inductive DeletedLetReadyAt (state : MachineState) (roots : List Value) :
         fvarId, binderName, type,
         value := .reuse token info updateHeader arguments }
 
+/-- Readiness for a let edge in the reachable-runtime graph.  Retained lets
+need no additional semantic premise: their operands are covered by the live
+environment relation and both machines will execute them.  A deleted let
+must instead carry the operation-specific certificate consumed by the
+source-only rule below. -/
+inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
+    (declaration : LCNF.LetDecl .impure)
+    (sourceContinuation : LCNF.Code .impure) (state : MachineState)
+    (roots : List Value) :
+    {target : LCNF.Code .impure} →
+      ShadowLetResidual fuel used declaration sourceContinuation target →
+        Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (covered : LetValueCovered used declaration.value) :
+      ReachableLetReadyAt fuel used declaration sourceContinuation state roots
+        (.retained targetContinuation continuation covered)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (absent : used.contains declaration.fvarId = false)
+      (ready : DeletedLetReadyAt state roots declaration) :
+      ReachableLetReadyAt fuel used declaration sourceContinuation state roots
+        (.deleted targetContinuation continuation)
+
+/-- Reachable-runtime readiness for a conditionally deleted object write. -/
+inductive ReachableObjectSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : LCNF.Arg .impure)
+    (sourceContinuation : LCNF.Code .impure) (state : MachineState)
+    (roots : List Value) :
+    {target : LCNF.Code .impure} →
+      ShadowObjectSetResidual fuel used object index field sourceContinuation
+        target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldCovered : ArgCovered used field) :
+      ReachableObjectSetReadyAt fuel used object index field
+        sourceContinuation state roots
+        (.retained targetContinuation continuation objectMember fieldCovered)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (ready : DeletedObjectSetReadyAt state roots object index field) :
+      ReachableObjectSetReadyAt fuel used object index field
+        sourceContinuation state roots
+        (.deleted targetContinuation continuation)
+
+/-- Reachable-runtime readiness for a conditionally deleted unboxed write. -/
+inductive ReachableUSizeSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (index : Nat) (field : FVarId)
+    (sourceContinuation : LCNF.Code .impure) (state : MachineState)
+    (roots : List Value) :
+    {target : LCNF.Code .impure} →
+      ShadowUSizeSetResidual fuel used object index field sourceContinuation
+        target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ReachableUSizeSetReadyAt fuel used object index field
+        sourceContinuation state roots
+        (.retained targetContinuation continuation objectMember fieldMember)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (ready : DeletedUSizeSetReadyAt state roots object index field) :
+      ReachableUSizeSetReadyAt fuel used object index field
+        sourceContinuation state roots
+        (.deleted targetContinuation continuation)
+
+/-- Reachable-runtime readiness for a conditionally deleted scalar write. -/
+inductive ReachableScalarSetReadyAt (fuel : Nat) (used : UsedLocals)
+    (object : FVarId) (width offset : Nat) (field : FVarId) (type : Expr)
+    (sourceContinuation : LCNF.Code .impure) (state : MachineState)
+    (roots : List Value) :
+    {target : LCNF.Code .impure} →
+      ShadowScalarSetResidual fuel used object width offset field type
+        sourceContinuation target → Prop where
+  | retained (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (objectMember : used.contains object = true)
+      (fieldMember : used.contains field = true) :
+      ReachableScalarSetReadyAt fuel used object width offset field type
+        sourceContinuation state roots
+        (.retained targetContinuation continuation objectMember fieldMember)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (ready : DeletedScalarSetReadyAt state roots object field) :
+      ReachableScalarSetReadyAt fuel used object width offset field type
+        sourceContinuation state roots
+        (.deleted targetContinuation continuation)
+
+/-- Operational certificate for the active node of a transparent graph.
+The graph determines whether a conditional node was retained or deleted;
+the certificate adds exactly the semantic premises needed by that branch. -/
+inductive ReachableCodeReadyAt (fuel : Nat) (used : UsedLocals)
+    (state : MachineState) (roots : List Value) :
+    {source target : LCNF.Code .impure} →
+      ShadowCodeGraph fuel used source target → Prop where
+  | letE
+      (graph : ShadowCodeGraph fuel used
+        (.let declaration sourceContinuation) target)
+      (ready : ReachableLetReadyAt fuel used declaration sourceContinuation
+        state roots graph.letResidual) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | join
+      (graph : ShadowCodeGraph fuel used
+        (.jp declaration sourceContinuation) target)
+      (ready : ShadowJoinReadyAt fuel used declaration sourceContinuation
+        graph.joinResidual) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | cases
+      (graph : ShadowCodeGraph fuel used (.cases caseInfo) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | jump
+      (graph : ShadowCodeGraph fuel used (.jmp join arguments) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | ret
+      (graph : ShadowCodeGraph fuel used (.return value) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | unreachable
+      (graph : ShadowCodeGraph fuel used (.unreach type) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | setTag
+      (graph : ShadowCodeGraph fuel used
+        (.setTag object tag continuation) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | increment
+      (graph : ShadowCodeGraph fuel used
+        (.inc object amount check persistent continuation) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | decrement
+      (graph : ShadowCodeGraph fuel used
+        (.dec object amount check persistent objects continuation) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | delete
+      (graph : ShadowCodeGraph fuel used (.del object continuation) target) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | objectSet
+      (graph : ShadowCodeGraph fuel used
+        (.oset object index field continuation) target)
+      (ready : ReachableObjectSetReadyAt fuel used object index field
+        continuation state roots graph.objectSetResidual) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | usizeSet
+      (graph : ShadowCodeGraph fuel used
+        (.uset object index field continuation) target)
+      (ready : ReachableUSizeSetReadyAt fuel used object index field
+        continuation state roots graph.usizeSetResidual) :
+      ReachableCodeReadyAt fuel used state roots graph
+  | scalarSet
+      (graph : ShadowCodeGraph fuel used
+        (.sset object width offset field type continuation) target)
+      (ready : ReachableScalarSetReadyAt fuel used object width offset field
+        type continuation state roots graph.scalarSetResidual) :
+      ReachableCodeReadyAt fuel used state roots graph
+
+/-- Readiness for an arbitrary related control.  Invocation and yielded
+controls impose no local operation premise; code controls expose the exact
+graph and complete source runtime roots used by deletion certificates. -/
+def ReachableControlReadyAt (fuel : Nat) (sourceState : MachineState)
+    (sourceFrameRoots : List Value) (sourceControl targetControl : Control) :
+    Prop :=
+  ∀ {used sourceCode targetCode},
+    sourceControl = .code sourceCode →
+    targetControl = .code targetCode →
+    (graph : ShadowCodeGraph fuel used sourceCode targetCode) →
+      ReachableCodeReadyAt fuel used sourceState
+        (runtimeRoots sourceState.runtime
+          (envRootsOn used sourceState.env ++ sourceFrameRoots)) graph
+
+/-- Pair-level form used by the eventual simulation laws.  It is universal
+over the proof-valued root witnesses hidden by `ReachableMachineRelated`, so
+readiness cannot depend on choosing a more convenient decomposition. -/
+def ReachableMachineReadyAt (fuel : Nat) (source target : MachineState) :
+    Prop :=
+  ∀ {rho sourceControlRoots targetControlRoots
+      sourceFrameRoots targetFrameRoots},
+    ProgramRelated (ShadowCodeRelated fuel) source.program target.program →
+    ReachableControlRelated fuel rho
+      source.env source.joins source.control
+      target.env target.joins target.control
+      sourceControlRoots targetControlRoots →
+    ReachableFramesRelated fuel rho source.frames target.frames
+      sourceFrameRoots targetFrameRoots →
+    ShadowRuntimeRel rho source.runtime target.runtime
+      (sourceControlRoots ++ sourceFrameRoots)
+      (targetControlRoots ++ targetFrameRoots) →
+    ReachableControlReadyAt fuel source sourceFrameRoots
+      source.control target.control
+
+/-- Structural reachability plus a separately maintained semantic invariant.
+The invariant will supply active readiness and be preserved across the
+finite paths chosen by the non-lockstep simulation. -/
+structure ReachableMachineRelatedWith (fuel : Nat)
+    (invariant : MachineState → MachineState → Prop)
+    (source target : MachineState) : Prop where
+  structural : SomeReachableMachineRelated fuel source target
+  invariant : invariant source target
+
+/-- Laws expected from compiler well-formedness and ownership analysis.  In
+particular, `ready` makes the nullary-FAP discrepancy an explicit unprovable
+obligation rather than an assumption inside the operational proof. -/
+structure ReachableInvariantLaws (externals : ExternalSpec) (fuel : Nat)
+    (invariant : MachineState → MachineState → Prop) : Prop where
+  ready : ∀ {source target},
+    SomeReachableMachineRelated fuel source target →
+    invariant source target → ReachableMachineReadyAt fuel source target
+  stable : ∀ {sourceBefore targetBefore sourceAfter targetAfter},
+    invariant sourceBefore targetBefore →
+    SomeReachableMachineRelated fuel sourceBefore targetBefore →
+    NonLockstep.Reaches externals sourceBefore sourceAfter →
+    NonLockstep.Reaches externals targetBefore targetAfter →
+    SomeReachableMachineRelated fuel sourceAfter targetAfter →
+      invariant sourceAfter targetAfter
+
+/-- A nullary full application can never satisfy the local deleted-let
+certificate: evaluating it produces an invocation action, not a value. -/
+theorem DeletedLetReadyAt.not_nullaryFap
+    (ready : DeletedLetReadyAt state roots {
+      fvarId, binderName, type, value := .fap name #[] }) : False := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      have empty : evalArgs state.env #[] = .ok #[] := by
+        unfold evalArgs
+        rw [Array.mapM_empty]
+        rfl
+      simp only [evalLetValue] at evaluated
+      rw [empty] at evaluated
+      change Except.ok (state.runtime, LetAction.invokeName name #[]) =
+        Except.ok (state.runtime, LetAction.value value) at evaluated
+      cases evaluated
+
 /-- General deleted-let stuttering rule.  Once the transparent graph supplies
 the related continuation and binder absence, `DeletedLetReadyAt` dispatches
 all locally value-producing safe-elimination shapes to one source step and
