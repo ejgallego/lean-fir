@@ -158,6 +158,39 @@ def packedPreserve (y : UInt32) : UInt32 :=
 def packedProjectUSize (value : USize) : USize :=
   PackedPoint.getX { x := value, y := 0 }
 
+/-- A source-level aggregate spanning every final-LCNF constructor storage class. -/
+structure MixedLayout where
+  natural : Nat
+  text : String
+  bytes : ByteArray
+  usize : USize
+  scalar : UInt32
+
+@[noinline]
+def mkMixedLayout (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : MixedLayout :=
+  { natural, text, bytes, usize, scalar }
+
+def mixedLayoutNatural (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : Nat :=
+  (mkMixedLayout natural text bytes usize scalar).natural
+
+def mixedLayoutText (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : String :=
+  (mkMixedLayout natural text bytes usize scalar).text
+
+def mixedLayoutBytes (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : ByteArray :=
+  (mkMixedLayout natural text bytes usize scalar).bytes
+
+def mixedLayoutUSize (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : USize :=
+  (mkMixedLayout natural text bytes usize scalar).usize
+
+def mixedLayoutUInt32 (natural : Nat) (text : String) (bytes : ByteArray)
+    (usize : USize) (scalar : UInt32) : UInt32 :=
+  (mkMixedLayout natural text bytes usize scalar).scalar
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -489,6 +522,20 @@ private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
+private def mixedLayoutText : String :=
+  "FIR\nα🙂"
+
+private def mixedLayoutBytes : ByteArray :=
+  ⟨#[0, 127, 128, 255]⟩
+
+private def mixedLayoutArgs : Array ValidationDatum :=
+  #[.nat Source.largeNat, .string mixedLayoutText, byteArrayDatum mixedLayoutBytes,
+    .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 32 (UInt64.ofNat Source.maxUInt32.toNat)]
+
+private def mixedLayoutArgSchemas : Array ValidationSchema :=
+  #[.nat, .string, .bytes, .usize, .bits 32]
+
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
   | .node left right => .ctor "Assoc.node" 1 #[assocDatum left, assocDatum right]
@@ -787,6 +834,79 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms :=
       #["lit", "ctor", "uset", "sset", "fap", "uproj", "return", "dec"]
     provenance := firProvenance "Project a USize field from a packed mixed-scalar structure" },
+  { id := "mixed-layout-natural"
+    entry := ``Source.mixedLayoutNatural
+    dependencies := #[``Source.mkMixedLayout]
+    args := mixedLayoutArgs
+    argSchemas := mixedLayoutArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.mixedLayoutNatural Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32)
+    tags := #["stress", "mixed-layout", "object", "projection", "heap", "boundary"]
+    requiredLcnfForms := #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    provenance := firProvenance
+      "Project a heap natural from an aggregate mixing object, USize, and scalar slots" },
+  { id := "mixed-layout-string"
+    entry := ``Source.mixedLayoutText
+    dependencies := #[``Source.mkMixedLayout]
+    args := mixedLayoutArgs
+    argSchemas := mixedLayoutArgSchemas
+    resultSchema := .string
+    native := fun _ => .string
+      (Source.mixedLayoutText Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32)
+    tags := #["stress", "mixed-layout", "object", "projection", "string", "unicode"]
+    requiredLcnfForms := #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    provenance := firProvenance
+      "Project a newline and non-BMP Unicode string from a mixed-layout aggregate" },
+  { id := "mixed-layout-byte-array"
+    entry := ``Source.mixedLayoutBytes
+    dependencies := #[``Source.mkMixedLayout]
+    args := mixedLayoutArgs
+    argSchemas := mixedLayoutArgSchemas
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.mixedLayoutBytes Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32)
+    tags := #["stress", "mixed-layout", "object", "projection", "bytes", "boundary"]
+    requiredLcnfForms := #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["ctor", "uset", "sset", "fap", "oproj", "inc", "dec", "return"]
+    provenance := firProvenance
+      "Project packed boundary bytes from an aggregate with mixed storage classes" },
+  { id := "mixed-layout-usize"
+    entry := ``Source.mixedLayoutUSize
+    dependencies := #[``Source.mkMixedLayout]
+    args := mixedLayoutArgs
+    argSchemas := mixedLayoutArgSchemas
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat
+      (Source.mixedLayoutUSize Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32).toNat)
+    tags := #["stress", "mixed-layout", "usize", "projection", "boundary"]
+    requiredLcnfForms := #["ctor", "uset", "sset", "fap", "uproj", "dec", "return"]
+    requiredExecutedLcnfForms := #["ctor", "uset", "sset", "fap", "uproj", "dec", "return"]
+    provenance := firProvenance
+      "Project maximum USize from an aggregate mixing object and scalar slots" },
+  { id := "mixed-layout-uint32"
+    entry := ``Source.mixedLayoutUInt32
+    dependencies := #[``Source.mkMixedLayout]
+    args := mixedLayoutArgs
+    argSchemas := mixedLayoutArgSchemas
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat
+      (Source.mixedLayoutUInt32 Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32).toNat)
+    tags := #["stress", "mixed-layout", "scalar", "projection", "boundary"]
+    requiredLcnfForms := #["ctor", "uset", "sset", "fap", "sproj", "dec", "return"]
+    requiredExecutedLcnfForms := #["ctor", "uset", "sset", "fap", "sproj", "dec", "return"]
+    provenance := firProvenance
+      "Project maximum UInt32 from an aggregate mixing object and USize slots" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]

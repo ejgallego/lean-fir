@@ -18,7 +18,7 @@ Run the quick corpus with:
 make validate
 ```
 
-Run the explicitly selected 64-case native/LCNF/real-V8 triangle with:
+Run the complete native/LCNF/real-V8 corpus triangle with:
 
 ```sh
 make validate-v8
@@ -152,9 +152,9 @@ the exact object for discovery without opening the matrix. Both verification
 commands print a compact rendering such as:
 
 ```text
-coverage results: 192/192 successful, 192/192 present, findings 0 (0 unassigned)
-coverage pair native -> v8: compared 64/64, equal 64, findings 0
-coverage consumer v8 <- lean-wasm-semantic: receipts 64/64, product references 128, unique products 128, opened 128/128 unique products with strace (<N> trace paths)
+coverage results: 207/207 successful, 207/207 present, findings 0 (0 unassigned)
+coverage pair native -> v8: compared 69/69, equal 69, findings 0
+coverage consumer v8 <- lean-wasm-semantic: receipts 69/69, product references 138, unique products 138, opened 138/138 unique products with strace (<N> trace paths)
 ```
 
 This is evidence-derived coverage, not a trusted counter channel. Offline
@@ -929,12 +929,17 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 64 cases.  Beyond literals,
+The compiler-generated corpus currently has 69 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
 polymorphic box/unbox, packed USize/scalar structure updates and `uproj`, and
-nested tuple projection/reallocation.  Stress fixtures additionally execute
+nested tuple projection/reallocation. Five mixed-layout fixtures build one
+source aggregate containing a heap natural, a newline/non-BMP Unicode string,
+a packed byte array, maximum `USize`, and maximum `UInt32`. Independent
+projections force the same compiler-produced constructor through object,
+`USize`, and scalar storage paths, including absolute fixed-slot `uset`/`uproj`
+coordinates after the three-object prefix. Stress fixtures additionally execute
 compiler-lowered ownership/reuse during recursive reassociation, change the
 tag of a uniquely reused constructor through `setTag`, delete a unique object
 before allocating a larger replacement, retain 17 closure captures,
@@ -1056,9 +1061,12 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 64 corpus cases, including a natural
+The default native-to-V8 matrix covers all 69 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
-`Nat.add`, heap-input `Nat.add`, and all three controlled-effect programs.
+`Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
+five mixed-layout projections. `make validate-v8` delegates whole-corpus
+selection to the plan rather than maintaining a second case allowlist, so every
+new shared fixture enters the real-engine triangle by default.
 `FIR-BUG-wasm-none-json-nat-precision` records the protocol-v2 exact-decimal
 repair.
 Native Lean remains the source oracle.
