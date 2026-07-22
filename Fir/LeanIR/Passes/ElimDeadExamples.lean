@@ -111,6 +111,15 @@ def deletedBoxBefore : LCNF.Code .impure :=
 def deletedBoxAfter : LCNF.Code .impure :=
   .return live
 
+def closedBoxInputDecl : LCNF.LetDecl .impure :=
+  letDecl boxInputVar u64Type (.lit (.uint64 18446744073709551615))
+
+def closedBoxBefore : LCNF.Code .impure :=
+  .let closedBoxInputDecl deletedBoxBefore
+
+def closedBoxAfter : LCNF.Code .impure :=
+  .return live
+
 def deadNullaryFapDecl : LCNF.LetDecl .impure :=
   letDecl dead objType (.fap `deadNullaryExternal #[])
 
@@ -190,6 +199,7 @@ def checkFixtures : CoreM Unit := do
     deletedLargeNatBefore deletedLargeNatAfter
   checkActualElimDead `elimDeadPap deletedPapBefore deletedPapAfter
   checkActualElimDead `elimDeadBox deletedBoxBefore deletedBoxAfter
+  checkActualElimDead `elimDeadClosedBox closedBoxBefore closedBoxAfter
   checkActualElimDead `elimDeadNullaryFap
     deadNullaryFapBefore deadNullaryFapAfter
   checkActualAgreement 128 traversalCorpus
@@ -246,6 +256,12 @@ def deletedBoxBeforeProgram : ImpureProgram :=
 
 def deletedBoxAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedBoxAfter] }
+
+def closedBoxBeforeProgram : ImpureProgram :=
+  { decls := #[decl `main #[param live] objType (.code closedBoxBefore)] }
+
+def closedBoxAfterProgram : ImpureProgram :=
+  { decls := #[decl `main #[param live] objType (.code closedBoxAfter)] }
 
 def deadNullaryExternalDecl : LCNF.Decl .impure :=
   decl `deadNullaryExternal #[] objType (.extern { entries := [] })
@@ -399,6 +415,19 @@ theorem deletedBoxShadowRun :
   simp [deletedBoxBefore, deletedBoxAfter, deadBoxDecl, letDecl,
     neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem closedBoxShadowRun :
+    shadowCode? 3 {} closedBoxBefore =
+      some (closedBoxAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have inputAbsent : boxInputVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedBoxBefore, closedBoxAfter, closedBoxInputDecl,
+    deletedBoxBefore, deadBoxDecl, letDecl, neutralUsed,
+    shadowCode?, safeToElim, liveMember, deadAbsent, inputAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -470,6 +499,14 @@ theorem deletedBoxProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedBoxBeforeProgram, deletedBoxAfterProgram,
     fixtureDecl, decl, deletedBoxShadowRun]
+
+theorem closedBoxProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 3)
+      closedBoxBeforeProgram closedBoxAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedBoxBeforeProgram, closedBoxAfterProgram,
+    decl, closedBoxShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -614,6 +651,28 @@ def deletedBoxTargetState : MachineState :=
     control := .code deletedBoxAfter
     env := liveEnv }
 
+def closedBoxSourceInitialState : MachineState :=
+  initialState closedBoxBeforeProgram `main #[.erased]
+
+def closedBoxTargetInitialState : MachineState :=
+  initialState closedBoxAfterProgram `main #[.erased]
+
+def closedBoxSourceBodyState : MachineState :=
+  { program := closedBoxBeforeProgram
+    control := .code closedBoxBefore
+    env := liveEnv }
+
+def closedBoxTargetBodyState : MachineState :=
+  { program := closedBoxAfterProgram
+    control := .code closedBoxAfter
+    env := liveEnv }
+
+def closedBoxSourceAfterLiteralState : MachineState :=
+  { closedBoxSourceBodyState with
+    control := .code deletedBoxBefore
+    env := bind liveEnv boxInputVar
+      (.scalar (.uint64 18446744073709551615)) }
+
 /-- A binding absent from the backwards used set can be added to one side
 without changing any lookup the transformed suffix is allowed to perform. -/
 theorem deadBindingOutsideCtorLiveness :
@@ -706,6 +765,16 @@ theorem returnLiveShadowGraph2 :
   refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
   simp [shadowCode?, neutralUsed]
 
+theorem deletedBoxShadowGraph3 :
+    ShadowCodeGraph 3 neutralUsed deletedBoxBefore deletedBoxAfter := by
+  exact ⟨2, {}, neutralUsed, by omega,
+    deletedBoxShadowRun, .refl neutralUsed⟩
+
+theorem closedBoxShadowGraph :
+    ShadowCodeGraph 3 neutralUsed closedBoxBefore closedBoxAfter := by
+  exact ⟨3, {}, neutralUsed, by omega,
+    closedBoxShadowRun, .refl neutralUsed⟩
+
 theorem deletedUSizeScalarShadowGraph :
     ShadowCodeGraph 4 neutralUsed
       (.uset dead 0 usizeField <|
@@ -728,6 +797,204 @@ theorem liveEnvReachableRelated :
     simpa [neutralUsed] using member
   subst fvarId
   exact .some .erased
+
+theorem closedBoxInitialSteps :
+    coreStep closedBoxSourceInitialState = .next closedBoxSourceBodyState ∧
+      coreStep closedBoxTargetInitialState = .next closedBoxTargetBodyState := by
+  constructor <;> rfl
+
+theorem closedBoxBodyRelated :
+    ReachableMachineRelated 3 emptyAddressRenaming
+      closedBoxSourceBodyState closedBoxTargetBodyState := by
+  unfold ReachableMachineRelated
+  refine ⟨envRootsOn neutralUsed closedBoxSourceBodyState.env,
+    envRootsOn neutralUsed closedBoxTargetBodyState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      closedBoxProgramShadowRelated
+  · exact .code closedBoxShadowGraph
+      (ShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+        liveEnvReachableRelated)
+  · simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+
+theorem closedBoxLiteralStepRelated :
+    coreStep closedBoxSourceBodyState =
+        .next closedBoxSourceAfterLiteralState ∧
+      ReachableMachineRelated 3 emptyAddressRenaming
+        closedBoxSourceAfterLiteralState closedBoxTargetBodyState := by
+  have programs : ProgramRelated (ShadowCodeRelated 3)
+      closedBoxSourceBodyState.program closedBoxTargetBodyState.program := by
+    simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      closedBoxProgramShadowRelated
+  have frames : ReachableFramesRelated 3 emptyAddressRenaming
+      closedBoxSourceBodyState.frames closedBoxTargetBodyState.frames [] [] :=
+    .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      closedBoxSourceBodyState.env closedBoxTargetBodyState.env := by
+    simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      liveEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      closedBoxSourceBodyState.runtime closedBoxTargetBodyState.runtime
+      (envRootsOn neutralUsed closedBoxSourceBodyState.env ++ [])
+      (envRootsOn neutralUsed closedBoxTargetBodyState.env ++ []) := by
+    simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+  have evaluated : evalLetValue closedBoxSourceBodyState closedBoxInputDecl =
+      .ok (closedBoxSourceBodyState.runtime,
+        .value (.scalar (.uint64 18446744073709551615))) := by
+    rfl
+  have progress := coreStep_deletedLet_reachableRelated
+    (sourceState := closedBoxSourceBodyState)
+    (targetState := closedBoxTargetBodyState)
+    (declaration := closedBoxInputDecl)
+    (sourceContinuation := deletedBoxBefore)
+    (targetContinuation := deletedBoxAfter)
+    programs frames deletedBoxShadowGraph3
+    (ShadowJoinEnvRelated.empty 3 neutralUsed) env
+    (by native_decide) evaluated runtime
+  simpa [closedBoxSourceBodyState, closedBoxTargetBodyState,
+    closedBoxSourceAfterLiteralState, closedBoxBefore, closedBoxAfter,
+    deletedBoxAfter, closedBoxInputDecl, letDecl] using progress
+
+theorem closedBoxAfterLiteralEnvRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed
+      closedBoxSourceAfterLiteralState.env closedBoxTargetBodyState.env := by
+  simpa [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+    closedBoxTargetBodyState] using
+      (EnvRelOn.bindLeft_of_absent
+        (binder := boxInputVar)
+        (value := Value.scalar (.uint64 18446744073709551615))
+        liveEnvReachableRelated (by native_decide))
+
+theorem closedBoxAfterLiteralRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      closedBoxSourceAfterLiteralState.runtime
+      closedBoxTargetBodyState.runtime
+      (envRootsOn neutralUsed closedBoxSourceAfterLiteralState.env)
+      (envRootsOn neutralUsed closedBoxTargetBodyState.env) := by
+  simpa [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+    closedBoxTargetBodyState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related closedBoxAfterLiteralEnvRelated)
+
+theorem closedBoxAfterLiteralBoxReady :
+    DeletedBoxReadyAt closedBoxSourceAfterLiteralState boxInputVar := by
+  apply DeletedBoxReadyAt.scalar (.uint64 18446744073709551615)
+  simp [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+    liveEnv, lookupValue, Impure.bind, lookup,
+    boxInputVar, live]
+
+theorem closedBoxAfterLiteralUnifiedReady :
+    DeletedLetReadyAt closedBoxSourceAfterLiteralState
+      (runtimeRoots closedBoxSourceAfterLiteralState.runtime
+        (envRootsOn neutralUsed closedBoxSourceAfterLiteralState.env ++ []))
+      deadBoxDecl := by
+  unfold deadBoxDecl letDecl
+  exact .box dead dead.name objType u64Type boxInputVar
+    closedBoxAfterLiteralBoxReady
+
+theorem closedBoxBoxStepRelated :
+    ∃ nextRuntime boxValue,
+      let sourceAfterBox := {
+        closedBoxSourceAfterLiteralState with
+        runtime := nextRuntime
+        env := bind closedBoxSourceAfterLiteralState.env dead boxValue
+        control := .code (.return live) }
+      coreStep closedBoxSourceAfterLiteralState = .next sourceAfterBox ∧
+        ReachableMachineRelated 3 emptyAddressRenaming
+          sourceAfterBox closedBoxTargetBodyState := by
+  have programs : ProgramRelated (ShadowCodeRelated 3)
+      closedBoxSourceAfterLiteralState.program
+      closedBoxTargetBodyState.program := by
+    simpa [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+      closedBoxTargetBodyState] using closedBoxProgramShadowRelated
+  have frames : ReachableFramesRelated 3 emptyAddressRenaming
+      closedBoxSourceAfterLiteralState.frames
+      closedBoxTargetBodyState.frames [] [] := .nil
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      closedBoxSourceAfterLiteralState.runtime closedBoxTargetBodyState.runtime
+      (envRootsOn neutralUsed closedBoxSourceAfterLiteralState.env ++ [])
+      (envRootsOn neutralUsed closedBoxTargetBodyState.env ++ []) := by
+    simpa using closedBoxAfterLiteralRuntimeRelated
+  have progress := coreStep_deletedLet_of_ready
+    (sourceState := closedBoxSourceAfterLiteralState)
+    (targetState := closedBoxTargetBodyState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (declaration := deadBoxDecl)
+    programs frames returnLiveShadowGraph
+    (ShadowJoinEnvRelated.empty 3 neutralUsed)
+    closedBoxAfterLiteralEnvRelated (by native_decide)
+    runtime closedBoxAfterLiteralUnifiedReady
+  simpa [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+    closedBoxTargetBodyState, closedBoxAfter, deletedBoxBefore,
+    deadBoxDecl, letDecl] using progress
+
+/-- Complete program-entry witness: Lean's actual output needs two internal
+steps, while the source additionally evaluates the now-dead literal and box.
+Both executions terminate with observations related up to unreachable heap
+garbage. -/
+theorem closedBoxProgramEvaluationsRelated (externals : ExternalSpec) :
+    ∃ sourceObservation targetObservation,
+      Impure.Evaluates externals closedBoxBeforeProgram `main #[.erased]
+          sourceObservation ∧
+        Impure.Evaluates externals closedBoxAfterProgram `main #[.erased]
+          targetObservation ∧
+        ObservationRel sourceObservation targetObservation := by
+  rcases closedBoxBoxStepRelated with
+    ⟨nextRuntime, boxValue, boxStep, afterBoxRelated⟩
+  let sourceAfterBox : MachineState := {
+    closedBoxSourceAfterLiteralState with
+    runtime := nextRuntime
+    env := bind closedBoxSourceAfterLiteralState.env dead boxValue
+    control := .code (.return live) }
+  have boxStep' : coreStep closedBoxSourceAfterLiteralState =
+      .next sourceAfterBox := by
+    simpa [sourceAfterBox] using boxStep
+  have afterBoxRelated' : ReachableMachineRelated 3 emptyAddressRenaming
+      sourceAfterBox closedBoxTargetBodyState := by
+    simpa [sourceAfterBox] using afterBoxRelated
+  have sourceRead : lookup sourceAfterBox.env live = some .erased := by
+    simp [sourceAfterBox, closedBoxSourceAfterLiteralState,
+      closedBoxSourceBodyState, liveEnv, Impure.bind, lookup,
+      live, dead, boxInputVar]
+  rcases afterBoxRelated'.returnStep rfl rfl sourceRead with
+    ⟨targetValue, targetRead, values,
+      sourceReturn, targetReturn, yieldedRelated⟩
+  let sourceYielded : MachineState := {
+    sourceAfterBox with control := .yielded .erased }
+  let targetYielded : MachineState := {
+    closedBoxTargetBodyState with control := .yielded targetValue }
+  have yieldedRelated' : ReachableMachineRelated 3 emptyAddressRenaming
+      sourceYielded targetYielded := by
+    simpa [sourceYielded, targetYielded] using yieldedRelated
+  have observations : ObservationRel
+      (observe sourceYielded (.returned .erased))
+      (observe targetYielded (.returned targetValue)) :=
+    yieldedRelated'.yieldedObservation rfl rfl rfl rfl
+  have sourceDone : coreStep sourceYielded =
+      .done (observe sourceYielded (.returned .erased)) := by
+    simp [sourceYielded, sourceAfterBox,
+      closedBoxSourceAfterLiteralState, closedBoxSourceBodyState, coreStep]
+  have targetDone : coreStep targetYielded =
+      .done (observe targetYielded (.returned targetValue)) := by
+    simp [targetYielded, closedBoxTargetBodyState, coreStep]
+  refine ⟨observe sourceYielded (.returned .erased),
+    observe targetYielded (.returned targetValue), ?_, ?_, observations⟩
+  · exact ⟨4, sourceYielded,
+      .step (.internal closedBoxInitialSteps.1) <|
+        .step (.internal closedBoxLiteralStepRelated.1) <|
+          .step (.internal boxStep') <|
+            .step (.internal sourceReturn) (.refl sourceYielded),
+      sourceDone⟩
+  · exact ⟨2, targetYielded,
+      .step (.internal closedBoxInitialSteps.2) <|
+        .step (.internal targetReturn) (.refl targetYielded),
+      targetDone⟩
 
 theorem deletedWriteEnvReachableRelated :
     EnvRelOn emptyAddressRenaming neutralUsed deletedWriteSourceEnv liveEnv := by
