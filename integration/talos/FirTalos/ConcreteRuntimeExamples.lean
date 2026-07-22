@@ -1034,6 +1034,21 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- A tag observation after explicit deletion reaches the same source-address
+-- dead-object channel proved by `getTagStep_deadObject_of_refines`.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match deleteStep store [.i32 object] with
+      | .Return [] deleted =>
+          match getTagStep deleted [.i32 object] with
+          | .Trap failed _ =>
+              failed.host.failure? == some (.runtime (.source (.address
+                (.deadObject (Word32.ofUInt32 object)))))
+          | _ => false
+      | _ => false
+  | _ => false
+
 -- The shared erased failed-reset encoding is an operation-specific delete
 -- no-op; physical zero does not become an ordinary object address.
 #guard match deleteStep emptyHostStore [.i32 0] with

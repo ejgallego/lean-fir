@@ -445,6 +445,21 @@ structure DeadCellRel (state : MemoryState) (address : Word32) : Prop where
     address.value + header.allocationBytes.toNat ≤ state.memory.size
   headerOwned : address.value + headerBytes ≤ state.heapCursor
 
+/-- Every canonical released cell is rejected by the common live-header
+decoder with its exact physical address.  Operation-specific stale-reference
+proofs should start from this fact rather than reopening the freed layout. -/
+theorem DeadCellRel.readLiveHeader_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) :
+    state.readLiveHeader address = .error (.deadObject address) := by
+  obtain ⟨header, headerRead, addressHeap, _, _, dead, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  unfold MemoryState.readLiveHeader
+  rw [addressHeap]
+  simp only [headerRead, Bind.bind, Except.bind]
+  rw [dead]
+  rfl
+
 /-- The recursive natural-limb decoder reads identically when all requested
 slots lie below the preserved prefix. -/
 theorem MemoryState.PrefixExtension.readNaturalLimbs
@@ -809,6 +824,36 @@ structure LiveHeapRel (state : MemoryState) (witness : RefinementWitness)
   promoted : ∀ payload address,
     witness.promotedTags.Contains payload address →
     PromotedTagRel state witness payload address
+
+/-- A witness-mapped semantic cell known to be dead has the canonical
+released concrete representation.  This packages the recurring contradiction
+against every live-cell constructor for operation-specific fault proofs. -/
+theorem LiveHeapRel.deadCellRel
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    DeadCellRel state address := by
+  cases mapped with
+  | mapped mappedFound =>
+      obtain ⟨mappedCell, semanticFound, cellRelation⟩ :=
+        related.concreteToSemantic location address mappedFound
+      rw [found] at semanticFound
+      have cellEq := Option.some.inj semanticFound
+      subst mappedCell
+      cases cellRelation with
+      | live liveRelated =>
+          cases liveRelated with
+          | constructor _ _ _ _ _ _ _ live => simp_all
+          | boxed _ _ _ _ _ live => simp_all
+          | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
+          | string _ _ _ _ _ live => simp_all
+          | closure closureRelated =>
+              cases closureRelated with
+              | closure _ _ _ _ _ _ _ _ _ live => simp_all
+      | dead _ _ _ deadRelated => exact deadRelated
 
 /-- Initial proof witness for one generated module. Runtime identity maps are
 empty, while the immutable closure dispatch and capture-descriptor tables are

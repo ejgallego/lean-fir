@@ -29,7 +29,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
 | `dec` | Yes | Complete recursive heap theorem for either outer check bit | Partial | Concrete checked/unchecked ordinary recursive host, checked tagged/promoted no-op, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked and unchecked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, continuation, ordinary-object whole-module deletion, and exact dead-object Node/V8 plus browser-Worker execution compose without weakening ordinary object decoding |
-| `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker constructor-case execution |
+| `getTag` | Yes | Complete `.tobject` constructor/tagged success theorem plus mapped stale-heap theorem | Dead-object source-address fault exact through `LiveHeapRel`, `ConcreteErrorSourceRel`, and the Talos host; remainder partial | Concrete Talos host plus generated constructor-case WP, whole-module concrete Talos execution, a direct allocate/delete/tag trap guard, and Node/V8 plus browser-Worker constructor-case execution |
 
 Cross-cutting W6.5 state:
 
@@ -60,10 +60,11 @@ Cross-cutting W6.5 state:
   before either concrete or semantic state changes, and executable Talos guards
   reread the original payload after each trap;
 - stale mapped references now use a source-address `deadObject address` trap;
-  `DeadCellRel`, `LiveHeapRel`, and the Talos host theorem preserve it against
-  FIR's `deadObject location`, with `HeapReferenceRel` carrying the exact fault
-  translation; the closed `isShared` regression and fixed classification are
-  tracked by `FIR-BUG-wasm-none-dead-object-fault-classification`;
+  reusable `DeadCellRel` and `LiveHeapRel` lemmas plus the `isShared` and
+  `getTag` Talos theorems preserve it against FIR's `deadObject location`, with
+  `HeapReferenceRel` carrying the exact fault translation; closed sharing and
+  direct tag guards cover execution, while the fixed classification is tracked
+  by `FIR-BUG-wasm-none-dead-object-fault-classification`;
 - invalid constructor arities are `malformed` in FIR but dedicated source
   `arityMismatch` faults in the concrete allocator; exact guards and the
   coordinated contract decision are tracked by

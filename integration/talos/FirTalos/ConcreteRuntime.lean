@@ -4470,6 +4470,35 @@ theorem getTagStep_of_refines
   rw [Word32.ofUInt32_ofNat_value, read]
   simp [tagToNat]
 
+/-- Stale tag observation preserves the exact witness-indexed source fault at
+the Talos host boundary. -/
+theorem getTagStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    getTagStep initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      getTag runtime (.object (.heap location)) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.readTag_deadObject heapRelated found dead
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [getTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Generic exact-contract lifting used by every W6.6 concrete host operation.
 It is independent of FIR's semantic host type and therefore composes Talos WP
 directly with a concrete resolver. -/

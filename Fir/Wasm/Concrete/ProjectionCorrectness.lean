@@ -312,6 +312,21 @@ theorem ConstructorObjectRel.readTag_refines
   simp [liftMemory, headerKind, tag64, constructorBeq]
   rfl
 
+/-- A concrete tag read cannot reinterpret a canonical released header: it
+reports the exact address-indexed source fault before inspecting object kind or
+tag metadata. -/
+theorem DeadCellRel.readTag_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) :
+    readTag state address =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ := related.header
+  unfold readTag
+  rw [addressHeap]
+  simp only
+  rw [related.readLiveHeader_eq]
+  rfl
+
 /-- Exact tagged references decode through `readTag`, whether their physical
 word is immediate or a promoted-tag allocation. -/
 theorem LiveHeapRel.readTaggedReferenceTag_refines
@@ -729,6 +744,25 @@ theorem LiveHeapRel.readTag_refines
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
       simp at semanticTag
+
+/-- A mapped stale constructor reference preserves `deadObject` through tag
+observation.  As at the sharing boundary, the concrete side retains the wasm32
+address while FIR retains the represented semantic location. -/
+theorem LiveHeapRel.readTag_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    readTag state address =
+        .error (.sourceAddress (.deadObject address)) ∧
+      getTag runtime (.object (.heap location)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readTag_eq, by
+    simp [getTag, getLiveCell, found, dead, Except.map]
+    rfl⟩
 
 /-- Complete `.getTag` wrapper for its representation-polymorphic object ABI.
 Mapped constructors use the heap theorem above; exact tagged values use the

@@ -68,18 +68,11 @@ theorem DeadCellRel.readIsShared_eq
     (related : DeadCellRel state address) :
     readIsShared state address =
       .error (.sourceAddress (.deadObject address)) := by
-  obtain ⟨header, headerRead, addressHeap, _, _, dead, _, _, _, _, _, _, _, _⟩ :=
-    related.header
-  have deadRead : state.readLiveHeader address = .error (.deadObject address) := by
-    unfold MemoryState.readLiveHeader
-    rw [addressHeap]
-    simp only [headerRead, Bind.bind, Except.bind]
-    rw [dead]
-    rfl
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ := related.header
   unfold readIsShared
   rw [addressHeap]
   simp only
-  rw [deadRead]
+  rw [related.readLiveHeader_eq]
   rfl
 
 /-- Both direct immediates and persistent promoted representations are shared
@@ -170,27 +163,9 @@ theorem LiveHeapRel.readIsShared_deadObject
         .error (.sourceAddress (.deadObject address)) ∧
       Fir.LeanIR.Impure.isShared runtime (.object (.heap location)) =
         .error (.deadObject location) := by
-  cases mapped with
-  | mapped mappedFound =>
-      obtain ⟨mappedCell, semanticFound, cellRelation⟩ :=
-        related.concreteToSemantic location address mappedFound
-      rw [found] at semanticFound
-      have cellEq := Option.some.inj semanticFound
-      subst mappedCell
-      constructor
-      · cases cellRelation with
-        | live liveRelated =>
-            cases liveRelated with
-            | constructor _ _ _ _ _ _ _ live => simp_all
-            | boxed _ _ _ _ _ live => simp_all
-            | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
-            | string _ _ _ _ _ live => simp_all
-            | closure closureRelated =>
-                cases closureRelated with
-                | closure _ _ _ _ _ _ _ _ _ live => simp_all
-        | dead _ _ _ deadRelated => exact deadRelated.readIsShared_eq
-      · simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, dead,
-          Except.map]
-        rfl
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readIsShared_eq, by
+    simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, dead, Except.map]
+    rfl⟩
 
 end Fir.Wasm.Concrete

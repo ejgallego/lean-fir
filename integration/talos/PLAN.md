@@ -2619,6 +2619,15 @@ Talos theorem carries both results into the exact source-address host trap plus
 executable endpoint. No further shared contract or runtime behavior changes in
 this proof-only slice.
 
+W6.6bn extends that stale-reference proof pattern to constructor tag
+observation and factors out its common heap facts. `DeadCellRel` now exposes
+the exact failed live-header read, while `LiveHeapRel.deadCellRel` recovers the
+canonical released representation from any mapped semantic cell known dead.
+Both sharing and tag proofs reuse those lemmas. `readTag`, FIR `getTag`, and the
+Talos `getTag` host now preserve the paired address/location `deadObject` fault
+through `ConcreteErrorSourceRel`; a direct allocate/delete/tag guard checks the
+executable trap. No shared contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
