@@ -2582,6 +2582,15 @@ reread the original in-bounds fields after each trap to confirm the failed
 operation changed no payload. Other setter failures remain partial. No
 executable layout or shared semantic contract changed.
 
+W6.6bj records the next structured-fault blocker without weakening either
+runtime. A closed allocate/delete/`isShared` module returns source
+`deadObject 0` from FIR, but the concrete live-header path maps
+`MemoryError.deadObject address` through generic `liftMemory` into a target
+memory trap. `FIR-BUG-wasm-none-dead-object-fault-classification` retains both
+executable observations and proposes a witness-indexed address-fault case,
+analogous to reference-count underflow, as a coordinated semantic-Wasm-ABI
+change. No workaround or shared contract change is included in this slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

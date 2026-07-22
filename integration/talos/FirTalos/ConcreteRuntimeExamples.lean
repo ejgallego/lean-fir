@@ -67,6 +67,17 @@ private def fixtureReturnsI64? (program : Fir.LeanIR.ImpureProgram)
           result == expected && store.host.failure?.isNone
       | _ => false
 
+private def fixtureDeadObjectClassifiesAsTarget?
+    (program : Fir.LeanIR.ImpureProgram) : Bool :=
+  (runtimeFixture? program).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Trap store _ =>
+          match store.host.failure? with
+          | some (.runtime (.target (.memory (.deadObject _)))) => true
+          | _ => false
+      | _ => false
+
 -- Complete lowered modules now execute against concrete linear memory rather
 -- than semantic handles for the first artifact-ready fragment.
 #guard fixtureReturnsWord? Fir.Wasm.abiLiteralProgram 85
@@ -109,6 +120,13 @@ private def uninitializedScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
   (.scalarFieldMissing 2 0)
 
 #guard fixtureReturnsI64? uninitializedScalarProjectionProgram 0
+
+-- FIR identifies a deleted semantic location as a source `deadObject` fault,
+-- while the current concrete live-header decoder classifies the corresponding
+-- address-bearing failure as target memory machinery.
+#guard faulted? (runMain deletedProgram) (.deadObject 0)
+
+#guard fixtureDeadObjectClassifiesAsTarget? deletedProgram
 
 /-- The positive scalar-mutation fixture uses the exact slot index emitted by
 Lean 4.32's `ToImpure`: object fields plus `USize` fields. -/
