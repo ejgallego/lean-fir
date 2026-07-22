@@ -2637,6 +2637,15 @@ allocate/delete/projection guard deliberately supplies out-of-range indices and
 still observes dead-object first. No shared contract or runtime behavior
 changes.
 
+W6.6bp extends dead-object precedence across all four supported packed-integer
+projection widths. The UInt8/16/32/64 checked readers share one whole-heap
+theorem with FIR `getScalarField`, and one ABI-kind-indexed Talos theorem
+preserves the exact source-address trap for those four kinds. The deleted-object
+guard now checks every width at deliberately invalid coordinates. This result
+is orthogonal to the live, valid-but-uninitialized coordinate discrepancy in
+`FIR-BUG-wasm-none-uninitialized-scalar-projection`; no shared contract or
+runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

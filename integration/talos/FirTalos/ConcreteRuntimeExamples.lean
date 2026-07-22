@@ -1066,7 +1066,24 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
             match usizeProjStep 99 deleted [.i32 object] with
             | .Trap failed _ => failed.host.failure? == expected
             | _ => false
-          objectFault && usizeFault
+          let scalar8Fault :=
+            match scalarProjStep 99 99 .uint8 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          let scalar16Fault :=
+            match scalarProjStep 99 99 .uint16 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          let scalar32Fault :=
+            match scalarProjStep 99 99 .uint32 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          let scalar64Fault :=
+            match scalarProjStep 99 99 .uint64 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          objectFault && usizeFault && scalar8Fault && scalar16Fault &&
+            scalar32Fault && scalar64Fault
       | _ => false
   | _ => false
 

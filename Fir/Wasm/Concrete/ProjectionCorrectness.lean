@@ -358,6 +358,42 @@ theorem DeadCellRel.readUSizeField_eq
   rw [related.readConstructorHeader_eq]
   rfl
 
+theorem DeadCellRel.readScalarUInt8Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
+    readScalarUInt8Field state address slotIndex byteOffset =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readScalarUInt8Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.readScalarUInt16Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
+    readScalarUInt16Field state address slotIndex byteOffset =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readScalarUInt16Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.readScalarUInt32Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
+    readScalarUInt32Field state address slotIndex byteOffset =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readScalarUInt32Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.readScalarUInt64Field_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
+    readScalarUInt64Field state address slotIndex byteOffset =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readScalarUInt64Field
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 /-- Exact tagged references decode through `readTag`, whether their physical
 word is immediate or a promoted-tag allocation. -/
 theorem LiveHeapRel.readTaggedReferenceTag_refines
@@ -829,6 +865,33 @@ theorem LiveHeapRel.readUSizeField_deadObject
   exact ⟨deadRelated.readUSizeField_eq index, by
     simp [getUSizeField, getConstructor, getLiveCell, found, dead]
     rfl⟩
+
+/-- All supported packed-integer readers share one stale-reference boundary;
+the scalar coordinate and width-specific payload decoder are unreachable. -/
+theorem LiveHeapRel.readScalarFields_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slotIndex byteOffset : Nat) :
+    readScalarUInt8Field state address slotIndex byteOffset =
+        .error (.sourceAddress (.deadObject address)) ∧
+      readScalarUInt16Field state address slotIndex byteOffset =
+        .error (.sourceAddress (.deadObject address)) ∧
+      readScalarUInt32Field state address slotIndex byteOffset =
+        .error (.sourceAddress (.deadObject address)) ∧
+      readScalarUInt64Field state address slotIndex byteOffset =
+        .error (.sourceAddress (.deadObject address)) ∧
+      getScalarField runtime (.object (.heap location)) slotIndex byteOffset =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  refine ⟨deadRelated.readScalarUInt8Field_eq slotIndex byteOffset,
+    deadRelated.readScalarUInt16Field_eq slotIndex byteOffset,
+    deadRelated.readScalarUInt32Field_eq slotIndex byteOffset,
+    deadRelated.readScalarUInt64Field_eq slotIndex byteOffset, ?_⟩
+  simp [getScalarField, getConstructor, getLiveCell, found, dead]
+  rfl
 
 /-- Complete `.getTag` wrapper for its representation-polymorphic object ABI.
 Mapped constructors use the heap theorem above; exact tagged values use the

@@ -1924,6 +1924,41 @@ theorem usizeProjStep_deadObject_of_refines
           simp [usizeProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- Every supported packed-integer projection rejects a stale mapped object at
+the common live-header gate, before scalar-coordinate validation. -/
+theorem scalarProjStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {location : Location}
+    {cell : HeapCell} (width offset : Nat) (kind : AbiKind)
+    (supported : kind = .uint8 ∨ kind = .uint16 ∨
+      kind = .uint32 ∨ kind = .uint64)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    scalarProjStep width offset kind initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      getScalarField runtime (.object (.heap location)) width offset =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨read8, read16, read32, read64, semantic⟩ :=
+            runtimeRelated.heap.readScalarFields_deadObject heapRelated found dead
+              width offset
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          rcases supported with rfl | rfl | rfl | rfl <;>
+            simp [scalarProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              read8, read16, read32, read64, ConcreteError.toTrap]
+
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
