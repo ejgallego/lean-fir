@@ -190,6 +190,25 @@ theorem deadBindingMachineRelated :
       (by simp [neutralLiveState, JoinEnvCovered])
       (by native_decide)
 
+/-- The first interpreter step reads only covered variables, so both concrete
+environments produce related successor results. -/
+theorem deadBindingCoreStepRelated :
+    LiveCoreResultRelated
+      (coreStep { neutralLiveState with env := deadExtendedEnv })
+      (coreStep neutralLiveState) := by
+  have agree : EnvsAgreeOn (({} : UsedLocals).insert live)
+      deadExtendedEnv liveEnv := by
+    simpa [deadExtendedEnv] using
+      (EnvsAgreeOn.bindLeft_of_absent (binder := dead) (value := .usize 42)
+        (EnvsAgreeOn.refl (({} : UsedLocals).insert live) liveEnv)
+        (by native_decide))
+  simpa [neutralLiveState] using
+    coreStep_codeLive_related
+      (used := ({} : UsedLocals).insert live) (joins := [])
+      (leftState := { neutralLiveState with env := deadExtendedEnv })
+      (rightState := neutralLiveState) rfl rfl (.nil)
+      neutralAfterCovered (by simp [JoinEnvCovered]) agree
+
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
 #guard (match runMain neutralBeforeProgram, runMain neutralAfterProgram with
