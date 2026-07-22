@@ -476,6 +476,21 @@ private def objectProjectionFixture :
       | _ => false
   | .error _ => false
 
+-- The matching object setter reports the same bounds payload before storing;
+-- the original slot remains observable after the trap.
+#guard match objectProjectionFixture with
+  | .ok (store, object) =>
+      match objectSetStep 1 .tagged store
+          [.i32 (UInt32.ofNat object.value), .i32 99] with
+      | .Trap next _ =>
+          match next.host.failure?, readObjectField next.host.runtime.heap object 0 with
+          | some (.runtime (.source (.runtime
+                (.objectFieldOutOfBounds 1 1)))), .ok field =>
+              field.value == 23
+          | _, _ => false
+      | _ => false
+  | .error _ => false
+
 private def usizeProjectionInfo : Lean.Compiler.LCNF.CtorInfo := {
   name := `FirTalos.Concrete.usizeProjection
   cidx := 4
@@ -511,6 +526,21 @@ private def usizeProjectionFixture :
       | .Trap next _ =>
           next.host.failure? == some (.runtime (.source (.runtime
             (.usizeFieldOutOfBounds 1 1))))
+      | _ => false
+  | .error _ => false
+
+-- The matching USize setter traps before storing and preserves the existing
+-- maximum-width field.
+#guard match usizeProjectionFixture with
+  | .ok (store, object) =>
+      match usizeSetStep 1 store
+          [.i32 (UInt32.ofNat object.value), .i64 37] with
+      | .Trap next _ =>
+          match next.host.failure?, readUSizeField next.host.runtime.heap object 0 with
+          | some (.runtime (.source (.runtime
+                (.usizeFieldOutOfBounds 1 1)))), .ok field =>
+              field == 18446744073709551615
+          | _, _ => false
       | _ => false
   | .error _ => false
 

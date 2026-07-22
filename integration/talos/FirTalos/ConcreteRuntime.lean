@@ -3541,6 +3541,77 @@ theorem usizeSetStep_of_refines
             apply modifyConstructor_heapOnly
             simpa [setUSizeField] using updated
 
+/-- An out-of-bounds object-slot mutation reaches the Talos boundary as the
+exact source-classified FIR bounds fault and leaves both runtimes unchanged. -/
+theorem objectSetStep_outOfBounds_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject} {objectWord fieldWord : Word32}
+    {fieldKind : AbiKind} {field : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (outOfBounds : semantic.objectFields.size ≤ index) :
+    objectSetStep index fieldKind initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial) (.runtime (.source (.runtime
+          (.objectFieldOutOfBounds index semantic.objectFields.size)))) ∧
+      setObjectField runtime (.object (.heap location)) index field =
+        .error (.objectFieldOutOfBounds index semantic.objectFields.size) := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨concreteFailure, semanticFailure⟩ :=
+            runtimeRelated.heap.writeObjectField_outOfBounds_refines mapped
+              found live objectEq descriptorFound field fieldWord outOfBounds
+          constructor
+          · simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteFailure, ConcreteError.toTrap]
+          · exact semanticFailure
+
+/-- An out-of-bounds `USize` mutation reaches the Talos boundary as the exact
+source-classified FIR bounds fault and leaves both runtimes unchanged. -/
+theorem usizeSetStep_outOfBounds_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject} {objectWord : Word32}
+    {field : UInt64} {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (outOfBounds : semantic.usizeFields.size ≤ index) :
+    usizeSetStep index initial
+        [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        trap (clearFailure initial) (.runtime (.source (.runtime
+          (.usizeFieldOutOfBounds index semantic.usizeFields.size)))) ∧
+      setUSizeField runtime (.object (.heap location)) index (.usize field) =
+        .error (.usizeFieldOutOfBounds index semantic.usizeFields.size) := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨concreteFailure, semanticFailure⟩ :=
+            runtimeRelated.heap.writeUSizeField_outOfBounds_refines mapped found
+              live objectEq field outOfBounds
+          constructor
+          · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteFailure, ConcreteError.toTrap]
+          · exact semanticFailure
+
 theorem scalarSetStep_uint64_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}

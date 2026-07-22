@@ -540,6 +540,147 @@ theorem LiveHeapRel.readUSizeField_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
 
+/-- Object mutation performs the same checked read before storing, so an
+out-of-bounds object slot fails without changing concrete memory. -/
+theorem ConstructorObjectRel.writeObjectField_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {index : Nat} (word : Word32)
+    (outOfBounds : semantic.objectFields.size ≤ index) :
+    writeObjectField state address index word = .error
+      (.source (.objectFieldOutOfBounds index semantic.objectFields.size)) := by
+  unfold writeObjectField
+  rw [related.readObjectField_outOfBounds outOfBounds]
+  rfl
+
+/-- `USize` mutation rejects an out-of-bounds slot before its payload store,
+retaining the exact semantic bounds fault. -/
+theorem ConstructorObjectRel.writeUSizeField_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {index : Nat} (value : UInt64)
+    (outOfBounds : semantic.usizeFields.size ≤ index) :
+    writeUSizeField state address index value = .error
+      (.source (.usizeFieldOutOfBounds index semantic.usizeFields.size)) := by
+  obtain ⟨header, headerRead, headerKind, _, _, _, usizeCount, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have sizeEq : header.aux2.toNat = semantic.usizeFields.size := by
+    rw [usizeCount, related.semanticUSizeFields]
+  unfold writeUSizeField
+  rw [constructorHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [sizeEq]
+  simp [Nat.not_lt.mpr outOfBounds]
+  rfl
+
+/-- A mapped live constructor's object setter preserves an exact semantic
+bounds failure and performs no concrete update. -/
+theorem LiveHeapRel.writeObjectField_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {index : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (field : Value) (word : Word32)
+    (outOfBounds : semantic.objectFields.size ≤ index) :
+    writeObjectField state address index word = .error
+        (.source (.objectFieldOutOfBounds index semantic.objectFields.size)) ∧
+      setObjectField runtime (.object (.heap location)) index field =
+        .error (.objectFieldOutOfBounds index semantic.objectFields.size) := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor descriptor storedObjectEq objectRelated _ _ _ _ _ =>
+      rw [descriptor] at descriptorFound
+      have descriptorEq := Option.some.inj descriptorFound
+      cases descriptorEq
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst semantic
+      constructor
+      · exact objectRelated.writeObjectField_outOfBounds word outOfBounds
+      · simp [setObjectField, modifyConstructor, getConstructor, getLiveCell,
+          found, live, objectEq, Bind.bind, Except.bind]
+        simp only [pure, Except.pure]
+        rw [dif_neg (Nat.not_lt.mpr outOfBounds)]
+  | boxed _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+/-- A mapped live constructor's `USize` setter preserves an exact semantic
+bounds failure and performs no concrete update. -/
+theorem LiveHeapRel.writeUSizeField_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {index : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (value : UInt64)
+    (outOfBounds : semantic.usizeFields.size ≤ index) :
+    writeUSizeField state address index value = .error
+        (.source (.usizeFieldOutOfBounds index semantic.usizeFields.size)) ∧
+      setUSizeField runtime (.object (.heap location)) index (.usize value) =
+        .error (.usizeFieldOutOfBounds index semantic.usizeFields.size) := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | constructor _ storedObjectEq objectRelated _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst semantic
+      constructor
+      · exact objectRelated.writeUSizeField_outOfBounds value outOfBounds
+      · simp [setUSizeField, modifyConstructor, getConstructor, getLiveCell,
+          found, live, objectEq, Bind.bind, Except.bind]
+        simp only [pure, Except.pure]
+        rw [dif_neg (Nat.not_lt.mpr outOfBounds)]
+  | boxed _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- Concrete constructor tag lookup refines semantic `getTag` for a mapped
 live constructor. -/
 theorem LiveHeapRel.readTag_refines

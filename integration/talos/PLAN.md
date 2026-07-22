@@ -2574,6 +2574,14 @@ payloads. Other projection failures remain in the conservative partial matrix,
 and scalar projection remains blocked by W6.6bg. No executable layout or shared
 semantic contract changed.
 
+W6.6bi extends those bounds results to mutation. Object and `USize` setters
+reject the same out-of-range coordinates before any concrete store or semantic
+heap update. The local constructor relation, complete heap, and Talos host each
+preserve the exact index/declared-size source fault; executable guards also
+reread the original in-bounds fields after each trap to confirm the failed
+operation changed no payload. Other setter failures remain partial. No
+executable layout or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
