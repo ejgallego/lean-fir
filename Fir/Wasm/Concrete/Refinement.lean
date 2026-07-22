@@ -33,6 +33,7 @@ inductive AllocationDescriptor where
   | boxed (kind : BoxedScalarKind)
   | promotedTag (payload : UInt64)
   | natural (value : Nat)
+  | string (value : String)
   deriving Inhabited, BEq, Repr
 
 abbrev DescriptorMap := List (Word32 × AllocationDescriptor)
@@ -137,6 +138,12 @@ def RefinementWitness.bindNatural (witness : RefinementWitness)
   { witness with
       locations := (location, address) :: witness.locations
       descriptors := (address, .natural value) :: witness.descriptors }
+
+def RefinementWitness.bindString (witness : RefinementWitness)
+    (location : Location) (address : Word32) (value : String) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .string value) :: witness.descriptors }
 
 def RefinementWitness.bindBoxed (witness : RefinementWitness)
     (location : Location) (address : Word32)
@@ -279,6 +286,34 @@ theorem RefinementWitness.lookup_bindNatural_descriptor_other
     (witness.bindNatural location address value).descriptors.lookup? other =
       witness.descriptors.lookup? other := by
   simp [RefinementWitness.bindNatural, DescriptorMap.lookup?, different]
+
+@[simp] theorem RefinementWitness.lookup_bindString_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : String) :
+    (witness.bindString location address value).locations.lookup? location =
+      some address := by
+  simp [RefinementWitness.bindString, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindString_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : String) :
+    (witness.bindString location address value).descriptors.lookup? address =
+      some (.string value) := by
+  simp [RefinementWitness.bindString, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_bindString_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (value : String) (different : other ≠ location) :
+    (witness.bindString location address value).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindString, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindString_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (value : String) (different : address.value ≠ other.value) :
+    (witness.bindString location address value).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindString, DescriptorMap.lookup?, different]
 
 @[simp] theorem RefinementWitness.lookup_bindBoxed_location
     (witness : RefinementWitness) (location : Location) (address : Word32)
@@ -461,6 +496,36 @@ theorem RefinementWitness.bindNatural_extends
     exact found
   · intro old descriptor found
     rw [witness.lookup_bindNatural_descriptor_other location address old value
+      (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding one fresh UTF-8 string extends all previously visible proof
+metadata. -/
+theorem RefinementWitness.bindString_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : String)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindString location address value) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_
+    closureDispatch := rfl
+    closureDescriptors := rfl }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindString_location_other location old address value different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindString_descriptor_other location address old value
       (descriptorFresh old descriptor found)]
     exact found
 
@@ -754,6 +819,66 @@ theorem RefinementWitness.WellFormed.bindNatural
       subst left
       exact promotedAddressFresh payload right promotedFound
     · rw [witness.lookup_bindNatural_location_other location old address value
+        isNew] at locationFound
+      exact valid.locationPromotionDisjoint old payload left right locationFound
+        promotedFound
+
+/-- A fresh string allocation preserves witness injectivity and the
+location/promoted-tag address partition. -/
+theorem RefinementWitness.WellFormed.bindString
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (value : String)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
+    (witness.bindString location address value).WellFormed := by
+  refine {
+    locationHeap := ?_
+    locationInjective := ?_
+    promotedHeap := valid.promotedHeap
+    promotedInjective := valid.promotedInjective
+    locationPromotionDisjoint := ?_ }
+  · intro old oldAddress found
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindString, LocationMap.lookup?] at found
+      cases found
+      exact addressHeap
+    · rw [witness.lookup_bindString_location_other location old address value
+        isNew] at found
+      exact valid.locationHeap old oldAddress found
+  · intro left right common leftFound rightFound
+    by_cases leftNew : left = location
+    · subst left
+      simp [RefinementWitness.bindString, LocationMap.lookup?] at leftFound
+      have commonEq : common = address := leftFound.symm
+      subst common
+      by_cases rightNew : right = location
+      · exact rightNew.symm
+      · rw [witness.lookup_bindString_location_other location right address value
+          rightNew] at rightFound
+        exact False.elim ((locationAddressFresh right address rightFound) rfl)
+    · rw [witness.lookup_bindString_location_other location left address value
+        leftNew] at leftFound
+      by_cases rightNew : right = location
+      · subst right
+        simp [RefinementWitness.bindString, LocationMap.lookup?] at rightFound
+        have commonEq : common = address := rightFound.symm
+        subst common
+        exact False.elim ((locationAddressFresh left address leftFound) rfl)
+      · rw [witness.lookup_bindString_location_other location right address value
+          rightNew] at rightFound
+        exact valid.locationInjective left right common leftFound rightFound
+  · intro old payload left right locationFound promotedFound
+    by_cases isNew : old = location
+    · subst old
+      simp [RefinementWitness.bindString, LocationMap.lookup?] at locationFound
+      have leftEq : left = address := locationFound.symm
+      subst left
+      exact promotedAddressFresh payload right promotedFound
+    · rw [witness.lookup_bindString_location_other location old address value
         isNew] at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound
         promotedFound

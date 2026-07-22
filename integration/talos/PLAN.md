@@ -2404,6 +2404,15 @@ foundational allocation slice: descriptor binding, `LiveCellRel`/`LiveHeapRel`
 extension, and generated literal composition remain separate follow-ups. No
 shared semantic contract changed.
 
+W6.6as adds strings to the proof-only allocation witness. A fresh string now
+binds its semantic location and exact source value to the concrete address,
+preserves every prior location, promoted-tag, descriptor, dispatch-table, and
+capture-descriptor lookup, and retains witness injectivity plus the
+location/promoted-address partition. This isolates the ghost-state extension
+from the larger `LiveCellRel` exhaustiveness change; the next slice consumes
+the new descriptor together with `StringObjectRel` to extend `LiveHeapRel`.
+No executable layout or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
