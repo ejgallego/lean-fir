@@ -2377,6 +2377,21 @@ executing `getTag` to `UInt64(1)` in Node and Chrome. The string source remains
 an exact construction-time layout gate; packed constructors and other initial
 heap kinds remain outside this slice. No shared semantic contract changed.
 
+W6.6aq freezes and executes the concrete string layout. A live string is one
+ordinary reference-counted object whose payload is the canonical `String.toUTF8`
+byte sequence, with `aux0 = 1` as the layout marker, `aux1` as the exact byte
+count, and zero reserved metadata; allocation padding is not semantic data.
+Lean's concrete runtime and Talos host now allocate this layout, while the
+shared Node/browser JavaScript host allocates, validates, observes, and loads
+the same bytes. The compiler-produced `string-heap` and mixed `nested-heap`
+artifacts move into the concrete success inventory, and the Unicode source
+input crosses the former initial-runtime gate after an exact cell/address
+audit. Both engines now execute 36 artifacts, retain only the external import
+fragment gate, and preserve the historical malformed-layout expected failure.
+This slice establishes the executable boundary; integrating string cells into
+`LiveHeapRel` and proving fresh-allocation framing remains the next proof
+slice. No shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

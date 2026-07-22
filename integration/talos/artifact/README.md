@@ -18,9 +18,9 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runners currently execute 34 closed artifacts through raw scalar
+The concrete runners currently execute 36 closed artifacts through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
-slots, natural and constructor allocation, cases/projection, ordinary and
+slots, natural, UTF-8 string, and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
 mutation, balanced and recursive ownership updates, deletion, unique/shared
 reset/reuse, recursive cache publication, and maximum-width integer
@@ -28,19 +28,19 @@ boxing/unboxing. Their
 logical-location map and allocation descriptors are observation-only data;
 runtime imports exchange physical words and consult the byte-level heap. Node
 and a Fetch-only browser Worker import the same host and fixture inventory.
-The remaining strings, externals, packed initial constructors, and other
-initial heap kinds stay on the semantic runner until their concrete
+The remaining externals, packed initial constructors, and other initial heap
+kinds stay on the semantic runner until their concrete
 counterparts join this explicit allowlist. An unsupported import is rejected
 while constructing the concrete import object, before instantiation.
 
-The concrete host also reconstructs the object-field constructor and arbitrary-
-precision natural subset of `initialRuntime`. It reserves physical addresses
+The concrete host also reconstructs the object-field constructor, arbitrary-
+precision natural, and UTF-8 string subset of `initialRuntime`. It reserves physical addresses
 for the complete heap before writing references, preserves semantic location
 order and cell metadata, and then passes the mapped address to a compiler-
 produced `List Nat` classifier. Node and the browser Worker audit every loaded
-cell and the entry-argument round-trip before executing it. Initial strings
-retain an explicit layout gate; packed constructors and the other initial heap
-kinds are not silently admitted.
+cell and the entry-argument round-trip before executing it. A compiler-produced
+Unicode string input is audited and executed through the same path; packed
+constructors and the other initial heap kinds are not silently admitted.
 
 The historical hand-written `mutation` fixture is intentionally not in that
 success allowlist: it uses packed-scalar slot index `1` despite a one-object,
@@ -215,10 +215,10 @@ make -C ../../.. validate-v8
 
 Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
 the complete shared-product Worker. It also materializes the live-oracle
-artifact corpus under `_build`, then runs the same 34 concrete artifacts, two
-fragment gates, and one expected failure used by Node through a third Worker.
-That Worker also executes the concrete initial-runtime `List Nat` source and
-checks the independent string-layout gate.
+artifact corpus under `_build`, then runs the same 36 concrete artifacts, one
+external fragment gate, and one expected failure used by Node through a third
+Worker. That Worker also executes the concrete initial-runtime `List Nat` and
+Unicode string sources.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

@@ -116,17 +116,38 @@ async function runInitialRuntimeSource() {
     { kind: "scalar", scalarKind: "uint64", value: 1n });
 }
 
-async function checkInitialRuntimeStringGate() {
+async function runInitialRuntimeStringSource() {
   const sourceBase = new URL("./_build/", import.meta.url);
+  const name = "source-string-input.wasm";
   const manifest = await fetchJson("source-string-input.wasm.json",
     "string source manifest", sourceBase);
-  let rejected = false;
-  try {
-    new ConcreteHost(manifest.imports, manifest.initialRuntime);
-  } catch (error) {
-    rejected = /unsupported concrete initial-runtime heap object: string/.test(String(error));
+  const bytes = await fetchBytes(name, "string source module", sourceBase);
+  assert.equal(manifest.fixture, "Fir.Wasm.Emit.SourceFixture.acceptString");
+  assert.deepStrictEqual(manifest.params, ["object"]);
+  assert.equal(manifest.result, "uint64");
+  assert.ok(WebAssembly.validate(bytes), "string source failed WebAssembly validation");
+
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
+  for (const cell of manifest.initialRuntime.heap) {
+    const address = host.locationAddresses.get(cell.location);
+    assert.notEqual(address, undefined, `initial location ${cell.location} was not loaded`);
+    const header = host.readHeader(address);
+    assert.equal(header.rc, cell.rc, `initial location ${cell.location} rc mismatch`);
+    assert.equal(header.persistent, cell.persistent,
+      `initial location ${cell.location} persistence mismatch`);
+    assert.equal(header.live, cell.live, `initial location ${cell.location} liveness mismatch`);
+    assert.deepStrictEqual(host.objectJson(address, header), cell.object,
+      `initial location ${cell.location} object mismatch`);
   }
-  assert.ok(rejected, "string initial runtime unexpectedly crossed its concrete layout gate");
+  const semanticArgument = concreteManifestValue(manifest.arguments[0]);
+  const physicalArgument = host.encode(manifest.params[0], semanticArgument);
+  assert.deepStrictEqual(host.decode(manifest.params[0], physicalArgument), semanticArgument,
+    "initial string argument did not round-trip through its concrete address");
+  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const result = host.decode(manifest.result,
+    instance.exports[manifest.entry](physicalArgument));
+  assert.deepStrictEqual(result,
+    { kind: "scalar", scalarKind: "uint64", value: 18446744073709551615n });
 }
 
 async function runConcreteBrowserCorpus() {
@@ -140,12 +161,13 @@ async function runConcreteBrowserCorpus() {
     await checkExpectedFault(fixture, expectedFault);
   }
   await runInitialRuntimeSource();
-  await checkInitialRuntimeStringGate();
+  await runInitialRuntimeStringSource();
+  const fragmentCount = REJECTED_FRAGMENT_FIXTURES.length;
   return `PASS browser Worker concrete Wasm corpus ` +
     `(${CONCRETE_FIXTURES.length} artifacts, ` +
-    `${REJECTED_FRAGMENT_FIXTURES.length} fragment gates, ` +
+    `${fragmentCount} fragment gate${fragmentCount === 1 ? "" : "s"}, ` +
     `${EXPECTED_CONCRETE_FAULTS.length} expected failure, ` +
-    `1 initial-runtime source, 1 initial-runtime gate)`;
+    `2 initial-runtime sources)`;
 }
 
 try {

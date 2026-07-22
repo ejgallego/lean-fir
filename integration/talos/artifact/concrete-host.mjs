@@ -6,6 +6,7 @@ const HEADER_BYTES = 32;
 const SLOT_BYTES = 8;
 const MAX_IMMEDIATE_PAYLOAD = 0x7fffffffn;
 const MAX_TAGGED_PAYLOAD = 0x7fffffffffffffffn;
+const STRING_UTF8_MARKER = 1;
 
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
@@ -194,6 +195,24 @@ export class ConcreteHost {
           limbs,
         };
       }
+      case "string": {
+        assert.equal(typeof object.value, "string", "initial string value must be text");
+        const bytes = new TextEncoder().encode(object.value);
+        assert.ok(bytes.length <= 0xffffffff,
+          "initial string UTF-8 byte count must fit UInt32");
+        return {
+          kind: KIND.string,
+          payloadBytes: bytes.length,
+          auxiliaries: {
+            aux0: STRING_UTF8_MARKER,
+            aux1: bytes.length,
+            aux2: 0,
+            aux3: 0,
+          },
+          descriptor: { kind: "string" },
+          bytes,
+        };
+      }
       default:
         throw new Error(`unsupported concrete initial-runtime heap object: ${object.kind}`);
     }
@@ -261,6 +280,9 @@ export class ConcreteHost {
       } else if (cell.object.kind === "natural") {
         layout.limbs.forEach((limb, index) =>
           this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
+      } else if (cell.object.kind === "string") {
+        new Uint8Array(this.buffer, address + HEADER_BYTES, layout.bytes.length)
+          .set(layout.bytes);
       }
       const header = this.readHeader(address);
       this.writeHeader(address, {
@@ -450,6 +472,33 @@ export class ConcreteHost {
     return value;
   }
 
+  allocateString(value) {
+    assert.equal(typeof value, "string", "concrete string literal must be text");
+    const bytes = new TextEncoder().encode(value);
+    assert.ok(bytes.length <= 0xffffffff,
+      "concrete string UTF-8 byte count must fit UInt32");
+    const address = this.allocate(KIND.string, bytes.length, {
+      aux0: STRING_UTF8_MARKER,
+      aux1: bytes.length,
+      aux2: 0,
+      aux3: 0,
+    });
+    new Uint8Array(this.buffer, address + HEADER_BYTES, bytes.length).set(bytes);
+    this.descriptors.set(address, { kind: "string" });
+    return address;
+  }
+
+  readString(address, header = this.readHeader(address)) {
+    assert.equal(header.kind, KIND.string, "expected a concrete string object");
+    assert.equal(header.aux0, STRING_UTF8_MARKER, "unknown concrete string representation");
+    assert.equal(header.aux2, 0, "nonzero concrete string reserved metadata");
+    assert.equal(header.aux3, 0, "nonzero concrete string reserved metadata");
+    assert.ok(HEADER_BYTES + header.aux1 <= header.bytes,
+      "concrete string payload exceeds its allocation");
+    const bytes = new Uint8Array(this.buffer, address + HEADER_BYTES, header.aux1);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  }
+
   acceptsWord(kind, word) {
     const classification = this.classify(word);
     if (kind === "erased") return unsigned32(word) === 0;
@@ -576,6 +625,11 @@ export class ConcreteHost {
   naturalLiteral(operation, args) {
     assert.equal(args.length, 0, "natural literal host arity mismatch");
     return signed32(this.allocateNatural(operation.value));
+  }
+
+  stringLiteral(operation, args) {
+    assert.equal(args.length, 0, "string literal host arity mismatch");
+    return signed32(this.allocateString(operation.value));
   }
 
   allocCtor(operation, args) {
@@ -1113,6 +1167,8 @@ export class ConcreteHost {
     switch (operation.kind) {
       case "naturalLiteral":
         return (...args) => this.naturalLiteral(operation, args);
+      case "stringLiteral":
+        return (...args) => this.stringLiteral(operation, args);
       case "allocCtor":
         return (...args) => this.allocCtor(operation, args);
       case "objectProj":
@@ -1222,6 +1278,9 @@ export class ConcreteHost {
     }
     if (header.kind === KIND.natural) {
       return { kind: "natural", value: this.readNatural(address, header).toString() };
+    }
+    if (header.kind === KIND.string) {
+      return { kind: "string", value: this.readString(address, header) };
     }
     if (header.kind === KIND.boxed) {
       const kind = descriptor?.scalarKind;

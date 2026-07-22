@@ -22,11 +22,13 @@ export const CONCRETE_FIXTURES = Object.freeze([
   "erased",
   "literal",
   "natural-heap",
+  "nested-heap",
   "object-mutation",
   "projection-fault",
   "recursive-call",
   "reset-reuse",
   "shared-reset-reuse",
+  "string-heap",
   "tag-mutation",
   "uint16-max",
   "uint32-max",
@@ -37,7 +39,6 @@ export const CONCRETE_FIXTURES = Object.freeze([
 
 export const REJECTED_FRAGMENT_FIXTURES = Object.freeze([
   "external-echo",
-  "string-heap",
 ]);
 
 export const EXPECTED_CONCRETE_FAULTS = Object.freeze([

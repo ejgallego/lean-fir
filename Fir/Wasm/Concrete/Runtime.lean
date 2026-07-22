@@ -69,6 +69,11 @@ def promotedTagMarker : UInt32 := 1
 
 def bigNaturalMarker : UInt32 := 2
 
+/-- Version marker for the W6 string payload. Strings store their canonical
+UTF-8 bytes contiguously after the common header; `aux1` records the exact byte
+count and `aux2`/`aux3` remain reserved. -/
+def stringUtf8Marker : UInt32 := 1
+
 /-- Allocate the persistent heap representation of a semantic tagged payload
 that cannot fit in the wasm32 immediate word. -/
 def allocatePromotedTag (state : MemoryState) (payload : UInt64) :
@@ -541,6 +546,57 @@ def readNatural (state : MemoryState) (object : Word32) : Except ConcreteError N
   unless header.kind == .natural && header.aux0 == bigNaturalMarker do
     throw (.source .expectedObject)
   liftMemory <| readNaturalLimbs state.memory object.value 0 header.aux1.toNat
+
+/-- Canonical byte sequence stored by one concrete string allocation. Keeping
+this conversion public lets the refinement layer compare the payload directly
+without trusting a second UTF-8 decoder. -/
+def stringUtf8Bytes (value : String) : List UInt8 :=
+  value.toUTF8.data.toList
+
+/-- Install one contiguous UTF-8 payload immediately after the common object
+header. -/
+def writeStringBytes (memory : LinearMemory) (base index : Nat) :
+    List UInt8 → Except MemoryError LinearMemory
+  | [] => .ok memory
+  | byte :: rest => do
+      let memory ← memory.writeByte (base + headerBytes + index) byte
+      writeStringBytes memory base (index + 1) rest
+
+/-- Read one bounded concrete string payload as raw canonical UTF-8 bytes. -/
+def readStringBytes (memory : LinearMemory) (base index : Nat) :
+    Nat → Except MemoryError (List UInt8)
+  | 0 => .ok []
+  | count + 1 => do
+      let byte ← memory.readByte (base + headerBytes + index)
+      let rest ← readStringBytes memory base (index + 1) count
+      return byte :: rest
+
+/-- Allocate one source string as a versioned, reference-counted UTF-8 object.
+The aligned allocation may contain zero padding, but only the `aux1` bytes are
+part of the semantic payload. -/
+def allocateString (state : MemoryState) (value : String) :
+    Except ConcreteError (MemoryState × Word32) := do
+  let bytes := stringUtf8Bytes value
+  let byteCount ← uint32Field "string UTF-8 byte count" bytes.length
+  let (state, address) ← liftMemory <|
+    state.allocateObject .string bytes.length false stringUtf8Marker byteCount
+  let memory ← liftMemory <|
+    writeStringBytes state.memory address.value 0 bytes
+  return ({ state with memory }, address)
+
+/-- Checked raw decoder for the frozen W6 string layout. Malformed metadata
+cannot make the decoder read beyond the object's retained physical extent. -/
+def readStringPayload (state : MemoryState) (object : Word32) :
+    Except ConcreteError (List UInt8) := do
+  unless object.classify = .heap do
+    throw (.source .expectedObject)
+  let header ← liftMemory <| state.readLiveHeader object
+  unless header.kind == .string do
+    throw (.source .expectedObject)
+  unless header.aux0 == stringUtf8Marker && header.aux2 == 0 && header.aux3 == 0 &&
+      headerBytes + header.aux1.toNat ≤ header.allocationBytes.toNat do
+    throw (.target (.malformedHeader object.value header.allocationBytes.toNat))
+  liftMemory <| readStringBytes state.memory object.value 0 header.aux1.toNat
 
 /-- Decode the object-representation lanes in one static closure capture
 descriptor. Scalar lanes are skipped; object, tagged, `tobject`, and erased

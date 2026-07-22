@@ -692,6 +692,32 @@ theorem naturalLiteralFn_satisfies_contract (value initial args) :
       ((naturalLiteralFn value).invoke initial args) := by
   rfl
 
+/-- Executable concrete string-literal import. The host allocates the frozen
+UTF-8 object layout and returns its exact wasm32 address. -/
+def stringLiteralStep (value : String) (store : Wasm.Store Host)
+    (args : List Wasm.Value) : Wasm.HostResult Host :=
+  let store := clearFailure store
+  match args with
+  | [] =>
+      match allocateString store.host.runtime.heap value with
+      | .ok (heap, word) =>
+          .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap store heap)
+      | .error failure => trap store (.runtime failure.toTrap)
+  | args => trap store (.arityMismatch 0 args.length)
+
+def stringLiteralFn (value : String) : Wasm.HostFn Host := {
+  params := []
+  results := [.i32]
+  invoke := stringLiteralStep value }
+
+def stringLiteralContract (value : String) : Wasm.HostContract Host :=
+  fun initial args result => result = stringLiteralStep value initial args
+
+theorem stringLiteralFn_satisfies_contract (value initial args) :
+    stringLiteralContract value initial args
+      ((stringLiteralFn value).invoke initial args) := by
+  rfl
+
 /-- Decode the i32-only physical fields accepted by constructor allocation.
 The index is carried solely to produce a precise structured lane failure. -/
 def decodeConstructorWords : Nat → List Wasm.Value → Except HostFailure (List Word32)

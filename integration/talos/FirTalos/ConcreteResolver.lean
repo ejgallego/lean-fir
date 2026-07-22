@@ -5,8 +5,8 @@ namespace FirTalos.Concrete
 open Fir.Wasm
 
 /-- Operations omitted from the concrete resolver are honest fragment gates:
-string allocation, floating-point scalar storage, legacy closure callbacks,
-and external implementations still need concrete executable counterparts. -/
+floating-point scalar storage, legacy closure callbacks, and external
+implementations still need concrete executable counterparts. -/
 private def boxedScalarKind? :
     AbiKind → Option Fir.Wasm.Concrete.BoxedScalarKind
   | .uint8 => some Fir.Wasm.Concrete.BoxedScalarKind.uint8
@@ -31,6 +31,7 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .literal value _ =>
       match value with
       | .nat value => some (naturalLiteralFn value)
+      | .str value => some (stringLiteralFn value)
       | _ => none
   | .allocCtor info fields result => some (allocCtorFn info fields result)
   | .objectProj index _ => some (objectProjFn index)

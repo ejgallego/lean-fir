@@ -65,6 +65,9 @@ private def fixtureReturnsI64? (program : Fir.LeanIR.ImpureProgram)
 -- than semantic handles for the first artifact-ready fragment.
 #guard fixtureReturnsWord? Fir.Wasm.abiLiteralProgram 85
 
+-- The first heap allocation begins at the frozen aligned concrete frontier.
+#guard fixtureReturnsWord? FirTalos.abiStringProgram 1024
+
 #guard fixtureReturnsWord? Fir.Wasm.abiCtorProjectionProgram 15
 
 #guard fixtureReturnsWord? Fir.Wasm.abiCaseProgram 3
@@ -183,10 +186,11 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 -- by closure dispatch and remain executable under the concrete host store.
 #guard fixtureReturnsWord? Fir.Wasm.abiRecursiveCallProgram 41
 
--- Unsupported runtime families are rejected by resolution rather than
--- reaching a concrete host that only traps after instantiation.
-#guard (hostFn? (.literal (.str "concrete") .object)).isNone
+-- String literals now resolve to the executable UTF-8 concrete host.
+#guard (hostFn? (.literal (.str "concrete") .object)).isSome
 
+-- Remaining unsupported runtime families are rejected by resolution rather
+-- than reaching a concrete host that only traps after instantiation.
 #guard (hostFn? (.scalarProj 1 0 .float32)).isNone
 
 #guard Fir.Wasm.externalModule?.any fun source =>
@@ -196,6 +200,21 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 
 private def emptyHostStore : Wasm.Store Host :=
   ({ funcs := [] } : Wasm.Module).initialStore
+
+-- Non-ASCII literals retain the exact canonical UTF-8 bytes and frozen header
+-- metadata at the concrete host boundary.
+#guard match stringLiteralStep "hello α_world_β" emptyHostStore [] with
+  | .Return [.i32 bits] store =>
+      let address := Word32.ofUInt32 bits
+      match store.host.runtime.heap.readLiveHeader address,
+          readStringPayload store.host.runtime.heap address with
+      | .ok header, .ok bytes =>
+          header.kind == .string && header.aux0 == stringUtf8Marker &&
+            header.aux1.toNat == bytes.length && header.aux2 == 0 &&
+            header.aux3 == 0 &&
+            bytes == stringUtf8Bytes "hello α_world_β"
+      | _, _ => false
+  | _ => false
 
 -- The executable concrete host decodes immediate object words without any
 -- semantic handle table.

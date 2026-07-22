@@ -103,18 +103,21 @@ Cross-cutting W6.5 state:
   resolution; and
 - a browser-safe external-engine host now mirrors the proved concrete word,
   header, slot, natural, constructor, closure, mutation, ownership, and reuse
-  layouts; the same frozen inventory of 34 closed artifacts passes its live
+  layouts; the same frozen inventory of 36 closed artifacts passes its live
   FIR oracle in Node/V8 and a Fetch-only browser Worker without runtime
-  handles, including cache miss/persistence/hit and maximum-width heap
-  boxing/unboxing; both engines also preserve two import-construction fragment
-  gates and the exact malformed-layout expected failure, while the explicit
-  allowlist leaves strings and externals to subsequent slices; and
+  handles, including cache miss/persistence/hit, maximum-width heap
+  boxing/unboxing, UTF-8 string allocation, and a mixed string/natural
+  constructor graph; both engines also preserve the remaining external
+  import-construction fragment gate and the exact malformed-layout expected
+  failure; and
 - the concrete external-engine host reserves and reconstructs the represented
   object-field constructor/natural `initialRuntime` subset before invocation,
   preserving all semantic locations and cell metadata; Node and the browser
   Worker audit a four-cell compiler-produced `List Nat` graph, its heap-backed
-  entry-address round-trip, and its `getTag` result, while strings, packed
-  constructors, and other initial heap kinds retain explicit layout gates; and
+  entry-address round-trip, and its `getTag` result; they also reconstruct,
+  audit, round-trip, and execute a compiler-produced Unicode string input,
+  while packed constructors and other initial heap kinds retain explicit
+  layout gates; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.
