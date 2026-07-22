@@ -29,7 +29,7 @@ theorem allocateString_liveHeapRel
     (allocated : allocateString state value = .ok (result, address)) :
     let nextWitness := witness.bindString runtime.nextLocation address value
     LiveHeapRel result nextWitness (semanticStringResult runtime value) ∧
-      ValueRel nextWitness .tobject (.word32 address)
+      ValueRel nextWitness .object (.word32 address)
         (.object (.heap runtime.nextLocation)) := by
   dsimp only
   obtain ⟨_, _, _, objectAllocation, _, _⟩ :=

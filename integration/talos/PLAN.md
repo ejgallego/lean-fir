@@ -2421,10 +2421,20 @@ Strings join the complete live-cell matrix, descriptor spatial framing,
 sharing, checked increment/decrement, canonical count-one release, recursive
 release dispatch, cache persistence, mutation exclusion, and reset/reuse
 transport. A fresh `allocateString` now extends `LiveHeapRel`, relates the
-returned wasm32 `.tobject` word to the new semantic location, and agrees with
+returned wasm32 `.object` word to the new semantic location, and agrees with
 the source string-literal allocation step. Generated literal-`let` composition
 remains the next boundary. No executable layout or shared semantic contract
 changed.
+
+W6.6au composes compiler-produced string literal `let` bindings with that heap
+theorem. The concrete host allocation now extends `ConcreteRuntimeRel`,
+returns the exact `.object` wasm32 lane emitted by Lean 4.32 lowering, writes
+the fresh address into the compiler-assigned local, transports every existing
+local across the witness extension, and resumes an arbitrary recursive
+`CodeWP` continuation. A closed Unicode initial-state theorem instantiates the
+same allocation boundary. This also tightens W6.6at's result relation from the
+wider `.tobject` lane to the compiler's precise `.object` ABI. No executable
+layout or shared semantic contract changed.
 
 ## Parallel agent packages
 

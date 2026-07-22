@@ -189,6 +189,22 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 -- String literals now resolve to the executable UTF-8 concrete host.
 #guard (hostFn? (.literal (.str "concrete") .object)).isSome
 
+/-- Closed initial-state instance of the string-allocation refinement used by
+the generated literal rule. -/
+theorem initialUnicodeString_liveHeapRel
+    (heap : MemoryState) (word : Word32)
+    (allocated : allocateString MemoryState.initial "hello α_world_β" =
+      .ok (heap, word)) :
+    ∃ nextWitness,
+      (initialWitness #[] #[]).Extends nextWitness ∧
+      LiveHeapRel heap nextWitness
+        (literal ({} : RuntimeState) (.str "hello α_world_β")).1 ∧
+      ValueRel nextWitness .object (.word32 word)
+        (literal ({} : RuntimeState) (.str "hello α_world_β")).2 := by
+  exact allocateString_liveHeapRel_extends MemoryState.initial heap
+    (initialWitness #[] #[]) ({} : RuntimeState) "hello α_world_β" word
+    (LiveHeapRel.initial #[] #[]) allocated
+
 -- Remaining unsupported runtime families are rejected by resolution rather
 -- than reaching a concrete host that only traps after instantiation.
 #guard (hostFn? (.scalarProj 1 0 .float32)).isNone

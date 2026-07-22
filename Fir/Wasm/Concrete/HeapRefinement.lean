@@ -1089,8 +1089,8 @@ theorem ValueRel.new_natural_result (witness : RefinementWitness)
 theorem ValueRel.new_string_result (witness : RefinementWitness)
     (location : Location) (address : Word32) (value : String) :
     ValueRel (witness.bindString location address value)
-      .tobject (.word32 address) (.object (.heap location)) :=
-  .tobject (.heap (.mapped
-    (RefinementWitness.lookup_bindString_location witness location address value)))
+      .object (.word32 address) (.object (.heap location)) :=
+  .object (.mapped
+    (RefinementWitness.lookup_bindString_location witness location address value))
 
 end Fir.Wasm.Concrete

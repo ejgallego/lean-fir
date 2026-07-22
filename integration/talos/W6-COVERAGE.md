@@ -7,7 +7,7 @@ failure correspondence. The matrix is intentionally conservative.
 
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
-| `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural concrete host plus generated literal-`let` WP; string concrete host and whole-module Talos/Node/browser execution; generated string literal composition pending |
+| `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural and string concrete hosts plus generated literal-`let` WPs and compiler-local writes; string whole-module Talos/Node/browser execution |
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
@@ -38,13 +38,13 @@ Cross-cutting W6.5 state:
   `StringObjectRel`; exact-value descriptor binding preserves witness
   well-formedness and prior lookups; and fresh string allocation extends
   `LiveHeapRel` with exact checked decoding, descriptor-region disjointness,
-  and a related `.tobject` result;
+  and a related `.object` result;
 - globals, world, trace, successful external calls, and failed external calls
   have `ConcreteRuntimeRel`/trap boundaries;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
-- natural literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
+- natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are
   composed with their W5/W2 generated case and `let` theorems using
   representation-aware concrete locals and host-owned memory; and
