@@ -111,8 +111,18 @@ def deletedBoxBefore : LCNF.Code .impure :=
 def deletedBoxAfter : LCNF.Code .impure :=
   .return live
 
+def deadNullaryFapDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.fap `deadNullaryExternal #[])
+
+def deadNullaryFapBefore : LCNF.Code .impure :=
+  .let liveDecl <| .let deadNullaryFapDecl <| .return live
+
+def deadNullaryFapAfter : LCNF.Code .impure :=
+  .let liveDecl <| .return live
+
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
+#guard safeToElim deadNullaryFapDecl.value
 #guard !safeToElim deadCopyDecl.value
 
 def fixtureDecl (name : Name) (code : LCNF.Code .impure) :
@@ -180,6 +190,8 @@ def checkFixtures : CoreM Unit := do
     deletedLargeNatBefore deletedLargeNatAfter
   checkActualElimDead `elimDeadPap deletedPapBefore deletedPapAfter
   checkActualElimDead `elimDeadBox deletedBoxBefore deletedBoxAfter
+  checkActualElimDead `elimDeadNullaryFap
+    deadNullaryFapBefore deadNullaryFapAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -234,6 +246,54 @@ def deletedBoxBeforeProgram : ImpureProgram :=
 
 def deletedBoxAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedBoxAfter] }
+
+def deadNullaryExternalDecl : LCNF.Decl .impure :=
+  decl `deadNullaryExternal #[] objType (.extern { entries := [] })
+
+def deadNullaryFapBeforeProgram : ImpureProgram :=
+  { decls := #[deadNullaryExternalDecl,
+      fixtureDecl `main deadNullaryFapBefore] }
+
+def deadNullaryFapAfterProgram : ImpureProgram :=
+  { decls := #[deadNullaryExternalDecl,
+      fixtureDecl `main deadNullaryFapAfter] }
+
+def countedNullaryExternal : ExternalImpl where
+  call _ runtime := .ok {
+    value := .erased
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world + 1 }
+
+theorem deadNullaryFapBeforeWellFormed :
+    WellFormedAt .impure deadNullaryFapBeforeProgram := by
+  apply WellFormedAt.impure
+  · simp [Program.NamesUnique, deadNullaryFapBeforeProgram,
+      deadNullaryExternalDecl, fixtureDecl, decl]
+  · unfold Program.ImpureHygienic
+    native_decide
+
+theorem deadNullaryFapAfterWellFormed :
+    WellFormedAt .impure deadNullaryFapAfterProgram := by
+  apply WellFormedAt.impure
+  · simp [Program.NamesUnique, deadNullaryFapAfterProgram,
+      deadNullaryExternalDecl, fixtureDecl, decl]
+  · unfold Program.ImpureHygienic
+    native_decide
+
+/-- Executable witness that current impure well-formedness does not make the
+upstream nullary-constant rule sound for FIR's observable external effects. -/
+def deadNullaryFapObservableMismatch : Bool :=
+  match runMain deadNullaryFapBeforeProgram countedNullaryExternal,
+      runMain deadNullaryFapAfterProgram countedNullaryExternal with
+  | .done source, .done target =>
+      source.outcome == .returned .erased &&
+        target.outcome == .returned .erased &&
+        source.world == 1 && source.trace.size == 1 &&
+        target.world == 0 && target.trace.isEmpty
+  | _, _ => false
+
+#guard deadNullaryFapObservableMismatch
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
