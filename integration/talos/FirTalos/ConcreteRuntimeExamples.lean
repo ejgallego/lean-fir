@@ -465,6 +465,17 @@ private def objectProjectionFixture :
       | _ => false
   | .error _ => false
 
+-- Object projection retains the complete FIR bounds fault at the Talos
+-- boundary rather than collapsing it into an unstructured Wasm trap.
+#guard match objectProjectionFixture with
+  | .ok (store, object) =>
+      match objectProjStep 1 store [.i32 (UInt32.ofNat object.value)] with
+      | .Trap next _ =>
+          next.host.failure? == some (.runtime (.source (.runtime
+            (.objectFieldOutOfBounds 1 1))))
+      | _ => false
+  | .error _ => false
+
 private def usizeProjectionInfo : Lean.Compiler.LCNF.CtorInfo := {
   name := `FirTalos.Concrete.usizeProjection
   cidx := 4
@@ -489,6 +500,17 @@ private def usizeProjectionFixture :
       match usizeProjStep 0 store [.i32 (UInt32.ofNat object.value)] with
       | .Return [.i64 value] next =>
           value == 18446744073709551615 && next.host.failure?.isNone
+      | _ => false
+  | .error _ => false
+
+-- USize projection preserves its exact index and declared size in the
+-- source-classified Talos failure channel.
+#guard match usizeProjectionFixture with
+  | .ok (store, object) =>
+      match usizeProjStep 1 store [.i32 (UInt32.ofNat object.value)] with
+      | .Trap next _ =>
+          next.host.failure? == some (.runtime (.source (.runtime
+            (.usizeFieldOutOfBounds 1 1))))
       | _ => false
   | .error _ => false
 

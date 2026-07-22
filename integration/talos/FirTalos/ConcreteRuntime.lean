@@ -1682,6 +1682,64 @@ theorem ConcreteRuntimeRel.readUSizeField_refines
           cases taggedRelated <;>
             simp [getUSizeField, getConstructor, Bind.bind, Except.bind] at projected
 
+theorem ConcreteRuntimeRel.readObjectField_outOfBounds_refines
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getObjectField runtime sourceObject index =
+      .error (.objectFieldOutOfBounds index info.size)) :
+    readObjectField concrete.heap objectWord index =
+      .error (.source (.objectFieldOutOfBounds index info.size)) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap mapped =>
+          cases mapped with
+          | mapped found =>
+              exact related.heap.readObjectField_outOfBounds_refines found
+                descriptor projected
+      | tagged taggedRelated =>
+          cases taggedRelated
+          <;> change Except.error RuntimeFault.expectedConstructor =
+              Except.error (.objectFieldOutOfBounds index info.size) at projected
+          <;> have faultEq := Except.error.inj projected
+          <;> cases faultEq
+
+theorem ConcreteRuntimeRel.readUSizeField_outOfBounds_refines
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeField runtime sourceObject index =
+      .error (.usizeFieldOutOfBounds index info.usize)) :
+    readUSizeField concrete.heap objectWord index =
+      .error (.source (.usizeFieldOutOfBounds index info.usize)) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap mapped =>
+          cases mapped with
+          | mapped found =>
+              exact related.heap.readUSizeField_outOfBounds_refines found
+                descriptor projected
+      | tagged taggedRelated =>
+          cases taggedRelated
+          <;> change Except.error RuntimeFault.expectedConstructor =
+              Except.error (.usizeFieldOutOfBounds index info.usize) at projected
+          <;> have faultEq := Except.error.inj projected
+          <;> cases faultEq
+
 theorem objectProjStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
@@ -1727,6 +1785,52 @@ theorem usizeProjStep_of_refines
       objectRelated descriptor projected
   refine ⟨read, ?_, valueRelated⟩
   simp [usizeProjStep, clearFailure, read]
+
+/-- An object-field bounds fault crosses the concrete Talos host without
+losing its FIR fault payload or its source classification. -/
+theorem objectProjStep_outOfBounds_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getObjectField runtime sourceObject index =
+      .error (.objectFieldOutOfBounds index info.size)) :
+    objectProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+      trap (clearFailure initial) (.runtime (.source (.runtime
+        (.objectFieldOutOfBounds index info.size)))) := by
+  have read :=
+    FirTalos.Concrete.ConcreteRuntimeRel.readObjectField_outOfBounds_refines
+      runtimeRelated objectRelated descriptor projected
+  simp [objectProjStep, clearFailure, read, ConcreteError.toTrap]
+
+/-- A `USize`-field bounds fault crosses the concrete Talos host without
+losing its FIR fault payload or its source classification. -/
+theorem usizeProjStep_outOfBounds_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeField runtime sourceObject index =
+      .error (.usizeFieldOutOfBounds index info.usize)) :
+    usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+      trap (clearFailure initial) (.runtime (.source (.runtime
+        (.usizeFieldOutOfBounds index info.usize)))) := by
+  have read :=
+    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeField_outOfBounds_refines
+      runtimeRelated objectRelated descriptor projected
+  simp [usizeProjStep, clearFailure, read, ConcreteError.toTrap]
 
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

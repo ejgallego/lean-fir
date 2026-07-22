@@ -9,8 +9,8 @@ failure correspondence. The matrix is intentionally conservative.
 |---|---|---|---|---|
 | `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural and string concrete hosts plus generated literal-`let` WPs and compiler-local writes; string whole-module Talos/Node/browser execution |
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
-| `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
-| `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
+| `objectProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
+| `usizeProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; uninitialized valid coordinates expose the confirmed FIR-fault/concrete-zero discrepancy in `FIR-BUG-wasm-none-uninitialized-scalar-projection`; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, natural, or string graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, local write, twice-called cached constructor-graph whole-module execution, and Node/V8 plus browser-Worker miss/persistence/hit execution compose; per-declaration body proofs pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, continuation, module-derived metadata tables, ordinary/erased/multi-stage whole-module executions, and Node/V8 plus browser-Worker concrete closure allocation compose; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
@@ -52,6 +52,10 @@ Cross-cutting W6.5 state:
   effect, and separately verifies reject-by-default behavior;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
+- mapped live-constructor object and `USize` projections preserve an exact
+  semantic bounds fault through the checked reader, complete runtime relation,
+  and Talos source-classified trap, including the original index and declared
+  size;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

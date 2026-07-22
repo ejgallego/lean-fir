@@ -31,6 +31,104 @@ theorem getUSizeField_eq_ok_iff_of_cell
   simp only [Pure.pure, Except.pure]
   cases fieldAt : semantic.usizeFields[index]? <;> simp
 
+theorem getObjectField_eq_error_outOfBounds_iff_of_cell
+    (runtime : RuntimeState) (location : Location) (cell : HeapCell)
+    (semantic : ConstructorObject) (index : Nat)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (objectEq : cell.object = .ctor semantic) :
+    getObjectField runtime (.object (.heap location)) index =
+        .error (.objectFieldOutOfBounds index semantic.objectFields.size) ↔
+      semantic.objectFields[index]? = none := by
+  simp [getObjectField, getConstructor, getLiveCell, found, live]
+  simp only [Bind.bind, Except.bind]
+  rw [objectEq]
+  simp only [Pure.pure, Except.pure]
+  cases fieldAt : semantic.objectFields[index]?
+  · have outOfBounds := Array.getElem?_eq_none_iff.mp fieldAt
+    constructor
+    · intro
+      exact outOfBounds
+    · intro
+      rfl
+  · have inBounds := (Array.getElem?_eq_some_iff.mp fieldAt).1
+    constructor
+    · intro impossible
+      contradiction
+    · intro outOfBounds
+      omega
+
+theorem getUSizeField_eq_error_outOfBounds_iff_of_cell
+    (runtime : RuntimeState) (location : Location) (cell : HeapCell)
+    (semantic : ConstructorObject) (index : Nat)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (objectEq : cell.object = .ctor semantic) :
+    getUSizeField runtime (.object (.heap location)) index =
+        .error (.usizeFieldOutOfBounds index semantic.usizeFields.size) ↔
+      semantic.usizeFields[index]? = none := by
+  simp [getUSizeField, getConstructor, getLiveCell, found, live]
+  simp only [Bind.bind, Except.bind]
+  rw [objectEq]
+  simp only [Pure.pure, Except.pure]
+  cases fieldAt : semantic.usizeFields[index]?
+  · have outOfBounds := Array.getElem?_eq_none_iff.mp fieldAt
+    constructor
+    · intro
+      exact outOfBounds
+    · intro
+      rfl
+  · have inBounds := (Array.getElem?_eq_some_iff.mp fieldAt).1
+    constructor
+    · intro impossible
+      contradiction
+    · intro outOfBounds
+      omega
+
+/-- A decoded constructor rejects every object-field index outside its
+declared semantic array with the exact source-classified bounds fault. -/
+theorem ConstructorObjectRel.readObjectField_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {index : Nat} (outOfBounds : semantic.objectFields.size ≤ index) :
+    readObjectField state address index = .error
+      (.source (.objectFieldOutOfBounds index semantic.objectFields.size)) := by
+  obtain ⟨header, headerRead, headerKind, _, _, objectCount, _, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have sizeEq : header.aux1.toNat = semantic.objectFields.size := by
+    rw [objectCount, related.semanticObjectFields]
+  unfold readObjectField
+  rw [constructorHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [sizeEq]
+  simp [Nat.not_lt.mpr outOfBounds]
+  rfl
+
+/-- A decoded constructor rejects every `USize` index outside its declared
+semantic array with the exact source-classified bounds fault. -/
+theorem ConstructorObjectRel.readUSizeField_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {index : Nat} (outOfBounds : semantic.usizeFields.size ≤ index) :
+    readUSizeField state address index = .error
+      (.source (.usizeFieldOutOfBounds index semantic.usizeFields.size)) := by
+  obtain ⟨header, headerRead, headerKind, _, _, objectCount, usizeCount, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have sizeEq : header.aux2.toNat = semantic.usizeFields.size := by
+    rw [usizeCount, related.semanticUSizeFields]
+  unfold readUSizeField
+  rw [constructorHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [sizeEq]
+  simp [Nat.not_lt.mpr outOfBounds]
+  rfl
+
 /-- A successful semantic packed-scalar projection identifies the exact
 field selected by its compiler operands. -/
 theorem scalarField_of_getScalarField_eq_ok_of_cell
@@ -323,6 +421,114 @@ theorem LiveHeapRel.readUSizeField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+
+/-- An exact semantic object-projection bounds fault is preserved by the
+checked concrete reader for the mapped live constructor. -/
+theorem LiveHeapRel.readObjectField_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {index : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (projected : getObjectField runtime (.object (.heap location)) index =
+      .error (.objectFieldOutOfBounds index info.size)) :
+    readObjectField state address index =
+      .error (.source (.objectFieldOutOfBounds index info.size)) := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getObjectField, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | constructor storedDescriptor objectEq objectRelated _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have descriptorEq := Option.some.inj descriptor
+      cases descriptorEq
+      have semanticSize := objectRelated.semanticObjectFields
+      rw [← semanticSize] at projected
+      have missing := (getObjectField_eq_error_outOfBounds_iff_of_cell runtime
+        location cell _ index found live objectEq).mp projected
+      have outOfBounds := Array.getElem?_eq_none_iff.mp missing
+      simpa [semanticSize] using
+        objectRelated.readObjectField_outOfBounds outOfBounds
+  | boxed storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+
+/-- An exact semantic `USize`-projection bounds fault is preserved by the
+checked concrete reader for the mapped live constructor. -/
+theorem LiveHeapRel.readUSizeField_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {index : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeField runtime (.object (.heap location)) index =
+      .error (.usizeFieldOutOfBounds index info.usize)) :
+    readUSizeField state address index =
+      .error (.source (.usizeFieldOutOfBounds index info.usize)) := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getUSizeField, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | constructor storedDescriptor objectEq objectRelated _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have descriptorEq := Option.some.inj descriptor
+      cases descriptorEq
+      have semanticSize := objectRelated.semanticUSizeFields
+      rw [← semanticSize] at projected
+      have missing := (getUSizeField_eq_error_outOfBounds_iff_of_cell runtime
+        location cell _ index found live objectEq).mp projected
+      have outOfBounds := Array.getElem?_eq_none_iff.mp missing
+      simpa [semanticSize] using
+        objectRelated.readUSizeField_outOfBounds outOfBounds
+  | boxed storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | string storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor

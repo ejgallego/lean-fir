@@ -2565,6 +2565,15 @@ blocks complete `scalarProj` fault correspondence until the Wasm fragment
 tracks initialization or proves definite writes before projections. No shared
 semantic contract changed.
 
+W6.6bh proves the first two operation-specific structured-fault paths.
+Semantic object-field and `USize`-field misses on a mapped live constructor now
+force the exact same index/declared-size bounds fault from the checked concrete
+reader. The result crosses `ConcreteRuntimeRel` and the Talos host as an
+unchanged source-classified runtime trap, with executable guards for both
+payloads. Other projection failures remain in the conservative partial matrix,
+and scalar projection remains blocked by W6.6bg. No executable layout or shared
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
