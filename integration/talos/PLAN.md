@@ -2628,6 +2628,15 @@ Talos `getTag` host now preserve the paired address/location `deadObject` fault
 through `ConcreteErrorSourceRel`; a direct allocate/delete/tag guard checks the
 executable trap. No shared contract or runtime behavior changes.
 
+W6.6bo carries the same exact stale-reference boundary through object and
+`USize` projection. The common constructor-header decoder is now proved to
+reject `DeadCellRel` before kind, bounds, padding, or payload inspection; both
+checked readers, both FIR projections, and both Talos hosts preserve the
+address/location `deadObject` pair through `ConcreteErrorSourceRel`. A combined
+allocate/delete/projection guard deliberately supplies out-of-range indices and
+still observes dead-object first. No shared contract or runtime behavior
+changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

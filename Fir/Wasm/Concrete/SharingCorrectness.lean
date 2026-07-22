@@ -165,7 +165,7 @@ theorem LiveHeapRel.readIsShared_deadObject
         .error (.deadObject location) := by
   have deadRelated := related.deadCellRel mapped found dead
   exact ⟨deadRelated.readIsShared_eq, by
-    simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, dead, Except.map]
+    simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, dead]
     rfl⟩
 
 end Fir.Wasm.Concrete

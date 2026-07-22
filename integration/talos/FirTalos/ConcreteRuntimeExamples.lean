@@ -1049,6 +1049,27 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
+-- Deleted constructors fault before either object or `USize` projection can
+-- inspect its deliberately out-of-range index.
+#guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
+    [.i32 23] with
+  | .Return [.i32 object] store =>
+      match deleteStep store [.i32 object] with
+      | .Return [] deleted =>
+          let expected := some (.runtime (.source (.address
+            (.deadObject (Word32.ofUInt32 object)))))
+          let objectFault :=
+            match objectProjStep 99 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          let usizeFault :=
+            match usizeProjStep 99 deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected
+            | _ => false
+          objectFault && usizeFault
+      | _ => false
+  | _ => false
+
 -- The shared erased failed-reset encoding is an operation-specific delete
 -- no-op; physical zero does not become an ordinary object address.
 #guard match deleteStep emptyHostStore [.i32 0] with

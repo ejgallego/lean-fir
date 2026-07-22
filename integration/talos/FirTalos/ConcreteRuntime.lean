@@ -1865,6 +1865,65 @@ theorem usizeProjStep_outOfBounds_of_refines
       runtimeRelated objectRelated descriptor projected
   simp [usizeProjStep, clearFailure, read, ConcreteError.toTrap]
 
+/-- A stale object-field projection preserves the exact mapped dead-object
+fault before any bounds or payload access. -/
+theorem objectProjStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {location : Location}
+    {cell : HeapCell} (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    objectProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      getObjectField runtime (.object (.heap location)) index =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.readObjectField_deadObject heapRelated found dead index
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [objectProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
+/-- The same stale-reference theorem for a `USize` projection. -/
+theorem usizeProjStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {location : Location}
+    {cell : HeapCell} (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      getUSizeField runtime (.object (.heap location)) index =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.readUSizeField_deadObject heapRelated found dead index
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [usizeProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}

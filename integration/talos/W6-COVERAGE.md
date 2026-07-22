@@ -9,8 +9,8 @@ failure correspondence. The matrix is intentionally conservative.
 |---|---|---|---|---|
 | `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural and string concrete hosts plus generated literal-`let` WPs and compiler-local writes; string whole-module Talos/Node/browser execution |
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial; invalid-arity classification blocked by `FIR-BUG-wasm-none-constructor-arity-fault-classification` | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
-| `objectProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
-| `usizeProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
+| `objectProj` | Yes | Live and stale mapped-heap theorems | Bounds and dead-object source-address faults exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds and stale-object traps with executable guards, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
+| `usizeProj` | Yes | Live and stale mapped-heap theorems | Bounds and dead-object source-address faults exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds and stale-object traps with executable guards, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; uninitialized valid coordinates expose the confirmed FIR-fault/concrete-zero discrepancy in `FIR-BUG-wasm-none-uninitialized-scalar-projection`; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
 | `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, natural, or string graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, local write, twice-called cached constructor-graph whole-module execution, and Node/V8 plus browser-Worker miss/persistence/hit execution compose; per-declaration body proofs pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, continuation, module-derived metadata tables, ordinary/erased/multi-stage whole-module executions, and Node/V8 plus browser-Worker concrete closure allocation compose; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
@@ -60,11 +60,12 @@ Cross-cutting W6.5 state:
   before either concrete or semantic state changes, and executable Talos guards
   reread the original payload after each trap;
 - stale mapped references now use a source-address `deadObject address` trap;
-  reusable `DeadCellRel` and `LiveHeapRel` lemmas plus the `isShared` and
-  `getTag` Talos theorems preserve it against FIR's `deadObject location`, with
-  `HeapReferenceRel` carrying the exact fault translation; closed sharing and
-  direct tag guards cover execution, while the fixed classification is tracked
-  by `FIR-BUG-wasm-none-dead-object-fault-classification`;
+  reusable `DeadCellRel` and `LiveHeapRel` lemmas plus the `isShared`, `getTag`,
+  object-projection, and `USize`-projection Talos theorems preserve it against
+  FIR's `deadObject location`, with `HeapReferenceRel` carrying the exact fault
+  translation; closed sharing and direct tag/projection guards cover execution,
+  while the fixed classification is tracked by
+  `FIR-BUG-wasm-none-dead-object-fault-classification`;
 - invalid constructor arities are `malformed` in FIR but dedicated source
   `arityMismatch` faults in the concrete allocator; exact guards and the
   coordinated contract decision are tracked by

@@ -327,6 +327,37 @@ theorem DeadCellRel.readTag_eq
   rw [related.readLiveHeader_eq]
   rfl
 
+/-- The shared constructor-header decoder rejects a released allocation before
+examining constructor metadata. -/
+theorem DeadCellRel.readConstructorHeader_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) :
+    readConstructorHeader state address =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ := related.header
+  unfold readConstructorHeader
+  simp [addressHeap]
+  rw [related.readLiveHeader_eq]
+  rfl
+
+theorem DeadCellRel.readObjectField_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (index : Nat) :
+    readObjectField state address index =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readObjectField
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.readUSizeField_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (index : Nat) :
+    readUSizeField state address index =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readUSizeField
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 /-- Exact tagged references decode through `readTag`, whether their physical
 word is immediate or a promoted-tag allocation. -/
 theorem LiveHeapRel.readTaggedReferenceTag_refines
@@ -761,7 +792,42 @@ theorem LiveHeapRel.readTag_deadObject
         .error (.deadObject location) := by
   have deadRelated := related.deadCellRel mapped found dead
   exact ⟨deadRelated.readTag_eq, by
-    simp [getTag, getLiveCell, found, dead, Except.map]
+    simp [getTag, getLiveCell, found, dead]
+    rfl⟩
+
+/-- A stale mapped object-field projection fails before index or payload
+decoding on both sides. -/
+theorem LiveHeapRel.readObjectField_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (index : Nat) :
+    readObjectField state address index =
+        .error (.sourceAddress (.deadObject address)) ∧
+      getObjectField runtime (.object (.heap location)) index =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readObjectField_eq index, by
+    simp [getObjectField, getConstructor, getLiveCell, found, dead]
+    rfl⟩
+
+/-- A stale mapped `USize` projection has the same exact dead-object boundary. -/
+theorem LiveHeapRel.readUSizeField_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (index : Nat) :
+    readUSizeField state address index =
+        .error (.sourceAddress (.deadObject address)) ∧
+      getUSizeField runtime (.object (.heap location)) index =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readUSizeField_eq index, by
+    simp [getUSizeField, getConstructor, getLiveCell, found, dead]
     rfl⟩
 
 /-- Complete `.getTag` wrapper for its representation-polymorphic object ABI.
