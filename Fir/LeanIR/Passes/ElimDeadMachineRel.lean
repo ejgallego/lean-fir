@@ -523,6 +523,86 @@ theorem coreStep_deletedScalarSet_of_ready
     coreStep_deletedScalarSet_reachableRelated sourceState targetState
       programs frames continuation joins env objectRead fieldRead effect next⟩
 
+/-- Operational ownership split for a deleted `reuse`: a `none` token may
+allocate fresh garbage, while a concrete token may overwrite only an
+unreachable compiler-owned constructor cell. -/
+inductive DeletedReuseReadyAt (state : MachineState) (roots : List Value)
+    (token : FVarId) (info : LCNF.CtorInfo)
+    (arguments : Array (LCNF.Arg .impure)) : Prop where
+  | none (values : Array Value)
+      (tokenRead : lookupValue state.env token = .ok (.reuseToken none))
+      (argumentsRead : evalArgs state.env arguments = .ok values)
+      (arity : values.size = info.size) :
+      DeletedReuseReadyAt state roots token info arguments
+  | some (location : Location) (cell : HeapCell)
+      (oldObject : ConstructorObject) (values : Array Value)
+      (tokenRead : lookupValue state.env token =
+        .ok (.reuseToken (some location)))
+      (argumentsRead : evalArgs state.env arguments = .ok values)
+      (found : findCell? state.runtime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor oldObject)
+      (arity : values.size = info.size)
+      (unreachable : ¬Reachable state.runtime.heap roots location) :
+      DeletedReuseReadyAt state roots token info arguments
+
+/-- Machine-level deleted-`reuse` rule.  Both token branches execute one
+source step and preserve the reachable runtime while the target stutters. -/
+theorem coreStep_deletedReuse_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedReuseReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      token info arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .reuse token info updateHeader arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  cases ready with
+  | none values tokenRead argumentsRead arity =>
+      rcases runtime.evalLetValueReuseNoneLeftGarbage
+          (fvarId := fvarId) (binderName := binderName) (type := type)
+          tokenRead argumentsRead arity with
+        ⟨nextRuntime, value, evaluated, next⟩
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_reachableRelated sourceState targetState
+          programs frames continuation joins env absent evaluated next⟩
+  | some location cell oldObject values tokenRead argumentsRead found live
+      objectEq arity unreachable =>
+      rcases runtime.evalLetValueReuseSomeLeftUnreachable
+          (fvarId := fvarId) (binderName := binderName) (type := type)
+          tokenRead argumentsRead found live objectEq unreachable arity with
+        ⟨nextRuntime, evaluated, next⟩
+      exact ⟨nextRuntime, .object (.heap location),
+        coreStep_deletedLet_reachableRelated sourceState targetState
+          programs frames continuation joins env absent evaluated next⟩
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation

@@ -1233,6 +1233,60 @@ theorem ShadowRuntimeRel.allocCtorLeftGarbage
     simp [allocCtor, arity, empty, object]
     rfl
 
+/-- A failed reuse token allocates a fresh constructor.  If the produced
+value is dead, that allocation is source-only unreachable garbage. -/
+theorem ShadowRuntimeRel.reuseNoneLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (info : LCNF.CtorInfo) (arguments : Array Value)
+    (arity : arguments.size = info.size) (updateHeader : Bool) :
+    ∃ nextRuntime value,
+      reuse left (.reuseToken none) info updateHeader arguments =
+          .ok (nextRuntime, value) ∧
+      ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
+  rcases related.allocCtorLeftGarbage info arguments arity with
+    ⟨nextRuntime, value, allocated, next⟩
+  exact ⟨nextRuntime, value, by simpa [reuse] using allocated, next⟩
+
+/-- Reusing an existing compiler-owned cell changes only that cell.  When the
+cell is outside the published reachable subgraph, the target may stutter. -/
+theorem ShadowRuntimeRel.reuseSomeLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor oldObject)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (info : LCNF.CtorInfo) (arguments : Array Value)
+    (arity : arguments.size = info.size) (updateHeader : Bool) :
+    ∃ nextRuntime,
+      reuse left (.reuseToken (some location)) info updateHeader arguments =
+          .ok (nextRuntime, .object (.heap location)) ∧
+      ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
+  let tag := if updateHeader then info.cidx else oldObject.tag
+  let object : ConstructorObject := {
+    tag
+    objectFields := arguments
+    usizeFields := Array.replicate info.usize 0
+    scalarFields := [] }
+  let replacement : HeapCell :=
+    { cell with object := .ctor object }
+  rcases related.setCellLeftUnreachable found unreachable replacement with
+    ⟨nextRuntime, effect, next⟩
+  refine ⟨nextRuntime, ?_, next⟩
+  unfold reuse
+  simp only [Bind.bind, Except.bind]
+  rw [if_neg (by simp [arity])]
+  have constructor : getLiveCell left location = .ok cell := by
+    simp [getLiveCell, found, live]
+  rw [constructor]
+  simp only [Bind.bind, Except.bind]
+  rw [objectEq]
+  change (do
+    let runtime ← setCell left location replacement
+    pure (runtime, Value.object (ObjectRef.heap location))) = _
+  rw [effect]
+  rfl
+
 /-- Interpreter-facing form of the constructor result: successful argument
 evaluation plus compiler arity well-formedness turns a dead constructor let
 into one source step that preserves the reachable runtime relation. -/
@@ -1254,6 +1308,57 @@ theorem ShadowRuntimeRel.evalLetValueCtorLeftGarbage
   refine ⟨nextRuntime, value, ?_, nextRelated⟩
   simp only [evalLetValue, argumentsResult, Bind.bind, Except.bind]
   rw [allocated]
+  rfl
+
+theorem ShadowRuntimeRel.evalLetValueReuseNoneLeftGarbage
+    (related : ShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra)
+    (tokenResult : lookupValue state.env token = .ok (.reuseToken none))
+    (argumentsResult : evalArgs state.env arguments = .ok values)
+    (arity : values.size = info.size) :
+    ∃ nextRuntime value,
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .reuse token info updateHeader arguments
+      } = .ok (nextRuntime, .value value) ∧
+      ShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra := by
+  rcases related.reuseNoneLeftGarbage info values arity updateHeader with
+    ⟨nextRuntime, value, reused, next⟩
+  refine ⟨nextRuntime, value, ?_, next⟩
+  simp only [evalLetValue, tokenResult, Bind.bind, Except.bind,
+    argumentsResult]
+  rw [reused]
+  rfl
+
+theorem ShadowRuntimeRel.evalLetValueReuseSomeLeftUnreachable
+    (related : ShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra)
+    (tokenResult : lookupValue state.env token =
+      .ok (.reuseToken (some location)))
+    (argumentsResult : evalArgs state.env arguments = .ok values)
+    (found : findCell? state.runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor oldObject)
+    (unreachable : ¬Reachable state.runtime.heap
+      (runtimeRoots state.runtime leftExtra) location)
+    (arity : values.size = info.size) :
+    ∃ nextRuntime,
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .reuse token info updateHeader arguments
+      } = .ok (nextRuntime, .value (.object (.heap location))) ∧
+      ShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra := by
+  rcases related.reuseSomeLeftUnreachable found live objectEq unreachable
+      info values arity updateHeader with
+    ⟨nextRuntime, reused, next⟩
+  refine ⟨nextRuntime, ?_, next⟩
+  simp only [evalLetValue, tokenResult, Bind.bind, Except.bind,
+    argumentsResult]
+  rw [reused]
   rfl
 
 theorem traceRoots_subset_runtimeRoots

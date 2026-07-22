@@ -18,6 +18,8 @@ def live : FVarId := ⟨`live⟩
 def dead : FVarId := ⟨`dead⟩
 def usizeField : FVarId := ⟨`usizeField⟩
 def scalarField : FVarId := ⟨`scalarField⟩
+def reuseTokenVar : FVarId := ⟨`reuseToken⟩
+def reuseArgVar : FVarId := ⟨`reuseArg⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -58,6 +60,16 @@ def deletedWritesBefore : LCNF.Code .impure :=
   .return live
 
 def deletedWritesAfter : LCNF.Code .impure :=
+  .return live
+
+def deadReuseDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType
+    (.reuse reuseTokenVar oneFieldInfo true #[.fvar reuseArgVar])
+
+def deletedReuseBefore : LCNF.Code .impure :=
+  .let deadReuseDecl (.return live)
+
+def deletedReuseAfter : LCNF.Code .impure :=
   .return live
 
 #guard safeToElim deadErasedDecl.value
@@ -123,6 +135,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadUnsafe unsafeBefore unsafeBefore
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
+  checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -147,6 +160,12 @@ def deletedWritesBeforeProgram : ImpureProgram :=
 
 def deletedWritesAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedWritesAfter] }
+
+def deletedReuseBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedReuseBefore] }
+
+def deletedReuseAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedReuseAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -202,6 +221,16 @@ theorem deletedScalarShadowRun :
     native_decide
   simp [neutralUsed, shadowCode?, liveMember, deadAbsent]
 
+theorem deletedReuseShadowRun :
+    shadowCode? 2 {} deletedReuseBefore =
+      some (deletedReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -225,6 +254,14 @@ theorem deletedWritesProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedWritesBeforeProgram, deletedWritesAfterProgram,
     fixtureDecl, decl, deletedWritesShadowRun]
+
+theorem deletedReuseProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 2)
+      deletedReuseBeforeProgram deletedReuseAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    deletedReuseBeforeProgram, deletedReuseAfterProgram,
+    fixtureDecl, decl, deletedReuseShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -274,6 +311,30 @@ def deletedScalarSetSourceState : MachineState :=
 def deletedWritesTargetState : MachineState :=
   { program := deletedWritesAfterProgram
     control := .code deletedWritesAfter
+    env := liveEnv }
+
+def deletedReuseNoneSourceEnv : Env :=
+  bind (bind liveEnv reuseTokenVar (.reuseToken none))
+    reuseArgVar .erased
+
+def deletedReuseSomeSourceEnv : Env :=
+  bind (bind liveEnv reuseTokenVar (.reuseToken (some 0)))
+    reuseArgVar .erased
+
+def deletedReuseNoneSourceState : MachineState :=
+  { program := deletedReuseBeforeProgram
+    control := .code deletedReuseBefore
+    env := deletedReuseNoneSourceEnv }
+
+def deletedReuseSomeSourceState : MachineState :=
+  { program := deletedReuseBeforeProgram
+    control := .code deletedReuseBefore
+    env := deletedReuseSomeSourceEnv
+    runtime := deletedWriteSourceRuntime }
+
+def deletedReuseTargetState : MachineState :=
+  { program := deletedReuseAfterProgram
+    control := .code deletedReuseAfter
     env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
@@ -363,6 +424,11 @@ theorem returnLiveShadowGraph4 :
   refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
   simp [shadowCode?, neutralUsed]
 
+theorem returnLiveShadowGraph2 :
+    ShadowCodeGraph 2 neutralUsed (.return live) (.return live) := by
+  refine ⟨0, {}, neutralUsed, by omega, ?_, .refl neutralUsed⟩
+  simp [shadowCode?, neutralUsed]
+
 theorem deletedUSizeScalarShadowGraph :
     ShadowCodeGraph 4 neutralUsed
       (.uset dead 0 usizeField <|
@@ -395,6 +461,83 @@ theorem deletedWriteEnvReachableRelated :
       native_decide
     · native_decide
   · native_decide
+
+theorem deletedReuseNoneEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedReuseNoneSourceEnv
+      liveEnv := by
+  unfold deletedReuseNoneSourceEnv
+  apply EnvRelOn.bindLeft_of_absent
+  · apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+    native_decide
+  · native_decide
+
+theorem deletedReuseSomeEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedReuseSomeSourceEnv
+      liveEnv := by
+  unfold deletedReuseSomeSourceEnv
+  apply EnvRelOn.bindLeft_of_absent
+  · apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+    native_decide
+  · native_decide
+
+theorem deletedReuseNoneRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      deletedReuseNoneSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseNoneSourceState.env)
+      (envRootsOn neutralUsed deletedReuseTargetState.env) := by
+  simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+    emptyRuntime_shadowRelated_of_roots
+      (envRootsOn_related deletedReuseNoneEnvReachableRelated)
+
+theorem deletedReuseSomeRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      deletedReuseSomeSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseSomeSourceState.env)
+      (envRootsOn neutralUsed deletedReuseTargetState.env) := by
+  have base := emptyRuntime_shadowRelated_of_roots
+    (envRootsOn_related deletedReuseSomeEnvReachableRelated)
+  simpa [deletedReuseSomeSourceState, deletedReuseTargetState,
+    deletedWriteSourceRuntime] using
+      base.allocLeftGarbage (.ctor deletedWriteObject) false
+
+theorem deletedReuseSomeDestinationUnreachable :
+    ¬Reachable deletedReuseSomeSourceState.runtime.heap
+      (runtimeRoots deletedReuseSomeSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseSomeSourceState.env)) 0 := by
+  apply deletedReuseSomeRuntimeRelated.leftUnreachable_of_forward_unmapped
+  simp [emptyAddressRenaming]
+
+theorem deletedReuseNoneReady :
+    DeletedReuseReadyAt deletedReuseNoneSourceState
+      (runtimeRoots deletedReuseNoneSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseNoneSourceState.env))
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  apply DeletedReuseReadyAt.none #[.erased]
+  · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+  · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
+      evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+    rfl
+  · rfl
+
+theorem deletedReuseSomeReady :
+    DeletedReuseReadyAt deletedReuseSomeSourceState
+      (runtimeRoots deletedReuseSomeSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseSomeSourceState.env))
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  apply DeletedReuseReadyAt.some 0
+    ({ object := .ctor deletedWriteObject } : HeapCell)
+    deletedWriteObject #[.erased]
+  · simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+  · simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+    rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · exact deletedReuseSomeDestinationUnreachable
 
 theorem deletedWriteRuntimeRelated :
     ShadowRuntimeRel emptyAddressRenaming deletedWriteSourceRuntime
@@ -573,6 +716,90 @@ theorem deletedScalarSetSourceOnlyMachineStep :
     (by simpa using deletedScalarSetReady)
   simpa [deletedScalarSetSourceState, deletedWritesTargetState,
     deletedWritesAfter, withCodeControl] using progress
+
+/-- A deleted failed-token reuse performs its constructor allocation only on
+the source; the dead result and allocation remain outside all live roots. -/
+theorem deletedReuseNoneSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        deletedReuseNoneSourceState with
+        runtime := nextRuntime
+        env := bind deletedReuseNoneSourceState.env dead value
+        control := .code (.return live) }
+      coreStep deletedReuseNoneSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedReuseTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedReuseNoneSourceState.program deletedReuseTargetState.program := by
+    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedReuseNoneSourceState.frames deletedReuseTargetState.frames [] [] :=
+    .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedReuseNoneSourceState.env deletedReuseTargetState.env := by
+    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseNoneEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedReuseNoneSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseNoneSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedReuseTargetState.env ++ []) := by
+    simpa using deletedReuseNoneRuntimeRelated
+  have progress := coreStep_deletedReuse_of_ready
+    (sourceState := deletedReuseNoneSourceState)
+    (targetState := deletedReuseTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (token := reuseTokenVar) (info := oneFieldInfo) (updateHeader := true)
+    (arguments := #[.fvar reuseArgVar])
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime (by simpa using deletedReuseNoneReady)
+  simpa [deletedReuseNoneSourceState, deletedReuseTargetState,
+    deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl] using progress
+
+/-- A deleted concrete-token reuse overwrites only its unreachable owned cell
+and likewise advances the source while the target stutters. -/
+theorem deletedReuseSomeSourceOnlyMachineStep :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        deletedReuseSomeSourceState with
+        runtime := nextRuntime
+        env := bind deletedReuseSomeSourceState.env dead value
+        control := .code (.return live) }
+      coreStep deletedReuseSomeSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedReuseTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedReuseSomeSourceState.program deletedReuseTargetState.program := by
+    simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedReuseSomeSourceState.frames deletedReuseTargetState.frames [] [] :=
+    .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedReuseSomeSourceState.env deletedReuseTargetState.env := by
+    simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseSomeEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedReuseSomeSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseSomeSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedReuseTargetState.env ++ []) := by
+    simpa using deletedReuseSomeRuntimeRelated
+  have progress := coreStep_deletedReuse_of_ready
+    (sourceState := deletedReuseSomeSourceState)
+    (targetState := deletedReuseTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (token := reuseTokenVar) (info := oneFieldInfo) (updateHeader := true)
+    (arguments := #[.fvar reuseArgVar])
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime (by simpa using deletedReuseSomeReady)
+  simpa [deletedReuseSomeSourceState, deletedReuseTargetState,
+    deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl] using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/
