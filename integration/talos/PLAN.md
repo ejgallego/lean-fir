@@ -2646,6 +2646,13 @@ is orthogonal to the live, valid-but-uninitialized coordinate discrepancy in
 `FIR-BUG-wasm-none-uninitialized-scalar-projection`; no shared contract or
 runtime behavior changes.
 
+W6.6bq extends exact stale-reference correspondence to object and `USize`
+mutation. Both checked writers and both FIR setters return their paired
+address/location `deadObject` errors before old-field decoding, bounds checks,
+or stores; the Talos theorems retain `ConcreteErrorSourceRel`. The deleted-cell
+guard supplies invalid indices and confirms both trapped stores leave linear
+memory byte-for-byte unchanged. No shared contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

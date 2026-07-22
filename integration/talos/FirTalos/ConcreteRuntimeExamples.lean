@@ -1049,8 +1049,8 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
       | _ => false
   | _ => false
 
--- Deleted constructors fault before either object or `USize` projection can
--- inspect its deliberately out-of-range index.
+-- Deleted constructors fault before projections or mutations can inspect
+-- deliberately out-of-range coordinates; failed setters preserve all bytes.
 #guard match allocCtorStep unaryConstructorInfo #[.tagged] .object emptyHostStore
     [.i32 23] with
   | .Return [.i32 object] store =>
@@ -1082,8 +1082,18 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
             match scalarProjStep 99 99 .uint64 deleted [.i32 object] with
             | .Trap failed _ => failed.host.failure? == expected
             | _ => false
+          let objectSetFault :=
+            match objectSetStep 99 .object deleted [.i32 object, .i32 23] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
+          let usizeSetFault :=
+            match usizeSetStep 99 deleted [.i32 object, .i64 77] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
           objectFault && usizeFault && scalar8Fault && scalar16Fault &&
-            scalar32Fault && scalar64Fault
+            scalar32Fault && scalar64Fault && objectSetFault && usizeSetFault
       | _ => false
   | _ => false
 

@@ -358,6 +358,24 @@ theorem DeadCellRel.readUSizeField_eq
   rw [related.readConstructorHeader_eq]
   rfl
 
+theorem DeadCellRel.writeObjectField_eq
+    {state : MemoryState} {address field : Word32}
+    (related : DeadCellRel state address) (index : Nat) :
+    writeObjectField state address index field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeObjectField
+  rw [related.readObjectField_eq]
+  rfl
+
+theorem DeadCellRel.writeUSizeField_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (index : Nat) (field : UInt64) :
+    writeUSizeField state address index field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeUSizeField
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 theorem DeadCellRel.readScalarUInt8Field_eq
     {state : MemoryState} {address : Word32}
     (related : DeadCellRel state address) (slotIndex byteOffset : Nat) :
@@ -864,6 +882,43 @@ theorem LiveHeapRel.readUSizeField_deadObject
   have deadRelated := related.deadCellRel mapped found dead
   exact ⟨deadRelated.readUSizeField_eq index, by
     simp [getUSizeField, getConstructor, getLiveCell, found, dead]
+    rfl⟩
+
+/-- Stale object-field mutation fails before validating the index, old field,
+or replacement word, so neither runtime has a post-state. -/
+theorem LiveHeapRel.writeObjectField_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address fieldWord : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (index : Nat) (field : Value) :
+    writeObjectField state address index fieldWord =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setObjectField runtime (.object (.heap location)) index field =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeObjectField_eq index, by
+    simp [setObjectField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
+
+/-- The corresponding stale `USize` mutation boundary. -/
+theorem LiveHeapRel.writeUSizeField_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (index : Nat) (field : UInt64) :
+    writeUSizeField state address index field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setUSizeField runtime (.object (.heap location)) index (.usize field) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeUSizeField_eq index field, by
+    simp [setUSizeField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
     rfl⟩
 
 /-- All supported packed-integer readers share one stale-reference boundary;

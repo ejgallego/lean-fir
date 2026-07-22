@@ -3739,6 +3739,66 @@ theorem usizeSetStep_outOfBounds_of_refines
               concreteFailure, ConcreteError.toTrap]
           · exact semanticFailure
 
+/-- A stale object-slot mutation traps before reading the old slot or writing
+the replacement word. -/
+theorem objectSetStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord fieldWord : Word32}
+    {location : Location} {cell : HeapCell} {fieldKind : AbiKind}
+    {field : Value} (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    objectSetStep index fieldKind initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setObjectField runtime (.object (.heap location)) index field =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.writeObjectField_deadObject (fieldWord := fieldWord)
+          heapRelated found dead index field
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
+/-- A stale `USize` mutation has the identical no-post-state boundary. -/
+theorem usizeSetStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32}
+    {location : Location} {cell : HeapCell} {field : UInt64}
+    (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    usizeSetStep index initial
+        [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      setUSizeField runtime (.object (.heap location)) index (.usize field) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | object heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.writeUSizeField_deadObject heapRelated found dead
+          index field
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        concrete, ConcreteError.toTrap]
+
 theorem scalarSetStep_uint64_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
