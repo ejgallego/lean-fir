@@ -1569,6 +1569,170 @@ theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
   · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
       targetObject] using targetStep
 
+/-- A reachable mapped closure whose declaration is absent on the source has
+an absent declaration on the target as well.  Reading the closure and
+combining its fixed and fresh arguments therefore exposes the same
+address-free `unknownDecl` terminal observation on both sides. -/
+theorem coreStep_invokeValue_closure_unknown_terminal
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceObject : sourceCell.object =
+      .closure name arity sourceFixed)
+    (sourceDeclFound : sourceState.program.findDecl? name = none)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .invokeValue (.object (.heap sourceLocation))
+        sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeValue (.object (.heap targetLocation))
+            targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
+      sourceObject arguments frames.roots with
+    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
+      fixed, invocationRuntime⟩
+  let sourceInvoke := {
+    sourceState with
+    control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
+  let targetInvoke := {
+    targetState with
+    control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFound : sourceInvoke.program.findDecl? name = none := by
+    simpa [sourceInvoke] using sourceDeclFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
+      ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+  rcases invokeDecl_unknown_reachableObservation
+      (fuel := fuel) sourceInvoke targetInvoke invokePrograms invokeFound
+      invokeRuntime with
+    ⟨targetDeclFound, sourceFault, targetFault, _observations⟩
+  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
+      .ok sourceCell := by
+    simp [getLiveCell, sourceCellFound, sourceLive]
+  have targetRead : getLiveCell targetState.runtime targetLocation =
+      .ok targetCell := by
+    simp [getLiveCell, targetCellFound, targetLive]
+  have sourceCore : coreStep sourceInvoke =
+      .done (observe sourceInvoke (.fault (.unknownDecl name))) := by
+    simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
+      sourceObject] using sourceFault
+  have targetCore : coreStep targetInvoke =
+      .done (observe targetInvoke (.fault (.unknownDecl name))) := by
+    simpa [targetInvoke, coreStep, invokeClosure, targetRead,
+      targetObject] using targetFault
+  have terminal := relatedFault_terminal
+    (externals := externals) invokeRuntime sourceCore targetCore
+    (by simpa [sourceInvoke] using done)
+  simpa [targetInvoke] using terminal
+
+/-- A reachable mapped closure whose combined fixed and fresh arguments fail
+parameter binding terminates with the same address-free binding fault on both
+sides. -/
+theorem coreStep_invokeValue_closure_bindingFault_terminal
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceObject : sourceCell.object =
+      .closure name arity sourceFixed)
+    (sourceDeclFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceEnough : ¬ (sourceFixed ++ sourceArguments).size <
+      sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      ((sourceFixed ++ sourceArguments).extract 0
+        sourceDeclaration.params.size) = .error fault)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .invokeValue (.object (.heap sourceLocation))
+        sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeValue (.object (.heap targetLocation))
+            targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
+      sourceObject arguments frames.roots with
+    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
+      fixed, invocationRuntime⟩
+  let sourceInvoke := {
+    sourceState with
+    control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
+  let targetInvoke := {
+    targetState with
+    control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have combinedArguments : ArrayRel (ValueRel rho)
+      (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
+    arrayRel_append fixed arguments
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceDeclFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
+      ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+  rcases invokeDecl_bindingFault_reachableObservation
+      (fuel := fuel) sourceInvoke targetInvoke invokePrograms
+      combinedArguments invokeFound sourceEnough sourceBinding invokeRuntime with
+    ⟨targetDeclaration, targetDeclFound, sourceFault, targetFault,
+      _observations⟩
+  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
+      .ok sourceCell := by
+    simp [getLiveCell, sourceCellFound, sourceLive]
+  have targetRead : getLiveCell targetState.runtime targetLocation =
+      .ok targetCell := by
+    simp [getLiveCell, targetCellFound, targetLive]
+  have sourceCore : coreStep sourceInvoke =
+      .done (observe sourceInvoke (.fault fault)) := by
+    simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
+      sourceObject] using sourceFault
+  have targetCore : coreStep targetInvoke =
+      .done (observe targetInvoke (.fault fault)) := by
+    simpa [targetInvoke, coreStep, invokeClosure, targetRead,
+      targetObject] using targetFault
+  have terminal := relatedFault_terminal
+    (externals := externals) invokeRuntime sourceCore targetCore
+    (by simpa [sourceInvoke] using done)
+  simpa [targetInvoke] using terminal
+
 /-- Related immediate values and reuse tokens are equally invalid as closure
 callees.  Their invocation terminates with the address-free
 `expectedClosure` fault on both sides. -/
