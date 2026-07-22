@@ -1679,6 +1679,425 @@ theorem shadowRecursiveForward
             rw [transition] at actual
             contradiction
 
+/-- Source normalization exposes a state whose next core result is again
+lockstep-related to the unchanged target.  This is the key ingredient for the
+reverse stuttering direction. -/
+def ShadowLockstepNormalizes (externals : ExternalSpec) (fuel : Nat)
+    (invariant : MachineState → MachineState → Prop)
+    (source target : MachineState) : Prop :=
+  ∃ sourceNormal,
+    NonLockstep.Reaches externals source sourceNormal ∧
+    ShadowMachineRelatedWith fuel invariant sourceNormal target ∧
+    ShadowCoreResultRelated fuel
+      (coreStep sourceNormal) (coreStep target)
+
+theorem shadowLockstepNormalizes_of_results
+    (refined : ShadowMachineRelatedWith fuel invariant source target)
+    (results : ShadowCoreResultRelated fuel
+      (coreStep source) (coreStep target)) :
+    ShadowLockstepNormalizes externals fuel invariant source target :=
+  ⟨source, NonLockstep.reaches_refl source, refined, results⟩
+
+/-- Structural recursion over the source code normalizes any finite prefix of
+runtime-neutral deleted lets and dead join declarations. -/
+theorem shadowCode_lockstepNormalizes
+    (laws : ShadowInvariantLaws externals fuel invariant)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used sourceCode targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (invariantAt : invariant
+      { sourceState with control := .code sourceCode }
+      { targetState with control := .code targetCode }) :
+    ShadowLockstepNormalizes externals fuel invariant
+      { sourceState with control := .code sourceCode }
+      { targetState with control := .code targetCode } := by
+  have unsupported {used : UsedLocals}
+      {sourceCode targetCode : LCNF.Code .impure}
+      (sourceState targetState : MachineState)
+      (programs : ProgramRelated (ShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+      (runtimeEq : sourceState.runtime = targetState.runtime)
+      (framesRelated : ShadowFramesRelated fuel
+        sourceState.frames targetState.frames)
+      (graph : ShadowCodeGraph fuel used sourceCode targetCode)
+      (joins : ShadowJoinEnvRelated fuel used
+        sourceState.joins targetState.joins)
+      (agree : EnvsAgreeOn used sourceState.env targetState.env)
+      (invariantAt : invariant
+        { sourceState with control := .code sourceCode }
+        { targetState with control := .code targetCode })
+      (impossible : ShadowCodeReadyAt fuel used
+        { sourceState with control := .code sourceCode } graph → False) :
+      False := by
+    have structural : ShadowMachineRelated fuel
+        { sourceState with control := .code sourceCode }
+        { targetState with control := .code targetCode } := {
+      programs
+      runtime_eq := runtimeEq
+      frames := framesRelated
+      control := .code graph joins agree
+    }
+    have ready : ShadowControlReadyAt fuel
+        { sourceState with control := .code sourceCode }
+        (.code sourceCode) (.code targetCode) :=
+      laws.ready structural invariantAt
+    exact impossible (ready rfl rfl graph)
+  cases sourceCode with
+  | «let» declaration sourceContinuation =>
+      let sourceCurrent := { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      let targetCurrent := { targetState with control := .code targetCode }
+      have structural : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      have ready : ShadowControlReadyAt fuel sourceCurrent
+          sourceCurrent.control targetCurrent.control :=
+        laws.ready structural invariantAt
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | letE graph headReady =>
+          cases headReady with
+          | retained targetContinuation continuation covered =>
+              apply shadowLockstepNormalizes_of_results
+                (refined := { structural, invariant := invariantAt })
+              exact coreStep_retainedLet_shadowRelated sourceState targetState
+                programs runtimeEq framesRelated continuation joins agree
+                  covered
+          | deleted targetContinuation continuation absent neutral =>
+              rcases neutral with ⟨value, evaluated⟩
+              let sourceAfter :=
+                { sourceState with
+                  env := bind sourceState.env declaration.fvarId value
+                  control := .code sourceContinuation }
+              have transition : coreStep sourceCurrent = .next sourceAfter :=
+                coreStep_runtimeNeutralLet evaluated
+              have afterStructural : ShadowMachineRelated fuel
+                  sourceAfter targetCurrent := {
+                programs
+                runtime_eq := runtimeEq
+                frames := framesRelated
+                control := .code continuation joins
+                  (agree.bindLeft_of_absent absent)
+              }
+              have sourcePath : NonLockstep.Reaches externals
+                  sourceCurrent sourceAfter :=
+                NonLockstep.reaches_of_step (.internal transition)
+              have targetPath : NonLockstep.Reaches externals
+                  targetCurrent targetCurrent :=
+                NonLockstep.reaches_refl targetCurrent
+              have afterInvariant := laws.stable invariantAt structural
+                sourcePath targetPath afterStructural
+              rcases shadowCode_lockstepNormalizes laws
+                { sourceState with
+                  env := bind sourceState.env declaration.fvarId value }
+                targetState programs runtimeEq framesRelated continuation joins
+                (agree.bindLeft_of_absent absent) afterInvariant with
+                ⟨sourceNormal, tailPath, normalRefined, normalResults⟩
+              exact ⟨sourceNormal, sourcePath.trans tailPath,
+                normalRefined, normalResults⟩
+  | jp declaration sourceContinuation =>
+      let sourceCurrent := { sourceState with
+        control := .code (.jp declaration sourceContinuation) }
+      let targetCurrent := { targetState with control := .code targetCode }
+      have structural : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      have ready : ShadowControlReadyAt fuel sourceCurrent
+          sourceCurrent.control targetCurrent.control :=
+        laws.ready structural invariantAt
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | join graph headReady =>
+          cases headReady with
+          | retained targetDeclaration targetContinuation declarationRelated
+              continuation =>
+              apply shadowLockstepNormalizes_of_results
+                (refined := { structural, invariant := invariantAt })
+              exact coreStep_retainedJoin_shadowRelated sourceState targetState
+                programs runtimeEq framesRelated declarationRelated
+                  continuation joins agree
+          | deleted targetContinuation continuation absent =>
+              let sourceAfter :=
+                { sourceState with
+                  joins := (declaration.fvarId, declaration) ::
+                    sourceState.joins
+                  control := .code sourceContinuation }
+              have transition : coreStep sourceCurrent = .next sourceAfter := rfl
+              have afterStructural : ShadowMachineRelated fuel
+                  sourceAfter targetCurrent := {
+                programs
+                runtime_eq := runtimeEq
+                frames := framesRelated
+                control := .code continuation
+                  (joins.consSourceOfAbsent absent) agree
+              }
+              have sourcePath : NonLockstep.Reaches externals
+                  sourceCurrent sourceAfter :=
+                NonLockstep.reaches_of_step (.internal transition)
+              have targetPath : NonLockstep.Reaches externals
+                  targetCurrent targetCurrent :=
+                NonLockstep.reaches_refl targetCurrent
+              have afterInvariant := laws.stable invariantAt structural
+                sourcePath targetPath afterStructural
+              rcases shadowCode_lockstepNormalizes laws
+                { sourceState with
+                  joins := (declaration.fvarId, declaration) ::
+                    sourceState.joins }
+                targetState programs runtimeEq framesRelated continuation
+                (joins.consSourceOfAbsent absent) agree afterInvariant with
+                ⟨sourceNormal, tailPath, normalRefined, normalResults⟩
+              exact ⟨sourceNormal, sourcePath.trans tailPath,
+                normalRefined, normalResults⟩
+  | «cases» caseInfo =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control := .code (.cases caseInfo) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_casesInfo_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | jmp target arguments =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control := .code (.jmp target arguments) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_jump_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | «return» value =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control := .code (.return value) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_return_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | unreach type =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control := .code (.unreach type) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_unreach_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | oset object index field continuation
+  | uset object index field continuation
+  | sset object width offset field type continuation
+  | setTag object tag continuation
+  | inc object amount check persistent continuation
+  | dec object amount check persistent objects continuation
+  | del object continuation =>
+      exact (unsupported sourceState targetState programs runtimeEq
+        framesRelated graph joins agree invariantAt
+          (by intro ready; cases ready)).elim
+  | «fun» declaration continuation impossible =>
+      nomatch impossible
+termination_by sizeOf sourceCode
+
+theorem shadowMachine_lockstepNormalizes_withControl
+    (laws : ShadowInvariantLaws externals fuel invariant)
+    (related : ShadowMachineRelated fuel source target)
+    (control : ShadowControlRelated fuel
+      source.env source.joins sourceControl
+      target.env target.joins targetControl)
+    (invariantAt : invariant
+      { source with control := sourceControl }
+      { target with control := targetControl }) :
+    ShadowLockstepNormalizes externals fuel invariant
+      { source with control := sourceControl }
+      { target with control := targetControl } := by
+  cases control with
+  | code graph joins agree =>
+      simpa using shadowCode_lockstepNormalizes laws source target
+        related.programs related.runtime_eq related.frames graph joins agree
+          invariantAt
+  | yielded value =>
+      let current : ShadowMachineRelatedWith fuel invariant
+          { source with control := .yielded value }
+          { target with control := .yielded value } := {
+        structural := {
+          programs := related.programs
+          runtime_eq := related.runtime_eq
+          frames := related.frames
+          control := .yielded value
+        }
+        invariant := invariantAt
+      }
+      apply shadowLockstepNormalizes_of_results current
+      exact coreStep_yielded_shadowRelated source target
+        related.programs related.runtime_eq related.frames
+  | invokeName name arguments =>
+      let currentStructural : ShadowMachineRelated fuel
+          { source with control := .invokeName name arguments }
+          { target with control := .invokeName name arguments } := {
+        programs := related.programs
+        runtime_eq := related.runtime_eq
+        frames := related.frames
+        control := .invokeName name arguments
+      }
+      apply shadowLockstepNormalizes_of_results {
+        structural := currentStructural
+        invariant := invariantAt
+      }
+      exact coreStep_invokeName_shadowRelated currentStructural name arguments
+  | invokeValue function arguments =>
+      let currentStructural : ShadowMachineRelated fuel
+          { source with control := .invokeValue function arguments }
+          { target with control := .invokeValue function arguments } := {
+        programs := related.programs
+        runtime_eq := related.runtime_eq
+        frames := related.frames
+        control := .invokeValue function arguments
+      }
+      apply shadowLockstepNormalizes_of_results {
+        structural := currentStructural
+        invariant := invariantAt
+      }
+      exact coreStep_invokeValue_shadowRelated currentStructural function arguments
+
+theorem shadowMachine_lockstepNormalizes
+    (laws : ShadowInvariantLaws externals fuel invariant)
+    (refined : ShadowMachineRelatedWith fuel invariant source target) :
+    ShadowLockstepNormalizes externals fuel invariant source target := by
+  simpa using shadowMachine_lockstepNormalizes_withControl laws
+    refined.structural refined.structural.control refined.invariant
+
+/-- Reverse operational use of a lockstep-related result: a target step is
+matched by one source step, retaining the source-to-target orientation. -/
+theorem shadowMatchCoreResult_right
+    (beforeRelated : ShadowMachineRelated fuel sourceBefore targetBefore)
+    (results : ShadowCoreResultRelated fuel
+      (coreStep sourceBefore) (coreStep targetBefore))
+    (step : Step externals targetBefore targetAfter) :
+    ∃ sourceAfter, NonLockstep.Reaches externals sourceBefore sourceAfter ∧
+      ShadowMachineRelated fuel sourceAfter targetAfter := by
+  generalize sourceResultEq : coreStep sourceBefore = sourceResult at results
+  generalize targetResultEq : coreStep targetBefore = targetResult at results
+  cases results with
+  | next afterRelated =>
+      cases step with
+      | internal transition =>
+          rw [targetResultEq] at transition
+          cases transition
+          exact ⟨_, NonLockstep.reaches_of_step (.internal sourceResultEq),
+            afterRelated⟩
+      | external transition externalProof =>
+          rw [targetResultEq] at transition
+          contradiction
+  | external request waitingRelated =>
+      rename_i sourceWaiting targetWaiting
+      cases step with
+      | internal transition =>
+          rw [targetResultEq] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [targetResultEq] at transition
+          cases transition
+          rename_i response
+          have sourceExternal :
+              externals request sourceBefore.runtime response := by
+            rw [beforeRelated.runtime_eq]
+            exact externalProof
+          exact ⟨resumeExternal request sourceWaiting response,
+            NonLockstep.reaches_of_step
+              (.external sourceResultEq sourceExternal),
+            shadowResumeExternal_related waitingRelated⟩
+  | done observation =>
+      cases step with
+      | internal transition =>
+          rw [targetResultEq] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [targetResultEq] at transition
+          contradiction
+
+theorem shadowTerminalCoreResult_right
+    (results : ShadowCoreResultRelated fuel
+      (coreStep source) (coreStep target))
+    (done : coreStep target = .done observation) :
+    SimpCase.EvaluatesState externals source observation := by
+  generalize sourceResultEq : coreStep source = sourceResult at results
+  generalize targetResultEq : coreStep target = targetResult at results
+  cases results with
+  | next related =>
+      rw [targetResultEq] at done
+      contradiction
+  | external request related =>
+      rw [targetResultEq] at done
+      contradiction
+  | done result =>
+      rw [targetResultEq] at done
+      cases done
+      exact ⟨0, source, .refl source, sourceResultEq⟩
+
+/-- Reverse finite-stuttering simulation.  It first normalizes source-only
+administrative deletions, then matches the target step at the lockstep
+frontier. -/
+theorem shadowRecursiveBackward
+    (laws : ShadowInvariantLaws externals fuel invariant) :
+    NonLockstep.StutteringSimulation externals
+      (fun target source =>
+        ShadowMachineRelatedWith fuel invariant source target) where
+  terminal := by
+    intro target source observation refined done
+    rcases shadowMachine_lockstepNormalizes laws refined with
+      ⟨sourceNormal, sourcePath, normalRefined, results⟩
+    exact NonLockstep.evaluatesState_of_reaches sourcePath
+      (shadowTerminalCoreResult_right results done)
+  advance := by
+    intro targetBefore targetAfter source refined step
+    rcases shadowMachine_lockstepNormalizes laws refined with
+      ⟨sourceNormal, sourcePrefix, normalRefined, results⟩
+    rcases shadowMatchCoreResult_right normalRefined.structural results step with
+      ⟨sourceAfter, sourceMatch, afterStructural⟩
+    have targetPath := NonLockstep.reaches_of_step step
+    have afterInvariant := laws.stable normalRefined.invariant
+      normalRefined.structural sourceMatch targetPath afterStructural
+    exact ⟨sourceAfter, sourcePrefix.trans sourceMatch, {
+      structural := afterStructural
+      invariant := afterInvariant
+    }⟩
+
+theorem shadowRecursiveBisimulation
+    (laws : ShadowInvariantLaws externals fuel invariant) :
+    NonLockstep.StutteringBisimulation externals
+      (ShadowMachineRelatedWith fuel invariant) where
+  forward := shadowRecursiveForward laws
+  backward := shadowRecursiveBackward laws
+
 /-- Whole-program graph relatedness supplies every initial invocation state;
 no semantic entry premise is needed until an eliminable operation is reached. -/
 theorem shadowInitialState_related
@@ -1691,5 +2110,30 @@ theorem shadowInitialState_related
   frames := .nil
   control := .invokeName entry arguments
 }
+
+theorem shadowInitialStatesRelatedOn
+    (programs : ProgramRelated (ShadowCodeRelated fuel) source target)
+    (initialInvariant : InitialInvariantOn admissible invariant
+      source target entries) :
+    InitialStatesRelatedOn admissible
+      (ShadowMachineRelatedWith fuel invariant) source target entries := by
+  intro entry member arguments accepted
+  exact {
+    structural := shadowInitialState_related programs
+    invariant := initialInvariant entry member arguments accepted
+  }
+
+/-- Compiler-facing correctness boundary for the exact-runtime fragment.  A
+program graph, initial invariant, and its readiness/stability laws now yield
+full same-phase observational equivalence for every accepted entry state. -/
+theorem shadowProgram_samePhaseCorrectOn
+    (programs : ProgramRelated (ShadowCodeRelated fuel) source target)
+    (laws : ShadowInvariantLaws externals fuel invariant)
+    (initialInvariant : InitialInvariantOn admissible invariant
+      source target entries) :
+    SamePhaseCorrectOn (Impure.semantics externals)
+      source target entries admissible :=
+  samePhaseCorrectOn_of_stuttering (shadowRecursiveBisimulation laws)
+    (shadowInitialStatesRelatedOn programs initialInvariant)
 
 end Fir.LeanIR.Passes.ElimDead
