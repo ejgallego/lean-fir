@@ -256,6 +256,24 @@ theorem deadErasedBeforeReturnCorrect (externals : ExternalSpec) :
   · simp [neutralLiveState, JoinEnvCovered]
   · native_decide
 
+/-- Recursive composition follows the actual neutral fixture: the outer live
+let is retained while its recursively transformed continuation deletes the
+inner dead erased let. -/
+theorem neutralCodeEquivalentAt (externals : ExternalSpec)
+    (state : MachineState) :
+    CodeEquivalentAt externals { state with joins := [] }
+      neutralBefore neutralAfter := by
+  unfold neutralBefore neutralAfter
+  apply let_codeEquivalentAt_of_runtimeNeutral (value := .erased)
+  · rfl
+  · apply eliminateLet_codeEquivalentAt_of_runtimeNeutral
+      (used := ({} : UsedLocals).insert live) (value := .erased)
+    · rfl
+    · exact codeEquivalentAt_refl
+    · exact .ret (by simp)
+    · simp [JoinEnvCovered]
+    · native_decide
+
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
 #guard (match runMain neutralBeforeProgram, runMain neutralAfterProgram with

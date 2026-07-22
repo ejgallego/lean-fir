@@ -1610,4 +1610,85 @@ theorem eliminateLet_correct_of_runtimeNeutral_coverage
   exact bindingIrrelevantAt_of_coverage state declaration value continuation
     covered joinsCovered absent
 
+/-- Congruence for a runtime-neutral value binding: once both sides take the
+same administrative let step, semantic equivalence of the recursively
+transformed continuations closes the original let nodes. -/
+theorem let_codeEquivalentAt_of_runtimeNeutral
+    (evaluated : evalLetValue state declaration =
+      .ok (state.runtime, .value value))
+    (continuations : SimpCase.CodeEquivalentAt externals
+      { state with env := bind state.env declaration.fvarId value }
+      sourceContinuation targetContinuation) :
+    SimpCase.CodeEquivalentAt externals state
+      (.let declaration sourceContinuation)
+      (.let declaration targetContinuation) := by
+  intro observation
+  calc
+    SimpCase.EvaluatesState externals
+        { state with
+          control := .code (.let declaration sourceContinuation) }
+        observation ↔
+      SimpCase.EvaluatesState externals
+        { state with
+          env := bind state.env declaration.fvarId value
+          control := .code sourceContinuation }
+        observation :=
+      SimpCase.evaluatesState_internal_iff
+        (coreStep_runtimeNeutralLet (state := state)
+          (declaration := declaration) (continuation := sourceContinuation)
+          evaluated)
+    _ ↔ SimpCase.EvaluatesState externals
+        { state with
+          env := bind state.env declaration.fvarId value
+          control := .code targetContinuation }
+        observation := continuations observation
+    _ ↔ SimpCase.EvaluatesState externals
+        { state with
+          control := .code (.let declaration targetContinuation) }
+        observation :=
+      (SimpCase.evaluatesState_internal_iff
+        (coreStep_runtimeNeutralLet (state := state)
+          (declaration := declaration) (continuation := targetContinuation)
+          evaluated)).symm
+
+/-- Recursive dead-let rule.  The source first evaluates the runtime-neutral
+binding, the induction hypothesis transforms its continuation, and liveness
+then removes the semantically irrelevant environment entry. -/
+theorem eliminateLet_codeEquivalentAt_of_runtimeNeutral
+    (evaluated : evalLetValue state declaration =
+      .ok (state.runtime, .value value))
+    (continuations : SimpCase.CodeEquivalentAt externals
+      { state with env := bind state.env declaration.fvarId value }
+      sourceContinuation targetContinuation)
+    (covered : CodeCovered used targetContinuation)
+    (joinsCovered : JoinEnvCovered used state.joins)
+    (absent : used.contains declaration.fvarId = false) :
+    SimpCase.CodeEquivalentAt externals state
+      (.let declaration sourceContinuation) targetContinuation := by
+  intro observation
+  calc
+    SimpCase.EvaluatesState externals
+        { state with
+          control := .code (.let declaration sourceContinuation) }
+        observation ↔
+      SimpCase.EvaluatesState externals
+        { state with
+          env := bind state.env declaration.fvarId value
+          control := .code sourceContinuation }
+        observation :=
+      SimpCase.evaluatesState_internal_iff
+        (coreStep_runtimeNeutralLet (state := state)
+          (declaration := declaration) (continuation := sourceContinuation)
+          evaluated)
+    _ ↔ SimpCase.EvaluatesState externals
+        { state with
+          env := bind state.env declaration.fvarId value
+          control := .code targetContinuation }
+        observation := continuations observation
+    _ ↔ SimpCase.EvaluatesState externals
+        { state with control := .code targetContinuation } observation :=
+      evaluatesState_iff_of_liveRelated
+        (liveMachineRelated_bindLeft_of_absent state declaration.fvarId value
+          targetContinuation covered joinsCovered absent)
+
 end Fir.LeanIR.Passes.ElimDead
