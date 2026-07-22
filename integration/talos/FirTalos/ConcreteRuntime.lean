@@ -3435,7 +3435,8 @@ theorem scalarSetStep_uint64_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 8 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3454,7 +3455,7 @@ theorem scalarSetStep_uint64_of_refines
           obtain ⟨heap, semanticAfter, concreteOperation,
               semanticOperation, finalHeapRelated⟩ :=
             runtimeRelated.heap.writeScalarUInt64Field_refines mapped found live
-              objectEq descriptorFound empty slotIndex byteOffset field
+              objectEq descriptorFound slotIndex byteOffset field replaced
               slotIndexEq fieldFits
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
@@ -3485,7 +3486,8 @@ theorem scalarSetStep_uint32_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 4 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3506,7 +3508,7 @@ theorem scalarSetStep_uint32_of_refines
               obtain ⟨heap, semanticAfter, concreteOperation,
                   semanticOperation, finalHeapRelated⟩ :=
                 runtimeRelated.heap.writeScalarUInt32Field_refines mapped found
-                  live objectEq descriptorFound empty slotIndex byteOffset field
+                  live objectEq descriptorFound slotIndex byteOffset field replaced
                   slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
@@ -3538,7 +3540,8 @@ theorem scalarSetStep_uint16_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 2 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3559,7 +3562,7 @@ theorem scalarSetStep_uint16_of_refines
               obtain ⟨heap, semanticAfter, concreteOperation,
                   semanticOperation, finalHeapRelated⟩ :=
                 runtimeRelated.heap.writeScalarUInt16Field_refines mapped found
-                  live objectEq descriptorFound empty slotIndex byteOffset field
+                  live objectEq descriptorFound slotIndex byteOffset field replaced
                   slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
@@ -3591,7 +3594,8 @@ theorem scalarSetStep_uint8_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 1 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3612,7 +3616,7 @@ theorem scalarSetStep_uint8_of_refines
               obtain ⟨heap, semanticAfter, concreteOperation,
                   semanticOperation, finalHeapRelated⟩ :=
                 runtimeRelated.heap.writeScalarUInt8Field_refines mapped found
-                  live objectEq descriptorFound empty slotIndex byteOffset field
+                  live objectEq descriptorFound slotIndex byteOffset field replaced
                   slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
@@ -5118,7 +5122,8 @@ theorem effectStepSimulates_scalarSet
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : match fieldKind with
       | .uint8 => byteOffset + 1 ≤ info.ssize
@@ -5149,7 +5154,7 @@ theorem effectStepSimulates_scalarSet
       | uint8 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint8_of_refines initialRelated.1 objectRelated
-              (.uint8 encoded) found live objectEq descriptorFound empty
+              (.uint8 encoded) found live objectEq descriptorFound replaced
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5173,7 +5178,7 @@ theorem effectStepSimulates_scalarSet
       | uint16 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint16_of_refines initialRelated.1 objectRelated
-              (.uint16 encoded) found live objectEq descriptorFound empty
+              (.uint16 encoded) found live objectEq descriptorFound replaced
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5197,7 +5202,7 @@ theorem effectStepSimulates_scalarSet
       | uint32 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint32_of_refines initialRelated.1 objectRelated
-              (.uint32 encoded) found live objectEq descriptorFound empty
+              (.uint32 encoded) found live objectEq descriptorFound replaced
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5223,7 +5228,7 @@ theorem effectStepSimulates_scalarSet
       | uint64 =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint64_of_refines initialRelated.1 objectRelated .uint64
-              found live objectEq descriptorFound empty slotIndexEq
+              found live objectEq descriptorFound replaced slotIndexEq
               (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost

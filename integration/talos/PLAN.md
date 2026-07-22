@@ -2486,6 +2486,17 @@ WebAssembly execution, and the live FIR oracle. The concrete Node/browser
 inventory grows from 38 to 41 artifacts. Float scalars remain excluded by
 `FIR-BUG-wasm-none-float-runtime-gap`. No shared semantic contract changed.
 
+W6.6az removes the artificial fresh-only restriction from packed-integer
+mutation proofs. All four width-specific constructor, complete-heap, concrete
+runtime, and generated `sset` composition theorems now require exactly the
+source operation's replacement condition: filtering the written slot/offset
+leaves no retained field. A reusable lemma discharges that condition for any
+history of writes to the same coordinate, and a closed two-write `UInt64`
+module confirms that the second value replaces the first through complete
+lowering and concrete execution. Framing retained fields at physically
+disjoint offsets remains the next scalar proof slice. No executable layout or
+shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

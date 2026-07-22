@@ -122,6 +122,21 @@ private def compilerShapedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
 #guard fixtureReturnsWord? Fir.Wasm.Emit.Examples.abiUInt32MutationProgram
   4294967295
 
+/-- The replacement proof boundary is executable: a second write to the same
+packed coordinate supersedes the first source field and concrete bytes. -/
+private def repeatedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl s u64Type (.lit (.uint64 66))) <|
+      .sset p 2 0 s u64Type <|
+      .let (letDecl u u64Type (.lit (.uint64 77))) <|
+      .sset p 2 0 u u64Type <|
+      .let (letDecl r u64Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsI64? repeatedScalarMutationProgram 77
+
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|

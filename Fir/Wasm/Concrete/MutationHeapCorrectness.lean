@@ -636,8 +636,9 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? address =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt64)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 8 ≤ info.ssize) :
     ∃ result nextRuntime,
@@ -674,7 +675,7 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines
         objectRelated.writeScalarUInt64Field_targetFrame related.frontier
           slotIndex byteOffset value slotIndexEq fieldFits
       obtain ⟨localResult, localOperation, _, _, _, _, objectAfter⟩ :=
-        objectRelated.writeScalarUInt64Field empty slotIndex byteOffset value
+        objectRelated.writeScalarUInt64Field slotIndex byteOffset value replaced
           slotIndexEq fieldFits
       rw [operation] at localOperation
       have resultMatch := Except.ok.inj localOperation
@@ -727,8 +728,9 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? address =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt32)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 4 ≤ info.ssize) :
     ∃ result nextRuntime,
@@ -765,7 +767,7 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
         objectRelated.writeScalarUInt32Field_targetFrame related.frontier
           slotIndex byteOffset value slotIndexEq fieldFits
       obtain ⟨localResult, localOperation, _, _, _, _, objectAfter⟩ :=
-        objectRelated.writeScalarUInt32Field empty slotIndex byteOffset value
+        objectRelated.writeScalarUInt32Field slotIndex byteOffset value replaced
           slotIndexEq fieldFits
       rw [operation] at localOperation
       have resultMatch := Except.ok.inj localOperation
@@ -818,8 +820,9 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? address =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt16)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 2 ≤ info.ssize) :
     ∃ result nextRuntime,
@@ -856,7 +859,7 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines
         objectRelated.writeScalarUInt16Field_targetFrame related.frontier
           slotIndex byteOffset value slotIndexEq fieldFits
       obtain ⟨localResult, localOperation, objectAfter⟩ :=
-        objectRelated.writeScalarUInt16Field empty slotIndex byteOffset value
+        objectRelated.writeScalarUInt16Field slotIndex byteOffset value replaced
           slotIndexEq fieldFits
       rw [operation] at localOperation
       have resultMatch := Except.ok.inj localOperation
@@ -909,8 +912,9 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? address =
       some (.constructor info fieldKinds))
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt8)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 1 ≤ info.ssize) :
     ∃ result nextRuntime,
@@ -947,7 +951,7 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
         objectRelated.writeScalarUInt8Field_targetFrame related.frontier
           slotIndex byteOffset value slotIndexEq fieldFits
       obtain ⟨localResult, localOperation, objectAfter⟩ :=
-        objectRelated.writeScalarUInt8Field empty slotIndex byteOffset value
+        objectRelated.writeScalarUInt8Field slotIndex byteOffset value replaced
           slotIndexEq fieldFits
       rw [operation] at localOperation
       have resultMatch := Except.ok.inj localOperation

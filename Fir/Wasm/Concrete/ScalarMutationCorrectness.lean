@@ -5,6 +5,25 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- A sequence of earlier writes to exactly one packed coordinate is fully
+removed by the source runtime's replacement filter. This is the reusable
+premise for repeated concrete writes at that coordinate. -/
+theorem scalarFields_filter_same_coordinate
+    (fields : List ScalarField) (slotIndex byteOffset : Nat)
+    (same : ∀ field ∈ fields,
+      field.width = slotIndex ∧ field.offset = byteOffset) :
+    fields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [] := by
+  induction fields with
+  | nil => rfl
+  | cons field fields induction =>
+      have head := same field (by simp)
+      have tail : ∀ old ∈ fields,
+          old.width = slotIndex ∧ old.offset = byteOffset := by
+        intro old member
+        exact same old (by simp [member])
+      simp [head.1, head.2, induction tail]
+
 /-- A compiler-shaped packed `UInt64` replacement reads back exactly and
 frames every previously implemented constructor observation. -/
 theorem ConstructorObjectRel.writeScalarUInt64Field
@@ -12,8 +31,9 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt64)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 8 ≤ info.ssize) :
     ∃ result,
@@ -218,7 +238,7 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
       objectFields := ?_
       usizeFields := ?_ }
     · intro field member
-      simp [empty] at member
+      simp [replaced] at member
       subst field
       exact ⟨slotIndexEq, fieldFits, readBack⟩
     · intro index kind semanticValue kindAt valueAt
@@ -233,15 +253,16 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
   exact ⟨result, operation, readBack, tagFrame, objectFieldFrame, usizeFieldFrame,
     relationAfter⟩
 
-/-- The verified 32-bit lane installs the corresponding first semantic
-packed field and frames all earlier constructor regions. -/
+/-- The verified 32-bit lane replaces the corresponding semantic packed
+coordinate and frames all earlier constructor regions. -/
 theorem ConstructorObjectRel.writeScalarUInt32Field
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt32)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 4 ≤ info.ssize) :
     ∃ result,
@@ -431,7 +452,7 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
       objectFields := ?_
       usizeFields := ?_ }
     · intro field member
-      simp [empty] at member
+      simp [replaced] at member
       subst field
       exact ⟨slotIndexEq, fieldFits, readBack⟩
     · intro index kind semanticValue kindAt valueAt
@@ -446,15 +467,16 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
   exact ⟨result, operation, readBack, tagFrame, objectFieldFrame, usizeFieldFrame,
     relationAfter⟩
 
-/-- A checked byte write implements the first semantic `UInt8` packed-field
-insertion and preserves every constructor region before the scalar suffix. -/
+/-- A checked byte write replaces one semantic `UInt8` packed coordinate and
+preserves every constructor region before the scalar suffix. -/
 theorem ConstructorObjectRel.writeScalarUInt8Field
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt8)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 1 ≤ info.ssize) :
     ∃ result,
@@ -623,7 +645,7 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
     objectFields := ?_
     usizeFields := ?_ }
   · intro field member
-    simp [empty] at member
+    simp [replaced] at member
     subst field
     exact ⟨slotIndexEq, fieldFits, readBack⟩
   · intro index kind semanticValue kindAt valueAt
@@ -636,15 +658,16 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
     rw [usizeFieldFrame]
     exact related.usizeFields index semanticValue valueAt
 
-/-- A checked little-endian halfword write implements the first semantic
-`UInt16` packed-field insertion and preserves all fixed constructor slots. -/
+/-- A checked little-endian halfword write replaces one semantic `UInt16`
+packed coordinate and preserves all fixed constructor slots. -/
 theorem ConstructorObjectRel.writeScalarUInt16Field
     {state : MemoryState} {witness : RefinementWitness} {address : Word32}
     {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
     {semantic : ConstructorObject}
     (related : ConstructorObjectRel state witness address info fieldKinds semantic)
-    (empty : semantic.scalarFields = [])
     (slotIndex byteOffset : Nat) (value : UInt16)
+    (replaced : semantic.scalarFields.filter (fun old =>
+      old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 2 ≤ info.ssize) :
     ∃ result,
@@ -813,7 +836,7 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
     objectFields := ?_
     usizeFields := ?_ }
   · intro field member
-    simp [empty] at member
+    simp [replaced] at member
     subst field
     exact ⟨slotIndexEq, fieldFits, readBack⟩
   · intro index kind semanticValue kindAt valueAt
