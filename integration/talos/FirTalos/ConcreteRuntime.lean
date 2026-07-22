@@ -4052,6 +4052,72 @@ theorem codeWP_callLet
       continuationAdapted, initialRelated, ?_⟩
   exact stepWP targetRest Q tail continuedWP
 
+/-- Witness-indexed concrete boundary for a generated external-call `let`.
+The source side retains the interpreter's full three-step protocol, while the
+target side executes the concrete foreign implementation and may extend the
+heap representation witness. -/
+def ExternalLetStepSimulates (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host) (externals : ExternalImpl)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (targetValue : Wasm.Program)
+    (sourceRuntime nextRuntime : RuntimeState) (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore nextStore : Wasm.Store Host)
+    (targetLocals nextLocals : Wasm.Locals) (resultIndex : Nat)
+    (witness nextWitness : RefinementWitness) : Prop :=
+  SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue ∧
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    StateRelated sourceFunction nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness ∧
+    ∀ (rest : Wasm.Program) (Q : Wasm.Assertion Host)
+        (tail : List Wasm.Value),
+      Wasm.wp module rest Q nextStore { nextLocals with values := tail } hostEnv →
+      Wasm.wp module (targetValue ++ .localSet resultIndex :: rest) Q
+        targetStore { targetLocals with values := tail } hostEnv
+
+/-- Recursive concrete `CodeWP` rule for a successful external-call `let` and
+an arbitrary already-composed continuation. -/
+theorem codeWP_externalLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {valueCode : List Fir.Wasm.Instruction}
+    {targetValue targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode = .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (step : ExternalLetStepSimulates context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+      sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+      witness nextWitness)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        targetRest nextStore nextLocals nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetValue ++ .localSet resultIndex :: targetRest)
+      targetStore targetLocals witness tail Q := by
+  rcases step with ⟨_, initialRelated, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+      continuationAdapted, initialRelated, ?_⟩
+  exact stepWP targetRest Q tail continuedWP
+
 /-- Witness-indexed semantic boundary for either lazy zero-argument cache
 path over the concrete host. -/
 def LazyLetStepSimulates (path : LazyCachePath) (context : Fir.Wasm.Context)
@@ -5652,6 +5718,133 @@ theorem wp_allocCtor_let
   · exact operation
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
+/-- Concrete-host WP for the exact generated external-call sequence: load
+every physical argument, invoke the resolved concrete foreign function, bind
+its singleton result, and restore the caller's operand tail. -/
+theorem wp_external_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {indices : List Nat} {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {physicalResult : Wasm.Value}
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (tail : List Wasm.Value)
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (externalContract operation resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operationStep : externalStep operation resultKind initial physicalArgs =
+      .Return [physicalResult] nextStore)
+    (targetSet : locals.set? resultIndex physicalResult = some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply wp_localGets tail hGets
+  apply wp_exact_host_call_of_return
+    (step := externalStep operation resultKind)
+    (physicalArgs := physicalArgs) (results := [physicalResult])
+    hImp hSat hi hContract
+  · simp [hParams]
+  · exact operationStep
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
+/-- Compose one pair of related concrete/source foreign responses through the
+generated external-call prefix and destination-local write. The source call,
+concrete call, and response relation remain explicit contractual premises. -/
+theorem externalLetStepSimulates_of_call
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {indices : List Nat}
+    {witness afterWitness : RefinementWitness}
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value) (concreteArgs : List LaneValue)
+    (semanticArgs : Array Value)
+    (semanticImplementation : ExternalImpl)
+    (concreteResponse : ConcreteExternalResponse)
+    (semanticResponse : ExternalResponse)
+    (sourceStep : SourceExternalLetResult context semanticImplementation
+      sourceRuntime sourceEnv decl continuation
+      (semanticExternalRuntimeAfter (operation.request semanticArgs)
+        sourceRuntime semanticResponse)
+      semanticResponse.value)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (externalContract operation resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (requestRelated : ConcreteExternalRequestRel witness
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      (operation.request semanticArgs))
+    (concreteCalled : initial.host.externals.call
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      initial.host.runtime = .ok concreteResponse)
+    (semanticCalled : semanticImplementation.call
+      (operation.request semanticArgs) sourceRuntime = .ok semanticResponse)
+    (responseRelated : ConcreteExternalResponseRel witness afterWitness
+      (operation.request semanticArgs) sourceRuntime resultKind
+      concreteResponse semanticResponse)
+    (targetSet : locals.set? resultIndex
+      (physicalOfLane concreteResponse.value) = some updated) :
+    ExternalLetStepSimulates context sourceFunction module hostEnv
+      semanticImplementation decl continuation
+      (indices.map Wasm.Instruction.localGet ++ [.call id])
+      sourceRuntime
+      (semanticExternalRuntimeAfter (operation.request semanticArgs)
+        sourceRuntime semanticResponse)
+      sourceEnv semanticResponse.value initial
+      (replaceRuntime initial
+        (initial.host.runtime.applyExternalResponse
+          (concreteExternalRequest operation resultKind concreteArgs.toArray)
+          concreteResponse))
+      locals updated resultIndex witness afterWitness := by
+  obtain ⟨operationStep, _, nextRuntimeRelated, valueRelated⟩ :=
+    externalStep_of_refines operation resultKind initial physicalArgs
+      concreteArgs semanticArgs witness sourceRuntime semanticImplementation
+      afterWitness concreteResponse semanticResponse decoded initialRelated.1
+      requestRelated concreteCalled semanticCalled responseRelated
+  have failureClear :
+      (replaceRuntime initial
+        (initial.host.runtime.applyExternalResponse
+          (concreteExternalRequest operation resultKind concreteArgs.toArray)
+          concreteResponse)).host.failure? = none := by
+    simp [replaceRuntime, clearFailure]
+  have nextState := initialRelated.bindAfter
+    responseRelated.witnessExtension nextRuntimeRelated failureClear
+    resultFound resultKindAt valueRelated targetSet
+  refine ⟨sourceStep, initialRelated, nextState, ?_⟩
+  intro rest Q tail continued
+  simpa [List.append_assoc] using
+    (wp_external_let operation resultKind tail hGets hImp hSat hi hContract
+      hParams hResults operationStep targetSet continued)
 
 /-- Concrete-host WP for the value-preserving cache update call. -/
 theorem wp_cacheSet_call

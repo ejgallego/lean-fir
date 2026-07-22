@@ -2465,6 +2465,17 @@ world/trace update, and a physical cache hit. Both engines separately verify
 the structured missing-implementation fault. No shared semantic contract
 changed.
 
+W6.6ax composes concrete external calls with compiler-produced code. A
+host-polymorphic local-get/call/local-set WP consumes an arbitrary typed
+argument list and exact singleton response while preserving the caller's
+operand tail. `ExternalLetStepSimulates` pairs the interpreter's complete
+three-step external protocol with related concrete/source call equations and
+the response's witness extension; `codeWP_externalLet` then binds the physical
+result and resumes an arbitrary recursive continuation. This closes the
+source external call through concrete runtime/world/trace execution to the
+compiler-assigned local without introducing semantic handles. No executable
+layout or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

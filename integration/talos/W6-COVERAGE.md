@@ -43,8 +43,11 @@ Cross-cutting W6.5 state:
   have `ConcreteRuntimeRel`/trap boundaries; validated singleton-result source
   externals now also resolve to an executable concrete Talos host, decode and
   encode exact physical lanes, reject mismatched response lanes structurally,
-  and pass a whole-module UInt64 world/trace fixture; the shared Node/browser
-  concrete host executes the matching external artifact with the same
+  pass a whole-module UInt64 world/trace fixture, and compose the generated
+  local-get/call/local-set prefix with the source interpreter's three-step
+  external protocol, witness-extending concrete/source responses, the
+  destination-local write, and arbitrary recursive continuations; the shared
+  Node/browser concrete host executes the matching external artifact with the same
   return/world/trace, executes a twice-called cached external with exactly one
   effect, and separately verifies reject-by-default behavior;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
