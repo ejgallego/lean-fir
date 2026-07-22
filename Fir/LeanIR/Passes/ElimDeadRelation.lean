@@ -792,6 +792,381 @@ theorem coreStep_codeLive_related
                 control := .codeLive continuationCovered joinsCovered agree
               }
 
+def exactCodeState (program : ImpureProgram) (runtime : RuntimeState)
+    (env : Env) (joins : JoinEnv) (frames : List Frame)
+    (code : LCNF.Code .impure) : MachineState :=
+  { program, control := .code code, env, joins, frames, runtime }
+
+/-- Exact code contexts need no coverage premise: both machines perform the
+same reads and runtime effects, while related frame tails are merely carried
+through the step. -/
+theorem coreStep_codeExact_related
+    (program : ImpureProgram) (runtime : RuntimeState)
+    (env : Env) (joins : JoinEnv)
+    (framesRelated : LiveFramesRelated leftFrames rightFrames)
+    (code : LCNF.Code .impure) :
+    LiveCoreResultRelated
+      (coreStep (exactCodeState program runtime env joins leftFrames code))
+      (coreStep (exactCodeState program runtime env joins rightFrames code)) := by
+  let leftMachine : MachineState :=
+    exactCodeState program runtime env joins leftFrames code
+  let rightMachine : MachineState :=
+    exactCodeState program runtime env joins rightFrames code
+  have failure (fault : RuntimeFault) :
+      LiveCoreResultRelated (fail leftMachine fault) (fail rightMachine fault) :=
+    fail_liveRelated (left := leftMachine) (right := rightMachine) rfl fault
+  cases code with
+  | «let» declaration continuation =>
+      have evaluated : evalLetValue leftMachine declaration =
+          evalLetValue rightMachine declaration :=
+        evalLetValue_eq_of_program_runtime_env rfl rfl rfl
+      simp only [leftMachine, rightMachine, exactCodeState] at evaluated
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      rw [evaluated]
+      generalize evaluation :
+        evalLetValue
+          ({ program, runtime, env, joins, frames := rightFrames,
+             control := .code (.let declaration continuation) } : MachineState)
+          declaration = result
+      cases result with
+      | error fault => exact failure fault
+      | ok evaluated =>
+          obtain ⟨nextRuntime, action⟩ := evaluated
+          cases action with
+          | value value =>
+              exact .next {
+                program_eq := rfl
+                runtime_eq := rfl
+                frames := framesRelated
+                control := .codeExact (bind env declaration.fvarId value)
+                  joins continuation
+              }
+          | invokeName name arguments =>
+              have frameRelated : LiveFrameRelated
+                  (.bind declaration.fvarId continuation env joins)
+                  (.bind declaration.fvarId continuation env joins) :=
+                .bindExact declaration.fvarId continuation env joins
+              have nextRelated : LiveMachineRelated
+                  { program, runtime := nextRuntime, env, joins,
+                    frames := .bind declaration.fvarId continuation env joins ::
+                      leftFrames,
+                    control := .invokeName name arguments }
+                  { program, runtime := nextRuntime, env, joins,
+                    frames := .bind declaration.fvarId continuation env joins ::
+                      rightFrames,
+                    control := .invokeName name arguments } := {
+                program_eq := rfl
+                runtime_eq := rfl
+                frames := .cons frameRelated framesRelated
+                control := .invokeName name arguments
+              }
+              simpa [leftMachine, rightMachine, pushBindFrame] using
+                LiveCoreResultRelated.next nextRelated
+          | invokeValue function arguments =>
+              have frameRelated : LiveFrameRelated
+                  (.bind declaration.fvarId continuation env joins)
+                  (.bind declaration.fvarId continuation env joins) :=
+                .bindExact declaration.fvarId continuation env joins
+              have nextRelated : LiveMachineRelated
+                  { program, runtime := nextRuntime, env, joins,
+                    frames := .bind declaration.fvarId continuation env joins ::
+                      leftFrames,
+                    control := .invokeValue function arguments }
+                  { program, runtime := nextRuntime, env, joins,
+                    frames := .bind declaration.fvarId continuation env joins ::
+                      rightFrames,
+                    control := .invokeValue function arguments } := {
+                program_eq := rfl
+                runtime_eq := rfl
+                frames := .cons frameRelated framesRelated
+                control := .invokeValue function arguments
+              }
+              simpa [leftMachine, rightMachine, pushBindFrame] using
+                LiveCoreResultRelated.next nextRelated
+  | «fun» declaration continuation impossible => nomatch impossible
+  | jp declaration continuation =>
+      exact .next {
+        program_eq := rfl
+        runtime_eq := rfl
+        frames := framesRelated
+        control := .codeExact env
+          ((declaration.fvarId, declaration) :: joins) continuation
+      }
+  | jmp target arguments =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize joinRead : findJoinPoint? joins target = joinResult
+      cases joinResult with
+      | none =>
+          simp only
+          exact failure (.unknownJoinPoint target)
+      | some declaration =>
+          simp only
+          generalize argsRead : evalArgs env arguments = argsResult
+          cases argsResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok values =>
+              simp only
+              generalize bindingRead :
+                bindParamsOver env declaration.params values = bindingResult
+              cases bindingResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextEnv =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact nextEnv joins declaration.value
+                  }
+  | «cases» caseInfo =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize discrRead : lookupValue env caseInfo.discr = discrResult
+      cases discrResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok discr =>
+          simp only
+          generalize tagRead : getTag runtime discr = tagResult
+          cases tagResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok tag =>
+              simp only
+              generalize selection :
+                chooseAlt tag caseInfo.alts.toList = selected
+              cases selected with
+              | none =>
+                  simp only
+                  exact failure .invalidCases
+              | some branch =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins branch
+                  }
+  | «return» result =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize valueRead : lookupValue env result = valueResult
+      cases valueResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok value =>
+          simp only
+          exact .next {
+            program_eq := rfl
+            runtime_eq := rfl
+            frames := framesRelated
+            control := .yielded value
+          }
+  | unreach type => exact failure .unreachable
+  | oset object index field continuation =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize objectRead : lookupValue env object = objectResult
+      generalize fieldRead : evalArg env field = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok fieldValue =>
+              simp only
+              generalize effectRead :
+                setObjectField runtime objectValue index fieldValue = effectResult
+              cases effectResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextRuntime =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins continuation
+                  }
+  | uset object index field continuation =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize objectRead : lookupValue env object = objectResult
+      generalize fieldRead : lookupValue env field = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok fieldValue =>
+              simp only
+              generalize effectRead :
+                setUSizeField runtime objectValue index fieldValue = effectResult
+              cases effectResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextRuntime =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins continuation
+                  }
+  | sset object width offset field type continuation =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize objectRead : lookupValue env object = objectResult
+      generalize fieldRead : lookupValue env field = fieldResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok objectValue =>
+          cases fieldResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok fieldValue =>
+              simp only
+              generalize effectRead :
+                setScalarField runtime objectValue width offset fieldValue =
+                  effectResult
+              cases effectResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextRuntime =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins continuation
+                  }
+  | setTag object tag continuation =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize objectRead : lookupValue env object = objectResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok objectValue =>
+          simp only
+          generalize effectRead : setTag runtime objectValue tag = effectResult
+          cases effectResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok nextRuntime =>
+              simp only
+              exact .next {
+                program_eq := rfl
+                runtime_eq := rfl
+                frames := framesRelated
+                control := .codeExact env joins continuation
+              }
+  | inc object amount check persistent continuation =>
+      cases persistent with
+      | true =>
+          exact .next {
+            program_eq := rfl
+            runtime_eq := rfl
+            frames := framesRelated
+            control := .codeExact env joins continuation
+          }
+      | false =>
+          simp only [leftMachine, rightMachine, exactCodeState, coreStep,
+            Bool.false_eq_true, ↓reduceIte]
+          generalize objectRead : lookupValue env object = objectResult
+          cases objectResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok objectValue =>
+              simp only
+              generalize effectRead :
+                incValue runtime objectValue amount check = effectResult
+              cases effectResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextRuntime =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins continuation
+                  }
+  | dec object amount check persistent objects continuation =>
+      cases persistent with
+      | true =>
+          exact .next {
+            program_eq := rfl
+            runtime_eq := rfl
+            frames := framesRelated
+            control := .codeExact env joins continuation
+          }
+      | false =>
+          simp only [leftMachine, rightMachine, exactCodeState, coreStep,
+            Bool.false_eq_true, ↓reduceIte]
+          generalize objectRead : lookupValue env object = objectResult
+          cases objectResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok objectValue =>
+              simp only
+              generalize effectRead :
+                decValue runtime objectValue amount check = effectResult
+              cases effectResult with
+              | error fault =>
+                  simp only
+                  exact failure fault
+              | ok nextRuntime =>
+                  simp only
+                  exact .next {
+                    program_eq := rfl
+                    runtime_eq := rfl
+                    frames := framesRelated
+                    control := .codeExact env joins continuation
+                  }
+  | del object continuation =>
+      simp only [leftMachine, rightMachine, exactCodeState, coreStep]
+      generalize objectRead : lookupValue env object = objectResult
+      cases objectResult with
+      | error fault =>
+          simp only
+          exact failure fault
+      | ok objectValue =>
+          simp only
+          generalize effectRead : deleteValue runtime objectValue = effectResult
+          cases effectResult with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok nextRuntime =>
+              simp only
+              exact .next {
+                program_eq := rfl
+                runtime_eq := rfl
+                frames := framesRelated
+                control := .codeExact env joins continuation
+              }
+
 /-- Yielding either terminates equally or restores the exact/live context
 stored by the top related frame. -/
 theorem coreStep_yielded_liveRelated
