@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-result="running">
+  <head>
+    <meta charset="utf-8">
+    <title>FIR concrete Wasm browser check</title>
+  </head>
+  <body>
+    <pre id="result">RUNNING</pre>
+    <script type="module">
+      const output = document.querySelector("#result");
+      const worker = new Worker(
+        `./browser-concrete-worker.mjs${globalThis.location.search}`,
+        { type: "module" },
+      );
+      try {
+        const message = await new Promise((resolve, reject) => {
+          worker.addEventListener("message", (event) => resolve(event.data), { once: true });
+          worker.addEventListener("error", reject, { once: true });
+        });
+        if (!message.ok) {
+          throw new Error(message.error);
+        }
+        output.textContent = message.result;
+        document.documentElement.dataset.result = "pass";
+      } catch (error) {
+        output.textContent = `FAIL ${error.stack ?? error}`;
+        document.documentElement.dataset.result = "fail";
+      } finally {
+        worker.terminate();
+      }
+    </script>
+  </body>
+</html>

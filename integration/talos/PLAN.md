@@ -2356,6 +2356,16 @@ failure tied to its existing bug card; strings, externals, initial heaps, and
 browser execution remain subsequent slices. No shared semantic contract
 changed.
 
+W6.6ao makes the concrete external-engine lane browser-portable without a
+second runtime implementation. Node and a Fetch-only module Worker import the
+same `ConcreteHost` and frozen fixture inventory. Chrome executes all 34
+live-oracle artifacts plus the two import-construction fragment gates and the
+exact malformed-layout expected failure. The browser-enabled artifact gate
+materializes only ignored `_build` corpus data, verifies the established
+semantic browser clients first, and then checks the concrete byte-memory lane.
+Strings, externals, and initial heaps remain subsequent slices. No shared
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

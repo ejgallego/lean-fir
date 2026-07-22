@@ -167,3 +167,11 @@ done
 
 node run-artifacts.mjs "$first"
 node run-concrete-artifacts.mjs "$first"
+if [[ -n "${FIR_BROWSER:-}" ]]; then
+  concrete_corpus="_build/concrete-corpus"
+  rm -rf "$concrete_corpus"
+  mkdir -p "$concrete_corpus"
+  cp "$first"/*.wasm "$first"/*.wasm.json "$first"/*.expected.json \
+    "$concrete_corpus/"
+  ./browser-concrete-check.sh "$FIR_BROWSER" "$concrete_corpus"
+fi

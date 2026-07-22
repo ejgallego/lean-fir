@@ -1,9 +1,9 @@
 # FIR Wasm artifact lane
 
 This package turns the supported W3--W5 semantic FIR corpus into deterministic WebAssembly 1.0
-binary artifacts, then runs those artifacts in Node's standard `WebAssembly` engine with
-both the established semantic FIR host and an incrementally widened concrete
-wasm32 linear-memory host.
+binary artifacts, then runs those artifacts in standard Node and browser
+`WebAssembly` engines with both the established semantic FIR host and an
+incrementally widened concrete wasm32 linear-memory host.
 
 The corpus covers erased and maximum-width unsigned results and entry arguments, tagged
 argument handles, tagged and heap-allocated natural literals, heap strings, constructor
@@ -18,7 +18,7 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runner currently executes 34 closed artifacts through raw scalar
+The concrete runners currently execute 34 closed artifacts through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
 slots, natural and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
@@ -26,9 +26,10 @@ mutation, balanced and recursive ownership updates, deletion, unique/shared
 reset/reuse, recursive cache publication, and maximum-width integer
 boxing/unboxing. Its
 logical-location map and allocation descriptors are observation-only data;
-runtime imports exchange physical words and consult the byte-level heap. The
-remaining strings, externals, initial heap loading, and browser client stay on the semantic runner
-until their concrete counterparts join this explicit allowlist. An unsupported
+runtime imports exchange physical words and consult the byte-level heap. Node
+and a Fetch-only browser Worker import the same host and fixture inventory.
+The remaining strings, externals, and initial heap loading stay on the semantic
+runner until their concrete counterparts join this explicit allowlist. An unsupported
 import is rejected while constructing the concrete import object, before
 instantiation.
 
@@ -204,8 +205,16 @@ make -C ../../.. validate-v8
 ```
 
 Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
-the complete shared-product Worker. A repository-local alternate validation
-directory can be supplied as the second argument for focused runs.
+the complete shared-product Worker. It also materializes the live-oracle
+artifact corpus under `_build`, then runs the same 34 concrete artifacts, two
+fragment gates, and one expected failure used by Node through a third Worker.
+A repository-local alternate validation directory can be supplied as the
+second argument for focused semantic-product runs. After a browser-enabled
+artifact check, the concrete Worker can be rerun directly with:
+
+```text
+./browser-concrete-check.sh google-chrome _build/concrete-corpus
+```
 
 The client also retains the focused expected-failure regression for
 `FIR-BUG-impure-none-cached-heap-persistence`. A longer standalone group reads
