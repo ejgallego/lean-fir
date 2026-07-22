@@ -688,6 +688,44 @@ theorem invokeDecl_foundPartial_reachableRelated
         programs frames arguments declarations.params_eq sourceFound
         targetFound sourceTooFew runtime
 
+/-- Related programs agree that a declaration is absent.  Both direct
+invocations therefore terminate with the same fault and related observable
+runtime state. -/
+theorem invokeDecl_unknown_reachableObservation
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (sourceFound : sourceState.program.findDecl? name = none)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots) :
+    targetState.program.findDecl? name = none ∧
+      invokeDecl sourceState name sourceArguments =
+        .done (observe sourceState (.fault (.unknownDecl name))) ∧
+      invokeDecl targetState name targetArguments =
+        .done (observe targetState (.fault (.unknownDecl name))) ∧
+      ObservationRel
+        (observe sourceState (.fault (.unknownDecl name)))
+        (observe targetState (.fault (.unknownDecl name))) := by
+  have found := programs.findDecl? name
+  rw [sourceFound] at found
+  cases targetFound : targetState.program.findDecl? name with
+  | some targetDeclaration =>
+      rw [targetFound] at found
+      cases found
+  | none =>
+      rw [targetFound] at found
+      refine ⟨rfl, ?_, ?_, ?_⟩
+      · simp [invokeDecl, sourceFound, fail]
+      · simp [invokeDecl, targetFound, fail]
+      · apply runtime.observationRel
+          (leftOutcome := .fault (.unknownDecl name))
+          (rightOutcome := .fault (.unknownDecl name))
+        · rfl
+        · intro value member
+          simp [outcomeRoots] at member
+        · intro value member
+          simp [outcomeRoots] at member
+
 /-- The named-call dispatcher reaches `invokeDecl` either because arguments
 are nonempty or because an empty call missed the global cache. -/
 inductive InvokeNameDeclReady (runtime : RuntimeState) (name : Name)
@@ -748,6 +786,66 @@ theorem coreStep_invokeName_of_declReady
     | nonempty nonempty => simpa [coreStep, nonempty] using targetStep
     | cacheMiss empty miss =>
         simpa [coreStep, empty, miss] using targetStep
+
+/-- A declaration-ready named call to an unknown declaration satisfies the
+terminal simulation contract immediately. -/
+theorem coreStep_invokeName_unknown_terminal
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name = none)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots)
+    (done : coreStep { sourceState with
+      control := .invokeName name sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeName name targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFound : sourceInvoke.program.findDecl? name = none := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime sourceRoots targetRoots := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_unknown_reachableObservation
+      (sourceArguments := sourceArguments) (targetArguments := targetArguments)
+      sourceInvoke targetInvoke invokePrograms invokeFound invokeRuntime with
+    ⟨targetFound, sourceFault, targetFault, observations⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have sourceCore : coreStep sourceInvoke =
+      .done (observe sourceInvoke (.fault (.unknownDecl name))) := by
+    cases sourceReady with
+    | nonempty nonempty =>
+        simpa [sourceInvoke, coreStep, nonempty] using sourceFault
+    | cacheMiss empty miss =>
+        simpa [sourceInvoke, coreStep, empty, miss] using sourceFault
+  have targetCore : coreStep targetInvoke =
+      .done (observe targetInvoke (.fault (.unknownDecl name))) := by
+    cases targetReady with
+    | nonempty nonempty =>
+        simpa [targetInvoke, coreStep, nonempty] using targetFault
+    | cacheMiss empty miss =>
+        simpa [targetInvoke, coreStep, empty, miss] using targetFault
+  have observationEq : sourceObservation =
+      observe sourceInvoke (.fault (.unknownDecl name)) := by
+    rw [sourceCore] at done
+    exact (CoreResult.done.inj done).symm
+  refine ⟨observe targetInvoke (.fault (.unknownDecl name)), ?_, ?_⟩
+  · exact ⟨0, targetInvoke, .refl targetInvoke, targetCore⟩
+  · simpa [sourceInvoke, targetInvoke, observationEq] using observations
 
 /-- A retained under-application is matched at `coreStep` whenever named-call
 dispatch is known to reach `invokeDecl`; this includes both nonempty calls and
