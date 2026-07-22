@@ -8,7 +8,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
 | `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural and string concrete hosts plus generated literal-`let` WPs and compiler-local writes; string whole-module Talos/Node/browser execution |
-| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
+| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial; invalid-arity classification blocked by `FIR-BUG-wasm-none-constructor-arity-fault-classification` | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
 | `objectProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
 | `usizeProj` | Yes | Heap theorem | Bounds fault exact; remainder partial | Concrete Talos host plus generated projection-`let` WP, exact source-classified bounds trap and executable guard, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; uninitialized valid coordinates expose the confirmed FIR-fault/concrete-zero discrepancy in `FIR-BUG-wasm-none-uninitialized-scalar-projection`; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
@@ -64,6 +64,10 @@ Cross-cutting W6.5 state:
   generic concrete memory lifting emits target `deadObject address`; the closed
   `isShared` reproducer and coordinated ABI fix are tracked by
   `FIR-BUG-wasm-none-dead-object-fault-classification`;
+- invalid constructor arities are `malformed` in FIR but dedicated source
+  `arityMismatch` faults in the concrete allocator; exact guards and the
+  coordinated contract decision are tracked by
+  `FIR-BUG-wasm-none-constructor-arity-fault-classification`;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

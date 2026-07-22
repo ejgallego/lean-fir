@@ -462,6 +462,19 @@ private def projectionInfo : Lean.Compiler.LCNF.CtorInfo := {
   usize := 0
   ssize := 0 }
 
+-- The semantic allocator currently folds a wrong field count into the broad
+-- malformed bucket, while the concrete allocator retains a dedicated source
+-- arity fault.
+#guard match allocCtor ({} : RuntimeState) projectionInfo #[] with
+  | .error (.malformed _) => true
+  | _ => false
+
+#guard match allocCtorStep projectionInfo #[] .object emptyHostStore [] with
+  | .Trap store _ =>
+      store.host.failure? == some (.runtime (.source (.runtime
+        (.arityMismatch 1 0))))
+  | _ => false
+
 private def objectProjectionFixture :
     Except ConcreteError (Wasm.Store Host × Word32) := do
   let field := Word32.encodeImmediate 11 (by decide)

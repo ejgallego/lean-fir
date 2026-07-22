@@ -2591,6 +2591,15 @@ executable observations and proposes a witness-indexed address-fault case,
 analogous to reference-count underflow, as a coordinated semantic-Wasm-ABI
 change. No workaround or shared contract change is included in this slice.
 
+W6.6bk finds the constructor-allocation failure analogue. For a descriptor
+expecting one object field and an empty argument array, FIR emits a broad
+`malformed` message while the concrete allocator and Talos host emit source
+`arityMismatch 1 0`. `FIR-BUG-wasm-none-constructor-arity-fault-classification`
+contains adjacent executable guards and confines the gap to invalid arities;
+validated compiler-produced calls remain aligned. Resolving the chosen fault
+constructor requires a coordinated source/concrete contract commit, so this
+slice adds no workaround or shared-contract change.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
