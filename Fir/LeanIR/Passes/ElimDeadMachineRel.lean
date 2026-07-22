@@ -998,6 +998,50 @@ theorem coreStep_deletedLet_of_ready
       exact coreStep_deletedReuse_of_ready sourceState targetState
         programs frames continuation joins env absent runtime ready
 
+/-- Semantic-step form of the unified deleted-let rule.  Determinism forces
+any source `Step` at this control to be the internal step exhibited above;
+the target matches it with the reflexive (zero-step) path required by a
+non-lockstep simulation. -/
+theorem match_deletedLetStep_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      declaration)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_deletedLet_of_ready sourceState targetState programs frames
+      continuation joins env absent runtime ready with
+    ⟨nextRuntime, value, transition, afterRelated⟩
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact ⟨_, NonLockstep.reaches_refl _, afterRelated⟩
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation

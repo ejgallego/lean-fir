@@ -1363,6 +1363,47 @@ theorem deletedBoxSourceOnlyMachineStep :
   simpa [deletedBoxSourceState, deletedBoxTargetState,
     deletedBoxBefore, deletedBoxAfter, deadBoxDecl, letDecl] using progress
 
+/-- The semantic `Step` interface sees the same deletion as a genuine
+non-lockstep match: the source advances and the target takes the reflexive
+path while the reachable relation is preserved. -/
+theorem deletedBoxStepMatchesTargetStutter (externals : ExternalSpec)
+    {sourceAfter : MachineState}
+    (step : Step externals deletedBoxSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedBoxTargetState targetAfter ∧
+      ReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedBoxSourceState.program deletedBoxTargetState.program := by
+    simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedBoxSourceState.frames deletedBoxTargetState.frames [] [] := .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedBoxSourceState.env deletedBoxTargetState.env := by
+    simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedBoxSourceState.runtime deletedBoxTargetState.runtime
+      (envRootsOn neutralUsed deletedBoxSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedBoxTargetState.env ++ []) := by
+    simpa using deletedBoxRuntimeRelated
+  have sourceStep : Step externals
+      { deletedBoxSourceState with
+        control := .code (.let deadBoxDecl (.return live)) }
+      sourceAfter := by
+    simpa [deletedBoxSourceState, deletedBoxBefore] using step
+  have matched := match_deletedLetStep_of_ready
+    (sourceState := deletedBoxSourceState)
+    (targetState := deletedBoxTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (declaration := deadBoxDecl)
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime deletedBoxUnifiedReady sourceStep
+  simpa [deletedBoxTargetState, deletedBoxAfter] using matched
+
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/
 theorem deadCtorSourceOnlyMachineStep :
