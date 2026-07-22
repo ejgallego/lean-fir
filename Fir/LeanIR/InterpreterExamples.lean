@@ -216,7 +216,7 @@ def mutationCode : LCNF.Code .impure :=
   .let (letDecl y objType (.lit (.nat 2))) <|
   .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
   .let (letDecl u usizeType (.lit (.usize 55))) <|
-  .uset p 0 u <|
+  .uset p 1 u <|
   .let (letDecl s u64Type (.lit (.uint64 66))) <|
   .sset p 1 0 s u64Type <|
   .oset p 0 (.fvar y) <|
@@ -233,8 +233,8 @@ def usizeProjectionCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.nat 1))) <|
   .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
   .let (letDecl u usizeType (.lit (.usize 77))) <|
-  .uset p 0 u <|
-  .let (letDecl r usizeType (.uproj 0 p)) <|
+  .uset p 1 u <|
+  .let (letDecl r usizeType (.uproj 1 p)) <|
   .return r
 
 def usizeProjectionProgram : ImpureProgram :=
