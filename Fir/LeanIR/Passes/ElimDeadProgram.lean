@@ -311,6 +311,17 @@ theorem ShadowJoinEnvRelated.consBoth
       (OptionalRel.some declaration)
   · simpa [findJoinPoint?, sameName] using rest target member
 
+theorem ShadowJoinEnvRelated.consBothOfKeys
+    (keyEq : sourceKey = targetKey)
+    (declaration : ShadowFunDeclRelated fuel used sourceDeclaration
+      targetDeclaration)
+    (rest : ShadowJoinEnvRelated fuel used sourceJoins targetJoins) :
+    ShadowJoinEnvRelated fuel used
+      ((sourceKey, sourceDeclaration) :: sourceJoins)
+      ((targetKey, targetDeclaration) :: targetJoins) := by
+  subst targetKey
+  exact rest.consBoth declaration
+
 theorem ShadowJoinEnvRelated.consSourceOfAbsent
     (absent : used.contains key = false)
     (rest : ShadowJoinEnvRelated fuel used sourceJoins targetJoins) :
@@ -322,6 +333,102 @@ theorem ShadowJoinEnvRelated.consSourceOfAbsent
   have sameName : (key.name == target.name) = false := by
     simp [different]
   simpa [findJoinPoint?, sameName] using rest target member
+
+/-- The two residual shapes produced when the source graph starts with a join:
+retained declarations have related recursively transformed bodies, while a
+dead declaration disappears and leaves only its transformed continuation. -/
+inductive ShadowJoinResidual (fuel : Nat) (used : UsedLocals)
+    (sourceDeclaration : LCNF.FunDecl .impure)
+    (sourceContinuation : LCNF.Code .impure) :
+    LCNF.Code .impure → Prop where
+  | retained (targetDeclaration : LCNF.FunDecl .impure)
+      (targetContinuation : LCNF.Code .impure)
+      (declaration : ShadowFunDeclRelated fuel used
+        sourceDeclaration targetDeclaration)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowJoinResidual fuel used sourceDeclaration sourceContinuation
+        (.jp targetDeclaration targetContinuation)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowJoinResidual fuel used sourceDeclaration sourceContinuation
+        targetContinuation
+
+/-- Inversion of a transparent shadow edge at a join declaration. -/
+theorem ShadowCodeGraph.joinResidual
+    (graph : ShadowCodeGraph fuel used
+      (.jp sourceDeclaration sourceContinuation) target) :
+    ShadowJoinResidual fuel used sourceDeclaration sourceContinuation target := by
+  cases sourceDeclaration with
+  | mk fvarId binderName params type body =>
+      rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+      cases remaining with
+      | zero => simp [shadowCode?] at result
+      | succ nextFuel =>
+          cases continuationResult :
+              shadowCode? nextFuel initial sourceContinuation with
+          | none => simp [shadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              have continuationBound : nextFuel ≤ fuel :=
+                Nat.le_trans (Nat.le_succ nextFuel) bounded
+              by_cases keep : fvarId ∈ continuationUsed
+              · cases bodyResult :
+                    shadowCode? nextFuel continuationUsed body with
+                | none =>
+                    simp [shadowCode?, continuationResult, keep, bodyResult]
+                      at result
+                | some output =>
+                    obtain ⟨targetBody, bodyUsed⟩ := output
+                    simp [shadowCode?, continuationResult, keep, bodyResult]
+                      at result
+                    rcases result with ⟨rfl, rfl⟩
+                    have bodySpec := shadowCode_spec bodyResult
+                    apply ShadowJoinResidual.retained
+                      (.mk fvarId binderName params type targetBody)
+                      targetContinuation
+                    · exact {
+                        fvarId_eq := rfl
+                        binderName_eq := rfl
+                        params_eq := rfl
+                        type_eq := rfl
+                        value := ⟨nextFuel, continuationUsed, bodyUsed,
+                          continuationBound, bodyResult, subset⟩
+                      }
+                    · exact ⟨nextFuel, initial, continuationUsed,
+                        continuationBound, continuationResult,
+                        bodySpec.2.trans subset⟩
+              · simp [shadowCode?, continuationResult, keep] at result
+                rcases result with ⟨rfl, rfl⟩
+                exact .deleted targetContinuation ⟨nextFuel, initial,
+                  continuationUsed, continuationBound, continuationResult,
+                  subset⟩
+
+/-- Join readiness is again indexed by the concrete residual edge.  Retained
+joins are unconditional; a deleted source-only entry must be absent from the
+active liveness index so no related target jump can observe it. -/
+inductive ShadowJoinReadyAt (fuel : Nat) (used : UsedLocals)
+    (sourceDeclaration : LCNF.FunDecl .impure)
+    (sourceContinuation : LCNF.Code .impure) :
+    {target : LCNF.Code .impure} →
+      ShadowJoinResidual fuel used sourceDeclaration sourceContinuation target →
+        Prop where
+  | retained (targetDeclaration : LCNF.FunDecl .impure)
+      (targetContinuation : LCNF.Code .impure)
+      (declaration : ShadowFunDeclRelated fuel used
+        sourceDeclaration targetDeclaration)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation) :
+      ShadowJoinReadyAt fuel used sourceDeclaration sourceContinuation
+        (.retained targetDeclaration targetContinuation declaration
+          continuation)
+  | deleted (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      (absent : used.contains sourceDeclaration.fvarId = false) :
+      ShadowJoinReadyAt fuel used sourceDeclaration sourceContinuation
+        (.deleted targetContinuation continuation)
 
 /-- A saved call continuation retains its residual shadow edge, captured
 environment agreement, and the transformed join graph it will resume with.
@@ -588,6 +695,99 @@ theorem coreStep_let_shadowProgress
       exact coreStep_deletedLet_shadowProgress sourceState targetState
         programs runtimeEq framesRelated continuation joins agree absent
           evaluated
+
+/-- A retained join declaration takes the same administrative step on both
+sides and installs related source/target bodies under their equal identifiers. -/
+theorem coreStep_retainedJoin_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (declaration : ShadowFunDeclRelated fuel used
+      sourceDeclaration targetDeclaration)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) })
+      (coreStep { targetState with
+        control := .code (.jp targetDeclaration targetContinuation) }) := by
+  simp only [coreStep]
+  exact .next {
+    programs
+    runtime_eq := runtimeEq
+    frames := framesRelated
+    control := .code continuation
+      (joins.consBothOfKeys declaration.fvarId_eq declaration) agree
+  }
+
+/-- A deleted join declaration takes one source-only administrative step.
+The added source entry is invisible because its identifier is absent from the
+active liveness index. -/
+theorem coreStep_deletedJoin_shadowProgress
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (absent : used.contains sourceDeclaration.fvarId = false) :
+    ShadowMachineProgress fuel
+      { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) }
+      { targetState with control := .code targetContinuation } := by
+  let sourceAfter :=
+    { sourceState with
+      joins := (sourceDeclaration.fvarId, sourceDeclaration) ::
+        sourceState.joins
+      control := .code sourceContinuation }
+  apply ShadowMachineProgress.sourceOnly sourceAfter
+  · rfl
+  · exact {
+      programs
+      runtime_eq := runtimeEq
+      frames := framesRelated
+      control := .code continuation
+        (joins.consSourceOfAbsent absent) agree
+    }
+
+/-- Complete one-node progress theorem for a source join edge. -/
+theorem coreStep_join_shadowProgress
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.jp sourceDeclaration sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env)
+    (ready : ShadowJoinReadyAt fuel used sourceDeclaration
+      sourceContinuation graph.joinResidual) :
+    ShadowMachineProgress fuel
+      { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) }
+      { targetState with control := .code targetCode } := by
+  cases ready with
+  | retained targetDeclaration targetContinuation declaration continuation =>
+      apply ShadowMachineProgress.lockstep
+      exact coreStep_retainedJoin_shadowRelated sourceState targetState
+        programs runtimeEq framesRelated declaration continuation joins agree
+  | deleted targetContinuation continuation absent =>
+      exact coreStep_deletedJoin_shadowProgress sourceState targetState
+        programs runtimeEq framesRelated continuation joins agree absent
 
 /-- Equal external responses preserve related waiting stacks and restore the
 same yielded value. -/
