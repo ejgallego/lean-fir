@@ -95,6 +95,21 @@ private def acceptedScalarLayoutMismatchIsStructured : Bool :=
 
 #guard acceptedScalarLayoutMismatchIsStructured
 
+/-- Candidate structured-fault discrepancy: FIR tracks whether a packed
+coordinate has been written, while the concrete heap currently exposes the
+zero-filled bytes of every layout-valid coordinate. -/
+private def uninitializedScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl r u64Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard faulted? (runMain uninitializedScalarProjectionProgram)
+  (.scalarFieldMissing 2 0)
+
+#guard fixtureReturnsI64? uninitializedScalarProjectionProgram 0
+
 /-- The positive scalar-mutation fixture uses the exact slot index emitted by
 Lean 4.32's `ToImpure`: object fields plus `USize` fields. -/
 private def compilerShapedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=

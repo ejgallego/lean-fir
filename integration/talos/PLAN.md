@@ -2555,6 +2555,16 @@ histories whose retained byte intervals do not overlap the new write; repeated
 same-coordinate histories remain a vacuous special case. No executable layout
 or shared semantic contract changed.
 
+W6.6bg begins the full structured-fault audit with a newly confirmed scalar
+projection discrepancy. FIR records initialized packed coordinates as a
+dynamic list and faults when a valid coordinate has never been written; the
+concrete layout zero-fills the declared byte region and currently returns
+zero. `FIR-BUG-wasm-none-uninitialized-scalar-projection` contains the exact
+closed differential reproducer and leaves the semantic fault unchanged. This
+blocks complete `scalarProj` fault correspondence until the Wasm fragment
+tracks initialization or proves definite writes before projections. No shared
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
