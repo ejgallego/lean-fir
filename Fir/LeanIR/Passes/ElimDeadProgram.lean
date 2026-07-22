@@ -148,6 +148,136 @@ inductive ShadowLetReadyAt (fuel : Nat) (used : UsedLocals)
       ShadowLetReadyAt fuel used declaration sourceContinuation state
         (.deleted targetContinuation continuation)
 
+/-- Case alternatives keep their tag/default metadata and relate only their
+recursively transformed code bodies. -/
+inductive ShadowAltRelated (fuel : Nat) (used : UsedLocals) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor (info : LCNF.CtorInfo)
+      (body : ShadowCodeGraph fuel used sourceBody targetBody) :
+      ShadowAltRelated fuel used
+        (.ctorAlt info sourceBody) (.ctorAlt info targetBody)
+  | default
+      (body : ShadowCodeGraph fuel used sourceBody targetBody) :
+      ShadowAltRelated fuel used
+        (.default sourceBody) (.default targetBody)
+
+def ShadowAltListRelated (fuel : Nat) (used : UsedLocals)
+    (source target : List (LCNF.Alt .impure)) : Prop :=
+  ListRel (ShadowAltRelated fuel used) source target
+
+/-- The alternative traversal produces pointwise-related bodies under any
+larger active liveness index that contains its final threaded set. -/
+theorem shadowAltList_related
+    (result : shadowAltList? (shadowCode? remaining) initial source =
+      some (target, final))
+    (bounded : remaining ≤ fuel)
+    (subset : UsedSubset final used) :
+    ShadowAltListRelated fuel used source target := by
+  induction source generalizing initial target final with
+  | nil =>
+      simp only [shadowAltList?] at result
+      rcases result with ⟨rfl, rfl⟩
+      exact .nil
+  | cons alternative rest ih =>
+      cases bodyResult :
+          shadowCode? remaining initial alternative.getCode with
+      | none => simp [shadowAltList?, bodyResult] at result
+      | some bodyOutput =>
+          obtain ⟨targetBody, middle⟩ := bodyOutput
+          cases restResult :
+              shadowAltList? (shadowCode? remaining) middle rest with
+          | none => simp [shadowAltList?, bodyResult, restResult] at result
+          | some restOutput =>
+              obtain ⟨targetRest, threadedFinal⟩ := restOutput
+              simp [shadowAltList?, bodyResult, restResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              have restSpec := shadowAltList_spec
+                (transformCode := shadowCode? remaining)
+                (transformSpec := fun _ _ _ _ bodyRun =>
+                  shadowCode_spec bodyRun)
+                (result := restResult)
+              have bodyGraph : ShadowCodeGraph fuel used
+                  alternative.getCode targetBody :=
+                ⟨remaining, initial, middle, bounded, bodyResult,
+                  restSpec.2.trans subset⟩
+              have headRelated : ShadowAltRelated fuel used alternative
+                  (updateAltCode alternative targetBody) := by
+                cases alternative with
+                | ctorAlt info body => exact .ctor info bodyGraph
+                | default body => exact .default bodyGraph
+                | alt _ _ _ impossible => nomatch impossible
+              exact .cons headRelated (ih restResult subset)
+
+theorem ShadowAltListRelated.findCtor
+    (related : ShadowAltListRelated fuel used source target) :
+    OptionalRel (ShadowCodeGraph fuel used)
+      (findCtorAlt tag source) (findCtorAlt tag target) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor info body =>
+          by_cases tagMatches : info.cidx == tag
+          · simpa [findCtorAlt, tagMatches] using OptionalRel.some body
+          · simpa [findCtorAlt, tagMatches] using ih
+      | default body => simpa [findCtorAlt] using ih
+
+theorem ShadowAltListRelated.findDefault
+    (related : ShadowAltListRelated fuel used source target) :
+    OptionalRel (ShadowCodeGraph fuel used)
+      (findDefaultAlt source) (findDefaultAlt target) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor info body => simpa [findDefaultAlt] using ih
+      | default body =>
+          simpa [findDefaultAlt] using OptionalRel.some body
+
+theorem ShadowAltListRelated.choose
+    (related : ShadowAltListRelated fuel used source target) :
+    OptionalRel (ShadowCodeGraph fuel used)
+      (chooseAlt tag source) (chooseAlt tag target) := by
+  unfold chooseAlt
+  have constructors := related.findCtor (tag := tag)
+  generalize sourceFoundEq : findCtorAlt tag source = sourceFound
+    at constructors ⊢
+  generalize targetFoundEq : findCtorAlt tag target = targetFound
+    at constructors ⊢
+  cases constructors with
+  | none => exact related.findDefault
+  | some body => exact .some body
+
+/-- Inversion of a transparent shadow edge at a case table.  Discriminant and
+case metadata remain exact, while every alternative body retains a residual
+graph under the final active liveness index. -/
+theorem ShadowCodeGraph.casesResidual
+    (graph : ShadowCodeGraph fuel used
+      (.cases (.mk typeName resultType discr sourceAlternatives)) target) :
+    ∃ targetAlternatives,
+      target = .cases (.mk typeName resultType discr targetAlternatives) ∧
+      ShadowAltListRelated fuel used sourceAlternatives.toList
+        targetAlternatives.toList ∧
+      used.contains discr = true := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases alternativesResult : shadowAltList? (shadowCode? nextFuel)
+          initial sourceAlternatives.toList with
+      | none => simp [shadowCode?, alternativesResult] at result
+      | some output =>
+          obtain ⟨targetAlternatives, beforeDiscr⟩ := output
+          simp [shadowCode?, alternativesResult] at result
+          rcases result with ⟨rfl, rfl⟩
+          have continuationBound : nextFuel ≤ fuel :=
+            Nat.le_trans (Nat.le_succ nextFuel) bounded
+          have beforeSubset : UsedSubset beforeDiscr used :=
+            (usedSubset_insert beforeDiscr discr).trans subset
+          refine ⟨targetAlternatives.toArray, rfl, ?_, subset discr (by simp)⟩
+          simpa using shadowAltList_related alternativesResult
+            continuationBound beforeSubset
+
 /-- Every target body in the program graph carries the liveness coverage
 proved for the transparent traversal. -/
 theorem ShadowCodeRelated.covered
@@ -927,6 +1057,81 @@ theorem coreStep_jump_shadowRelated
                     frames := framesRelated
                     control := .code declarations.value joins nextAgree
                   }
+
+/-- Case dispatch reads the same covered discriminant and runtime tag, then
+selects pointwise-related transformed alternative bodies. -/
+theorem coreStep_cases_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.cases (.mk typeName resultType discr sourceAlternatives)) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with
+        control := .code (.cases
+          (.mk typeName resultType discr sourceAlternatives)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  rcases graph.casesResidual with
+    ⟨targetAlternatives, targetEq, alternatives, discrMember⟩
+  subst targetCode
+  simp only [coreStep]
+  have discrEq :
+      lookupValue sourceState.env
+          (LCNF.Cases.mk typeName resultType discr sourceAlternatives).discr =
+        lookupValue targetState.env
+          (LCNF.Cases.mk typeName resultType discr targetAlternatives).discr :=
+    agree discr discrMember
+  rw [discrEq]
+  generalize discrRead : lookupValue targetState.env
+    (LCNF.Cases.mk typeName resultType discr targetAlternatives).discr =
+      discrResult
+  cases discrResult with
+  | error fault =>
+      simp only
+      exact shadowFail_related runtimeEq fault
+  | ok value =>
+      simp only
+      have tagEq : getTag sourceState.runtime value =
+          getTag targetState.runtime value :=
+        congrArg (fun runtime => getTag runtime value) runtimeEq
+      rw [tagEq]
+      generalize tagRead : getTag targetState.runtime value = tagResult
+      cases tagResult with
+      | error fault =>
+          simp only
+          exact shadowFail_related runtimeEq fault
+      | ok tag =>
+          simp only
+          generalize sourceChoiceEq :
+            chooseAlt tag
+              (LCNF.Cases.mk typeName resultType discr
+                sourceAlternatives).alts.toList = sourceChoice
+          generalize targetChoiceEq :
+            chooseAlt tag
+              (LCNF.Cases.mk typeName resultType discr
+                targetAlternatives).alts.toList = targetChoice
+          have selected : OptionalRel (ShadowCodeGraph fuel used)
+              sourceChoice targetChoice := by
+            rw [← sourceChoiceEq, ← targetChoiceEq]
+            exact alternatives.choose
+          cases selected with
+          | none =>
+              simp only
+              exact shadowFail_related runtimeEq .invalidCases
+          | some body =>
+              simp only
+              exact .next {
+                programs
+                runtime_eq := runtimeEq
+                frames := framesRelated
+                control := .code body joins agree
+              }
 
 /-- Equal external responses preserve related waiting stacks and restore the
 same yielded value. -/
