@@ -1460,6 +1460,103 @@ theorem LiveCellRel.ownershipHeader
           exact ⟨_, headerRead, rawRead, by
             simp [Header.isPromotedTag, headerKind, different], persistent, refCount⟩
 
+/-- A stale mapped allocation rejects increment before reference-count
+arithmetic or a header write. -/
+theorem DeadCellRel.incrementReference_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (amount : Nat) (check : Bool) :
+    Fir.Wasm.Concrete.incrementReference state address amount check =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  unfold Fir.Wasm.Concrete.incrementReference
+  rw [addressHeap]
+  simp only
+  rw [related.readLiveHeader_eq]
+  rfl
+
+/-- Every fuel branch of one stale decrement rejects at the released-header
+read, before fuel, reference-count, descriptor, or child processing. -/
+theorem DeadCellRel.decrementReferenceOnceFuel_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (fuel : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnceFuel fuel state address check descriptors =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  cases fuel <;> simp only [decrementReferenceOnceFuel] <;>
+    rw [addressHeap, related.readLiveHeader_eq] <;> rfl
+
+/-- The public one-step stale decrement inherits the fuel-indexed boundary. -/
+theorem DeadCellRel.decrementReferenceOnce_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnce state address check descriptors =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold decrementReferenceOnce
+  exact related.decrementReferenceOnceFuel_eq _ check descriptors
+
+/-- A positive repeated decrement stops at its first stale one-step
+transition. Amount zero remains the operation's intentional empty fold. -/
+theorem DeadCellRel.decrementReference_succ_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (amount : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReference state address (amount + 1) check descriptors =
+      .error (.sourceAddress (.deadObject address)) := by
+  simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+    Bind.bind, Except.bind]
+  rw [related.decrementReferenceOnce_eq check descriptors]
+
+/-- A stale mapped increment has the same exact concrete/source fault and no
+post-state at either level. -/
+theorem LiveHeapRel.incrementReference_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (amount : Nat) (check : Bool) :
+    incrementReference state address amount check =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.incrementReference_eq amount check, by
+    simp [Fir.LeanIR.Impure.incValue, Fir.LeanIR.Impure.incLocation,
+      getLiveCell, found, dead]
+    rfl⟩
+
+/-- Every positive stale decrement has the same exact boundary; the first
+failed step prevents any concrete or semantic update. -/
+theorem LiveHeapRel.decrementReference_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (amount : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReference state address (amount + 1) check
+        descriptors =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.decValue runtime (.object (.heap location))
+          (amount + 1) check = .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  refine ⟨deadRelated.decrementReference_succ_eq amount check
+    descriptors, ?_⟩
+  have semanticOnce :
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .error (.deadObject location) := by
+    simp [Fir.LeanIR.Impure.decValueOnce, Fir.LeanIR.Impure.decLocation,
+      Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found, dead]
+    rfl
+  simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
+    List.foldlM_cons, Bind.bind, Except.bind]
+  rw [semanticOnce]
+
 /-- A represented persistent cell makes the concrete increment operation an
 exact no-op, independently of the requested count. -/
 theorem LiveCellRel.incrementReference_persistent_eq

@@ -2985,6 +2985,36 @@ theorem incrementStep_of_refines
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
           · simpa [replaceHeap, clearFailure] using runtimeRelated
 
+/-- A stale mapped increment reaches the Talos boundary as the exact
+source-address dead-object fault before count arithmetic or a header write. -/
+theorem incrementStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {amount : Nat} {check : Bool}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    incrementStep amount check initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      incValue runtime (.object (.heap location)) amount check =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.incrementReference_deadObject heapRelated found
+              dead amount check
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [incrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Repeating a checked decrement on an immediate or promoted tag remains a
 concrete no-op. -/
 theorem decrementReference_tagged_checked
@@ -3078,6 +3108,38 @@ theorem decrementStep_of_refines
               · simp [decrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
               · simpa [replaceHeap, clearFailure] using runtimeRelated
+
+/-- A positive stale decrement stops at its first released-header read and
+preserves the exact source-address fault through the Talos host. -/
+theorem decrementStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    decrementStep (amount + 1) check objectFields? initial
+        [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      decValue runtime (.object (.heap location)) (amount + 1) check =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.decrementReference_deadObject heapRelated found
+              dead amount check initial.host.closureDescriptors
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [decrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
 
 /-- Successful semantic deletion is heap-only for both the ordinary-object
 transition and the erased failed-reset no-op. -/

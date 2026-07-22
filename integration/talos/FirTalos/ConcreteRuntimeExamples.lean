@@ -1121,10 +1121,21 @@ private def unaryConstructorInfo : Lean.Compiler.LCNF.CtorInfo := {
             | .Trap failed _ => failed.host.failure? == expected &&
                 failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
             | _ => false
+          let incrementFault :=
+            match incrementStep 7 false deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
+          let decrementFault :=
+            match decrementStep 2 true none deleted [.i32 object] with
+            | .Trap failed _ => failed.host.failure? == expected &&
+                failed.host.runtime.heap.memory == deleted.host.runtime.heap.memory
+            | _ => false
           objectFault && usizeFault && scalar8Fault && scalar16Fault &&
             scalar32Fault && scalar64Fault && objectSetFault && usizeSetFault &&
             tagSetFault && scalar8SetFault && scalar16SetFault &&
-            scalar32SetFault && scalar64SetFault
+            scalar32SetFault && scalar64SetFault && incrementFault &&
+            decrementFault
       | _ => false
   | _ => false
 

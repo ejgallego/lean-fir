@@ -2668,6 +2668,14 @@ coordinates and confirms byte-for-byte memory preservation. This remains
 orthogonal to the live uninitialized-projection discrepancy; no shared
 contract or runtime behavior changes.
 
+W6.6bt extends the exact stale-reference boundary through reference-count
+ownership. Concrete/FIR increment and every positive-count decrement preserve
+the paired address/location `deadObject` fault before count arithmetic,
+descriptor processing, recursion, or any header write; the Talos hosts retain
+`ConcreteErrorSourceRel`. The deleted-cell guard checks both traps and complete
+memory preservation. Zero-count decrement remains the intentionally specified
+empty-fold no-op on both sides. No shared contract or runtime behavior changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
