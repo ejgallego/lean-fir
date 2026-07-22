@@ -688,6 +688,125 @@ theorem invokeDecl_foundPartial_reachableRelated
         programs frames arguments declarations.params_eq sourceFound
         targetFound sourceTooFew runtime
 
+/-- The named-call dispatcher reaches `invokeDecl` either because arguments
+are nonempty or because an empty call missed the global cache. -/
+inductive InvokeNameDeclReady (runtime : RuntimeState) (name : Name)
+    (arguments : Array Value) : Prop where
+  | nonempty (ready : arguments.isEmpty = false) :
+      InvokeNameDeclReady runtime name arguments
+  | cacheMiss (empty : arguments.isEmpty = true)
+      (miss : findGlobal? runtime.globals name = none) :
+      InvokeNameDeclReady runtime name arguments
+
+theorem InvokeNameDeclReady.related
+    (ready : InvokeNameDeclReady sourceRuntime name sourceArguments)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (globals : ListRel (NamedValueRel rho)
+      sourceRuntime.globals targetRuntime.globals) :
+    InvokeNameDeclReady targetRuntime name targetArguments := by
+  have argumentSize := arrayRel_size_eq arguments
+  cases ready with
+  | nonempty sourceNonempty =>
+      exact .nonempty (by
+        simpa [Array.isEmpty, argumentSize] using sourceNonempty)
+  | cacheMiss sourceEmpty sourceMiss =>
+      have targetEmpty : targetArguments.isEmpty = true := by
+        simpa [Array.isEmpty, argumentSize] using sourceEmpty
+      have found := findGlobal?_related globals name
+      rw [sourceMiss] at found
+      cases targetFound : findGlobal? targetRuntime.globals name with
+      | none => exact .cacheMiss targetEmpty targetFound
+      | some targetValue =>
+          rw [targetFound] at found
+          cases found
+
+/-- Once both dispatchers are known to reach declaration invocation, matched
+`invokeDecl` transitions are exactly matched `coreStep` transitions. -/
+theorem coreStep_invokeName_of_declReady
+    (sourceState targetState sourceAfter targetAfter : MachineState)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (targetReady : InvokeNameDeclReady targetState.runtime name
+      targetArguments)
+    (sourceStep : invokeDecl
+      { sourceState with control := .invokeName name sourceArguments }
+      name sourceArguments = .next sourceAfter)
+    (targetStep : invokeDecl
+      { targetState with control := .invokeName name targetArguments }
+      name targetArguments = .next targetAfter) :
+    coreStep { sourceState with
+      control := .invokeName name sourceArguments } = .next sourceAfter ∧
+    coreStep { targetState with
+      control := .invokeName name targetArguments } = .next targetAfter := by
+  constructor
+  · cases sourceReady with
+    | nonempty nonempty => simpa [coreStep, nonempty] using sourceStep
+    | cacheMiss empty miss =>
+        simpa [coreStep, empty, miss] using sourceStep
+  · cases targetReady with
+    | nonempty nonempty => simpa [coreStep, nonempty] using targetStep
+    | cacheMiss empty miss =>
+        simpa [coreStep, empty, miss] using targetStep
+
+/-- A retained under-application is matched at `coreStep` whenever named-call
+dispatch is known to reach `invokeDecl`; this includes both nonempty calls and
+empty cache misses. -/
+theorem coreStep_invokeName_foundPartial_of_declReady_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundPartial_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceTooFew invokeRuntime with
+    ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
+      nextRelated⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨larger, sourceAfter, targetAfter, extension, steps.1, steps.2,
+    nextRelated⟩
+
 /-- Nonempty under-applied named calls take one allocating `coreStep` on each
 side and re-establish the machine invariant under an extended renaming. -/
 theorem coreStep_invokeName_nonempty_foundPartial_reachableRelated
@@ -818,6 +937,67 @@ theorem invokeDecl_foundCode_reachableRelated
                     rfl, targetValueEq, sourceStep, targetStep,
                     nextRelated⟩
 
+/-- A fully applied internal declaration is matched at `coreStep` for either
+form of declaration-ready named dispatch: nonempty arguments or an empty
+cache miss. -/
+theorem coreStep_invokeName_foundCode_of_declReady_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ sourceAfter targetAfter,
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundCode_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceValue sourceEnough sourceBinding
+      invokeRuntime with
+    ⟨targetDeclaration, targetCode, targetEnv, sourceAfter, targetAfter,
+      targetFound, targetValue, sourceStep, targetStep, nextRelated⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨sourceAfter, targetAfter, steps.1, steps.2, nextRelated⟩
+
 /-- A nonempty named call bypasses the global cache on both sides.  When its
 source declaration is an internal body and parameter binding succeeds, the
 actual `coreStep` transitions enter related transformed declaration bodies. -/
@@ -877,6 +1057,85 @@ theorem coreStep_invokeName_nonempty_foundCode_reachableRelated
   refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
   · simpa [sourceInvoke, coreStep, sourceNonempty] using sourceStep
   · simpa [targetInvoke, coreStep, targetNonempty] using targetStep
+
+/-- Empty named calls consult related global tables in lockstep.  A cache hit
+publishes related yielded values without changing either runtime; those values
+were already live through the global roots. -/
+theorem coreStep_invokeName_cacheHit_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceEmpty : sourceArguments.isEmpty = true)
+    (sourceGlobal : findGlobal? sourceState.runtime.globals name =
+      some sourceValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetValue sourceAfter targetAfter,
+      findGlobal? targetState.runtime.globals name = some targetValue ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have globals := findGlobal?_related runtime.globals name
+  rw [sourceGlobal] at globals
+  cases targetGlobal : findGlobal? targetState.runtime.globals name with
+  | none =>
+      rw [targetGlobal] at globals
+      cases globals
+  | some targetValue =>
+      rw [targetGlobal] at globals
+      cases globals with
+      | some values =>
+          have published := runtime.prependGlobal values sourceGlobal
+            targetGlobal
+          have sourceSubset : RootSubset
+              (sourceValue :: sourceFrameRoots)
+              (sourceValue :: sourceArguments.toList ++ sourceFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have targetSubset : RootSubset
+              (targetValue :: targetFrameRoots)
+              (targetValue :: targetArguments.toList ++ targetFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have nextRuntime := published.restrictExtra
+            (.cons values frames.roots) sourceSubset targetSubset
+          let sourceAfter := {
+            sourceState with control := .yielded sourceValue }
+          let targetAfter := {
+            targetState with control := .yielded targetValue }
+          have argumentSize := arrayRel_size_eq arguments
+          have targetEmpty : targetArguments.isEmpty = true := by
+            simpa [Array.isEmpty, argumentSize] using sourceEmpty
+          have sourceStep : coreStep { sourceState with
+              control := .invokeName name sourceArguments } =
+              .next sourceAfter := by
+            simp [coreStep, sourceEmpty, sourceGlobal, sourceAfter]
+          have targetStep : coreStep { targetState with
+              control := .invokeName name targetArguments } =
+              .next targetAfter := by
+            simp [coreStep, targetEmpty, targetGlobal, targetAfter]
+          refine ⟨targetValue, sourceAfter, targetAfter, rfl,
+            sourceStep, targetStep, ?_⟩
+          unfold ReachableMachineRelated
+          exact ⟨[sourceValue], [targetValue], sourceFrameRoots,
+            targetFrameRoots, programs, .yielded values, frames, nextRuntime⟩
 
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/

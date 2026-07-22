@@ -300,6 +300,40 @@ def NamedValueRel (rho : AddressRenaming)
     (left right : Name × Value) : Prop :=
   left.1 = right.1 ∧ ValueRel rho left.2 right.2
 
+/-- Related global tables make the same cache-hit decision and return related
+values.  This is the address-renamed counterpart of exact global equality. -/
+theorem findGlobal?_related
+    (related : ListRel (NamedValueRel rho) left right) (name : Name) :
+    OptionalRel (ValueRel rho)
+      (findGlobal? left name) (findGlobal? right name) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      rename_i leftHead rightHead leftTail rightTail
+      obtain ⟨nameEq, value⟩ := head
+      obtain ⟨leftName, leftValue⟩ := leftHead
+      obtain ⟨rightName, rightValue⟩ := rightHead
+      simp only at nameEq value
+      simp only [findGlobal?]
+      rw [nameEq]
+      cases rightName == name with
+      | false => exact ih
+      | true => exact .some value
+
+theorem findGlobal?_value_mem
+    (found : findGlobal? globals name = some value) :
+    value ∈ globals.map Prod.snd := by
+  induction globals with
+  | nil => simp [findGlobal?] at found
+  | cons head tail ih =>
+      obtain ⟨candidate, candidateValue⟩ := head
+      by_cases same : candidate == name
+      · simp [findGlobal?, same] at found
+        subst value
+        exact List.mem_cons_self
+      · have member := ih (by simpa [findGlobal?, same] using found)
+        exact List.mem_cons_of_mem _ member
+
 theorem eventRel_mono
     (extension : RenamingExtends smaller larger)
     (related : EventRel smaller left right) :
@@ -1181,6 +1215,50 @@ theorem ShadowRuntimeRel.restrictExtra
     heap := heapRel_monoRoots related.heap
       (runtimeRoots_monoExtra leftSubset)
       (runtimeRoots_monoExtra rightSubset)
+    leftMappingFresh := related.leftMappingFresh
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := related.leftHeapFresh
+    rightHeapFresh := related.rightHeapFresh
+  }
+
+/-- A cache hit may publish a global as a new control root.  The value was
+already among the canonical runtime roots, so this changes only the explicit
+root presentation. -/
+theorem ShadowRuntimeRel.prependGlobal
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (value : ValueRel rho leftValue rightValue)
+    (leftFound : findGlobal? left.globals name = some leftValue)
+    (rightFound : findGlobal? right.globals name = some rightValue) :
+    ShadowRuntimeRel rho left right
+      (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+  have leftMember := findGlobal?_value_mem leftFound
+  have rightMember := findGlobal?_value_mem rightFound
+  exact {
+    extra := .cons value related.extra
+    globals := related.globals
+    world_eq := related.world_eq
+    trace := related.trace
+    heap := heapRel_monoRoots related.heap
+      (by
+        intro root member
+        simp only [runtimeRoots, List.mem_append, List.mem_cons] at member ⊢
+        rcases member with (headOrExtra | global) | traced
+        · rcases headOrExtra with same | extra
+          · subst root
+            exact Or.inl (Or.inr leftMember)
+          · exact Or.inl (Or.inl extra)
+        · exact Or.inl (Or.inr global)
+        · exact Or.inr traced)
+      (by
+        intro root member
+        simp only [runtimeRoots, List.mem_append, List.mem_cons] at member ⊢
+        rcases member with (headOrExtra | global) | traced
+        · rcases headOrExtra with same | extra
+          · subst root
+            exact Or.inl (Or.inr rightMember)
+          · exact Or.inl (Or.inl extra)
+        · exact Or.inl (Or.inr global)
+        · exact Or.inr traced)
     leftMappingFresh := related.leftMappingFresh
     rightMappingFresh := related.rightMappingFresh
     leftHeapFresh := related.leftHeapFresh
