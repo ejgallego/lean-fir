@@ -681,6 +681,23 @@ theorem MemoryState.AllocationFrame.readNatural_eq
   simp only [liftMemory, Bind.bind, Except.bind]
   rw [frame.readNaturalLimbs 0 header.aux1.toNat (by simpa using limbsFit)]
 
+/-- A raw UTF-8 byte decoder is stable when its complete payload lies inside
+the framed allocation. -/
+theorem MemoryState.AllocationFrame.readStringBytes
+    {before after : MemoryState} {address : Word32} {bytes : Nat}
+    (frame : before.AllocationFrame after address bytes)
+    (index count : Nat) (owned : headerBytes + index + count ≤ bytes) :
+    Fir.Wasm.Concrete.readStringBytes after.memory address.value index count =
+      Fir.Wasm.Concrete.readStringBytes before.memory address.value index count := by
+  induction count generalizing index with
+  | zero => rfl
+  | succ count ih =>
+      unfold Fir.Wasm.Concrete.readStringBytes
+      rw [show address.value + headerBytes + index =
+        address.value + (headerBytes + index) by omega]
+      rw [frame.readByte (headerBytes + index) (by omega)]
+      rw [ih (index + 1) (by omega)]
+
 /-- Every constructor observation stays inside its declared mixed-layout
 allocation, so a complete allocation frame preserves the decoded object. -/
 theorem ConstructorObjectRel.allocationFrame
@@ -1061,16 +1078,41 @@ theorem BoxedObjectRel.allocationFrame
     extent := by rw [frame.cursor]; exact related.extent
     decoded := by rw [decoderEq]; exact related.decoded }
 
-/-- Boxed scalars and heap naturals are the nonrecursive live ownership
+/-- A complete string allocation decoder is stable when every byte in its
+region is framed. -/
+theorem StringObjectRel.allocationFrame
+    {before after : MemoryState} {address : Word32} {value : String}
+    {header : Header} (related : StringObjectRel before address value header)
+    (frame : before.AllocationFrame after address header.allocationBytes.toNat) :
+    StringObjectRel after address value header := by
+  obtain ⟨_, _, _, minimum, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts before address header
+      related.headerRead
+  have headerAfter : after.readLiveHeader address = .ok header := by
+    rw [frame.readLiveHeader minimum]
+    exact related.headerRead
+  have decoderEq := frame.readStringBytes 0 header.aux1.toNat
+    (by simpa using related.bytesFit)
+  exact {
+    headerRead := headerAfter
+    headerKind := related.headerKind
+    marker := related.marker
+    byteCount := related.byteCount
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    allocationBytes := related.allocationBytes
+    headerOwned := by rw [frame.cursor]; exact related.headerOwned
+    extent := by rw [frame.cursor]; exact related.extent
+    bytesFit := related.bytesFit
+    rawDecoded := by rw [decoderEq]; exact related.rawDecoded }
+
+/-- Boxes, heap naturals, and strings are the nonrecursive live ownership
 representations. A complete allocation frame preserves their `LiveCellRel`. -/
 theorem LiveCellRel.leaf_allocationFrame
     {before after : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell} {regionHeader : Header}
     (related : LiveCellRel before witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (headerRead : Header.read before.memory address = .ok regionHeader)
     (frame : before.AllocationFrame after address
       regionHeader.allocationBytes.toNat) :
@@ -1078,12 +1120,15 @@ theorem LiveCellRel.leaf_allocationFrame
   cases related with
   | constructor descriptor objectEq objectRelated liveHeaderRead headerKind refCount
         persistent live =>
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [objectEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
         contradiction
   | @boxed kind scalar actualHeader _ descriptor objectEq objectRelated refCount
         persistent live =>
@@ -1110,14 +1155,27 @@ theorem LiveCellRel.leaf_allocationFrame
         (by rw [frame.cursor]; exact extent) limbsFit
         (by rw [frame.readNatural_eq liveHeaderRead limbsFit]; exact decoded)
         refCount persistent live
+  | @string value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      obtain ⟨_, rawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts before address actualHeader
+          objectRelated.headerRead
+      rw [headerRead] at rawRead
+      have headerEq := Except.ok.inj rawRead
+      subst regionHeader
+      exact .string descriptor objectEq (objectRelated.allocationFrame frame)
+        refCount persistent live
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [closureEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [closureEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [closureEq] at stringEq
         contradiction
 
 /-- Whole cells whose live branch is nonrecursive transport across a complete
@@ -1126,10 +1184,7 @@ theorem CellRel.leaf_allocationFrame
     {before after : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell} {header : Header}
     (related : CellRel before witness address cell)
-    (leafCell : cell.live = true →
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : cell.live = true → NonrecursiveCell cell)
     (headerRead : Header.read before.memory address = .ok header)
     (frame : before.AllocationFrame after address header.allocationBytes.toNat) :
     CellRel after witness address cell := by
@@ -1198,6 +1253,16 @@ theorem LiveCellRel.allocationFrame
       exact .natural descriptor objectEq headerAfter headerKind marker
         (by rw [frame.cursor]; exact extent) limbsFit
         (by rw [frame.readNatural_eq liveHeaderRead limbsFit]; exact decoded)
+        refCount persistent live
+  | @string value actualHeader _ descriptor objectEq objectRelated refCount
+        persistent live =>
+      obtain ⟨_, rawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts before address actualHeader
+          objectRelated.headerRead
+      rw [headerRead] at rawRead
+      have headerEq := Except.ok.inj rawRead
+      subst regionHeader
+      exact .string descriptor objectEq (objectRelated.allocationFrame frame)
         refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.allocationFrame headerRead frame)
@@ -1376,6 +1441,14 @@ theorem LiveCellRel.ownershipHeader
       exact ⟨_, headerRead, rawRead, by
         simp [Header.isPromotedTag, headerKind, marker, bigNaturalMarker,
           promotedTagMarker], persistent, refCount⟩
+  | string descriptor objectEq objectRelated refCount persistent live =>
+      obtain ⟨_, rawRead, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address _
+          objectRelated.headerRead
+      have different : (ObjectKind.string == ObjectKind.natural) = false := by decide
+      exact ⟨_, objectRelated.headerRead, rawRead, by
+        simp [Header.isPromotedTag, objectRelated.headerKind, different],
+        persistent, refCount⟩
   | closure closureRelated =>
       cases closureRelated with
       | closure objectEq objectRelated headerRead headerKind descriptorLookup
@@ -1653,10 +1726,7 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
     (mapped : witness.locations.lookup? location = some address)
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (ordinary : cell.persistent = false)
     (one : cell.rc = 1) (check : Bool) :
     ∃ result nextRuntime,
@@ -1744,10 +1814,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
     (mapped : witness.locations.lookup? location = some address)
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (ordinary : cell.persistent = false)
     (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
     ∃ result nextRuntime,
@@ -1832,11 +1899,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
           cases targetRelated with
           | @boxed kind scalar header _ descriptor objectEq objectRelated refCount
                 persistent cellLive =>
-              let leafCell :
-                  (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-                    cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-                  (∃ value : Nat, cell.object = .natural value) :=
-                .inl ⟨kind, scalar, objectEq⟩
+              let leafCell : NonrecursiveCell cell :=
+                .inl (.inl ⟨kind, scalar, objectEq⟩)
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
                   finalRelated⟩ :=
                 related.decrementReferenceOnceFuel_refines_leaf_one
@@ -1847,11 +1911,19 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
               exact ⟨result, concreteBranch, finalRelated⟩
           | @natural value header _ descriptor objectEq headerRead headerKind
                 marker extent limbsFit decoded refCount persistent cellLive =>
-              let leafCell :
-                  (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-                    cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-                  (∃ value : Nat, cell.object = .natural value) :=
-                .inr ⟨value, objectEq⟩
+              let leafCell : NonrecursiveCell cell :=
+                .inl (.inr ⟨value, objectEq⟩)
+              obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
+                  finalRelated⟩ :=
+                related.decrementReferenceOnceFuel_refines_leaf_one
+                  (descriptors := witness.closureDescriptors) mapped found live leafCell
+                    ordinary one fuel true
+              have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
+              subst branchRuntime
+              exact ⟨result, concreteBranch, finalRelated⟩
+          | @string value header _ descriptor objectEq objectRelated refCount
+                persistent cellLive =>
+              let leafCell : NonrecursiveCell cell := .inr ⟨value, objectEq⟩
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
                   finalRelated⟩ :=
                 related.decrementReferenceOnceFuel_refines_leaf_one

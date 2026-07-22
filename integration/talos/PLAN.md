@@ -2413,6 +2413,19 @@ from the larger `LiveCellRel` exhaustiveness change; the next slice consumes
 the new descriptor together with `StringObjectRel` to extend `LiveHeapRel`.
 No executable layout or shared semantic contract changed.
 
+W6.6at closes that string-to-heap refinement slice. `StringObjectRel` now
+retains the exact allocation extent and UTF-8 payload while leaving mutable
+reference-count/persistence metadata to `LiveCellRel`; consequently the same
+decoded string survives prefix allocation, ownership writes, and persistence.
+Strings join the complete live-cell matrix, descriptor spatial framing,
+sharing, checked increment/decrement, canonical count-one release, recursive
+release dispatch, cache persistence, mutation exclusion, and reset/reuse
+transport. A fresh `allocateString` now extends `LiveHeapRel`, relates the
+returned wasm32 `.tobject` word to the new semantic location, and agrees with
+the source string-literal allocation step. Generated literal-`let` composition
+remains the next boundary. No executable layout or shared semantic contract
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

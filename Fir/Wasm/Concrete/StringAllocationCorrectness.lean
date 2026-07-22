@@ -314,6 +314,21 @@ theorem allocateString_prefixExtension
         omega))
     _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
 
+/-- A bounded raw UTF-8 decoder reads identically through a fresh prefix
+extension. -/
+theorem MemoryState.PrefixExtension.readStringBytes
+    {before after : MemoryState} (extension : before.PrefixExtension after)
+    (base index count : Nat)
+    (owned : base + headerBytes + index + count ≤ before.heapCursor) :
+    readStringBytes after.memory base index count =
+      readStringBytes before.memory base index count := by
+  induction count generalizing index with
+  | zero => rfl
+  | succ count ih =>
+      unfold Fir.Wasm.Concrete.readStringBytes
+      rw [extension.readByte (base + headerBytes + index) (by omega)]
+      rw [ih (index + 1) (by omega)]
+
 /-- Fully decoded shape of one fresh ordinary UTF-8 string allocation. The
 relation compares canonical source bytes directly and records every header
 field needed by the checked public decoder. -/
@@ -321,19 +336,18 @@ structure StringObjectRel (state : MemoryState) (address : Word32)
     (value : String) (header : Header) : Prop where
   headerRead : state.readLiveHeader address = .ok header
   headerKind : header.kind = .string
-  ordinary : header.persistent = false
   marker : header.aux0 = stringUtf8Marker
   byteCount : header.aux1.toNat = (stringUtf8Bytes value).length
   reserved2 : header.aux2 = 0
   reserved3 : header.aux3 = 0
   allocationBytes : header.allocationBytes.toNat =
     align8 (headerBytes + (stringUtf8Bytes value).length)
+  headerOwned : address.value + headerBytes ≤ state.heapCursor
   extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
   bytesFit : headerBytes + header.aux1.toNat ≤
     header.allocationBytes.toNat
   rawDecoded : readStringBytes state.memory address.value 0 header.aux1.toNat =
     .ok (stringUtf8Bytes value)
-  refCountOne : header.refCount.toNat = 1
 
 /-- The exact byte-level relation discharges every check in the public string
 payload decoder. -/
@@ -360,6 +374,35 @@ theorem StringObjectRel.readPayload
   rw [if_pos metadataCheck]
   rw [related.rawDecoded]
 
+/-- A completely owned string object remains decoded through a fresh prefix
+extension. -/
+theorem StringObjectRel.prefixExtension
+    {before after : MemoryState} {address : Word32} {value : String}
+    {header : Header} (related : StringObjectRel before address value header)
+    (extension : before.PrefixExtension after) :
+    StringObjectRel after address value header := by
+  have headerAfter := extension.readLiveHeader_eq_ok address header
+    related.headerOwned related.headerRead
+  have payloadOwned : address.value + headerBytes + 0 + header.aux1.toNat ≤
+      before.heapCursor := by
+    have extent := related.extent
+    have bytesFit := related.bytesFit
+    omega
+  have decoderEq := extension.readStringBytes address.value 0 header.aux1.toNat
+    payloadOwned
+  exact {
+    headerRead := headerAfter
+    headerKind := related.headerKind
+    marker := related.marker
+    byteCount := related.byteCount
+    reserved2 := related.reserved2
+    reserved3 := related.reserved3
+    allocationBytes := related.allocationBytes
+    headerOwned := Nat.le_trans related.headerOwned extension.cursor
+    extent := Nat.le_trans related.extent extension.cursor
+    bytesFit := related.bytesFit
+    rawDecoded := by rw [decoderEq]; exact related.rawDecoded }
+
 /-- A successful fresh string allocation preserves the frontier invariant and
 establishes the exact checked UTF-8 object relation. -/
 theorem allocateString_objectRel
@@ -367,7 +410,8 @@ theorem allocateString_objectRel
     (valid : state.FrontierInvariant)
     (allocated : allocateString state value = .ok (result, address)) :
     result.FrontierInvariant ∧
-      ∃ header, StringObjectRel result address value header := by
+      ∃ header, StringObjectRel result address value header ∧
+        header.persistent = false ∧ header.refCount.toNat = 1 := by
   obtain ⟨byteCount, middle, countEncoded, objectAllocation, byteWrite,
       cursorEq⟩ := allocateString_decompose state result value address allocated
   obtain ⟨countFits, countEq⟩ := uint32Field_string_success
@@ -440,7 +484,6 @@ theorem allocateString_objectRel
   refine ⟨finalValid, header, {
     headerRead := headerRead
     headerKind := by rfl
-    ordinary := by rfl
     marker := by rfl
     byteCount := countToNat
     reserved2 := by rfl
@@ -448,6 +491,11 @@ theorem allocateString_objectRel
     allocationBytes := by
       change (UInt32.ofNat allocationBytes).toNat = allocationBytes
       exact allocationToNat
+    headerOwned := by
+      have minimum : headerBytes ≤ allocationBytes := by
+        exact Nat.le_trans (Nat.le_add_right headerBytes _)
+          (align8_ge (headerBytes + (stringUtf8Bytes value).length))
+      omega
     extent := by
       change address.value + (UInt32.ofNat allocationBytes).toNat ≤
         result.heapCursor
@@ -462,7 +510,6 @@ theorem allocateString_objectRel
       change readStringBytes result.memory address.value 0 byteCount.toNat =
         .ok (stringUtf8Bytes value)
       rw [countToNat]
-      exact decodedBytes
-    refCountOne := by rfl }⟩
+      exact decodedBytes }, by rfl, by rfl⟩
 
 end Fir.Wasm.Concrete

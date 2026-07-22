@@ -38,6 +38,9 @@ theorem LiveHeapRel.closureMatches_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       cases closureRelated with
       | @closure storedFunction storedArity captureKinds storedCaptures header _
@@ -87,6 +90,9 @@ theorem LiveHeapRel.projectClosureCapture_refines
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | closure closureRelated =>

@@ -1,6 +1,7 @@
 import Fir.Wasm.Concrete.Runtime
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
 import Fir.Wasm.Concrete.ClosureHeapCorrectness
+import Fir.Wasm.Concrete.StringAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -414,6 +415,15 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
       (live : cell.live = true) :
       LiveCellRel state witness address cell
 
+  | string {value header cell}
+      (descriptor : witness.descriptors.lookup? address = some (.string value))
+      (objectEq : cell.object = .string value)
+      (related : StringObjectRel state address value header)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent)
+      (live : cell.live = true) :
+      LiveCellRel state witness address cell
+
   | closure {cell}
       (related : ClosureCellRel state witness address cell) :
       LiveCellRel state witness address cell
@@ -546,6 +556,9 @@ theorem LiveCellRel.prefixExtension
       · exact refCount
       · exact persistent
       · exact live
+  | string descriptor objectEq objectRelated refCount persistent live =>
+      exact .string descriptor objectEq (objectRelated.prefixExtension extension)
+        refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.prefixExtension extension)
 
@@ -569,6 +582,9 @@ theorem LiveCellRel.witnessExtension
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
         headerKind marker extent limbsFit decoded refCount persistent live
+  | string descriptor objectEq objectRelated refCount persistent live =>
+      exact .string (extension.descriptors _ _ descriptor) objectEq objectRelated
+        refCount persistent live
   | closure closureRelated =>
       exact .closure (closureRelated.witnessExtension extension)
 
@@ -602,6 +618,7 @@ theorem LiveCellRel.headerOwned
       have minimum :=
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
       omega
+  | string _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
   | closure closureRelated => exact closureRelated.headerOwned
 
 /-- Whole-cell relation used once ownership can make semantic cells dead.
@@ -635,6 +652,7 @@ theorem LiveCellRel.descriptor
   | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | natural descriptor _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | string descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | closure closureRelated =>
       cases closureRelated with
       | closure _ objectRelated _ _ _ _ _ _ _ _ =>
@@ -1067,5 +1085,12 @@ theorem ValueRel.new_natural_result (witness : RefinementWitness)
       .tobject (.word32 address) (.object (.heap location)) :=
   .tobject (.heap (.mapped
     (RefinementWitness.lookup_bindNatural_location witness location address value)))
+
+theorem ValueRel.new_string_result (witness : RefinementWitness)
+    (location : Location) (address : Word32) (value : String) :
+    ValueRel (witness.bindString location address value)
+      .tobject (.word32 address) (.object (.heap location)) :=
+  .tobject (.heap (.mapped
+    (RefinementWitness.lookup_bindString_location witness location address value)))
 
 end Fir.Wasm.Concrete

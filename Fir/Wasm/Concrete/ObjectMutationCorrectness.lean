@@ -445,6 +445,9 @@ theorem LiveHeapRel.writeObjectField_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq

@@ -891,6 +891,24 @@ theorem Header.readNaturalLimbs_of_write_eq_ok
         headerInBounds written (.inr (by omega))]
       rw [ih (index + 1)]
 
+/-- A common-header rewrite leaves the raw UTF-8 payload decoder unchanged
+because every byte starts after the 32-byte header. -/
+theorem Header.readStringBytes_of_write_eq_ok
+    (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
+    (index count : Nat)
+    (headerInBounds : address.value + headerBytes ≤ before.size)
+    (written : updatedHeader.write before address = .ok after) :
+    readStringBytes after address.value index count =
+      readStringBytes before address.value index count := by
+  induction count generalizing index with
+  | zero => rfl
+  | succ count ih =>
+      unfold readStringBytes
+      rw [Header.readByte_of_write_eq_ok_other before after address updatedHeader
+        (address.value + headerBytes + index) headerInBounds written
+        (.inr (by omega))]
+      rw [ih (index + 1)]
+
 theorem Header.readUInt16_of_write_eq_ok_payload
     (before after : LinearMemory) (address : Word32) (updatedHeader : Header)
     (other : Nat)
@@ -1900,6 +1918,10 @@ theorem LiveCellRel.decrementReferenceOnce_boxed_above_one
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
+  | string _ objectEq _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
@@ -1937,6 +1959,10 @@ theorem LiveCellRel.incrementReference_boxed
       · simpa using persistent
       · simpa using live
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
+      rw [objectEq] at boxedEq
+      contradiction
+  | string _ objectEq _ _ _ _ =>
       obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
       rw [objectEq] at boxedEq
       contradiction
@@ -1981,6 +2007,10 @@ theorem LiveCellRel.incrementReference_constructor
       rw [objectEq] at constructorEq
       contradiction
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+  | string _ objectEq _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -2029,6 +2059,10 @@ theorem LiveCellRel.decrementReferenceOnce_constructor_above_one
       rw [objectEq] at constructorEq
       contradiction
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨semantic, constructorEq⟩ := constructorCell
+      rw [objectEq] at constructorEq
+      contradiction
+  | string _ objectEq _ _ _ _ =>
       obtain ⟨semantic, constructorEq⟩ := constructorCell
       rw [objectEq] at constructorEq
       contradiction
@@ -2100,6 +2134,10 @@ theorem LiveCellRel.incrementReference_natural
         exact UInt32.toNat_ofNat_of_lt' fits
       · simpa using persistent
       · simpa using live
+  | string _ objectEq _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨value, naturalEq⟩ := naturalCell
@@ -2189,23 +2227,199 @@ theorem LiveCellRel.decrementReferenceOnce_natural_above_one
         exact UInt32.toNat_ofNat_of_lt' nextFits
       · simpa using persistent
       · simpa using live
+  | string _ objectEq _ _ _ _ =>
+      obtain ⟨value, naturalEq⟩ := naturalCell
+      rw [objectEq] at naturalEq
+      contradiction
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
       obtain ⟨value, naturalEq⟩ := naturalCell
       rw [closureEq] at naturalEq
       contradiction
 
-/-- Boxes and heap naturals own no concrete child references. At count one,
-both representations therefore transition directly to `DeadCellRel`. -/
+/-- String bytes and layout metadata frame across a common-header increment,
+yielding the same decoded semantic string at the incremented live-cell count. -/
+theorem LiveCellRel.incrementReference_string
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (stringCell : ∃ value : String, cell.object = .string value)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result,
+      incrementReference state address amount check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc + amount } := by
+  have headerOwned := related.headerOwned
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | boxed _ objectEq _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      have notPromoted : Header.isPromotedTag header = false := by
+        have different : (ObjectKind.string == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+          headerWrite, finalValid, headerReadAfter⟩ :=
+        incrementReference_header valid objectRelated.headerRead headerOwned
+          notPromoted headerOrdinary cell.rc amount refCount fits check
+      subst updatedHeader
+      subst result
+      have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+        Nat.le_trans headerOwned valid.cursorInBounds
+      have decoderEq :
+          readStringBytes memory address.value 0 header.aux1.toNat =
+            readStringBytes state.memory address.value 0 header.aux1.toNat := by
+        rw [Header.readStringBytes_of_write_eq_ok state.memory memory address
+          { header with refCount := UInt32.ofNat (cell.rc + amount) }
+          0 _ headerInBounds headerWrite]
+      have objectAfter : StringObjectRel ({ state with memory } : MemoryState)
+          address value { header with refCount := UInt32.ofNat (cell.rc + amount) } := {
+        headerRead := headerReadAfter
+        headerKind := by simpa using objectRelated.headerKind
+        marker := by simpa using objectRelated.marker
+        byteCount := by simpa using objectRelated.byteCount
+        reserved2 := by simpa using objectRelated.reserved2
+        reserved3 := by simpa using objectRelated.reserved3
+        allocationBytes := by simpa using objectRelated.allocationBytes
+        headerOwned := by simpa using objectRelated.headerOwned
+        extent := by simpa using objectRelated.extent
+        bytesFit := by simpa using objectRelated.bytesFit
+        rawDecoded := by rw [decoderEq]; exact objectRelated.rawDecoded }
+      refine ⟨{ state with memory }, operation, finalValid, ?_⟩
+      apply LiveCellRel.string descriptor (by simpa using objectEq) objectAfter
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' fits
+      · simpa using persistent
+      · simpa using live
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [closureEq] at stringEq
+      contradiction
+
+/-- String cells above one retain their exact UTF-8 decoder while the common
+header and semantic cell counts decrease together. -/
+theorem LiveCellRel.decrementReferenceOnce_string_above_one
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (stringCell : ∃ value : String, cell.object = .string value)
+    (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
+    ∃ result,
+      decrementReferenceOnce state address check = .ok result ∧
+      result.FrontierInvariant ∧
+      LiveCellRel result witness address { cell with rc := cell.rc - 1 } := by
+  have headerOwned := related.headerOwned
+  cases related with
+  | constructor _ objectEq _ _ _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | boxed _ objectEq _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [objectEq] at stringEq
+      contradiction
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      have notPromoted : Header.isPromotedTag header = false := by
+        have different : (ObjectKind.string == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      obtain ⟨result, updatedHeader, memory, write, updatedEq, resultEq,
+          headerWrite, finalValid, headerReadAfter⟩ :=
+        writeReferenceCount_header valid objectRelated.headerRead headerOwned
+          (UInt32.ofNat (cell.rc - 1))
+      subst updatedHeader
+      subst result
+      obtain ⟨heap, _, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address header
+          objectRelated.headerRead
+      have refCountNe : header.refCount ≠ 0 := by
+        intro zero
+        rw [zero] at refCount
+        simp at refCount
+        omega
+      have operation :
+          decrementReferenceOnce state address check = .ok { state with memory } := by
+        simp only [decrementReferenceOnce, decrementReferenceOnceFuel]
+        rw [heap]
+        simp only
+        rw [objectRelated.headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted])]
+        rw [if_neg (by simp [headerOrdinary])]
+        rw [if_neg (by simpa using refCountNe)]
+        rw [refCount, if_pos oneLt]
+        exact write
+      have headerInBounds : address.value + headerBytes ≤ state.memory.size :=
+        Nat.le_trans headerOwned valid.cursorInBounds
+      have decoderEq :
+          readStringBytes memory address.value 0 header.aux1.toNat =
+            readStringBytes state.memory address.value 0 header.aux1.toNat := by
+        rw [Header.readStringBytes_of_write_eq_ok state.memory memory address
+          { header with refCount := UInt32.ofNat (cell.rc - 1) }
+          0 _ headerInBounds headerWrite]
+      have objectAfter : StringObjectRel ({ state with memory } : MemoryState)
+          address value { header with refCount := UInt32.ofNat (cell.rc - 1) } := {
+        headerRead := headerReadAfter
+        headerKind := by simpa using objectRelated.headerKind
+        marker := by simpa using objectRelated.marker
+        byteCount := by simpa using objectRelated.byteCount
+        reserved2 := by simpa using objectRelated.reserved2
+        reserved3 := by simpa using objectRelated.reserved3
+        allocationBytes := by simpa using objectRelated.allocationBytes
+        headerOwned := by simpa using objectRelated.headerOwned
+        extent := by simpa using objectRelated.extent
+        bytesFit := by simpa using objectRelated.bytesFit
+        rawDecoded := by rw [decoderEq]; exact objectRelated.rawDecoded }
+      have nextFits : cell.rc - 1 < UInt32.size := by
+        have oldFits := UInt32.toNat_lt_size header.refCount
+        rw [refCount] at oldFits
+        omega
+      refine ⟨{ state with memory }, operation, finalValid, ?_⟩
+      apply LiveCellRel.string descriptor (by simpa using objectEq) objectAfter
+      · simp only
+        exact UInt32.toNat_ofNat_of_lt' nextFits
+      · simpa using persistent
+      · simpa using live
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      obtain ⟨value, stringEq⟩ := stringCell
+      rw [closureEq] at stringEq
+      contradiction
+
+/-- Live payload representations whose semantic ownership traversal has no
+heap child references. -/
+def NonrecursiveCell (cell : HeapCell) : Prop :=
+  ((∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
+      cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
+    (∃ value : Nat, cell.object = .natural value)) ∨
+  (∃ value : String, cell.object = .string value)
+
+/-- Boxes, heap naturals, and strings own no concrete child references. At
+count one, all three representations therefore transition directly to
+`DeadCellRel`. -/
 theorem LiveCellRel.decrementReferenceOnce_leaf_one
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
     (related : LiveCellRel state witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (valid : state.FrontierInvariant) (ordinary : cell.persistent = false)
     (one : cell.rc = 1) (check : Bool) :
     ∃ result header memory,
@@ -2217,12 +2431,15 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
       DeadCellRel result address := by
   cases related with
   | constructor _ objectEq _ _ _ _ _ _ =>
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [objectEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
         contradiction
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
       have headerOrdinary : header.persistent = false := persistent.trans ordinary
@@ -2257,14 +2474,33 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_one
           notPromoted headerOrdinary countOne owned check
       exact ⟨result, header, memory, operation, headerRead, resultEq, headerWrite,
         finalValid, deadRelated⟩
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.string == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
+        simp [readOwnedReferences, objectRelated.headerKind]
+      obtain ⟨result, memory, operation, resultEq, headerWrite, finalValid,
+          deadRelated⟩ :=
+        Fir.Wasm.Concrete.decrementReferenceOnce_leaf_one valid
+          objectRelated.headerRead objectRelated.headerOwned notPromoted
+          headerOrdinary countOne owned check
+      exact ⟨result, header, memory, operation, objectRelated.headerRead,
+        resultEq, headerWrite, finalValid, deadRelated⟩
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [closureEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [closureEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [closureEq] at stringEq
         contradiction
 
 /-- The local box/natural leaf branch agrees with the public concrete entry
@@ -2274,22 +2510,22 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
     {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
     (related : LiveCellRel state witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (ordinary : cell.persistent = false)
     (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
     decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
       decrementReferenceOnce state address check descriptors := by
   cases related with
   | constructor _ objectEq _ _ _ _ _ _ =>
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [objectEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [objectEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [objectEq] at stringEq
         contradiction
   | @boxed kind scalar header _ descriptor objectEq objectRelated refCount persistent live =>
       have headerOrdinary : header.persistent = false := persistent.trans ordinary
@@ -2313,14 +2549,28 @@ theorem LiveCellRel.decrementReferenceOnceFuel_leaf_one_eq_public
         simp [readOwnedReferences, headerKind]
       exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public headerRead
         notPromoted headerOrdinary countOne owned fuel check
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      have headerOrdinary : header.persistent = false := persistent.trans ordinary
+      have notPromoted : header.isPromotedTag = false := by
+        have different : (ObjectKind.string == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, objectRelated.headerKind, different]
+      have countOne : header.refCount.toNat = 1 := by
+        rw [refCount, one]
+      have owned : readOwnedReferences state address header descriptors = .ok [] := by
+        simp [readOwnedReferences, objectRelated.headerKind]
+      exact Fir.Wasm.Concrete.decrementReferenceOnceFuel_leaf_one_eq_public
+        objectRelated.headerRead notPromoted headerOrdinary countOne owned fuel check
   | closure closureRelated =>
       obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
-      rcases leafCell with boxedCell | naturalCell
+      rcases leafCell with (boxedCell | naturalCell) | stringCell
       · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
         rw [closureEq] at boxedEq
         contradiction
       · obtain ⟨value, naturalEq⟩ := naturalCell
         rw [closureEq] at naturalEq
+        contradiction
+      · obtain ⟨value, stringEq⟩ := stringCell
+        rw [closureEq] at stringEq
         contradiction
 
 /-- Complete local increment theorem for every live-cell representation in
@@ -2354,6 +2604,11 @@ theorem LiveCellRel.incrementReference
         .natural descriptor objectEq headerRead headerKind marker extent limbsFit
           decoded refCount persistent live
       exact localRelated.incrementReference_natural ⟨value, objectEq⟩ valid ordinary
+        amount fits check
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      let localRelated : LiveCellRel state witness address cell :=
+        .string descriptor objectEq objectRelated refCount persistent live
+      exact localRelated.incrementReference_string ⟨value, objectEq⟩ valid ordinary
         amount fits check
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
@@ -2392,6 +2647,11 @@ theorem LiveCellRel.decrementReferenceOnce_above_one
           decoded refCount persistent live
       exact localRelated.decrementReferenceOnce_natural_above_one
         ⟨value, objectEq⟩ valid ordinary oneLt check
+  | @string value header _ descriptor objectEq objectRelated refCount persistent live =>
+      let localRelated : LiveCellRel state witness address cell :=
+        .string descriptor objectEq objectRelated refCount persistent live
+      exact localRelated.decrementReferenceOnce_string_above_one
+        ⟨value, objectEq⟩ valid ordinary oneLt check
   | closure closureRelated =>
       obtain ⟨result, operation, finalValid, closureAfter⟩ :=
         closureRelated.decrementReferenceOnce_above_one valid ordinary oneLt check
@@ -2405,6 +2665,7 @@ theorem LiveCellRel.live_eq_true
   | constructor _ _ _ _ _ _ _ live => exact live
   | boxed _ _ _ _ _ live => exact live
   | natural _ _ _ _ _ _ _ _ _ _ live => exact live
+  | string _ _ _ _ _ live => exact live
   | closure closureRelated =>
       cases closureRelated with
       | closure _ _ _ _ _ _ _ _ _ live => exact live
@@ -2450,10 +2711,7 @@ theorem LiveCellRel.decLocationFuel_leaf_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
@@ -2466,7 +2724,7 @@ theorem LiveCellRel.decLocationFuel_leaf_one_eq
     related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
   rw [if_neg (by simp [ordinary])]
   rw [if_neg nonzero, if_neg notAboveOne]
-  rcases leafCell with boxedCell | naturalCell
+  rcases leafCell with (boxedCell | naturalCell) | stringCell
   · obtain ⟨kind, scalar, objectEq⟩ := boxedCell
     have ownedValues : cell.object.ownedValues = #[scalar.semanticValue] := by
       rw [objectEq]
@@ -2493,6 +2751,16 @@ theorem LiveCellRel.decLocationFuel_leaf_one_eq
     | ok next =>
         change Except.ok next = Except.ok next
         rfl
+  · obtain ⟨value, objectEq⟩ := stringCell
+    have ownedValues : cell.object.ownedValues = #[] := by
+      rw [objectEq]
+      rfl
+    rw [ownedValues]
+    cases resultEq : setCell runtime location { cell with rc := 0, live := false } with
+    | error fault => rfl
+    | ok next =>
+        change Except.ok next = Except.ok next
+        rfl
 
 /-- The public count-one leaf operation selects the same fuel-independent
 branch. -/
@@ -2500,10 +2768,7 @@ theorem LiveCellRel.decValueOnce_leaf_one_eq
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)
     (found : findCell? runtime.heap location = some cell)
@@ -2521,10 +2786,7 @@ theorem LiveCellRel.decrementReferenceOnce_leaf_refines_one
     {state : MemoryState} {witness : RefinementWitness}
     {address : Word32} {cell : HeapCell}
     (related : LiveCellRel state witness address cell)
-    (leafCell :
-      (∃ (kind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed kind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value))
+    (leafCell : NonrecursiveCell cell)
     (valid : state.FrontierInvariant)
     (ordinary : cell.persistent = false)
     (runtime : RuntimeState) (location : Location)

@@ -101,6 +101,11 @@ theorem LiveHeapRel.scalarField_of_projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | string descriptor objectEq objectRelated refCount persistent cellLive =>
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | closure closureRelated =>
       obtain ⟨function, arity, captures, objectEq⟩ := closureRelated.objectEq
       simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
@@ -266,6 +271,10 @@ theorem LiveHeapRel.readObjectField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -314,6 +323,10 @@ theorem LiveHeapRel.readUSizeField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | closure closureRelated =>
       obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
         closureRelated.descriptor
@@ -354,6 +367,11 @@ theorem LiveHeapRel.readTag_refines
       rw [objectEq] at semanticTag
       simp at semanticTag
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | string _ objectEq _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag

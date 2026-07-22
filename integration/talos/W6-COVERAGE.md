@@ -7,12 +7,12 @@ failure correspondence. The matrix is intentionally conservative.
 
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
-| `literal` | Naturals and UTF-8 strings | Tagged encoder and large-natural heap theorem; exact fresh-string allocation/object theorem plus monotone string witness binding, not yet `LiveHeapRel` | Partial | Natural concrete host plus generated literal-`let` WP; string concrete host and whole-module Talos/Node/browser execution; string cell/heap relation and generated literal composition pending |
+| `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural concrete host plus generated literal-`let` WP; string concrete host and whole-module Talos/Node/browser execution; generated string literal composition pending |
 | `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
 | `objectProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
 | `usizeProj` | Yes | Heap theorem | Partial | Concrete Talos host plus generated projection-`let` WP, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
 | `scalarProj` | Four integer widths | Heap theorems | Partial | Integer concrete host plus generated projection-`let` WP, compiler-shaped `UInt64` whole-module and Node/V8 plus browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; other widths pending; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
-| `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, or natural graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, local write, twice-called cached constructor-graph whole-module execution, and Node/V8 plus browser-Worker miss/persistence/hit execution compose; per-declaration body proofs pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
+| `cacheSet` | Typed concrete globals, recursive graph persistence, and Talos host | Constructive for every represented non-heap lane and mapped constructor, closure, box, natural, or string graph; public fuel and descriptor-table identity proved | Partial | Concrete hit/miss control, witness-indexed source/compiler judgment, terminating declaration call, host call, both global writes, cached-value reload, local write, twice-called cached constructor-graph whole-module execution, and Node/V8 plus browser-Worker miss/persistence/hit execution compose; per-declaration body proofs pending; canonical dead-child gap fixed by `FIR-BUG-wasm-none-persistence-dead-child-refinement` |
 | `partialApply` | Concrete Talos closure allocation | Heap theorem | Partial | Source interpreter, compiler/adapter, arbitrary-arity host call/local write, continuation, module-derived metadata tables, ordinary/erased/multi-stage whole-module executions, and Node/V8 plus browser-Worker concrete closure allocation compose; `.tagged` result gap tracked by `FIR-BUG-wasm-none-partial-apply-tagged-result` |
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Concrete interprocedural judgment, body-WP-to-termination bridge, candidate and direct-call/local-write rules, plus ordinary/erased/multi-stage whole-module Node/V8 and browser-Worker executions; complete compiler candidate-fold proof pending |
 | `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | Generated matcher plus one candidate `if`/fallthrough WP, module-derived dispatch table, and ordinary/erased/multi-stage whole-module Node/V8 and browser-Worker executions; complete compiler candidate-fold proof pending |
@@ -36,8 +36,9 @@ Cross-cutting W6.5 state:
 - the frozen UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness
-  well-formedness and prior lookups, while `LiveHeapRel` integration remains
-  an explicit follow-up;
+  well-formedness and prior lookups; and fresh string allocation extends
+  `LiveHeapRel` with exact checked decoding, descriptor-region disjointness,
+  and a related `.tobject` result;
 - globals, world, trace, successful external calls, and failed external calls
   have `ConcreteRuntimeRel`/trap boundaries;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
@@ -50,7 +51,7 @@ Cross-cutting W6.5 state:
 - lazy-cache hits and misses compose through the declaration-call termination
   boundary, typed host cache update, physical flag/value globals, and generated
   result-local write; scalar, erased/reuse, direct-tag, promoted-tag, and
-  ordinary boxed/natural leaf roots discharge cache persistence constructively;
+  ordinary boxed/natural/string leaf roots discharge cache persistence constructively;
   ordered ownership folds, recursive constructor/closure steps, and the
   complete ordinary-live-count-bounded graph theorem, successful-fuel public
   lift, core global-write rule, and Talos host rule are constructive for every

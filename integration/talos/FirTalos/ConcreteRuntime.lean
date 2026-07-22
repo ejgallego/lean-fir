@@ -1,6 +1,6 @@
 import FirTalos.Correctness.Semantics
 import Fir.Wasm.Concrete
-import Fir.Wasm.Concrete.StringAllocationCorrectness
+import Fir.Wasm.Concrete.StringHeapCorrectness
 import Interpreter.Wasm.Spec.Termination
 
 namespace FirTalos.Concrete
@@ -1880,9 +1880,9 @@ theorem cacheSetStep_of_refines_nonHeapReference
   subst lane
   exact .of_nonHeapReference runtimeRelated.heap expectedRelated nonHeap
 
-/-- Ordinary boxed scalars and heap naturals likewise compose without a
-caller-supplied persistence premise; their complete cache transition follows
-from `LiveHeapRel`. -/
+/-- Ordinary boxed scalars, heap naturals, and strings likewise compose
+without a caller-supplied persistence premise; their complete cache transition
+follows from `LiveHeapRel`. -/
 theorem cacheSetStep_of_refines_heapLeaf
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
@@ -1896,10 +1896,7 @@ theorem cacheSetStep_of_refines_heapLeaf
     (kindEq : slot.kind = kind)
     (cellFound : findCell? runtime.heap location = some cell)
     (live : cell.live = true) (ordinary : cell.persistent = false)
-    (leafCell :
-      (∃ (boxedKind : BoxedScalarKind) (scalar : BoxedScalar),
-        cell.object = .boxed boxedKind.semanticType scalar.semanticValue) ∨
-      (∃ value : Nat, cell.object = .natural value)) :
+    (leafCell : NonrecursiveCell cell) :
     ∃ after,
       cacheSetStep declaration kind initial [physical] =
         .Return [physical] (replaceRuntime initial after) ∧
@@ -1916,7 +1913,7 @@ theorem cacheSetStep_of_refines_heapLeaf
   exact .of_heapLeaf runtimeRelated.heap expectedRelated cellFound live ordinary
     leafCell
 
-/-- Arbitrary mapped constructor, closure, boxed, or natural graphs compose
+/-- Arbitrary mapped constructor, closure, boxed, natural, or string graphs compose
 through cache publication once the concrete host and refinement witness use
 the same immutable closure descriptor table. -/
 theorem cacheSetStep_of_refines_heapReference
