@@ -6,6 +6,7 @@ open Lean
 open Lean.Compiler
 open Fir.LeanIR
 open Fir.LeanIR.Impure
+open Fir.LeanIR.Passes.SimpCase
 open Fir.LeanIR.Passes.NonLockstep.Structural
 
 /-!
@@ -104,6 +105,74 @@ def ReachableMachineRelated (fuel : Nat) (rho : AddressRenaming)
     ShadowRuntimeRel rho source.runtime target.runtime
         (sourceControlRoots ++ sourceFrameRoots)
         (targetControlRoots ++ targetFrameRoots)
+
+/-- Finite-stuttering simulation with a relational terminal contract.  This
+is the observation-aware counterpart of `NonLockstep.StutteringSimulation`:
+the advance field is identical, while terminal source observations may map to
+distinct target observations. -/
+structure RelationalStutteringSimulation (externals : ExternalSpec)
+    (observationRel : Observation → Observation → Prop)
+    (relation : MachineState → MachineState → Prop) : Prop where
+  terminal : ∀ {source target sourceObservation}, relation source target →
+    coreStep source = .done sourceObservation →
+      ∃ targetObservation,
+        EvaluatesState externals target targetObservation ∧
+        observationRel sourceObservation targetObservation
+  advance : ∀ {sourceBefore sourceAfter target},
+    relation sourceBefore target →
+    Step externals sourceBefore sourceAfter →
+      ∃ targetAfter,
+        NonLockstep.Reaches externals target targetAfter ∧
+        relation sourceAfter targetAfter
+
+/-- A relational stuttering simulation transports every finite terminating
+source execution to a related terminating target execution. -/
+theorem RelationalStutteringSimulation.evaluatesState
+    (simulation : RelationalStutteringSimulation externals observationRel
+      relation)
+    (related : relation source target)
+    (evaluation : EvaluatesState externals source sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      observationRel sourceObservation targetObservation := by
+  rcases evaluation with ⟨count, final, execution, done⟩
+  induction execution generalizing target with
+  | refl state => exact simulation.terminal related done
+  | step head tail ih =>
+      rcases simulation.advance related head with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      rcases ih afterRelated done with
+        ⟨targetObservation, targetEvaluation, observations⟩
+      exact ⟨targetObservation,
+        NonLockstep.evaluatesState_of_reaches targetPath targetEvaluation,
+        observations⟩
+
+/-- One-way, reachable-observation correctness for a same-phase pass.  This
+is the compiler-facing statement appropriate for transformations that may
+change unreachable heap garbage. -/
+def ReachablePassForwardCorrectOn (externals : ExternalSpec)
+    (source target : ImpureProgram) (entries : Array Name) : Prop :=
+  ∀ entry, entry ∈ entries → ∀ arguments sourceObservation,
+    Impure.Evaluates externals source entry arguments sourceObservation →
+      ∃ targetObservation,
+        Impure.Evaluates externals target entry arguments targetObservation ∧
+        ObservationRel sourceObservation targetObservation
+
+theorem reachablePassForwardCorrectOn_of_stuttering
+    (simulation : RelationalStutteringSimulation externals ObservationRel
+      relation)
+    (initial : ∀ entry, entry ∈ entries → ∀ arguments,
+      relation (initialState source entry arguments)
+        (initialState target entry arguments)) :
+    ReachablePassForwardCorrectOn externals source target entries := by
+  intro entry member arguments sourceObservation evaluation
+  exact simulation.evaluatesState (initial entry member arguments) evaluation
+
+/-- Hide the current address-renaming witness so lockstep allocations may
+extend it between simulation states. -/
+def SomeReachableMachineRelated (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∃ rho, ReachableMachineRelated fuel rho source target
 
 theorem ReachableControlRelated.monoRenaming
     (extension : RenamingExtends smaller larger)
@@ -204,6 +273,17 @@ theorem initialState_reachableMachineRelated
       (ReachableFramesRelated.nil :
         ReachableFramesRelated fuel emptyAddressRenaming [] [] [] [])
   · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
+theorem initialState_someReachableMachineRelated
+    (programs : ProgramRelated (ShadowCodeRelated fuel) sourceProgram
+      targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    SomeReachableMachineRelated fuel
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) :=
+  ⟨emptyAddressRenaming,
+    initialState_reachableMachineRelated programs arguments⟩
 
 /-- A retained return narrows the active runtime roots from the complete live
 environment to the returned value, while keeping all saved-frame roots. -/
@@ -1198,5 +1278,18 @@ theorem ReachableMachineRelated.yieldedObservation
             simpa [outcomeRoots] using member
           · intro value member
             simpa [outcomeRoots] using member
+
+theorem SomeReachableMachineRelated.yieldedObservation
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (targetControl : target.control = .yielded targetValue)
+    (sourceFrames : source.frames = [])
+    (targetFrames : target.frames = []) :
+    ObservationRel
+      (observe source (.returned sourceValue))
+      (observe target (.returned targetValue)) := by
+  rcases related with ⟨rho, related⟩
+  exact related.yieldedObservation sourceControl targetControl
+    sourceFrames targetFrames
 
 end Fir.LeanIR.Passes.ElimDead
