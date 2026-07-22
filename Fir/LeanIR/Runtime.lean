@@ -520,12 +520,31 @@ def getObjectField (runtime : RuntimeState) (value : Value) (index : Nat) :
   | some field => return field
   | none => throw (.objectFieldOutOfBounds index object.objectFields.size)
 
+/-- Read one type-local entry from the semantic `USize` field array.
+
+This is a representation-level helper. Final impure LCNF carries an absolute
+fixed-slot coordinate; instruction interpreters should use `getUSizeSlot`. -/
 def getUSizeField (runtime : RuntimeState) (value : Value) (index : Nat) :
     Except RuntimeFault Value := do
   let (_, _, object) ← getConstructor runtime value
   match object.usizeFields[index]? with
   | some field => return .usize field
   | none => throw (.usizeFieldOutOfBounds index object.usizeFields.size)
+
+/-- Translate Lean final-LCNF's absolute fixed-slot coordinate to FIR's
+type-local `usizeFields` representation. Object fields occupy the fixed-slot
+prefix; packed scalars follow the `USize` interval. -/
+def getUSizeSlot (runtime : RuntimeState) (value : Value) (slot : Nat) :
+    Except RuntimeFault Value := do
+  let (_, _, object) ← getConstructor runtime value
+  let start := object.objectFields.size
+  if start ≤ slot then
+    let index := slot - start
+    match object.usizeFields[index]? with
+    | some field => return .usize field
+    | none => throw (.usizeFieldOutOfBounds slot (start + object.usizeFields.size))
+  else
+    throw (.usizeFieldOutOfBounds slot (start + object.usizeFields.size))
 
 def getScalarField (runtime : RuntimeState) (value : Value) (width offset : Nat) :
     Except RuntimeFault Value := do
@@ -549,6 +568,10 @@ def setObjectField (runtime : RuntimeState) (value : Value) (index : Nat) (field
     else
       .error (.objectFieldOutOfBounds index object.objectFields.size)
 
+/-- Write one type-local entry in the semantic `USize` field array.
+
+This is a representation-level helper. Final impure LCNF carries an absolute
+fixed-slot coordinate; instruction interpreters should use `setUSizeSlot`. -/
 def setUSizeField (runtime : RuntimeState) (value : Value) (index : Nat) (field : Value) :
     Except RuntimeFault RuntimeState := do
   let .usize field := field | throw .expectedUSize
@@ -557,6 +580,41 @@ def setUSizeField (runtime : RuntimeState) (value : Value) (index : Nat) (field 
       .ok { object with usizeFields := object.usizeFields.set index field }
     else
       .error (.usizeFieldOutOfBounds index object.usizeFields.size)
+
+/-- Write a `USize` field addressed by Lean final-LCNF's absolute fixed-slot
+coordinate. -/
+def setUSizeSlot (runtime : RuntimeState) (value : Value) (slot : Nat) (field : Value) :
+    Except RuntimeFault RuntimeState := do
+  let .usize field := field | throw .expectedUSize
+  modifyConstructor runtime value fun object =>
+    let start := object.objectFields.size
+    if start ≤ slot then
+      let index := slot - start
+      if h : index < object.usizeFields.size then
+        .ok { object with usizeFields := object.usizeFields.set index field }
+      else
+        .error (.usizeFieldOutOfBounds slot (start + object.usizeFields.size))
+    else
+      .error (.usizeFieldOutOfBounds slot (start + object.usizeFields.size))
+
+private def absoluteUSizeSlotGuard : Bool :=
+  let info : LCNF.CtorInfo := {
+    name := `MixedLayout
+    cidx := 0
+    size := 3
+    usize := 1
+    ssize := 4 }
+  match allocCtor {} info #[.object (.tagged 1), .object (.tagged 2), .object (.tagged 3)] with
+  | .error _ => false
+  | .ok (runtime, object) =>
+      match setUSizeSlot runtime object 3 (.usize 77) with
+      | .error _ => false
+      | .ok runtime =>
+          match getUSizeSlot runtime object 3, getUSizeSlot runtime object 2 with
+          | .ok (.usize 77), .error (.usizeFieldOutOfBounds 2 4) => true
+          | _, _ => false
+
+#guard absoluteUSizeSlotGuard
 
 def setScalarField (runtime : RuntimeState) (value : Value) (width offset : Nat) (field : Value) :
     Except RuntimeFault RuntimeState := do

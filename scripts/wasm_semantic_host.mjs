@@ -375,18 +375,25 @@ export class SemanticHost {
     return this.encode(operation.result, value);
   }
 
+  usizeFieldIndex(object, slot) {
+    const start = object.objectFields.length;
+    const index = slot - start;
+    if (index < 0 || index >= object.usizeFields.length) {
+      throw new SemanticFault({
+        kind: "usizeFieldOutOfBounds",
+        index: slot,
+        size: start + object.usizeFields.length,
+      });
+    }
+    return index;
+  }
+
   usizeProj(operation, physicalArgs) {
     assert.equal(physicalArgs.length, 1, "usize projection host arity mismatch");
     const source = this.decode("tobject", physicalArgs[0]);
     const object = this.constructorObject(source);
-    const value = object.usizeFields[operation.index];
-    if (value === undefined) {
-      throw new SemanticFault({
-        kind: "usizeFieldOutOfBounds",
-        index: operation.index,
-        size: object.usizeFields.length,
-      });
-    }
+    const index = this.usizeFieldIndex(object, operation.index);
+    const value = object.usizeFields[index];
     return this.encode("usize", { kind: "usize", value });
   }
 
@@ -657,14 +664,8 @@ export class SemanticHost {
     const source = this.decode("object", physicalArgs[0]);
     const field = this.decode("usize", physicalArgs[1]);
     const object = this.constructorObject(source);
-    if (operation.index >= object.usizeFields.length) {
-      throw new SemanticFault({
-        kind: "usizeFieldOutOfBounds",
-        index: operation.index,
-        size: object.usizeFields.length,
-      });
-    }
-    object.usizeFields[operation.index] = field.value;
+    const index = this.usizeFieldIndex(object, operation.index);
+    object.usizeFields[index] = field.value;
   }
 
   scalarSet(operation, physicalArgs) {

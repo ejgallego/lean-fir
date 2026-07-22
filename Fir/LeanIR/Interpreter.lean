@@ -103,7 +103,7 @@ def evalLetValue (state : MachineState) (decl : LCNF.LetDecl .impure) :
       return (state.runtime, .value value)
   | .uproj index fvarId =>
       let object ← lookupValue state.env fvarId
-      let value ← getUSizeField state.runtime object index
+      let value ← getUSizeSlot state.runtime object index
       return (state.runtime, .value value)
   | .sproj width offset fvarId =>
       let object ← lookupValue state.env fvarId
@@ -288,7 +288,7 @@ def coreStep (state : MachineState) : CoreResult :=
       | .uset fvarId index fieldId continuation =>
           match lookupValue state.env fvarId, lookupValue state.env fieldId with
           | .ok object, .ok field =>
-              match setUSizeField state.runtime object index field with
+              match setUSizeSlot state.runtime object index field with
               | .ok runtime => .next { state with runtime, control := .code continuation }
               | .error fault => fail state fault
           | .error fault, _ | _, .error fault => fail state fault
