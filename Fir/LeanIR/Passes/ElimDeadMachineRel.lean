@@ -545,6 +545,204 @@ theorem invokeDecl_code_reachableRelated
     sourceBinding targetBinding' runtime
   simpa [paramsEq] using entered
 
+/-- Under-applied related declarations allocate matching closures.  Their
+fresh locations extend the address renaming, while the fixed arguments become
+reachable through the newly yielded closure rather than remaining explicit
+machine roots. -/
+theorem invokeDecl_partial_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (paramsEq : sourceDeclaration.params = targetDeclaration.params)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (targetFound : targetState.program.findDecl? name =
+      some targetDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceObject : HeapObject := .closure name
+    sourceDeclaration.params.size sourceArguments
+  let targetObject : HeapObject := .closure name
+    targetDeclaration.params.size targetArguments
+  have objects : HeapObjectRel rho sourceObject targetObject := by
+    rw [show sourceObject = .closure name sourceDeclaration.params.size
+      sourceArguments from rfl]
+    rw [show targetObject = .closure name targetDeclaration.params.size
+      targetArguments from rfl]
+    rw [← paramsEq]
+    exact .closure arguments
+  have sourceOwned : RootSubset sourceObject.ownedValues.toList
+      (runtimeRoots sourceState.runtime
+        (sourceArguments.toList ++ sourceFrameRoots)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [sourceObject, HeapObject.ownedValues] using member
+  have targetOwned : RootSubset targetObject.ownedValues.toList
+      (runtimeRoots targetState.runtime
+        (targetArguments.toList ++ targetFrameRoots)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [targetObject, HeapObject.ownedValues] using member
+  rcases runtime.allocBoth objects sourceOwned targetOwned false with
+    ⟨larger, extension, values, allocatedRuntime⟩
+  let sourceRuntime := (alloc sourceState.runtime sourceObject).1
+  let targetRuntime := (alloc targetState.runtime targetObject).1
+  let sourceValue : Value := .object
+    (alloc sourceState.runtime sourceObject).2
+  let targetValue : Value := .object
+    (alloc targetState.runtime targetObject).2
+  have largerFrames := frames.monoRenaming extension
+  have sourceSubset : RootSubset
+      (sourceValue :: sourceFrameRoots)
+      (sourceValue :: sourceArguments.toList ++ sourceFrameRoots) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | frameRoot
+    · subst value
+      exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _
+        (List.mem_append_right _ frameRoot)
+  have targetSubset : RootSubset
+      (targetValue :: targetFrameRoots)
+      (targetValue :: targetArguments.toList ++ targetFrameRoots) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | frameRoot
+    · subst value
+      exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _
+        (List.mem_append_right _ frameRoot)
+  have nextRuntime : ShadowRuntimeRel larger sourceRuntime targetRuntime
+      (sourceValue :: sourceFrameRoots)
+      (targetValue :: targetFrameRoots) := by
+    apply allocatedRuntime.restrictExtra
+    · exact .cons values largerFrames.roots
+    · exact sourceSubset
+    · exact targetSubset
+  let sourceAfter := sourceState.withValue sourceRuntime sourceValue
+  let targetAfter := targetState.withValue targetRuntime targetValue
+  have argumentSize := arrayRel_size_eq arguments
+  have targetTooFew :
+      targetArguments.size < targetDeclaration.params.size := by
+    rw [← paramsEq, ← argumentSize]
+    exact sourceTooFew
+  have sourceStep : invokeDecl sourceState name sourceArguments =
+      .next sourceAfter := by
+    unfold invokeDecl
+    rw [sourceFound]
+    simp only
+    rw [if_pos sourceTooFew]
+  have targetStep : invokeDecl targetState name targetArguments =
+      .next targetAfter := by
+    unfold invokeDecl
+    rw [targetFound]
+    simp only
+    rw [if_pos targetTooFew]
+  refine ⟨larger, sourceAfter, targetAfter, extension, sourceStep,
+    targetStep, ?_⟩
+  unfold ReachableMachineRelated
+  exact ⟨[sourceValue], [targetValue], sourceFrameRoots, targetFrameRoots,
+    programs, .yielded values, largerFrames, nextRuntime⟩
+
+/-- Related program lookup supplies the target declaration and matching arity
+for the retained partial-application allocation. -/
+theorem invokeDecl_foundPartial_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  have found := programs.findDecl? name
+  rw [sourceFound] at found
+  generalize targetFound : targetState.program.findDecl? name = targetResult
+    at found
+  cases found with
+  | some declarations =>
+      exact invokeDecl_partial_reachableRelated sourceState targetState
+        programs frames arguments declarations.params_eq sourceFound
+        targetFound sourceTooFew runtime
+
+/-- Nonempty under-applied named calls take one allocating `coreStep` on each
+side and re-establish the machine invariant under an extended renaming. -/
+theorem coreStep_invokeName_nonempty_foundPartial_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceNonempty : sourceArguments.isEmpty = false)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundPartial_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceTooFew invokeRuntime with
+    ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
+      nextRelated⟩
+  have argumentSize := arrayRel_size_eq arguments
+  have targetNonempty : targetArguments.isEmpty = false := by
+    simpa [Array.isEmpty, argumentSize] using sourceNonempty
+  refine ⟨larger, sourceAfter, targetAfter, extension, ?_, ?_, nextRelated⟩
+  · simpa [sourceInvoke, coreStep, sourceNonempty] using sourceStep
+  · simpa [targetInvoke, coreStep, targetNonempty] using targetStep
+
 /-- Program relatedness turns a successful source lookup of an internal
 declaration into the matching target lookup, body graph, and parameter
 binding needed by `invokeDecl_code_reachableRelated`. -/

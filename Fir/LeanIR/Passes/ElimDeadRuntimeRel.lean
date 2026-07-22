@@ -833,6 +833,11 @@ runtime contributes globals and the already observable external trace. -/
 def runtimeRoots (runtime : RuntimeState) (extra : List Value) : List Value :=
   extra ++ runtime.globals.map Prod.snd ++ traceRoots runtime.trace
 
+theorem extra_subset_runtimeRoots (runtime : RuntimeState) (extra : List Value) :
+    RootSubset extra (runtimeRoots runtime extra) := by
+  intro value member
+  simp [runtimeRoots, member]
+
 theorem runtimeRoots_monoExtra
     (subset : RootSubset smaller larger) :
     RootSubset (runtimeRoots runtime smaller) (runtimeRoots runtime larger) := by
@@ -1640,13 +1645,14 @@ theorem ShadowRuntimeRel.allocBoth
       (runtimeRoots right rightExtra))
     (persistent : Bool) :
     ∃ larger,
-      ValueRel larger (.object (alloc left leftObject persistent).2)
-        (.object (alloc right rightObject persistent).2) ∧
-      ShadowRuntimeRel larger
-        (alloc left leftObject persistent).1
-        (alloc right rightObject persistent).1
-        (.object (alloc left leftObject persistent).2 :: leftExtra)
-        (.object (alloc right rightObject persistent).2 :: rightExtra) := by
+      RenamingExtends rho larger ∧
+        ValueRel larger (.object (alloc left leftObject persistent).2)
+          (.object (alloc right rightObject persistent).2) ∧
+        ShadowRuntimeRel larger
+          (alloc left leftObject persistent).1
+          (alloc right rightObject persistent).1
+          (.object (alloc left leftObject persistent).2 :: leftExtra)
+          (.object (alloc right rightObject persistent).2 :: rightExtra) := by
   let leftUnmapped := related.leftMappingFresh left.nextLocation (Nat.le_refl _)
   let rightUnmapped :=
     related.rightMappingFresh right.nextLocation (Nat.le_refl _)
@@ -1656,7 +1662,7 @@ theorem ShadowRuntimeRel.allocBoth
     renamingExtend_extends leftUnmapped rightUnmapped
   have mapping : larger.forward left.nextLocation = some right.nextLocation :=
     renamingExtend_forward_new leftUnmapped rightUnmapped
-  refine ⟨larger, ?_, ?_⟩
+  refine ⟨larger, extension, ?_, ?_⟩
   · exact .heap mapping
   · simp only [alloc]
     have cells : HeapCellRel rho
