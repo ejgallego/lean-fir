@@ -88,6 +88,30 @@ none
 
 none
 
+## Consumer handoff
+
+The proof lane must migrate only final-LCNF `.uset` execution statements from
+`setUSizeField` to `setUSizeSlot`. The direct consumers are in
+`AlphaEqvCode.lean`, `SimpCaseRelation.lean`, `ElimDeadRelation.lean`,
+`ElimDeadProgram.lean`, and `ElimDeadMachineRel.lean`.
+`ShadowRuntimeRel.setUSizeFieldLeftUnreachable` is intentionally
+representation-level and remains type-local. Its slot-aware companion needs
+the bounds
+`object.objectFields.size ≤ slot` and
+`slot - object.objectFields.size < object.usizeFields.size`. The deleted-write
+example has one object field, so its compiler-shaped `USize` slot is `1`, not
+`0`. No proof-owned direct `getUSizeField` consumer currently needs migration.
+
+The Wasm compiler and ABI already preserve the correct final-LCNF coordinate;
+`Fir/Wasm/Lower.lean` requires no change. Talos must consume the slot contract
+in its symbolic `FirTalos.Runtime` projection/mutation steps and in the
+corresponding lowering, semantics, and composition statements. Its concrete
+runtime should retain type-local `readUSizeField`/`writeUSizeField` helpers,
+add absolute-slot wrappers using the constructor's object-field prefix, and
+route `usizeProjStep`/`usizeSetStep` through those wrappers. The artifact
+concrete host needs the same interval check and translation. This migration is
+a runtime-adapter consumer change, not Wasm generation work.
+
 ## Resolution and regression
 
 The integration-owned runtime now exposes `getUSizeSlot` and `setUSizeSlot`,
