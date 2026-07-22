@@ -59,6 +59,29 @@ theorem LiveCellRel.readIsShared_eq
       exact oneEq.symm
     cases cell.persistent <;> simp [headerNotOne, rcOne] <;> rfl
 
+/-- A canonical released cell fails sharing observation through the exact
+address-indexed source channel.  This is the concrete half of the stale
+reference boundary: the retained freed header is still readable, but it is
+never reinterpreted as a live object's sharing metadata. -/
+theorem DeadCellRel.readIsShared_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) :
+    readIsShared state address =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨header, headerRead, addressHeap, _, _, dead, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  have deadRead : state.readLiveHeader address = .error (.deadObject address) := by
+    unfold MemoryState.readLiveHeader
+    rw [addressHeap]
+    simp only [headerRead, Bind.bind, Except.bind]
+    rw [dead]
+    rfl
+  unfold readIsShared
+  rw [addressHeap]
+  simp only
+  rw [deadRead]
+  rfl
+
 /-- Both direct immediates and persistent promoted representations are shared
 without consulting semantic heap state. -/
 theorem LiveHeapRel.readIsShared_tagged
@@ -131,5 +154,43 @@ theorem LiveHeapRel.readIsShared_refines
                 simp [getLiveCell, found, live, shared]
                 rfl
               exact ⟨shared, concrete, semantic, .uint8 rfl⟩
+
+/-- A mapped stale heap word and its dead semantic location report the same
+`deadObject` failure.  The concrete error retains the physical address; the
+semantic error retains the represented location.  The witness mapping lets
+the later fault layer relate those indices without weakening either side. -/
+theorem LiveHeapRel.readIsShared_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    readIsShared state address =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.isShared runtime (.object (.heap location)) =
+        .error (.deadObject location) := by
+  cases mapped with
+  | mapped mappedFound =>
+      obtain ⟨mappedCell, semanticFound, cellRelation⟩ :=
+        related.concreteToSemantic location address mappedFound
+      rw [found] at semanticFound
+      have cellEq := Option.some.inj semanticFound
+      subst mappedCell
+      constructor
+      · cases cellRelation with
+        | live liveRelated =>
+            cases liveRelated with
+            | constructor _ _ _ _ _ _ _ live => simp_all
+            | boxed _ _ _ _ _ live => simp_all
+            | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
+            | string _ _ _ _ _ live => simp_all
+            | closure closureRelated =>
+                cases closureRelated with
+                | closure _ _ _ _ _ _ _ _ _ live => simp_all
+        | dead _ _ _ deadRelated => exact deadRelated.readIsShared_eq
+      · simp [Fir.LeanIR.Impure.isShared, getLiveCell, found, dead,
+          Except.map]
+        rfl
 
 end Fir.Wasm.Concrete

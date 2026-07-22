@@ -2610,6 +2610,15 @@ fixture now requires the source-address Talos trap, and
 decoder failures remain target-classified. Both feature branches must rebase
 on this contract before dependent work continues.
 
+W6.6bm proves the witness-indexed `isShared` failure path enabled by that
+contract. A canonical `DeadCellRel` now forces the exact concrete
+`sourceAddress (deadObject address)` result; the whole-heap theorem pairs it
+with FIR's `deadObject location` under the persistent address mapping; and the
+Talos theorem carries both results into the exact source-address host trap plus
+`ConcreteErrorSourceRel`. The existing closed deleted-object guard remains the
+executable endpoint. No further shared contract or runtime behavior changes in
+this proof-only slice.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

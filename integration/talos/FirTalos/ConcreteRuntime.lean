@@ -1630,6 +1630,39 @@ theorem isSharedStep_of_refines
   exact ⟨by simp [isSharedStep, clearFailure,
       Word32.ofUInt32_ofNat_value, read], valueRelated⟩
 
+/-- A stale mapped object preserves its exact source fault across all three
+layers: FIR names the semantic location, W6 names its concrete wasm32 address,
+and the Talos host traps with the corresponding address-indexed source
+failure.  The final conjunct records the witness-indexed translation between
+the two fault payloads. -/
+theorem isSharedStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {location : Location}
+    {cell : HeapCell}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    isSharedStep initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject objectWord)))) ∧
+      isShared runtime (.object (.heap location)) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.readIsShared_deadObject heapRelated found dead
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [isSharedStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Successful semantic projection identifies a mapped constructor and the
 checked concrete read returns a field related at its static descriptor kind. -/
 theorem ConcreteRuntimeRel.readObjectField_refines
