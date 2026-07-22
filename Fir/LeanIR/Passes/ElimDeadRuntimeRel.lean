@@ -1,4 +1,4 @@
-import Fir.LeanIR.PassCorrectness
+import Fir.LeanIR.Passes.ElimDead
 
 namespace Fir.LeanIR.Passes.ElimDead
 
@@ -253,6 +253,65 @@ theorem heapRel_monoRoots
   · intro location reachable
     exact related.2 location (reachable_monoRoots rightSubset reachable)
 
+/-- Prepending a cell at an unmapped source location cannot make it reachable
+from roots already governed by the old heap relation. -/
+theorem reachable_cons_of_forward_unmapped
+    (related : HeapRel rho heap other roots otherRoots)
+    (unmapped : rho.forward fresh = none)
+    (reachable : Reachable ((fresh, garbage) :: heap) roots location) :
+    Reachable heap roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have parentDifferent : fresh ≠ parent := by
+        intro same
+        subst parent
+        rcases related.1 fresh ih with
+          ⟨mapped, leftCell, rightCell, mapping, leftFound, rightFound, cell⟩
+        rw [unmapped] at mapping
+        contradiction
+      have oldFound : findCell? heap parent = some cell := by
+        simpa [findCell?, parentDifferent] using cellFound
+      exact .child ih oldFound member reference
+
+/-- Adding unreachable garbage at an unmapped source address preserves the
+reachable-heap relation. -/
+theorem heapRel_consLeft_of_forward_unmapped
+    (related : HeapRel rho left right leftRoots rightRoots)
+    (unmapped : rho.forward fresh = none) :
+    HeapRel rho ((fresh, garbage) :: left) right leftRoots rightRoots := by
+  constructor
+  · intro location reachable
+    have oldReachable :=
+      reachable_cons_of_forward_unmapped related unmapped reachable
+    rcases related.1 location oldReachable with
+      ⟨mapped, leftCell, rightCell, mapping, leftFound, rightFound, cell⟩
+    have different : fresh ≠ location := by
+      intro same
+      subst location
+      rw [unmapped] at mapping
+      contradiction
+    exact ⟨mapped, leftCell, rightCell, mapping,
+      by simpa [findCell?, different] using leftFound, rightFound, cell⟩
+  · intro location reachable
+    rcases related.2 location reachable with
+      ⟨mapped, rightCell, leftCell, mapping, rightFound, leftFound, cell⟩
+    have forward := rho.rightInverse mapping
+    have different : fresh ≠ mapped := by
+      intro same
+      subst mapped
+      rw [unmapped] at forward
+      contradiction
+    exact ⟨mapped, rightCell, leftCell, mapping, rightFound,
+      by simpa [findCell?, different] using leftFound, cell⟩
+
+theorem not_reachable_from_empty
+    (reachable : Reachable heap [] location) : False := by
+  induction reachable with
+  | root member => simp at member
+  | child parentReachable cellFound member reference ih => exact ih
+
 def traceRoots (trace : Array ExternalEvent) : List Value :=
   trace.toList.flatMap fun event => event.result :: event.args.toList
 
@@ -275,23 +334,103 @@ structure ShadowRuntimeRel (rho : AddressRenaming)
   trace : ArrayRel (EventRel rho) left.trace right.trace
   heap : HeapRel rho left.heap right.heap
     (runtimeRoots left leftExtra) (runtimeRoots right rightExtra)
-  leftFresh : rho.forward left.nextLocation = none
-  rightFresh : rho.reverse right.nextLocation = none
+  leftMappingFresh : ∀ location, left.nextLocation ≤ location →
+    rho.forward location = none
+  rightMappingFresh : ∀ location, right.nextLocation ≤ location →
+    rho.reverse location = none
+  leftHeapFresh : ∀ location, left.nextLocation ≤ location →
+    findCell? left.heap location = none
+  rightHeapFresh : ∀ location, right.nextLocation ≤ location →
+    findCell? right.heap location = none
 
 theorem shadowRuntimeRel_monoRenaming
     (extension : RenamingExtends smaller larger)
     (related : ShadowRuntimeRel smaller left right leftExtra rightExtra)
-    (leftFresh : larger.forward left.nextLocation = none)
-    (rightFresh : larger.reverse right.nextLocation = none) :
+    (leftMappingFresh : ∀ location, left.nextLocation ≤ location →
+      larger.forward location = none)
+    (rightMappingFresh : ∀ location, right.nextLocation ≤ location →
+      larger.reverse location = none) :
     ShadowRuntimeRel larger left right leftExtra rightExtra := {
   extra := listRel_mono (valueRel_mono extension) related.extra
   globals := listRel_mono (namedValueRel_mono extension) related.globals
   world_eq := related.world_eq
   trace := arrayRel_mono (eventRel_mono extension) related.trace
   heap := heapRel_monoRenaming extension related.heap
-  leftFresh
-  rightFresh
+  leftMappingFresh
+  rightMappingFresh
+  leftHeapFresh := related.leftHeapFresh
+  rightHeapFresh := related.rightHeapFresh
 }
+
+theorem mappingFresh_succ
+    (mapping : Location → Option Location)
+    (fresh : ∀ location, start ≤ location → mapping location = none) :
+    ∀ location, start + 1 ≤ location → mapping location = none := by
+  intro location bounded
+  exact fresh location (Nat.le_trans (Nat.le_succ start) bounded)
+
+theorem heapFresh_succ
+    (fresh : ∀ location, start ≤ location →
+      findCell? heap location = none) :
+    ∀ location, start + 1 ≤ location →
+      findCell? ((start, cell) :: heap) location = none := by
+  intro location bounded
+  have less : start < location :=
+    Nat.lt_of_lt_of_le (Nat.lt_succ_self start) bounded
+  have different : start ≠ location := Nat.ne_of_lt less
+  simpa [findCell?, different] using
+    fresh location (Nat.le_trans (Nat.le_succ start) bounded)
+
+theorem renamingExtend_leftMappingFresh
+    (fresh : ∀ location, left ≤ location → rho.forward location = none)
+    (rightFresh : rho.reverse right = none) :
+    ∀ location, left + 1 ≤ location →
+      (AddressRenaming.extend rho left right (fresh left (Nat.le_refl left))
+        rightFresh).forward location = none := by
+  intro location bounded
+  have less : left < location :=
+    Nat.lt_of_lt_of_le (Nat.lt_succ_self left) bounded
+  have different : location ≠ left := (Nat.ne_of_lt less).symm
+  simp [AddressRenaming.extend, different,
+    fresh location (Nat.le_trans (Nat.le_succ left) bounded)]
+
+theorem renamingExtend_rightMappingFresh
+    (leftFresh : rho.forward left = none)
+    (fresh : ∀ location, right ≤ location → rho.reverse location = none) :
+    ∀ location, right + 1 ≤ location →
+      (AddressRenaming.extend rho left right leftFresh
+        (fresh right (Nat.le_refl right))).reverse location = none := by
+  intro location bounded
+  have less : right < location :=
+    Nat.lt_of_lt_of_le (Nat.lt_succ_self right) bounded
+  have different : location ≠ right := (Nat.ne_of_lt less).symm
+  simp [AddressRenaming.extend, different,
+    fresh location (Nat.le_trans (Nat.le_succ right) bounded)]
+
+/-- An allocation whose result is absent from all live roots is unreachable
+garbage.  It may advance only the source heap and fresh counter while the
+existing runtime relation and address renaming remain valid. -/
+theorem ShadowRuntimeRel.allocLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (object : HeapObject) (persistent : Bool) :
+    ShadowRuntimeRel rho (alloc left object persistent).1 right
+      leftExtra rightExtra := by
+  simp only [alloc]
+  exact {
+    extra := related.extra
+    globals := related.globals
+    world_eq := related.world_eq
+    trace := related.trace
+    heap := by
+      simpa [runtimeRoots] using
+        heapRel_consLeft_of_forward_unmapped related.heap
+          (related.leftMappingFresh left.nextLocation (Nat.le_refl _))
+    leftMappingFresh := mappingFresh_succ rho.forward
+      related.leftMappingFresh
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := heapFresh_succ related.leftHeapFresh
+    rightHeapFresh := related.rightHeapFresh
+  }
 
 theorem traceRoots_subset_runtimeRoots
     (runtime : RuntimeState) (extra : List Value) :
@@ -340,5 +479,26 @@ theorem ShadowRuntimeRel.observationRel
       leftOutcomeSubset)
     (observationRoots_subset_runtimeRoots right rightOutcome rightExtra
       rightOutcomeSubset)
+
+/-- Initial runtimes are related by the empty address renaming. -/
+theorem emptyRuntime_shadowRelated :
+    ShadowRuntimeRel emptyAddressRenaming ({} : RuntimeState)
+      ({} : RuntimeState) [] [] := by
+  refine {
+    extra := .nil
+    globals := .nil
+    world_eq := rfl
+    trace := .nil
+    heap := ?_
+    leftMappingFresh := by simp [emptyAddressRenaming]
+    rightMappingFresh := by simp [emptyAddressRenaming]
+    leftHeapFresh := by simp [findCell?]
+    rightHeapFresh := by simp [findCell?]
+  }
+  constructor
+  · intro location reachable
+    exact (not_reachable_from_empty reachable).elim
+  · intro location reachable
+    exact (not_reachable_from_empty reachable).elim
 
 end Fir.LeanIR.Passes.ElimDead
