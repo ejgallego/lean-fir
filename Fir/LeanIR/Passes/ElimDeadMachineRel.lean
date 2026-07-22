@@ -1137,6 +1137,170 @@ theorem coreStep_invokeName_cacheHit_reachableRelated
           exact ⟨[sourceValue], [targetValue], sourceFrameRoots,
             targetFrameRoots, programs, .yielded values, frames, nextRuntime⟩
 
+/-- Invoking a reachable mapped closure reads related fixed arguments from
+the two heaps, appends the fresh argument arrays, and enters related internal
+declaration bodies through the ordinary declaration-invocation theorem. -/
+theorem coreStep_invokeValue_closure_foundCode_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceObject : sourceCell.object =
+      .closure name arity sourceFixed)
+    (sourceDeclFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceDeclValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ (sourceFixed ++ sourceArguments).size <
+      sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      ((sourceFixed ++ sourceArguments).extract 0
+        sourceDeclaration.params.size) = .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots)) :
+    ∃ sourceAfter targetAfter,
+      coreStep { sourceState with
+        control := .invokeValue (.object (.heap sourceLocation))
+          sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeValue (.object (.heap targetLocation))
+          targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
+      sourceObject arguments frames.roots with
+    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
+      fixed, invocationRuntime⟩
+  let sourceInvoke := {
+    sourceState with
+    control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
+  let targetInvoke := {
+    targetState with
+    control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have combinedArguments : ArrayRel (ValueRel rho)
+      (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
+    arrayRel_append fixed arguments
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceDeclFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
+      ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+  rcases invokeDecl_foundCode_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames combinedArguments invokeFound sourceDeclValue sourceEnough
+      sourceBinding invokeRuntime with
+    ⟨targetDeclaration, targetCode, targetEnv, sourceAfter, targetAfter,
+      targetDeclFound, targetDeclValue, sourceStep, targetStep, nextRelated⟩
+  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
+      .ok sourceCell := by
+    simp [getLiveCell, sourceCellFound, sourceLive]
+  have targetRead : getLiveCell targetState.runtime targetLocation =
+      .ok targetCell := by
+    simp [getLiveCell, targetCellFound, targetLive]
+  refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
+      sourceObject] using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
+      targetObject] using targetStep
+
+/-- The same reachable closure read supports retained under-application: the
+combined fixed/fresh arguments allocate related closures and extend the
+address renaming. -/
+theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceObject : sourceCell.object =
+      .closure name arity sourceFixed)
+    (sourceDeclFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : (sourceFixed ++ sourceArguments).size <
+      sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      coreStep { sourceState with
+        control := .invokeValue (.object (.heap sourceLocation))
+          sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeValue (.object (.heap targetLocation))
+          targetArguments } = .next targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
+      sourceObject arguments frames.roots with
+    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
+      fixed, invocationRuntime⟩
+  let sourceInvoke := {
+    sourceState with
+    control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
+  let targetInvoke := {
+    targetState with
+    control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have combinedArguments : ArrayRel (ValueRel rho)
+      (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
+    arrayRel_append fixed arguments
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : ReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceDeclFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
+      ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+  rcases invokeDecl_foundPartial_reachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames combinedArguments invokeFound sourceTooFew invokeRuntime with
+    ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
+      nextRelated⟩
+  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
+      .ok sourceCell := by
+    simp [getLiveCell, sourceCellFound, sourceLive]
+  have targetRead : getLiveCell targetState.runtime targetLocation =
+      .ok targetCell := by
+    simp [getLiveCell, targetCellFound, targetLive]
+  refine ⟨larger, sourceAfter, targetAfter, extension, ?_, ?_, nextRelated⟩
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
+      sourceObject] using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
+      targetObject] using targetStep
+
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/
 theorem ReachableMachineRelated.monoRenaming

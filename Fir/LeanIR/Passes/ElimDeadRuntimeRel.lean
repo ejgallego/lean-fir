@@ -254,6 +254,13 @@ theorem arrayRel_extract (related : ArrayRel relation left right)
   simp only [Array.toList_extract]
   exact listRel_extract start stop related
 
+theorem arrayRel_append
+    (first : ArrayRel relation leftFirst rightFirst)
+    (second : ArrayRel relation leftSecond rightSecond) :
+    ArrayRel relation (leftFirst ++ leftSecond) (rightFirst ++ rightSecond) := by
+  unfold ArrayRel at first second ⊢
+  simpa using listRel_append first second
+
 theorem heapObjectRel_mono
     (extension : RenamingExtends smaller larger)
     (related : HeapObjectRel smaller left right) :
@@ -385,6 +392,19 @@ theorem reachable_monoRoots
     Reachable heap larger location := by
   induction reachable with
   | root member => exact .root (subset _ member)
+  | child parentReachable cellFound member reference ih =>
+      exact .child ih cellFound member reference
+
+/-- A new root presentation may be justified semantically rather than by
+literal list inclusion: it is enough that every heap reference named by a new
+root is already reachable from the old roots. -/
+theorem reachable_monoRootReachability
+    (roots : ∀ location,
+      Value.object (.heap location) ∈ smaller → Reachable heap larger location)
+    (reachable : Reachable heap smaller location) :
+    Reachable heap larger location := by
+  induction reachable with
+  | root member => exact roots _ member
   | child parentReachable cellFound member reference ih =>
       exact .child ih cellFound member reference
 
@@ -1220,6 +1240,151 @@ theorem ShadowRuntimeRel.restrictExtra
     leftHeapFresh := related.leftHeapFresh
     rightHeapFresh := related.rightHeapFresh
   }
+
+/-- Replace the explicit roots using semantic reachability inclusions.  This
+is strictly more general than `restrictExtra` and is needed when captured
+closure fields become call arguments: they are reachable through the closure
+cell even though they were not direct machine roots. -/
+theorem ShadowRuntimeRel.reindexExtra
+    (related : ShadowRuntimeRel rho left right leftOld rightOld)
+    (extra : ListRel (ValueRel rho) leftNew rightNew)
+    (leftReachable : ∀ location,
+      Reachable left.heap (runtimeRoots left leftNew) location →
+        Reachable left.heap (runtimeRoots left leftOld) location)
+    (rightReachable : ∀ location,
+      Reachable right.heap (runtimeRoots right rightNew) location →
+        Reachable right.heap (runtimeRoots right rightOld) location) :
+    ShadowRuntimeRel rho left right leftNew rightNew := by
+  exact {
+    extra
+    globals := related.globals
+    world_eq := related.world_eq
+    trace := related.trace
+    heap := ⟨
+      fun location reachable => related.heap.1 location
+        (leftReachable location reachable),
+      fun location reachable => related.heap.2 location
+        (rightReachable location reachable)⟩
+    leftMappingFresh := related.leftMappingFresh
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := related.leftHeapFresh
+    rightHeapFresh := related.rightHeapFresh
+  }
+
+theorem closureCallRoots_reachable
+    (found : findCell? runtime.heap closureLocation = some cell)
+    (objectEq : cell.object = .closure name arity fixed) :
+    ∀ location,
+      Value.object (.heap location) ∈
+        runtimeRoots runtime ((fixed ++ arguments).toList ++ frameRoots) →
+      Reachable runtime.heap
+        (runtimeRoots runtime
+          ((.object (.heap closureLocation) :: arguments.toList) ++
+            frameRoots))
+        location := by
+  intro location member
+  simp only [runtimeRoots, Array.toList_append, List.mem_append] at member
+  rcases member with
+    (((fixedRoot | argumentRoot) | frameRoot) | globalRoot) | traceRoot
+  · have closureReachable : Reachable runtime.heap
+        (runtimeRoots runtime
+          ((.object (.heap closureLocation) :: arguments.toList) ++
+            frameRoots))
+        closureLocation := by
+      apply Reachable.root
+      simp [runtimeRoots]
+    exact .child closureReachable found
+      (by simpa [objectEq, HeapObject.ownedValues] using fixedRoot) rfl
+  · exact .root (by simp [runtimeRoots, argumentRoot])
+  · exact .root (by simp [runtimeRoots, frameRoot])
+  · exact .root (by simp [runtimeRoots, globalRoot])
+  · exact .root (by simp [runtimeRoots, traceRoot])
+
+/-- Reindex an invocation from a closure reference plus fresh arguments to
+the concatenated fixed/fresh argument array expected by `invokeDecl`.  Fixed
+arguments are justified as children of the reachable closure cell. -/
+theorem ShadowRuntimeRel.reindexClosureCall
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftArguments.toList) ++
+        leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightArguments.toList) ++
+        rightFrameRoots))
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (rightFound : findCell? right.heap rightLocation = some rightCell)
+    (leftObject : leftCell.object =
+      .closure name arity leftFixed)
+    (rightObject : rightCell.object =
+      .closure name arity rightFixed)
+    (fixed : ArrayRel (ValueRel rho) leftFixed rightFixed)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots) :
+    ShadowRuntimeRel rho left right
+      ((leftFixed ++ leftArguments).toList ++ leftFrameRoots)
+      ((rightFixed ++ rightArguments).toList ++ rightFrameRoots) := by
+  apply related.reindexExtra
+    (listRel_append (arrayRel_append fixed arguments) frames)
+  · intro location reachable
+    exact reachable_monoRootReachability
+      (closureCallRoots_reachable leftFound leftObject) reachable
+  · intro location reachable
+    exact reachable_monoRootReachability
+      (closureCallRoots_reachable rightFound rightObject) reachable
+
+/-- Reading a reachable source closure through a mapped reference determines
+the corresponding live target closure and reindexes both runtimes to the
+concatenated argument arrays consumed by `invokeDecl`. -/
+theorem ShadowRuntimeRel.readMappedClosure
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftArguments.toList) ++
+        leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightArguments.toList) ++
+        rightFrameRoots))
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (leftLive : leftCell.live = true)
+    (leftObject : leftCell.object = .closure name arity leftFixed)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots) :
+    ∃ rightCell rightFixed,
+      findCell? right.heap rightLocation = some rightCell ∧
+      rightCell.live = true ∧
+      rightCell.object = .closure name arity rightFixed ∧
+      ArrayRel (ValueRel rho) leftFixed rightFixed ∧
+      ShadowRuntimeRel rho left right
+        ((leftFixed ++ leftArguments).toList ++ leftFrameRoots)
+        ((rightFixed ++ rightArguments).toList ++ rightFrameRoots) := by
+  have leftReachable : Reachable left.heap
+      (runtimeRoots left
+        ((.object (.heap leftLocation) :: leftArguments.toList) ++
+          leftFrameRoots))
+      leftLocation := by
+    apply Reachable.root
+    apply extra_subset_runtimeRoots
+    exact List.mem_append_left _ List.mem_cons_self
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have locationEq : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have cellEq : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  have rightLive : rightCell.live = true := by
+    rw [← cells.2.2.1]
+    exact leftLive
+  have objects := cells.2.2.2
+  generalize rightObject : rightCell.object = targetObject at objects
+  rw [leftObject] at objects
+  cases objects with
+  | closure fixed =>
+      rename_i rightFixed
+      have reindexed := related.reindexClosureCall leftFound rightFound
+        leftObject rightObject fixed arguments frames
+      exact ⟨rightCell, rightFixed, rightFound, rightLive, rightObject, fixed,
+        reindexed⟩
 
 /-- A cache hit may publish a global as a new control root.  The value was
 already among the canonical runtime roots, so this changes only the explicit
