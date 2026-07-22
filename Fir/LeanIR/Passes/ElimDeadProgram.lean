@@ -578,6 +578,50 @@ inductive ShadowJoinReadyAt (fuel : Nat) (used : UsedLocals)
       ShadowJoinReadyAt fuel used sourceDeclaration sourceContinuation
         (.deleted targetContinuation continuation)
 
+/-- The currently certified exact-runtime fragment of the shadow graph.
+Heap-effect nodes are intentionally absent until the runtime relation is
+weakened from raw equality to reachable-heap equivalence. -/
+inductive ShadowCodeReadyAt (fuel : Nat) (used : UsedLocals)
+    (state : MachineState) :
+    {source target : LCNF.Code .impure} →
+      ShadowCodeGraph fuel used source target → Prop where
+  | letE
+      (graph : ShadowCodeGraph fuel used
+        (.let declaration sourceContinuation) target)
+      (ready : ShadowLetReadyAt fuel used declaration sourceContinuation
+        state graph.letResidual) :
+      ShadowCodeReadyAt fuel used state graph
+  | join
+      (graph : ShadowCodeGraph fuel used
+        (.jp declaration sourceContinuation) target)
+      (ready : ShadowJoinReadyAt fuel used declaration sourceContinuation
+        graph.joinResidual) :
+      ShadowCodeReadyAt fuel used state graph
+  | cases
+      (graph : ShadowCodeGraph fuel used
+        (.cases caseInfo) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | jump
+      (graph : ShadowCodeGraph fuel used (.jmp join arguments) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | ret
+      (graph : ShadowCodeGraph fuel used (.return value) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | unreachable
+      (graph : ShadowCodeGraph fuel used (.unreach type) target) :
+      ShadowCodeReadyAt fuel used state graph
+
+/-- Readiness for an arbitrary control override.  Only code controls impose an
+obligation, and they impose it on the exact graph carried by the structural
+control relation. -/
+def ShadowControlReadyAt (fuel : Nat) (sourceState : MachineState)
+    (sourceControl targetControl : Control) : Prop :=
+  ∀ {used sourceCode targetCode},
+    sourceControl = .code sourceCode →
+    targetControl = .code targetCode →
+    (graph : ShadowCodeGraph fuel used sourceCode targetCode) →
+      ShadowCodeReadyAt fuel used sourceState graph
+
 /-- A saved call continuation retains its residual shadow edge, captured
 environment agreement, and the transformed join graph it will resume with.
 Apply and cache frames remain exact. -/
@@ -1133,6 +1177,25 @@ theorem coreStep_cases_shadowRelated
                 control := .code body joins agree
               }
 
+theorem coreStep_casesInfo_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used (.cases caseInfo) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control := .code (.cases caseInfo) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  cases caseInfo with
+  | mk typeName resultType discr alternatives =>
+      exact coreStep_cases_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+
 /-- Equal external responses preserve related waiting stacks and restore the
 same yielded value. -/
 theorem shadowResumeExternal_related
@@ -1394,6 +1457,227 @@ theorem coreStep_invokeValue_shadowRelated
       (coreStep { target with control := .invokeValue function arguments }) := by
   simpa only [coreStep] using
     invokeClosure_shadowRelated related function arguments
+
+/-- Progress for an arbitrary related control override.  The certified code
+fragment dispatches to its node theorem; values and invocations are already
+lockstep-related independently of lexical environments. -/
+theorem shadowMachineProgress_withControl
+    (related : ShadowMachineRelated fuel source target)
+    (control : ShadowControlRelated fuel
+      source.env source.joins sourceControl
+      target.env target.joins targetControl)
+    (ready : ShadowControlReadyAt fuel source sourceControl targetControl) :
+    ShadowMachineProgress fuel
+      { source with control := sourceControl }
+      { target with control := targetControl } := by
+  cases control with
+  | code graph joins agree =>
+      have codeReady := ready rfl rfl graph
+      cases codeReady with
+      | letE graph headReady =>
+          exact coreStep_let_shadowProgress source target related.programs
+            related.runtime_eq related.frames graph joins agree headReady
+      | join graph headReady =>
+          exact coreStep_join_shadowProgress source target related.programs
+            related.runtime_eq related.frames graph joins agree headReady
+      | cases graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_casesInfo_shadowRelated source target
+            related.programs related.runtime_eq related.frames graph joins
+              agree
+      | jump graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_jump_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree
+      | ret graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_return_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree
+      | unreachable graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_unreach_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree
+  | yielded value =>
+      apply ShadowMachineProgress.lockstep
+      exact coreStep_yielded_shadowRelated source target related.programs
+        related.runtime_eq related.frames
+  | invokeName name arguments =>
+      let current : ShadowMachineRelated fuel
+          { source with control := .invokeName name arguments }
+          { target with control := .invokeName name arguments } := {
+        programs := related.programs
+        runtime_eq := related.runtime_eq
+        frames := related.frames
+        control := .invokeName name arguments
+      }
+      apply ShadowMachineProgress.lockstep
+      exact coreStep_invokeName_shadowRelated current name arguments
+  | invokeValue function arguments =>
+      let current : ShadowMachineRelated fuel
+          { source with control := .invokeValue function arguments }
+          { target with control := .invokeValue function arguments } := {
+        programs := related.programs
+        runtime_eq := related.runtime_eq
+        frames := related.frames
+        control := .invokeValue function arguments
+      }
+      apply ShadowMachineProgress.lockstep
+      exact coreStep_invokeValue_shadowRelated current function arguments
+
+theorem shadowMachineProgress
+    (related : ShadowMachineRelated fuel source target)
+    (ready : ShadowControlReadyAt fuel source
+      source.control target.control) :
+    ShadowMachineProgress fuel source target := by
+  simpa using shadowMachineProgress_withControl related related.control ready
+
+/-- A lockstep-related core result matches a semantic source step, including
+the same externally supplied response. -/
+theorem shadowMatchCoreResult
+    (beforeRelated : ShadowMachineRelated fuel sourceBefore targetBefore)
+    (results : ShadowCoreResultRelated fuel
+      (coreStep sourceBefore) (coreStep targetBefore))
+    (step : Step externals sourceBefore sourceAfter) :
+    ∃ targetAfter, NonLockstep.Reaches externals targetBefore targetAfter ∧
+      ShadowMachineRelated fuel sourceAfter targetAfter := by
+  generalize sourceResultEq : coreStep sourceBefore = sourceResult at results
+  generalize targetResultEq : coreStep targetBefore = targetResult at results
+  cases results with
+  | next afterRelated =>
+      cases step with
+      | internal transition =>
+          rw [sourceResultEq] at transition
+          cases transition
+          exact ⟨_, NonLockstep.reaches_of_step (.internal targetResultEq),
+            afterRelated⟩
+      | external transition externalProof =>
+          rw [sourceResultEq] at transition
+          contradiction
+  | external request waitingRelated =>
+      rename_i sourceWaiting targetWaiting
+      cases step with
+      | internal transition =>
+          rw [sourceResultEq] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [sourceResultEq] at transition
+          cases transition
+          rename_i response
+          have targetExternal :
+              externals request targetBefore.runtime response := by
+            rw [← beforeRelated.runtime_eq]
+            exact externalProof
+          exact ⟨resumeExternal request targetWaiting response,
+            NonLockstep.reaches_of_step
+              (.external targetResultEq targetExternal),
+            shadowResumeExternal_related waitingRelated⟩
+  | done observation =>
+      cases step with
+      | internal transition =>
+          rw [sourceResultEq] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [sourceResultEq] at transition
+          contradiction
+
+/-- Equal terminal observations provide a zero-step target evaluation. -/
+theorem shadowTerminalCoreResult
+    (results : ShadowCoreResultRelated fuel
+      (coreStep source) (coreStep target))
+    (done : coreStep source = .done observation) :
+    SimpCase.EvaluatesState externals target observation := by
+  generalize sourceResultEq : coreStep source = sourceResult at results
+  generalize targetResultEq : coreStep target = targetResult at results
+  cases results with
+  | next related =>
+      rw [sourceResultEq] at done
+      contradiction
+  | external request related =>
+      rw [sourceResultEq] at done
+      contradiction
+  | done result =>
+      rw [sourceResultEq] at done
+      cases done
+      exact ⟨0, target, .refl target, targetResultEq⟩
+
+structure ShadowMachineRelatedWith (fuel : Nat)
+    (invariant : MachineState → MachineState → Prop)
+    (source target : MachineState) : Prop where
+  structural : ShadowMachineRelated fuel source target
+  invariant : invariant source target
+
+/-- Laws required of the semantic invariant for the exact-runtime fragment.
+It establishes active readiness and is preserved along the finite paths built
+by the structural simulation. -/
+structure ShadowInvariantLaws (externals : ExternalSpec) (fuel : Nat)
+    (invariant : MachineState → MachineState → Prop) : Prop where
+  ready : ∀ {source target}
+    (_ : ShadowMachineRelated fuel source target),
+    invariant source target →
+      ShadowControlReadyAt fuel source source.control target.control
+  stable : ∀ {sourceBefore targetBefore sourceAfter targetAfter},
+    invariant sourceBefore targetBefore →
+    ShadowMachineRelated fuel sourceBefore targetBefore →
+    NonLockstep.Reaches externals sourceBefore sourceAfter →
+    NonLockstep.Reaches externals targetBefore targetAfter →
+    ShadowMachineRelated fuel sourceAfter targetAfter →
+      invariant sourceAfter targetAfter
+
+/-- Forward finite-stuttering simulation for the currently certified
+exact-runtime fragment.  Deleted lets and joins consume one source step and
+zero target steps; every other certified node advances lockstep. -/
+theorem shadowRecursiveForward
+    (laws : ShadowInvariantLaws externals fuel invariant) :
+    NonLockstep.StutteringSimulation externals
+      (ShadowMachineRelatedWith fuel invariant) where
+  terminal := by
+    intro source target observation refined done
+    have ready : ShadowControlReadyAt fuel source
+        source.control target.control :=
+      laws.ready refined.structural refined.invariant
+    have progress := shadowMachineProgress refined.structural ready
+    cases progress with
+    | lockstep results => exact shadowTerminalCoreResult results done
+    | sourceOnly sourceAfter transition afterRelated =>
+        rw [transition] at done
+        contradiction
+  advance := by
+    intro sourceBefore sourceAfter target refined step
+    have ready : ShadowControlReadyAt fuel sourceBefore
+        sourceBefore.control target.control :=
+      laws.ready refined.structural refined.invariant
+    have progress := shadowMachineProgress refined.structural ready
+    cases progress with
+    | lockstep results =>
+        rcases shadowMatchCoreResult refined.structural results step with
+          ⟨targetAfter, targetPath, afterStructural⟩
+        have sourcePath := NonLockstep.reaches_of_step step
+        have afterInvariant := laws.stable refined.invariant
+          refined.structural sourcePath targetPath afterStructural
+        exact ⟨targetAfter, targetPath, {
+          structural := afterStructural
+          invariant := afterInvariant
+        }⟩
+    | sourceOnly expected transition afterStructural =>
+        cases step with
+        | internal actual =>
+            rw [transition] at actual
+            cases actual
+            have sourcePath : NonLockstep.Reaches externals
+                sourceBefore sourceAfter :=
+              NonLockstep.reaches_of_step
+                (Step.internal transition)
+            have targetPath : NonLockstep.Reaches externals target target :=
+              NonLockstep.reaches_refl target
+            have afterInvariant := laws.stable refined.invariant
+              refined.structural sourcePath targetPath afterStructural
+            exact ⟨target, targetPath, {
+              structural := afterStructural
+              invariant := afterInvariant
+            }⟩
+        | external actual externalProof =>
+            rw [transition] at actual
+            contradiction
 
 /-- Whole-program graph relatedness supplies every initial invocation state;
 no semantic entry premise is needed until an eliminable operation is reached. -/
