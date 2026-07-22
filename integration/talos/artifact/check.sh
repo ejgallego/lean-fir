@@ -148,6 +148,8 @@ node test-module-client.mjs \
   _build/source-usize-id.wasm
 node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
+node run-concrete-source-artifacts.mjs \
+  _build/source-nat-list-case.wasm _build/source-string-input.wasm
 if [[ -n "${FIR_BROWSER:-}" ]]; then
   make -C "$here/../../.." validate-v8
   ./browser-check.sh "$FIR_BROWSER"

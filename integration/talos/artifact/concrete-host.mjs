@@ -86,11 +86,14 @@ export function concreteManifestValue(argument) {
     case "erased":
       return { kind: "erased" };
     case "reuseToken":
-      assert.equal(argument.location, null,
-        "heap-backed reuse-token arguments need concrete initial-runtime loading");
-      return { kind: "reuseToken", location: null };
+      assert.ok(argument.location === null ||
+        (Number.isSafeInteger(argument.location) && argument.location >= 0),
+      "reuse-token location must be null or a nonnegative safe integer");
+      return { kind: "reuseToken", location: argument.location };
     case "heap":
-      throw new Error("heap-backed arguments need concrete initial-runtime loading");
+      assert.ok(Number.isSafeInteger(argument.location) && argument.location >= 0,
+        "heap argument location must be a nonnegative safe integer");
+      return { kind: "heap", location: argument.location };
     default:
       throw new Error(`unsupported manifest argument kind: ${argument.kind}`);
   }
@@ -103,7 +106,7 @@ export function concreteManifestValue(argument) {
  * to normalize final observations against the source oracle.
  */
 export class ConcreteHost {
-  constructor(manifestImports = []) {
+  constructor(manifestImports = [], initialRuntime = undefined) {
     this.buffer = new ArrayBuffer(PAGE_BYTES);
     this.view = new DataView(this.buffer);
     this.heapCursor = HEAP_BASE;
@@ -128,6 +131,144 @@ export class ConcreteHost {
       if (operation.kind === "partialApply") {
         uniquePush(this.closureDescriptors, [...operation.fields], sameKinds);
       }
+    }
+    if (initialRuntime !== undefined) {
+      this.loadInitialRuntime(initialRuntime);
+    }
+  }
+
+  initialNaturalLimbs(value) {
+    const limbs = [];
+    let remaining = BigInt(value);
+    assert.ok(remaining >= 0n, "initial natural must be nonnegative");
+    do {
+      limbs.push(BigInt.asUintN(64, remaining));
+      remaining >>= 64n;
+    } while (remaining !== 0n);
+    return limbs;
+  }
+
+  initialObjectFieldKind(value) {
+    if (value.kind === "object") return "tobject";
+    if (value.kind === "erased") return "erased";
+    throw new Error(`unsupported concrete initial constructor field: ${value.kind}`);
+  }
+
+  initialCellLayout(cell) {
+    const object = cell.object;
+    assert.ok(object && typeof object === "object", "initial heap object must be an object");
+    switch (object.kind) {
+      case "ctor": {
+        assert.ok(Array.isArray(object.objectFields),
+          "initial constructor objectFields must be an array");
+        assert.ok(Array.isArray(object.usizeFields),
+          "initial constructor usizeFields must be an array");
+        assert.ok(Array.isArray(object.scalarFields),
+          "initial constructor scalarFields must be an array");
+        assert.equal(object.scalarFields.length, 0,
+          "packed initial constructors remain outside the concrete loader fragment");
+        const tag = BigInt(object.tag);
+        assert.ok(tag >= 0n && tag <= 0xffffffffn,
+          "initial constructor tag must fit UInt32");
+        const fieldKinds = object.objectFields.map((value) =>
+          this.initialObjectFieldKind(value));
+        return {
+          kind: KIND.constructor,
+          payloadBytes: SLOT_BYTES * (object.objectFields.length + object.usizeFields.length),
+          auxiliaries: {
+            aux0: Number(tag),
+            aux1: object.objectFields.length,
+            aux2: object.usizeFields.length,
+            aux3: 0,
+          },
+          descriptor: { kind: "constructor", fieldKinds },
+        };
+      }
+      case "natural": {
+        const limbs = this.initialNaturalLimbs(object.value);
+        return {
+          kind: KIND.natural,
+          payloadBytes: SLOT_BYTES * limbs.length,
+          auxiliaries: { aux0: 2, aux1: limbs.length },
+          descriptor: { kind: "natural" },
+          limbs,
+        };
+      }
+      default:
+        throw new Error(`unsupported concrete initial-runtime heap object: ${object.kind}`);
+    }
+  }
+
+  initialObjectWord(value) {
+    if (value.kind === "erased") return 0;
+    assert.equal(value.kind, "object", "initial constructor field must be object-like");
+    assert.ok(value.reference && typeof value.reference === "object",
+      "initial object reference must be an object");
+    if (value.reference.kind === "tagged") {
+      return this.encodeTagged(BigInt(value.reference.payload));
+    }
+    if (value.reference.kind === "heap") {
+      const address = this.locationAddresses.get(value.reference.location);
+      assert.notEqual(address, undefined,
+        `initial object references unknown location ${value.reference.location}`);
+      return address;
+    }
+    throw new Error(`unsupported initial object reference: ${value.reference.kind}`);
+  }
+
+  loadInitialRuntime(runtime) {
+    assert.ok(runtime && typeof runtime === "object", "initialRuntime must be an object");
+    assert.ok(Number.isSafeInteger(runtime.nextLocation) && runtime.nextLocation >= 0,
+      "initialRuntime.nextLocation must be a nonnegative safe integer");
+    assert.ok(Array.isArray(runtime.heap), "initialRuntime.heap must be an array");
+    const layouts = new Map();
+    const locations = new Set();
+
+    for (const cell of [...runtime.heap].reverse()) {
+      assert.ok(cell && typeof cell === "object", "initial heap cell must be an object");
+      assert.ok(Number.isSafeInteger(cell.location) && cell.location >= 0 &&
+        cell.location < runtime.nextLocation,
+      "initial heap location must be below nextLocation");
+      assert.ok(!locations.has(cell.location), `duplicate initial heap location ${cell.location}`);
+      locations.add(cell.location);
+      assert.ok(Number.isSafeInteger(cell.rc) && cell.rc >= 0 && cell.rc <= 0xffffffff,
+        "initial reference count must fit UInt32");
+      assert.equal(typeof cell.persistent, "boolean", "initial persistent flag must be boolean");
+      assert.equal(typeof cell.live, "boolean", "initial live flag must be boolean");
+      const layout = this.initialCellLayout(cell);
+      const address = this.allocate(layout.kind, layout.payloadBytes, layout.auxiliaries,
+        { logical: false });
+      this.addressLocations.set(address, cell.location);
+      this.locationAddresses.set(cell.location, address);
+      this.allocations.unshift(address);
+      this.descriptors.set(address, layout.descriptor);
+      layouts.set(cell.location, layout);
+    }
+
+    this.nextLocation = runtime.nextLocation;
+    for (const cell of runtime.heap) {
+      const address = this.locationAddresses.get(cell.location);
+      const layout = layouts.get(cell.location);
+      assert.notEqual(address, undefined, `missing initial address for location ${cell.location}`);
+      assert.ok(layout, `missing initial layout for location ${cell.location}`);
+      if (cell.object.kind === "ctor") {
+        cell.object.objectFields.forEach((value, index) =>
+          this.writeWordSlot(address + HEADER_BYTES + SLOT_BYTES * index,
+            this.initialObjectWord(value)));
+        cell.object.usizeFields.forEach((value, index) =>
+          this.writeU64(address + HEADER_BYTES +
+            SLOT_BYTES * (cell.object.objectFields.length + index), BigInt(value)));
+      } else if (cell.object.kind === "natural") {
+        layout.limbs.forEach((limb, index) =>
+          this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
+      }
+      const header = this.readHeader(address);
+      this.writeHeader(address, {
+        ...header,
+        persistent: cell.persistent,
+        live: cell.live,
+        rc: cell.rc,
+      });
     }
   }
 
@@ -363,14 +504,23 @@ export class ConcreteHost {
         return 0;
       case "reuseToken":
         assert.equal(value.kind, "reuseToken", "reuseToken has the wrong semantic kind");
-        assert.equal(value.location, null,
-          "heap-backed reuse-token encoding needs concrete initial-runtime loading");
-        return 0;
+        if (value.location === null) return 0;
+        assert.ok(Number.isSafeInteger(value.location) && value.location >= 0,
+          "reuse-token location must be a nonnegative safe integer");
+        const address = this.locationAddresses.get(value.location);
+        assert.notEqual(address, undefined,
+          `reuse-token references unknown concrete location ${value.location}`);
+        return signed32(this.checkedWord("reuseToken", address));
       case "object":
       case "tagged":
-      case "tobject":
-        assert.equal(value.kind, "tagged", `${kind} input needs concrete initial-runtime loading`);
-        return signed32(this.encodeTagged(value.payload));
+      case "tobject": {
+        if (value.kind === "tagged") return signed32(this.encodeTagged(value.payload));
+        assert.equal(value.kind, "heap", `${kind} requires an object-like value`);
+        const address = this.locationAddresses.get(value.location);
+        assert.notEqual(address, undefined,
+          `${kind} argument references unknown concrete location ${value.location}`);
+        return signed32(this.checkedWord(kind, address));
+      }
       default:
         throw new Error(`unsupported concrete argument ABI kind: ${kind}`);
     }

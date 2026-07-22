@@ -108,8 +108,13 @@ Cross-cutting W6.5 state:
   handles, including cache miss/persistence/hit and maximum-width heap
   boxing/unboxing; both engines also preserve two import-construction fragment
   gates and the exact malformed-layout expected failure, while the explicit
-  allowlist leaves strings, externals, and initial heaps to subsequent slices;
-  and
+  allowlist leaves strings and externals to subsequent slices; and
+- the concrete external-engine host reserves and reconstructs the represented
+  object-field constructor/natural `initialRuntime` subset before invocation,
+  preserving all semantic locations and cell metadata; Node and the browser
+  Worker audit a four-cell compiler-produced `List Nat` graph, its heap-backed
+  entry-address round-trip, and its `getTag` result, while strings, packed
+  constructors, and other initial heap kinds retain explicit layout gates; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

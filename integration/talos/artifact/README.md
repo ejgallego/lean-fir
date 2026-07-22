@@ -24,14 +24,23 @@ slots, natural and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
 mutation, balanced and recursive ownership updates, deletion, unique/shared
 reset/reuse, recursive cache publication, and maximum-width integer
-boxing/unboxing. Its
+boxing/unboxing. Their
 logical-location map and allocation descriptors are observation-only data;
 runtime imports exchange physical words and consult the byte-level heap. Node
 and a Fetch-only browser Worker import the same host and fixture inventory.
-The remaining strings, externals, and initial heap loading stay on the semantic
-runner until their concrete counterparts join this explicit allowlist. An unsupported
-import is rejected while constructing the concrete import object, before
-instantiation.
+The remaining strings, externals, packed initial constructors, and other
+initial heap kinds stay on the semantic runner until their concrete
+counterparts join this explicit allowlist. An unsupported import is rejected
+while constructing the concrete import object, before instantiation.
+
+The concrete host also reconstructs the object-field constructor and arbitrary-
+precision natural subset of `initialRuntime`. It reserves physical addresses
+for the complete heap before writing references, preserves semantic location
+order and cell metadata, and then passes the mapped address to a compiler-
+produced `List Nat` classifier. Node and the browser Worker audit every loaded
+cell and the entry-argument round-trip before executing it. Initial strings
+retain an explicit layout gate; packed constructors and the other initial heap
+kinds are not silently admitted.
 
 The historical hand-written `mutation` fixture is intentionally not in that
 success allowlist: it uses packed-scalar slot index `1` despite a one-object,
@@ -208,6 +217,9 @@ Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
 the complete shared-product Worker. It also materializes the live-oracle
 artifact corpus under `_build`, then runs the same 34 concrete artifacts, two
 fragment gates, and one expected failure used by Node through a third Worker.
+That Worker also executes the concrete initial-runtime `List Nat` source and
+checks the independent string-layout gate.
+
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled
 artifact check, the concrete Worker can be rerun directly with:

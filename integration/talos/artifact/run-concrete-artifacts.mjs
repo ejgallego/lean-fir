@@ -22,7 +22,7 @@ export async function runConcreteArtifact(manifestPath) {
   const bytes = await readFile(wasmPath);
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed WebAssembly validation`);
 
-  const host = new ConcreteHost(manifest.imports);
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -48,7 +48,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
   for (const fixture of REJECTED_FRAGMENT_FIXTURES) {
     const manifest = JSON.parse(await readFile(
       join(artifactDirectory, `${fixture}.wasm.json`), "utf8"));
-    const host = new ConcreteHost(manifest.imports);
+    const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
     assert.throws(() => host.imports(manifest.imports),
       /unsupported concrete artifact operation/,
       `${fixture} unexpectedly crossed its concrete fragment gate`);
@@ -58,7 +58,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifestPath = join(artifactDirectory, `${fixture}.wasm.json`);
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const bytes = await readFile(manifestPath.slice(0, -".json".length));
-    const host = new ConcreteHost(manifest.imports);
+    const host = new ConcreteHost(manifest.imports, manifest.initialRuntime);
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {

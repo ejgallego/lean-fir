@@ -2366,6 +2366,17 @@ semantic browser clients first, and then checks the concrete byte-memory lane.
 Strings, externals, and initial heaps remain subsequent slices. No shared
 semantic contract changed.
 
+W6.6ap opens the concrete initial-runtime boundary for the represented
+constructor/natural subset. The JavaScript host reserves a physical wasm32
+address for every semantic location before installing references, reconstructs
+object-field constructors and arbitrary-precision natural limbs, preserves
+reference count, persistence, liveness, heap order, and `nextLocation`, and
+maps heap-backed entry arguments without opaque handles. The compiler-produced
+`List Nat` case audits all four loaded cells and the address round-trip before
+executing `getTag` to `UInt64(1)` in Node and Chrome. The string source remains
+an exact construction-time layout gate; packed constructors and other initial
+heap kinds remain outside this slice. No shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

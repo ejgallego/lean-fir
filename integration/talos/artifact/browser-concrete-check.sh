@@ -18,6 +18,10 @@ chrome_data="$(mktemp -d)"
 test -s "$here/$corpus_path/literal.wasm"
 test -s "$here/$corpus_path/literal.wasm.json"
 test -s "$here/$corpus_path/literal.expected.json"
+test -s "$here/_build/source-nat-list-case.wasm"
+test -s "$here/_build/source-nat-list-case.wasm.json"
+test -s "$here/_build/source-string-input.wasm"
+test -s "$here/_build/source-string-input.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &
