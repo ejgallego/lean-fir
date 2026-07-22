@@ -1,4 +1,5 @@
 import Fir.LeanIR.Passes.ElimDeadRelation
+import Fir.LeanIR.Passes.ElimDeadRuntimeRel
 import Fir.LeanIR.Passes.Structural
 
 namespace Fir.LeanIR.Passes.ElimDead
