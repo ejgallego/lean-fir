@@ -27,7 +27,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `scalarSet` | Four integer widths | Heap theorems, including same-coordinate replacement | Partial | Concrete width dispatcher, FVar source step, compiler/adapter, generated binary call, continuation, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/readback compose; repeated same-coordinate writes refine the source replacement filter and execute twice in one module; disjoint retained-field framing remains pending; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats share the runtime gap |
 | `setTag` | Yes | Heap theorem | Partial | Concrete header host, source step, compiler/adapter, generated unary call, continuation, whole-module case/readback, and Node/V8 plus browser-Worker header mutation compose; explicit wasm32 tag-fit premise retained |
 | `inc` | Yes | Ordinary heap theorem; exact tagged equation | Partial | Concrete ordinary/tagged/promoted host, source step, compiler/adapter, generated unary call, persistent elision, continuation, shared-reset whole-module execution, and balanced/shared-reset Node/V8 plus browser-Worker execution compose; ordinary wasm32 count-fit premise retained |
-| `dec` | Yes | Complete checked recursive heap theorem | Partial | Concrete checked ordinary/tagged/promoted recursive host, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity; unchecked nonpersistent composition pending |
+| `dec` | Yes | Complete recursive heap theorem for either outer check bit | Partial | Concrete checked/unchecked ordinary recursive host, checked tagged/promoted no-op, source step, compiler/adapter, generated unary call, persistent elision, continuation, checked and unchecked constructor-graph whole-module release, and balanced/recursive Node/V8 plus browser-Worker ownership executions compose with explicit closure-descriptor identity |
 | `delete` | Yes | Ordinary heap and erased-sentinel theorems | Partial | Concrete canonical-delete/erased-zero host, representation-indexed source step, compiler/adapter, generated unary call, continuation, ordinary-object whole-module deletion, and exact dead-object Node/V8 plus browser-Worker execution compose without weakening ordinary object decoding |
 | `getTag` | Yes | Complete `.tobject` constructor/tagged theorem | Partial | Concrete Talos host plus generated constructor-case WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker constructor-case execution |
 
@@ -69,10 +69,10 @@ Cross-cutting W6.5 state:
 - reference-count increment composes through exact object-like local widening,
   the concrete header/tagged operation, generated no-result host call, and
   persistent compiler elision; and
-- checked reference-count decrement composes through exact object-like local
-  widening, the complete recursive ownership theorem, generated no-result host
-  call, and persistent compiler elision; closure descriptor identity remains
-  explicit and unchecked nonpersistent composition remains open; and
+- checked and unchecked reference-count decrement compose through exact
+  object-like local widening, the complete recursive ownership theorem,
+  generated no-result host call, and persistent compiler elision; closure
+  descriptor identity remains explicit; and
 - explicit deletion composes through its exact physical value relation,
   canonical nonrecursive header release, and generated no-result host call;
   erased word zero remains an operation-specific no-op rather than an object;

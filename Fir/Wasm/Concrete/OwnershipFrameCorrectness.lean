@@ -1851,13 +1851,14 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     (related : LiveHeapRel state witness runtime)
     (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
     (semanticOperation :
       Fir.LeanIR.Impure.decLocationFuel fuel runtime location = .ok nextRuntime) :
     ∃ result,
-      decrementReferenceOnceFuel fuel state address true witness.closureDescriptors =
+      decrementReferenceOnceFuel fuel state address check witness.closureDescriptors =
         .ok result ∧
       LiveHeapRel result witness nextRuntime := by
-  induction fuel generalizing state runtime location address nextRuntime with
+  induction fuel generalizing state runtime location address nextRuntime check with
   | zero =>
       simp [Fir.LeanIR.Impure.decLocationFuel] at semanticOperation
   | succ fuel ih =>
@@ -1876,7 +1877,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
         have runtimeEq := Except.ok.inj (semanticEq.symm.trans semanticOperation)
         subst nextRuntime
         exact ⟨state,
-          targetRelated.decrementReferenceOnceFuel_persistent_eq persistentCase fuel true
+          targetRelated.decrementReferenceOnceFuel_persistent_eq persistentCase fuel check
             witness.closureDescriptors,
           related⟩
       · have ordinary : cell.persistent = false := by
@@ -1891,7 +1892,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
         · obtain ⟨result, branchRuntime, concreteBranch, semanticBranch, finalRelated⟩ :=
           related.decrementReferenceOnceFuel_refines_above_one
               (descriptors := witness.closureDescriptors) mapped found live ordinary oneLt
-                fuel true
+                fuel check
           have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
           subst branchRuntime
           exact ⟨result, concreteBranch, finalRelated⟩
@@ -1905,7 +1906,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   finalRelated⟩ :=
                 related.decrementReferenceOnceFuel_refines_leaf_one
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
-                    ordinary one fuel true
+                    ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
               exact ⟨result, concreteBranch, finalRelated⟩
@@ -1917,7 +1918,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   finalRelated⟩ :=
                 related.decrementReferenceOnceFuel_refines_leaf_one
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
-                    ordinary one fuel true
+                    ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
               exact ⟨result, concreteBranch, finalRelated⟩
@@ -1928,7 +1929,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   finalRelated⟩ :=
                 related.decrementReferenceOnceFuel_refines_leaf_one
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
-                    ordinary one fuel true
+                    ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
               exact ⟨result, concreteBranch, finalRelated⟩
@@ -1986,7 +1987,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                     LiveHeapRel after witness nextSemantic := by
                 intro before semanticState nextSemantic childLocation childAddress
                   childRelated childMapped childOperation
-                exact ih childRelated childMapped childOperation
+                exact ih childRelated childMapped true childOperation
               obtain ⟨result, concreteFold, finalRelated⟩ :=
                 ownershipRelated.foldlM_refines parentRelated recurse semanticFoldList
               have addressHeap :=
@@ -1999,7 +2000,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                 simp [Header.isPromotedTag, headerKind, headerOrdinary, different]
               have headerOrdinary : header.persistent = false := persistent.trans ordinary
               have concreteOperation :
-                  decrementReferenceOnceFuel (fuel + 1) state address true
+                  decrementReferenceOnceFuel (fuel + 1) state address check
                     witness.closureDescriptors = .ok result := by
                 simp only [decrementReferenceOnceFuel]
                 rw [addressHeap, headerRead]
@@ -2093,7 +2094,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                       LiveHeapRel after witness nextSemantic := by
                   intro before semanticState nextSemantic childLocation childAddress
                     childRelated childMapped childOperation
-                  exact ih childRelated childMapped childOperation
+                  exact ih childRelated childMapped true childOperation
                 obtain ⟨result, concreteFold, finalRelated⟩ :=
                   ownershipRelated.foldlM_refines parentRelated recurse semanticOwnedFoldList
                 have addressHeap :=
@@ -2106,7 +2107,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                     by decide
                   simp [Header.isPromotedTag, headerKind, concreteOrdinary, different]
                 have concreteOperation :
-                    decrementReferenceOnceFuel (fuel + 1) state address true
+                    decrementReferenceOnceFuel (fuel + 1) state address check
                       witness.closureDescriptors = .ok result := by
                   simp only [decrementReferenceOnceFuel]
                   rw [addressHeap, headerRead]
@@ -2133,34 +2134,38 @@ theorem LiveHeapRel.decrementReferenceOnce_refines
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     (related : LiveHeapRel state witness runtime)
     (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
     (semanticOperation :
       Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime) :
     ∃ result,
-      decrementReferenceOnce state address true witness.closureDescriptors = .ok result ∧
+      decrementReferenceOnce state address check witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness nextRuntime := by
   unfold Fir.LeanIR.Impure.decLocation at semanticOperation
   obtain ⟨result, concreteSemanticFuel, finalRelated⟩ :=
-    related.decrementReferenceOnceFuel_refines mapped semanticOperation
+    related.decrementReferenceOnceFuel_refines mapped check semanticOperation
   have concretePublic := decrementReferenceOnceFuel_ok_mono
     related.semanticFuel_le_concreteFuel concreteSemanticFuel
   exact ⟨result, by
     unfold decrementReferenceOnce
     exact concretePublic, finalRelated⟩
 
-/-- Repeating the checked public decrement preserves the heap relation after
-every successful semantic step. The witness mapping is stable across dead-cell
-transitions, so the one-step theorem composes directly through both folds. -/
+/-- Repeating a public decrement preserves the heap relation after every
+successful semantic step. The outer checked/unchecked bit is immaterial for a
+mapped heap address; recursive child releases remain checked in both models.
+The witness mapping is stable across dead-cell transitions, so the one-step
+theorem composes directly through both folds. -/
 theorem LiveHeapRel.decrementReference_refines
     {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     {amount : Nat}
     (related : LiveHeapRel state witness runtime)
     (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
     (semanticOperation :
-      Fir.LeanIR.Impure.decValue runtime (.object (.heap location)) amount true =
+      Fir.LeanIR.Impure.decValue runtime (.object (.heap location)) amount check =
         .ok nextRuntime) :
     ∃ result,
-      decrementReference state address amount true witness.closureDescriptors = .ok result ∧
+      decrementReference state address amount check witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness nextRuntime := by
   induction amount generalizing state runtime nextRuntime with
   | zero =>
@@ -2179,7 +2184,7 @@ theorem LiveHeapRel.decrementReference_refines
       | ok middleRuntime =>
           rw [firstSemantic] at semanticOperation
           obtain ⟨middleState, firstConcrete, middleRelated⟩ :=
-            related.decrementReferenceOnce_refines mapped firstSemantic
+            related.decrementReferenceOnce_refines mapped check firstSemantic
           obtain ⟨result, restConcrete, finalRelated⟩ :=
             ih middleRelated semanticOperation
           refine ⟨result, ?_, finalRelated⟩

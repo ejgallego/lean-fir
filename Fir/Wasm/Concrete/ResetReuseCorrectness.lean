@@ -1452,7 +1452,7 @@ theorem OwnershipValuesRel.foldlM_public_refines
                 .ok middleRuntime := by
               simpa [Fir.LeanIR.Impure.decValueOnce] using headSemantic
             obtain ⟨middleState, concreteHead, middleHeap⟩ :=
-              heap.decrementReferenceOnce_refines mapped semanticHead
+              heap.decrementReferenceOnce_refines mapped true semanticHead
             obtain ⟨finalState, concreteTail, finalHeap⟩ :=
               ih middleHeap semanticOperation
             exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
@@ -1656,7 +1656,7 @@ theorem LiveHeapRel.resetObject_refines_nonunique
         subst middleRuntime
         rfl
   obtain ⟨result, concreteDec, finalRelated⟩ :=
-    related.decrementReferenceOnce_refines mapped semanticDec
+    related.decrementReferenceOnce_refines mapped true semanticDec
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead).1

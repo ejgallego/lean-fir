@@ -2781,23 +2781,25 @@ theorem decValue_tagged_checked
         Bind.bind, Except.bind, decValueOnce]
       exact ih
 
-/-- Successful checked concrete decrement refines the exact semantic
-operation. Ordinary objects may recursively release ownership trees; tagged
-and promoted-tag words are checked no-ops. The descriptor equality exposes
+/-- Successful concrete decrement refines the exact semantic operation.
+Ordinary objects may recursively release ownership trees for either check bit;
+tagged and promoted-tag words are checked no-ops, while their only successful
+unchecked operation is the amount-zero fold. The descriptor equality exposes
 the frozen closure-layout contract needed to release typed captures. -/
 theorem decrementStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {sourceObject : Value}
-    {word : Word32} {amount : Nat} {objectFields? : Option Nat}
+    {word : Word32} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
     (runtimeRelated :
       ConcreteRuntimeRel initial.host.runtime witness runtime)
     (objectRelated :
       ValueRel witness .tobject (.word32 word) sourceObject)
     (descriptorsEq :
       initial.host.closureDescriptors = witness.closureDescriptors)
-    (updated : decValue runtime sourceObject amount true = .ok nextRuntime) :
+    (updated : decValue runtime sourceObject amount check = .ok nextRuntime) :
     ∃ heap,
-      decrementStep amount true objectFields? initial
+      decrementStep amount check objectFields? initial
           [.i32 (UInt32.ofNat word.value)] =
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
@@ -2809,7 +2811,7 @@ theorem decrementStep_of_refines
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.decrementReference_refines mapped updated
+                runtimeRelated.heap.decrementReference_refines mapped check updated
               refine ⟨heap, ?_, ?_⟩
               · simp [decrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, descriptorsEq,
@@ -2817,17 +2819,34 @@ theorem decrementStep_of_refines
               · exact ConcreteRuntimeRel.replaceHeap_of_runtimeAux
                   runtimeRelated finalHeapRelated (decValue_runtimeAux updated)
       | tagged taggedRelated =>
-          have concreteOperation :=
-            decrementReference_tagged_checked runtimeRelated.heap taggedRelated
-              amount initial.host.closureDescriptors
-          have afterEq : nextRuntime = runtime := by
-            rw [decValue_tagged_checked] at updated
-            exact (Except.ok.inj updated).symm
-          subst nextRuntime
-          refine ⟨initial.host.runtime.heap, ?_, ?_⟩
-          · simp [decrementStep, clearFailure,
-              Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
-          · simpa [replaceHeap, clearFailure] using runtimeRelated
+          cases check with
+          | false =>
+              cases amount with
+              | zero =>
+                  have afterEq : nextRuntime = runtime := by
+                    simpa [decValue] using (Except.ok.inj updated).symm
+                  subst nextRuntime
+                  refine ⟨initial.host.runtime.heap, ?_, ?_⟩
+                  · simp [decrementStep, decrementReference, clearFailure,
+                      Word32.ofUInt32_ofNat_value, replaceHeap, pure,
+                      Except.pure]
+                  · simpa [replaceHeap, clearFailure] using runtimeRelated
+              | succ amount =>
+                  simp only [decValue, List.replicate_succ, List.foldlM_cons,
+                    Bind.bind, Except.bind, decValueOnce] at updated
+                  simp at updated
+          | true =>
+              have concreteOperation :=
+                decrementReference_tagged_checked runtimeRelated.heap taggedRelated
+                  amount initial.host.closureDescriptors
+              have afterEq : nextRuntime = runtime := by
+                rw [decValue_tagged_checked] at updated
+                exact (Except.ok.inj updated).symm
+              subst nextRuntime
+              refine ⟨initial.host.runtime.heap, ?_, ?_⟩
+              · simp [decrementStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
+              · simpa [replaceHeap, clearFailure] using runtimeRelated
 
 /-- Successful semantic deletion is heap-only for both the ordinary-object
 transition and the erased failed-reset no-op. -/
@@ -4630,16 +4649,19 @@ theorem effectStepSimulates_inc_persistent
   · exact codeAdapted_inc_persistent continuationAdapted
   · exact initialRelated
 
-/-- Checked nonpersistent decrement composed through source evaluation, the
-real compiler and adapter, concrete recursive ownership release, and the exact
-generated unary host-call prefix. -/
+/-- Nonpersistent decrement composed through source evaluation, the real
+compiler and adapter, concrete recursive ownership release, and the exact
+generated unary host-call prefix. Both checked and unchecked ordinary heap
+operations use this rule; representation refinement excludes successful
+nonzero unchecked tagged releases. -/
 theorem effectStepSimulates_dec
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
     {labels : List Lean.FVarId} {module : Wasm.Module}
     {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
     {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
-    {objectId : Lean.FVarId} {amount : Nat} {objectFields? : Option Nat}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
     {objectKind : AbiKind}
     {continuation : Lean.Compiler.LCNF.Code .impure}
     {initial : Wasm.Store Host} {locals : Wasm.Locals}
@@ -4647,7 +4669,7 @@ theorem effectStepSimulates_dec
     {sourceRuntime nextRuntime : RuntimeState}
     {targetRest : Wasm.Program} {witness : RefinementWitness}
     (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
-    (updated : decValue sourceRuntime sourceObject amount true = .ok nextRuntime)
+    (updated : decValue sourceRuntime sourceObject amount check = .ok nextRuntime)
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
       initial locals witness)
     (objectCompiled : Fir.Wasm.getLocal context objectId =
@@ -4660,20 +4682,20 @@ theorem effectStepSimulates_dec
     (descriptorsEq :
       initial.host.closureDescriptors = witness.closureDescriptors)
     (callFound : callIndex? sourceModule
-      (.runtime (.dec amount true objectFields?)) = some id)
+      (.runtime (.dec amount check objectFields?)) = some id)
     (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
       continuation targetRest)
     (hImp : module.imports[id]? = some imp)
     (hSat : hostEnv.Satisfies module spec)
     (hi : id < module.imports.length)
     (hContract : spec.contracts[id]? = some
-      (decrementContract amount true objectFields?))
+      (decrementContract amount check objectFields?))
     (hParams : imp.params.length = 1)
     (hResults : imp.results.length = 0) :
     ∃ heap,
       EffectStepSimulates context sourceModule sourceFunction labels module
         hostEnv sourceRuntime nextRuntime sourceEnv
-        (.dec objectId amount true false objectFields? continuation) continuation
+        (.dec objectId amount check false objectFields? continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
   have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
@@ -4694,7 +4716,7 @@ theorem effectStepSimulates_dec
           updated
       refine ⟨heap, ?_⟩
       apply effectStepSimulates_unaryHost
-        (step := decrementStep amount true objectFields?)
+        (step := decrementStep amount check objectFields?)
       · intro externals
         simp [executeStep, coreStep, objectLookup, updated]
       · exact codeAdapted_dec objectCompiled objectFound callFound

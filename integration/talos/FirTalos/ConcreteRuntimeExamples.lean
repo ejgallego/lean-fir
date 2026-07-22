@@ -148,6 +148,19 @@ private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? decrementGraphProgram 25
 
+/-- Unchecked release follows the same recursive heap path for an ordinary
+constructor; only tagged/promoted inputs distinguish the check bit. -/
+private def uncheckedDecrementGraphProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .dec p 1 false false (some 1) <|
+      .let (letDecl r LCNF.ImpureType.tobject (.lit (.nat 12))) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? uncheckedDecrementGraphProgram 25
+
 private def deleteObjectProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 20))) <|

@@ -2508,6 +2508,18 @@ impure LCNF arguments are either FVars or erased, object-field write
 composition now covers the complete argument syntax. No executable layout or
 shared semantic contract changed.
 
+W6.6bb closes unchecked nonpersistent decrement composition. The recursive
+whole-heap theorem now carries the outer check bit through every ordinary
+parent branch while retaining checked recursive child releases, exactly as
+both runtimes specify. Public repeated decrement, the concrete Talos host, and
+the source/compiler/adapter composition theorem are correspondingly generic.
+Successful nonzero unchecked tagged or promoted releases remain excluded by
+their exact representation semantics; amount zero remains the shared empty
+fold. A closed ordinary-constructor module executes an unchecked release
+through the full lowering and concrete-host path. Closure descriptor identity
+and all recursive ownership premises remain explicit. No executable layout or
+shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
