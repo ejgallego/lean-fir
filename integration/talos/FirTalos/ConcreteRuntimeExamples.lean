@@ -137,6 +137,22 @@ private def repeatedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsI64? repeatedScalarMutationProgram 77
 
+/-- A `UInt64` write at the second packed coordinate preserves the first
+disjoint field through lowering, adaptation, host resolution, and execution. -/
+private def disjointUInt64ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType
+        (.ctor { layoutInfo with ssize := 16 } #[.fvar x])) <|
+      .let (letDecl s u64Type (.lit (.uint64 66))) <|
+      .sset p 2 0 s u64Type <|
+      .let (letDecl u u64Type (.lit (.uint64 77))) <|
+      .sset p 2 8 u u64Type <|
+      .let (letDecl r u64Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsI64? disjointUInt64ScalarMutationProgram 66
+
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|

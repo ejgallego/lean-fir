@@ -3454,8 +3454,10 @@ theorem scalarSetStep_uint64_of_refines
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (replaced : semantic.scalarFields.filter (fun old =>
-      old.width != slotIndex || old.offset != byteOffset) = [])
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ old.offset)
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : byteOffset + 8 ≤ info.ssize)
     (updated : setScalarField runtime (.object (.heap location)) slotIndex
@@ -3474,8 +3476,8 @@ theorem scalarSetStep_uint64_of_refines
           obtain ⟨heap, semanticAfter, concreteOperation,
               semanticOperation, finalHeapRelated⟩ :=
             runtimeRelated.heap.writeScalarUInt64Field_refines mapped found live
-              objectEq descriptorFound slotIndex byteOffset field replaced
-              slotIndexEq fieldFits
+              objectEq descriptorFound slotIndex byteOffset field
+              retainedDisjoint slotIndexEq fieldFits
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
@@ -5229,8 +5231,9 @@ theorem effectStepSimulates_usizeSet
 
 /-- Packed-integer field mutation composed through exact compiler-assigned
 locals, the real compiler and adapter, the width-indexed concrete writer, and
-the generated binary host-call prefix. The current whole-heap mutation lemmas
-require the semantic packed-field list to be initially empty. -/
+the generated binary host-call prefix. `UInt64` writes preserve every retained
+field whose byte interval is disjoint; the other widths still require every
+earlier write to name the replaced coordinate. -/
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -5283,8 +5286,13 @@ theorem effectStepSimulates_scalarSet
     (objectEq : cell.object = .ctor semantic)
     (descriptorFound : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (replaced : semantic.scalarFields.filter (fun old =>
-      old.width != slotIndex || old.offset != byteOffset) = [])
+    (historySafe : match fieldKind with
+      | .uint64 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 8 ≤ old.offset
+      | _ => semantic.scalarFields.filter (fun old =>
+          old.width != slotIndex || old.offset != byteOffset) = [])
     (slotIndexEq : slotIndex = info.size + info.usize)
     (fieldFits : match fieldKind with
       | .uint8 => byteOffset + 1 ≤ info.ssize
@@ -5315,7 +5323,8 @@ theorem effectStepSimulates_scalarSet
       | uint8 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint8_of_refines initialRelated.1 objectRelated
-              (.uint8 encoded) found live objectEq descriptorFound replaced
+              (.uint8 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe)
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5339,7 +5348,8 @@ theorem effectStepSimulates_scalarSet
       | uint16 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint16_of_refines initialRelated.1 objectRelated
-              (.uint16 encoded) found live objectEq descriptorFound replaced
+              (.uint16 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe)
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5363,7 +5373,8 @@ theorem effectStepSimulates_scalarSet
       | uint32 encoded =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint32_of_refines initialRelated.1 objectRelated
-              (.uint32 encoded) found live objectEq descriptorFound replaced
+              (.uint32 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe)
               slotIndexEq (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost
@@ -5389,7 +5400,8 @@ theorem effectStepSimulates_scalarSet
       | uint64 =>
           obtain ⟨heap, operation, runtimeRelated⟩ :=
             scalarSetStep_uint64_of_refines initialRelated.1 objectRelated .uint64
-              found live objectEq descriptorFound replaced slotIndexEq
+              found live objectEq descriptorFound (by simpa using historySafe)
+              slotIndexEq
               (by simpa using fieldFits) updated
           refine ⟨heap, ?_⟩
           apply effectStepSimulates_binaryHost

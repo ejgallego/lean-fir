@@ -2520,6 +2520,17 @@ through the full lowering and concrete-host path. Closure descriptor identity
 and all recursive ownership premises remain explicit. No executable layout or
 shared semantic contract changed.
 
+W6.6bc opens retained packed-field framing at the wide write boundary. A
+successful checked `UInt64` write now preserves every retained semantic
+`UInt8`, `UInt16`, `UInt32`, or `UInt64` field whose byte interval is disjoint
+from the written eight-byte interval. The constructor proof carries those
+readbacks through the concrete byte/word frames; the complete-heap, Talos host,
+and generated `sset` composition theorems expose the same condition. A closed
+module writes two disjoint `UInt64` coordinates and projects the first value
+after the second write. The narrower writers still require same-coordinate
+replacement and are the next framing slices. No executable layout or shared
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
