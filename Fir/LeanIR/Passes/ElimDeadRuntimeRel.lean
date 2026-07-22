@@ -432,6 +432,55 @@ theorem ShadowRuntimeRel.allocLeftGarbage
     rightHeapFresh := related.rightHeapFresh
   }
 
+/-- A well-formed dead constructor evaluation either produces an immediate
+tag without changing the runtime, or allocates source-only unreachable
+garbage covered by `allocLeftGarbage`. -/
+theorem ShadowRuntimeRel.allocCtorLeftGarbage
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (info : LCNF.CtorInfo) (arguments : Array Value)
+    (arity : arguments.size = info.size) :
+    ∃ nextRuntime value,
+      allocCtor left info arguments = .ok (nextRuntime, value) ∧
+      ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · refine ⟨left, .object (.tagged (UInt64.ofNat info.cidx)), ?_, related⟩
+    simp [allocCtor, arity, empty.1.1, empty.1.2, empty.2]
+    rfl
+  · let object : ConstructorObject := {
+      tag := info.cidx
+      objectFields := arguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    refine ⟨(alloc left (.ctor object)).1,
+      .object (alloc left (.ctor object)).2, ?_,
+      related.allocLeftGarbage (.ctor object) false⟩
+    simp [allocCtor, arity, empty, object]
+    rfl
+
+/-- Interpreter-facing form of the constructor result: successful argument
+evaluation plus compiler arity well-formedness turns a dead constructor let
+into one source step that preserves the reachable runtime relation. -/
+theorem ShadowRuntimeRel.evalLetValueCtorLeftGarbage
+    (related : ShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra)
+    (argumentsResult : evalArgs state.env arguments = .ok values)
+    (arity : values.size = info.size) :
+    ∃ nextRuntime value,
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .ctor info arguments
+      } = .ok (nextRuntime, .value value) ∧
+      ShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra := by
+  rcases related.allocCtorLeftGarbage info values arity with
+    ⟨nextRuntime, value, allocated, nextRelated⟩
+  refine ⟨nextRuntime, value, ?_, nextRelated⟩
+  simp only [evalLetValue, argumentsResult, Bind.bind, Except.bind]
+  rw [allocated]
+  rfl
+
 theorem traceRoots_subset_runtimeRoots
     (runtime : RuntimeState) (extra : List Value) :
     RootSubset (traceRoots runtime.trace) (runtimeRoots runtime extra) := by

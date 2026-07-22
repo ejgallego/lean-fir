@@ -205,6 +205,32 @@ def neutralLiveState : MachineState :=
     control := .code neutralAfter
     env := liveEnv }
 
+/-- Kernel regression for the allocating bug-card fixture: evaluating the
+well-formed dead constructor may add a source heap cell, but the resulting
+runtime is still related to the unchanged empty target runtime because the
+constructor result is absent from all live roots. -/
+theorem deadCtorEvalPreservesReachableRuntime :
+    ∃ nextRuntime value,
+      evalLetValue neutralLiveState deadCtorDecl =
+          .ok (nextRuntime, .value value) ∧
+      ShadowRuntimeRel emptyAddressRenaming nextRuntime
+        ({} : RuntimeState) [] [] := by
+  have base : ShadowRuntimeRel emptyAddressRenaming
+      neutralLiveState.runtime ({} : RuntimeState) [] [] := by
+    simpa [neutralLiveState] using emptyRuntime_shadowRelated
+  have argumentsResult :
+      evalArgs neutralLiveState.env #[.fvar live] = .ok #[.erased] := by
+    simp [neutralLiveState, liveEnv, evalArgs, evalArg]
+    rfl
+  have arity : (#[.erased] : Array Value).size = oneFieldInfo.size := by
+    rfl
+  simpa [deadCtorDecl, letDecl] using
+    (base.evalLetValueCtorLeftGarbage
+      (state := neutralLiveState) (fvarId := dead)
+      (binderName := dead.name) (type := objType) (info := oneFieldInfo)
+      (arguments := #[.fvar live]) (values := #[.erased])
+      argumentsResult arity)
+
 /-- The liveness-indexed machine relation accepts the concrete environment
 difference introduced by executing and then deleting the dead binding. -/
 theorem deadBindingMachineRelated :
