@@ -888,14 +888,14 @@ theorem coreStep_uset_related
       | ok field =>
           dsimp
           have updateEq :
-              setUSizeField left.runtime object index field =
-                setUSizeField right.runtime object index field :=
+              setUSizeSlot left.runtime object index field =
+                setUSizeSlot right.runtime object index field :=
             congrArg
-              (fun runtime => setUSizeField runtime object index field)
+              (fun runtime => setUSizeSlot runtime object index field)
               related.runtime_eq
           rw [updateEq]
           exact runtimeResult_related current continuation
-            (setUSizeField right.runtime object index field)
+            (setUSizeSlot right.runtime object index field)
 
 theorem coreStep_sset_related
     (related : MachineRelated (CodeRel validCase) left right)

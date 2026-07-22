@@ -1452,17 +1452,17 @@ theorem coreStep_usizeSet_shadowRelated
           | ok fieldValue =>
               dsimp
               have effectEq :
-                  setUSizeField sourceState.runtime objectValue index
+                  setUSizeSlot sourceState.runtime objectValue index
                       fieldValue =
-                    setUSizeField targetState.runtime objectValue index
+                    setUSizeSlot targetState.runtime objectValue index
                       fieldValue :=
                 congrArg
                   (fun runtime =>
-                    setUSizeField runtime objectValue index fieldValue)
+                    setUSizeSlot runtime objectValue index fieldValue)
                   runtimeEq
               rw [effectEq]
               exact shadowRuntimeResult_related current continuation joins agree
-                (setUSizeField targetState.runtime objectValue index fieldValue)
+                (setUSizeSlot targetState.runtime objectValue index fieldValue)
 
 /-- A retained scalar-field write executes in lockstep. -/
 theorem coreStep_scalarSet_shadowRelated

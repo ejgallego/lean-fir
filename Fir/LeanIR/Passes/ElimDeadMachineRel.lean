@@ -2716,7 +2716,7 @@ theorem coreStep_deletedUSizeSet_reachableRelated
     (env : EnvRelOn rho used sourceState.env targetState.env)
     (objectRead : lookupValue sourceState.env object = .ok objectValue)
     (fieldRead : lookupValue sourceState.env field = .ok fieldValue)
-    (effect : setUSizeField sourceState.runtime objectValue index fieldValue =
+    (effect : setUSizeSlot sourceState.runtime objectValue index fieldValue =
       .ok nextRuntime)
     (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
       (envRootsOn used sourceState.env ++ sourceFrameRoots)
@@ -2800,7 +2800,8 @@ def DeletedUSizeSetReadyAt (state : MachineState) (roots : List Value)
     findCell? state.runtime.heap location = some cell ∧
     cell.live = true ∧
     cell.object = .ctor constructor ∧
-    index < constructor.usizeFields.size ∧
+    constructor.objectFields.size ≤ index ∧
+    index - constructor.objectFields.size < constructor.usizeFields.size ∧
     ¬Reachable state.runtime.heap roots location
 
 def DeletedScalarSetReadyAt (state : MachineState) (roots : List Value)
@@ -2881,8 +2882,8 @@ theorem coreStep_deletedUSizeSet_of_ready
           { targetState with control := .code targetContinuation } := by
   rcases ready with
     ⟨location, cell, constructor, fieldValue,
-      objectRead, fieldRead, found, live, objectEq, bounded, unreachable⟩
-  rcases runtime.setUSizeFieldLeftUnreachable found live objectEq bounded
+      objectRead, fieldRead, found, live, objectEq, lower, bounded, unreachable⟩
+  rcases runtime.setUSizeSlotLeftUnreachable found live objectEq lower bounded
       unreachable fieldValue with
     ⟨nextRuntime, effect, next⟩
   exact ⟨nextRuntime,

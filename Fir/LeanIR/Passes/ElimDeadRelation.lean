@@ -657,14 +657,14 @@ theorem coreStep_codeLive_related
           | ok fieldValue =>
               simp only
               have effectEq :
-                  setUSizeField leftState.runtime objectValue index fieldValue =
-                    setUSizeField rightState.runtime objectValue index fieldValue :=
+                  setUSizeSlot leftState.runtime objectValue index fieldValue =
+                    setUSizeSlot rightState.runtime objectValue index fieldValue :=
                 congrArg
-                  (fun runtime => setUSizeField runtime objectValue index fieldValue)
+                  (fun runtime => setUSizeSlot runtime objectValue index fieldValue)
                   runtimeEq
               rw [effectEq]
               generalize effectRead :
-                setUSizeField rightState.runtime objectValue index fieldValue =
+                setUSizeSlot rightState.runtime objectValue index fieldValue =
                   effectResult
               cases effectResult with
               | error fault => exact failure fault
@@ -1056,7 +1056,7 @@ theorem coreStep_codeExact_related
           | ok fieldValue =>
               simp only
               generalize effectRead :
-                setUSizeField runtime objectValue index fieldValue = effectResult
+                setUSizeSlot runtime objectValue index fieldValue = effectResult
               cases effectResult with
               | error fault =>
                   simp only

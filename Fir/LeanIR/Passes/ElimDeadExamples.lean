@@ -58,7 +58,7 @@ def allocatingAfter : LCNF.Code .impure := neutralAfter
 
 def deletedWritesBefore : LCNF.Code .impure :=
   .oset dead 0 .erased <|
-  .uset dead 0 usizeField <|
+  .uset dead 1 usizeField <|
   .sset dead 8 0 scalarField u8Type <|
   .return live
 
@@ -346,7 +346,7 @@ theorem deletedWritesShadowRun :
 
 theorem deletedUSizeScalarShadowRun :
     shadowCode? 3 {}
-        (.uset dead 0 usizeField <|
+        (.uset dead 1 usizeField <|
           .sset dead 8 0 scalarField u8Type <| .return live) =
       some (.return live, neutralUsed) := by
   have liveMember : live ∈ ({} : UsedLocals).insert live := by
@@ -542,7 +542,7 @@ def deletedObjectSetSourceState : MachineState :=
 
 def deletedUSizeSetSourceState : MachineState :=
   { program := deletedWritesBeforeProgram
-    control := .code (.uset dead 0 usizeField <|
+    control := .code (.uset dead 1 usizeField <|
       .sset dead 8 0 scalarField u8Type <| .return live)
     env := deletedWriteSourceEnv
     runtime := deletedWriteSourceRuntime }
@@ -777,7 +777,7 @@ theorem closedBoxShadowGraph :
 
 theorem deletedUSizeScalarShadowGraph :
     ShadowCodeGraph 4 neutralUsed
-      (.uset dead 0 usizeField <|
+      (.uset dead 1 usizeField <|
         .sset dead 8 0 scalarField u8Type <| .return live)
       (.return live) := by
   exact ⟨3, {}, neutralUsed, by omega,
@@ -1238,14 +1238,15 @@ theorem deletedUSizeSetReady :
     DeletedUSizeSetReadyAt deletedUSizeSetSourceState
       (runtimeRoots deletedUSizeSetSourceState.runtime
         (envRootsOn neutralUsed deletedUSizeSetSourceState.env))
-      dead 0 usizeField := by
+      dead 1 usizeField := by
   refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_⟩
+    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_, ?_⟩
   · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
   · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
   · rfl
+  · simp [deletedWriteObject]
   · simp [deletedWriteObject]
   · simpa [deletedUSizeSetSourceState] using
       deletedWriteDestinationUnreachable
@@ -1272,7 +1273,7 @@ theorem deletedObjectSetSourceOnlyMachineStep :
       let sourceAfter := {
         deletedObjectSetSourceState with
         runtime := nextRuntime
-        control := .code (.uset dead 0 usizeField <|
+        control := .code (.uset dead 1 usizeField <|
           .sset dead 8 0 scalarField u8Type <| .return live) }
       coreStep deletedObjectSetSourceState = .next sourceAfter ∧
         ReachableMachineRelated 4 emptyAddressRenaming sourceAfter
@@ -1297,7 +1298,7 @@ theorem deletedObjectSetSourceOnlyMachineStep :
   have progress := coreStep_deletedObjectSet_of_ready
     (sourceState := deletedObjectSetSourceState)
     (targetState := deletedWritesTargetState)
-    (sourceContinuation := .uset dead 0 usizeField <|
+    (sourceContinuation := .uset dead 1 usizeField <|
       .sset dead 8 0 scalarField u8Type <| .return live)
     (targetContinuation := .return live)
     programs frames deletedUSizeScalarShadowGraph

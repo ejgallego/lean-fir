@@ -1908,6 +1908,41 @@ theorem ShadowRuntimeRel.setUSizeFieldLeftUnreachable
   rw [dif_pos bounded]
   simpa [replacement] using effect
 
+/-- An absolute final-LCNF unboxed-word slot changes only an unreachable cell.
+Object fields occupy the fixed-slot prefix before the type-local `USize`
+array. -/
+theorem ShadowRuntimeRel.setUSizeSlotLeftUnreachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (found : findCell? left.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor object)
+    (lower : object.objectFields.size ≤ slot)
+    (bounded : slot - object.objectFields.size < object.usizeFields.size)
+    (unreachable : ¬Reachable
+      left.heap (runtimeRoots left leftExtra) location)
+    (field : UInt64) :
+    ∃ result,
+      setUSizeSlot left (.object (.heap location)) slot (.usize field) =
+        .ok result ∧
+      ShadowRuntimeRel rho result right leftExtra rightExtra := by
+  let index := slot - object.objectFields.size
+  let replacement : HeapCell :=
+    { cell with object := .ctor {
+        object with usizeFields := object.usizeFields.set index field } }
+  rcases related.setCellLeftUnreachable found unreachable replacement with
+    ⟨result, effect, next⟩
+  refine ⟨result, ?_, next⟩
+  have constructor : getConstructor left (.object (.heap location)) =
+      .ok (location, cell, object) := by
+    simp [getConstructor, getLiveCell, found, live, objectEq,
+      Bind.bind, Except.bind]
+    rfl
+  unfold setUSizeSlot modifyConstructor
+  rw [constructor]
+  simp only [Bind.bind, Except.bind]
+  rw [if_pos lower, dif_pos bounded]
+  simpa [index, replacement] using effect
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable

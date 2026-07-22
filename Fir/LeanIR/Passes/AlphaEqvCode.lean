@@ -1653,7 +1653,7 @@ theorem coreStep_code_related
           | ok fieldValue =>
               simp
               generalize effectEq :
-                setUSizeField rightState.runtime objectValue index fieldValue = effect
+                setUSizeSlot rightState.runtime objectValue index fieldValue = effect
               cases effect with
               | error fault =>
                   simp only
@@ -2479,7 +2479,7 @@ theorem coreStep_preserves_program (state : MachineState) :
               rename_i objectValue fieldValue
               simp only
               generalize effect :
-                setUSizeField runtime objectValue index fieldValue = effectResult
+                setUSizeSlot runtime objectValue index fieldValue = effectResult
               cases effectResult <;> simp only <;> trivial
           | sset object width offset field type continuation =>
               simp only [coreStep]
