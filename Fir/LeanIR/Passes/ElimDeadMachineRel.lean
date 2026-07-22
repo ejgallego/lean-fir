@@ -233,6 +233,204 @@ theorem ReachableFramesRelated.roots
   | nil => exact .nil
   | cons head tail ih => exact listRel_append head.roots ih
 
+/-- Related declaration arguments prepare related apply/cache frame stacks.
+Only an apply frame contributes new roots; a cache frame contributes none. -/
+theorem ReachableFramesRelated.prepareCall
+    (name : Name) (params : Array (LCNF.Param .impure))
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (extraArguments : ArrayRel (ValueRel rho)
+      sourceExtraArguments targetExtraArguments)
+    (related : ReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceRoots targetRoots) :
+    ReachableFramesRelated fuel rho
+      (let frames := if sourceExtraArguments.isEmpty then sourceFrames
+        else .apply sourceExtraArguments :: sourceFrames
+       if params.isEmpty && sourceArguments.isEmpty then
+          .cache name :: frames
+       else frames)
+      (let frames := if targetExtraArguments.isEmpty then targetFrames
+        else .apply targetExtraArguments :: targetFrames
+       if params.isEmpty && targetArguments.isEmpty then
+          .cache name :: frames
+       else frames)
+      (if sourceExtraArguments.isEmpty then sourceRoots
+        else sourceExtraArguments.toList ++ sourceRoots)
+      (if targetExtraArguments.isEmpty then targetRoots
+        else targetExtraArguments.toList ++ targetRoots) := by
+  have extraSize := arrayRel_size_eq extraArguments
+  have argumentSize := arrayRel_size_eq arguments
+  have extraEmptyEq : sourceExtraArguments.isEmpty =
+      targetExtraArguments.isEmpty := by
+    simp [Array.isEmpty, extraSize]
+  have argumentsEmptyEq : sourceArguments.isEmpty =
+      targetArguments.isEmpty := by
+    simp [Array.isEmpty, argumentSize]
+  rw [← extraEmptyEq, ← argumentsEmptyEq]
+  by_cases extraEmpty : sourceExtraArguments.isEmpty
+  · by_cases cache : params.isEmpty && sourceArguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        ReachableFramesRelated.cons
+          (ReachableFrameRelated.cache (fuel := fuel) (rho := rho) name)
+          related
+    · simpa [extraEmpty, cache] using related
+  · by_cases cache : params.isEmpty && sourceArguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        ReachableFramesRelated.cons
+          (ReachableFrameRelated.cache (fuel := fuel) (rho := rho) name)
+          (ReachableFramesRelated.cons
+            (ReachableFrameRelated.apply extraArguments) related)
+    · simpa [extraEmpty, cache] using
+        ReachableFramesRelated.cons
+          (ReachableFrameRelated.apply extraArguments) related
+
+/-- Entering related internal declaration bodies after argument splitting and
+parameter binding preserves the reachable machine relation.  The new control
+roots come from call arguments; the prepared frame roots come from extra
+arguments and the old stack, so the runtime relation can be restricted from
+the original invocation roots. -/
+theorem enterInternalDecl_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (body : ShadowCodeGraph fuel used sourceCode targetCode)
+    (sourceBinding : bindParams params
+      (sourceArguments.extract 0 params.size) = .ok sourceEnv)
+    (targetBinding : bindParams params
+      (targetArguments.extract 0 params.size) = .ok targetEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    let sourceExtraArguments :=
+      sourceArguments.extract params.size sourceArguments.size
+    let targetExtraArguments :=
+      targetArguments.extract params.size targetArguments.size
+    let sourcePreparedFrames :=
+      let frames := if sourceExtraArguments.isEmpty then sourceFrames
+        else .apply sourceExtraArguments :: sourceFrames
+      if params.isEmpty && sourceArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    let targetPreparedFrames :=
+      let frames := if targetExtraArguments.isEmpty then targetFrames
+        else .apply targetExtraArguments :: targetFrames
+      if params.isEmpty && targetArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    ReachableMachineRelated fuel rho
+      { sourceState with
+        env := sourceEnv
+        joins := []
+        frames := sourcePreparedFrames
+        control := .code sourceCode }
+      { targetState with
+        env := targetEnv
+        joins := []
+        frames := targetPreparedFrames
+        control := .code targetCode } := by
+  dsimp only
+  have callArguments : ArrayRel (ValueRel rho)
+      (sourceArguments.extract 0 params.size)
+      (targetArguments.extract 0 params.size) :=
+    arrayRel_extract arguments 0 params.size
+  have argumentSize := arrayRel_size_eq arguments
+  have extraArguments : ArrayRel (ValueRel rho)
+      (sourceArguments.extract params.size sourceArguments.size)
+      (targetArguments.extract params.size targetArguments.size) := by
+    simpa [argumentSize] using
+      arrayRel_extract arguments params.size sourceArguments.size
+  have binding := bindParams_relOn (rho := rho) (params := params)
+    used callArguments
+  rw [sourceBinding, targetBinding] at binding
+  cases binding with
+  | ok envRelated =>
+      have preparedFrames := frames.prepareCall name params arguments
+        extraArguments
+      have sourcePartition :=
+        array_extract_partition sourceArguments params.size
+      have targetPartition :=
+        array_extract_partition targetArguments params.size
+      have sourceSubset : RootSubset
+          (envRootsOn used sourceEnv ++
+            (if (sourceArguments.extract params.size sourceArguments.size).isEmpty
+              then sourceFrameRoots
+              else (sourceArguments.extract params.size
+                sourceArguments.size).toList ++ sourceFrameRoots))
+          (sourceArguments.toList ++ sourceFrameRoots) := by
+        intro root member
+        rcases List.mem_append.mp member with boundRoot | preparedRoot
+        · apply List.mem_append_left
+          rw [← sourcePartition]
+          exact List.mem_append_left _
+            (envRootsOn_bindParams_subset sourceBinding root boundRoot)
+        · by_cases empty :
+              (sourceArguments.extract params.size
+                sourceArguments.size).isEmpty
+          · simp [empty] at preparedRoot
+            exact List.mem_append_right _ preparedRoot
+          · have preparedRoot' : root ∈
+                (sourceArguments.extract params.size
+                  sourceArguments.size).toList ++ sourceFrameRoots := by
+              simpa only [empty, Bool.false_eq_true, if_false] using
+                preparedRoot
+            rcases List.mem_append.mp preparedRoot' with
+              extraRoot | frameRoot
+            · apply List.mem_append_left
+              rw [← sourcePartition]
+              exact List.mem_append_right _ extraRoot
+            · exact List.mem_append_right _ frameRoot
+      have targetSubset : RootSubset
+          (envRootsOn used targetEnv ++
+            (if (targetArguments.extract params.size targetArguments.size).isEmpty
+              then targetFrameRoots
+              else (targetArguments.extract params.size
+                targetArguments.size).toList ++ targetFrameRoots))
+          (targetArguments.toList ++ targetFrameRoots) := by
+        intro root member
+        rcases List.mem_append.mp member with boundRoot | preparedRoot
+        · apply List.mem_append_left
+          rw [← targetPartition]
+          exact List.mem_append_left _
+            (envRootsOn_bindParams_subset targetBinding root boundRoot)
+        · by_cases empty :
+              (targetArguments.extract params.size
+                targetArguments.size).isEmpty
+          · simp [empty] at preparedRoot
+            exact List.mem_append_right _ preparedRoot
+          · have preparedRoot' : root ∈
+                (targetArguments.extract params.size
+                  targetArguments.size).toList ++ targetFrameRoots := by
+              simpa only [empty, Bool.false_eq_true, if_false] using
+                preparedRoot
+            rcases List.mem_append.mp preparedRoot' with
+              extraRoot | frameRoot
+            · apply List.mem_append_left
+              rw [← targetPartition]
+              exact List.mem_append_right _ extraRoot
+            · exact List.mem_append_right _ frameRoot
+      have nextRuntime := runtime.restrictExtra
+        (listRel_append (envRootsOn_related envRelated)
+          preparedFrames.roots)
+        sourceSubset targetSubset
+      unfold ReachableMachineRelated
+      exact ⟨envRootsOn used sourceEnv, envRootsOn used targetEnv,
+        (if (sourceArguments.extract params.size
+            sourceArguments.size).isEmpty
+          then sourceFrameRoots
+          else (sourceArguments.extract params.size
+            sourceArguments.size).toList ++ sourceFrameRoots),
+        (if (targetArguments.extract params.size
+            targetArguments.size).isEmpty
+          then targetFrameRoots
+          else (targetArguments.extract params.size
+            targetArguments.size).toList ++ targetFrameRoots),
+        programs, .code body (.empty fuel used) envRelated,
+        preparedFrames, nextRuntime⟩
+
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/
 theorem ReachableMachineRelated.monoRenaming

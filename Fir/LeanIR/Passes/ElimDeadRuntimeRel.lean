@@ -162,6 +162,38 @@ theorem listRel_append
   | nil => exact second
   | cons head tail ih => exact .cons head ih
 
+theorem listRel_length_eq
+    (related : ListRel relation left right) : left.length = right.length := by
+  induction related with
+  | nil => rfl
+  | cons head tail ih => simp [ih]
+
+theorem listRel_take (count : Nat)
+    (related : ListRel relation left right) :
+    ListRel relation (left.take count) (right.take count) := by
+  induction related generalizing count with
+  | nil => cases count <;> exact .nil
+  | cons head tail ih =>
+      cases count with
+      | zero => exact .nil
+      | succ count => exact .cons head (ih count)
+
+theorem listRel_drop (count : Nat)
+    (related : ListRel relation left right) :
+    ListRel relation (left.drop count) (right.drop count) := by
+  induction related generalizing count with
+  | nil => cases count <;> exact .nil
+  | cons head tail ih =>
+      cases count with
+      | zero => exact .cons head tail
+      | succ count => exact ih count
+
+theorem listRel_extract (start stop : Nat)
+    (related : ListRel relation left right) :
+    ListRel relation (left.extract start stop) (right.extract start stop) := by
+  rw [List.extract_eq_take_drop, List.extract_eq_take_drop]
+  exact listRel_take (stop - start) (listRel_drop start related)
+
 theorem listRel_flatMap
     (related : ListRel relation left right)
     (elements : ∀ {leftValue rightValue}, relation leftValue rightValue →
@@ -210,6 +242,17 @@ theorem arrayRel_mono
     (related : ArrayRel relation left right) :
     ArrayRel larger left right :=
   listRel_mono element related
+
+theorem arrayRel_size_eq
+    (related : ArrayRel relation left right) : left.size = right.size := by
+  simpa [ArrayRel] using listRel_length_eq related
+
+theorem arrayRel_extract (related : ArrayRel relation left right)
+    (start stop : Nat) :
+    ArrayRel relation (left.extract start stop) (right.extract start stop) := by
+  unfold ArrayRel
+  simp only [Array.toList_extract]
+  exact listRel_extract start stop related
 
 theorem heapObjectRel_mono
     (extension : RenamingExtends smaller larger)
@@ -807,6 +850,11 @@ def EnvRelOn (rho : AddressRenaming) (used : UsedLocals)
   ∀ fvarId, used.contains fvarId = true →
     OptionalRel (ValueRel rho) (lookup left fvarId) (lookup right fvarId)
 
+theorem EnvRelOn.empty (rho : AddressRenaming) (used : UsedLocals) :
+    EnvRelOn rho used [] [] := by
+  intro fvarId member
+  exact .none
+
 /-- Canonical runtime roots contributed by the live portion of an
 environment.  `filterMap` drops malformed/missing live lookups symmetrically. -/
 def envRootsOn (used : UsedLocals) (env : Env) : List Value :=
@@ -873,6 +921,72 @@ theorem envRootsOn_bind_subset :
     apply List.mem_filterMap.mpr
     exact ⟨fvarId, keyMember,
       by simpa [lookup_bind_of_name_ne sameName] using found⟩
+
+/-- Roots in an environment produced by binding a parameter/value prefix
+come either from those values or from the starting environment. -/
+theorem envRootsOn_bindPairs_subset
+    (params : List (LCNF.Param .impure)) (values : List Value) :
+    RootSubset
+      (envRootsOn used
+        ((params.zip values).foldl
+          (fun env pair => bind env pair.1.fvarId pair.2) sourceEnv))
+      (values ++ envRootsOn used sourceEnv) := by
+  induction values generalizing params sourceEnv with
+  | nil =>
+      simpa using (RootSubset.refl (envRootsOn used sourceEnv))
+  | cons value values ih =>
+      cases params with
+      | nil =>
+          intro root member
+          simp only [List.zip, List.foldl_nil, List.mem_append,
+            List.mem_cons]
+          exact Or.inr member
+      | cons param params =>
+          simp only [List.zip, List.foldl_cons]
+          intro root member
+          have next := ih (params := params)
+            (sourceEnv := bind sourceEnv param.fvarId value) root member
+          simp only [List.mem_append, List.mem_cons] at next ⊢
+          rcases next with later | rebound
+          · exact Or.inl (Or.inr later)
+          · have rooted := envRootsOn_bind_subset root rebound
+            simp only [List.mem_cons] at rooted
+            rcases rooted with same | old
+            · exact Or.inl (Or.inl same)
+            · exact Or.inr old
+
+theorem envRootsOn_bindParams_subset
+    (bound : bindParams params arguments = .ok env) :
+    RootSubset (envRootsOn used env) arguments.toList := by
+  unfold bindParams at bound
+  cases arityEq : params.size == arguments.size with
+  | false => simp [arityEq] at bound
+  | true =>
+      simp [arityEq] at bound
+      subst env
+      have roots := envRootsOn_bindPairs_subset
+        (used := used) (sourceEnv := []) params.toList arguments.toList
+      intro root member
+      rcases List.mem_append.mp (roots root member) with
+        inArguments | inEmpty
+      · exact inArguments
+      · simp [envRootsOn, lookup] at inEmpty
+
+/-- The call and extra-argument slices used by `invokeDecl` partition the
+original argument array. -/
+theorem array_extract_partition (values : Array α) (split : Nat) :
+    (values.extract 0 split).toList ++
+      (values.extract split values.size).toList = values.toList := by
+  simp only [Array.toList_extract, List.extract_eq_take_drop,
+    List.drop_zero, Nat.sub_zero]
+  rw [← Array.length_toList]
+  have tail :
+      List.take (values.toList.length - split) (values.toList.drop split) =
+        values.toList.drop split := by
+    rw [← List.length_drop]
+    exact List.take_length
+  rw [tail]
+  exact List.take_append_drop split values.toList
 
 theorem lookupRoots_related
     (keys : List FVarId)
@@ -972,6 +1086,51 @@ theorem EnvRelOn.bindBoth
     simpa using OptionalRel.some related
   · rw [lookup_bind_of_name_ne sameName, lookup_bind_of_name_ne sameName]
     exact agree fvarId member
+
+/-- Binding pointwise-related argument values to the same parameter list
+preserves relational lookup agreement from arbitrary starting environments. -/
+theorem EnvRelOn.bindPairsBoth
+    (agree : EnvRelOn rho used sourceEnv targetEnv)
+    (params : List (LCNF.Param .impure))
+    (values : ListRel (ValueRel rho) sourceValues targetValues) :
+    EnvRelOn rho used
+      ((params.zip sourceValues).foldl
+        (fun env pair => bind env pair.1.fvarId pair.2) sourceEnv)
+      ((params.zip targetValues).foldl
+        (fun env pair => bind env pair.1.fvarId pair.2) targetEnv) := by
+  induction values generalizing params sourceEnv targetEnv with
+  | nil => simpa using agree
+  | cons value rest ih =>
+      cases params with
+      | nil => simpa using agree
+      | cons param params =>
+          simp only [List.zip, List.foldl_cons]
+          exact ih (agree.bindBoth (binder := param.fvarId) value) params
+
+inductive EnvResultRelOn (rho : AddressRenaming) (used : UsedLocals) :
+    Except RuntimeFault Env → Except RuntimeFault Env → Prop where
+  | error (fault : RuntimeFault) :
+      EnvResultRelOn rho used (.error fault) (.error fault)
+  | ok (env : EnvRelOn rho used source target) :
+      EnvResultRelOn rho used (.ok source) (.ok target)
+
+/-- Relational parameter binding for declaration entry.  Related argument
+arrays have equal arity; successful binding yields environments related on
+every liveness set requested by the entered body. -/
+theorem bindParams_relOn (used : UsedLocals)
+    (values : ArrayRel (ValueRel rho) sourceArguments targetArguments) :
+    EnvResultRelOn rho used
+      (bindParams params sourceArguments)
+      (bindParams params targetArguments) := by
+  have sizeEq := arrayRel_size_eq values
+  unfold bindParams
+  rw [← sizeEq]
+  generalize arityEq : (params.size == sourceArguments.size) = arity
+  cases arity with
+  | false => exact .error _
+  | true =>
+      exact .ok ((EnvRelOn.empty rho used).bindPairsBoth
+        params.toList values)
 
 /-- Runtime states agree observationally on all supplied live roots, while
 allowing different unreachable heap cells and fresh-location counters. -/
