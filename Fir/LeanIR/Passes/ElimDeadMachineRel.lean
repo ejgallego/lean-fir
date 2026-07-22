@@ -273,6 +273,59 @@ theorem coreStep_deletedLiteral_reachableRelated
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
 
+/-- Successful argument evaluation and constructor arity are the operational
+well-formedness facts needed for a deleted constructor allocation. -/
+inductive DeletedCtorReadyAt (state : MachineState) (info : LCNF.CtorInfo)
+    (arguments : Array (LCNF.Arg .impure)) : Prop where
+  | mk (values : Array Value)
+      (argumentsRead : evalArgs state.env arguments = .ok values)
+      (arity : values.size = info.size) :
+      DeletedCtorReadyAt state info arguments
+
+/-- A deleted constructor is immediate or allocates one unreachable cell, so
+its source step preserves the reachable machine relation. -/
+theorem coreStep_deletedCtor_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedCtorReadyAt sourceState info arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .ctor info arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases ready with ⟨values, argumentsRead, arity⟩
+  rcases runtime.evalLetValueCtorLeftGarbage
+      (fvarId := fvarId) (binderName := binderName) (type := type)
+      argumentsRead arity with
+    ⟨nextRuntime, value, evaluated, next⟩
+  exact ⟨nextRuntime, value,
+    coreStep_deletedLet_reachableRelated sourceState targetState
+      programs frames continuation joins env absent evaluated next⟩
+
 /-- Operational well-formedness needed to execute a deleted partial
 application: its fixed arguments resolve, its declaration exists, and the
 application is genuinely partial. -/
@@ -840,6 +893,110 @@ theorem coreStep_deletedReset_of_ready
   exact ⟨nextRuntime, token,
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
+
+/-- Unified operational certificate for every locally stutterable deleted
+let-value shape.  `runtimeNeutral` covers successful erased/projection/unbox/
+`isShared` reads (and other unchanged-runtime values); the remaining
+constructors expose the allocation or ownership facts used above.
+
+There is intentionally no nullary `.fap` constructor: evaluating it starts a
+possibly observable declaration invocation rather than producing a local
+value step.  See `FIR-BUG-impure-elimDeadVars-nullary-fap-effects`. -/
+inductive DeletedLetReadyAt (state : MachineState) (roots : List Value) :
+    LCNF.LetDecl .impure → Prop where
+  | runtimeNeutral (declaration : LCNF.LetDecl .impure) (value : Value)
+      (evaluated : evalLetValue state declaration =
+        .ok (state.runtime, .value value)) :
+      DeletedLetReadyAt state roots declaration
+  | literal (fvarId : FVarId) (binderName : Name) (type : Expr)
+      (literalValue : LCNF.LitValue) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type, value := .lit literalValue }
+  | constructor (fvarId : FVarId) (binderName : Name) (type : Expr)
+      (info : LCNF.CtorInfo) (arguments : Array (LCNF.Arg .impure))
+      (ready : DeletedCtorReadyAt state info arguments) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type, value := .ctor info arguments }
+  | partialApplication (fvarId : FVarId) (binderName : Name)
+      (type : Expr) (name : Name) (arguments : Array (LCNF.Arg .impure))
+      (ready : DeletedPapReadyAt state name arguments) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type, value := .pap name arguments }
+  | box (fvarId : FVarId) (binderName : Name) (resultType boxedType : Expr)
+      (input : FVarId) (ready : DeletedBoxReadyAt state input) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type := resultType, value := .box boxedType input }
+  | reset (fvarId : FVarId) (binderName : Name) (type : Expr)
+      (count : Nat) (object : FVarId)
+      (ready : DeletedResetReadyAt state roots count object) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type, value := .reset count object }
+  | reuse (fvarId : FVarId) (binderName : Name) (type : Expr)
+      (token : FVarId) (info : LCNF.CtorInfo) (updateHeader : Bool)
+      (arguments : Array (LCNF.Arg .impure))
+      (ready : DeletedReuseReadyAt state roots token info arguments) :
+      DeletedLetReadyAt state roots {
+        fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments }
+
+/-- General deleted-let stuttering rule.  Once the transparent graph supplies
+the related continuation and binder absence, `DeletedLetReadyAt` dispatches
+all locally value-producing safe-elimination shapes to one source step and
+zero target steps. -/
+theorem coreStep_deletedLet_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      declaration) :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env declaration.fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact ⟨sourceState.runtime, value,
+        coreStep_deletedLet_reachableRelated sourceState targetState
+          programs frames continuation joins env absent evaluated runtime⟩
+  | literal fvarId binderName type literalValue =>
+      exact coreStep_deletedLiteral_reachableRelated
+        (literalValue := literalValue) sourceState targetState
+        programs frames continuation joins env absent runtime
+  | constructor fvarId binderName type info arguments ready =>
+      exact coreStep_deletedCtor_of_ready sourceState targetState
+        programs frames continuation joins env absent runtime ready
+  | partialApplication fvarId binderName type name arguments ready =>
+      exact coreStep_deletedPap_of_ready sourceState targetState
+        programs frames continuation joins env absent runtime ready
+  | box fvarId binderName resultType boxedType input ready =>
+      exact coreStep_deletedBox_of_ready sourceState targetState
+        programs frames continuation joins env absent runtime ready
+  | reset fvarId binderName type count object ready =>
+      exact coreStep_deletedReset_of_ready sourceState targetState
+        programs frames continuation joins env absent runtime ready
+  | reuse fvarId binderName type token info updateHeader arguments ready =>
+      exact coreStep_deletedReuse_of_ready sourceState targetState
+        programs frames continuation joins env absent runtime ready
 
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/

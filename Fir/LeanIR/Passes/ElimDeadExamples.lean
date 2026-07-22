@@ -896,6 +896,14 @@ theorem deletedBoxReady :
   simp [deletedBoxSourceState, deletedBoxSourceEnv,
     lookupValue, Impure.bind, lookup, boxInputVar]
 
+theorem deletedBoxUnifiedReady :
+    DeletedLetReadyAt deletedBoxSourceState
+      (runtimeRoots deletedBoxSourceState.runtime
+        (envRootsOn neutralUsed deletedBoxSourceState.env ++ []))
+      deadBoxDecl := by
+  unfold deadBoxDecl letDecl
+  exact .box dead dead.name objType u64Type boxInputVar deletedBoxReady
+
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
       (runtimeRoots deletedReuseNoneSourceState.runtime
@@ -1343,17 +1351,15 @@ theorem deletedBoxSourceOnlyMachineStep :
       (envRootsOn neutralUsed deletedBoxSourceState.env ++ [])
       (envRootsOn neutralUsed deletedBoxTargetState.env ++ []) := by
     simpa using deletedBoxRuntimeRelated
-  have progress := coreStep_deletedBox_of_ready
+  have progress := coreStep_deletedLet_of_ready
     (sourceState := deletedBoxSourceState)
     (targetState := deletedBoxTargetState)
     (sourceContinuation := .return live)
     (targetContinuation := .return live)
-    (fvarId := dead) (binderName := dead.name)
-    (resultType := objType) (boxedType := u64Type)
-    (input := boxInputVar)
+    (declaration := deadBoxDecl)
     programs frames returnLiveShadowGraph2
     (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
-    runtime deletedBoxReady
+    runtime deletedBoxUnifiedReady
   simpa [deletedBoxSourceState, deletedBoxTargetState,
     deletedBoxBefore, deletedBoxAfter, deadBoxDecl, letDecl] using progress
 

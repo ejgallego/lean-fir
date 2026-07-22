@@ -25,6 +25,28 @@ def safeToElim : LCNF.LetValue .impure → Bool
   | .fap _ args => args.isEmpty
   | .fvar .. => false
 
+/-- The syntax-only part of the safe-elimination policy whose successful
+evaluation produces a local value in one interpreter step.  Operational
+readiness (successful reads, arities, and ownership) remains a separate
+semantic premise. -/
+def locallyValueProducingSafeToElim : LCNF.LetValue .impure → Bool
+  | .ctor .. | .reset .. | .reuse .. | .oproj .. | .uproj .. | .sproj ..
+  | .lit .. | .pap .. | .box .. | .unbox .. | .erased .. | .isShared .. => true
+  | .fap .. | .fvar .. => false
+
+/-- Audit of Lean 4.32's eliminable impure let-value shapes.  The only
+`safeToElim` case outside the locally value-producing family is a full
+application whose argument array is empty. -/
+theorem safeToElim_local_or_nullaryFap
+    (value : LCNF.LetValue .impure)
+    (safe : safeToElim value = true) :
+    locallyValueProducingSafeToElim value = true ∨
+      ∃ name arguments,
+        value = .fap name arguments ∧ arguments.isEmpty = true := by
+  cases value <;>
+    simp_all [safeToElim, locallyValueProducingSafeToElim] <;>
+    contradiction
+
 /-! ## Transparent backwards liveness traversal -/
 
 /-- SHA-256 of `Lean/Compiler/LCNF/ElimDead.lean` in Lean 4.32.0. -/
