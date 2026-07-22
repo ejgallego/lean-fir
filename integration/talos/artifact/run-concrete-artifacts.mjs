@@ -17,17 +17,28 @@ const CONCRETE_FIXTURES = [
   "arg-uint64-max",
   "arg-uint8-max",
   "arg-usize-max",
+  "box-heap",
+  "box-roundtrip",
   "case",
+  "cached-constructor",
   "closure-call",
   "closure-underapply",
+  "compiler-shaped-mutation",
+  "constructor-delete-fault",
+  "constructor-graph-release",
+  "constructor-reference-counting",
   "ctor-projection",
   "default-case",
   "direct-call",
   "erased",
   "literal",
   "natural-heap",
+  "object-mutation",
   "projection-fault",
   "recursive-call",
+  "reset-reuse",
+  "shared-reset-reuse",
+  "tag-mutation",
   "uint16-max",
   "uint32-max",
   "uint64-max",
@@ -37,8 +48,11 @@ const CONCRETE_FIXTURES = [
 
 const REJECTED_FRAGMENT_FIXTURES = [
   "external-echo",
-  "mutation",
   "string-heap",
+];
+
+const EXPECTED_CONCRETE_FAULTS = [
+  ["mutation", { kind: "scalarFieldMissing", width: 1, offset: 0 }],
 ];
 
 export async function runConcreteArtifact(manifestPath) {
@@ -80,6 +94,24 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
       /unsupported concrete artifact operation/,
       `${fixture} unexpectedly crossed its concrete fragment gate`);
     console.log(`PASS concrete fragment gate ${fixture}`);
+  }
+  for (const [fixture, expectedFault] of EXPECTED_CONCRETE_FAULTS) {
+    const manifestPath = join(artifactDirectory, `${fixture}.wasm.json`);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const bytes = await readFile(manifestPath.slice(0, -".json".length));
+    const host = new ConcreteHost(manifest.imports);
+    const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    let actual;
+    try {
+      instance.exports[manifest.entry]();
+      actual = undefined;
+    } catch (error) {
+      if (!(error instanceof ConcreteFault)) throw error;
+      actual = error.fault;
+    }
+    assert.deepStrictEqual(actual, expectedFault,
+      `${fixture} did not retain its exact concrete expected failure`);
+    console.log(`PASS concrete expected failure ${fixture}`);
   }
 }
 

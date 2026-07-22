@@ -65,6 +65,85 @@ def abiObjectProjectionFaultProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r tobjectType (.oproj 2 p)) <|
       .return r)] }
 
+/-- Ownership artifact that stays inside the proved constructor fragment: one
+increment and decrement restore the freshly allocated object to uniqueness. -/
+def abiConstructorReferenceCountingProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u8Type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 17))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .inc p 1 false false <|
+      .dec p 1 false false (some 1) <|
+      .let (letDecl r u8Type (.isShared p)) <|
+      .return r)] }
+
+/-- Checked decrement releases an owned constructor graph before continuing
+with an independent immediate result. -/
+def abiConstructorGraphReleaseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 10))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .let (letDecl y objType
+        (.ctor { pairInfo with size := 1 } #[.fvar p])) <|
+      .dec y 1 true false (some 1) <|
+      .let (letDecl r tobjectType (.lit (.nat 12))) <|
+      .return r)] }
+
+/-- Positive packed-layout artifact using the scalar slot index emitted by
+Lean 4.32 after one object and one `USize` slot. -/
+def abiCompilerShapedMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl u usizeType (.lit (.usize 55))) <|
+      .uset p 0 u <|
+      .let (letDecl s u64Type (.lit (.uint64 66))) <|
+      .sset p 2 0 s u64Type <|
+      .let (letDecl r u64Type (.sproj 2 0 p)) <|
+      .return r)] }
+
+def abiCachedConstructorDecl : LCNF.Decl .impure :=
+  decl `abiCachedConstructor #[] objType (.code <|
+    .let (letDecl x tobjectType (.lit (.nat 42))) <|
+    .let (letDecl p objType
+      (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+    .return p)
+
+/-- A concrete cache miss publishes a recursively persistent constructor;
+the second generated call observes the Wasm flag/value globals and reuses it. -/
+def abiCachedConstructorProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[abiCachedConstructorDecl,
+      decl `main #[] tobjectType (.code <|
+        .let (letDecl p objType (.fap `abiCachedConstructor #[])) <|
+        .let (letDecl y objType (.fap `abiCachedConstructor #[])) <|
+        .let (letDecl r tobjectType (.oproj 0 y)) <|
+        .return r)] }
+
+def abiMaxUInt64BoxRoundtripProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code <|
+      .let (letDecl s u64Type (.lit (.uint64 18446744073709551615))) <|
+      .let (letDecl boxed tobjectType (.box u64Type s)) <|
+      .let (letDecl r u64Type (.unbox boxed)) <|
+      .return r)] }
+
+def abiMaxUInt64HeapBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] tobjectType (.code <|
+      .let (letDecl s u64Type (.lit (.uint64 18446744073709551615))) <|
+      .let (letDecl boxed tobjectType (.box u64Type s)) <|
+      .return boxed)] }
+
+/-- Delete-fault artifact independent of the still-gated concrete string
+representation. The subsequent checked read must report logical location 0. -/
+def abiConstructorDeleteFaultProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u8Type (.code <|
+      .let (letDecl x tobjectType (.lit (.nat 18))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .del p <|
+      .let (letDecl r u8Type (.isShared p)) <|
+      .return r)] }
+
 def abiCachedExternalProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[
       decl `cachedBinaryExternal #[] u64Type (.extern { entries := [] }),
@@ -110,9 +189,18 @@ def initialFixtures : List CorpusFixture := [
   { name := "object-mutation", program := abiObjectMutationProgram },
   { name := "tag-mutation", program := abiTagMutationProgram },
   { name := "reference-counting", program := rcProgram },
+  { name := "constructor-reference-counting",
+    program := abiConstructorReferenceCountingProgram },
+  { name := "constructor-graph-release",
+    program := abiConstructorGraphReleaseProgram },
+  { name := "compiler-shaped-mutation", program := abiCompilerShapedMutationProgram },
+  { name := "cached-constructor", program := abiCachedConstructorProgram },
+  { name := "box-roundtrip", program := abiMaxUInt64BoxRoundtripProgram },
+  { name := "box-heap", program := abiMaxUInt64HeapBoxProgram },
   { name := "reset-reuse", program := abiResetReuseProgram },
   { name := "shared-reset-reuse", program := abiSharedResetProgram },
   { name := "delete-fault", program := deletedProgram },
+  { name := "constructor-delete-fault", program := abiConstructorDeleteFaultProgram },
   { name := "direct-call", program := Fir.Wasm.abiDirectCallProgram },
   { name := "closure-call", program := Fir.Wasm.abiClosureCallProgram },
   { name := "closure-underapply", program := Fir.Wasm.abiClosureUnderApplyProgram },

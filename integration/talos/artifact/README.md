@@ -18,16 +18,25 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runner currently executes 23 closed artifacts through raw scalar
+The concrete runner currently executes 34 closed artifacts through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
 slots, natural and constructor allocation, cases/projection, ordinary and
-recursive direct calls, and single/multi-stage closure application. Its
+recursive direct calls, single/multi-stage closure application, object/tag
+mutation, balanced and recursive ownership updates, deletion, unique/shared
+reset/reuse, recursive cache publication, and maximum-width integer
+boxing/unboxing. Its
 logical-location map and allocation descriptors are observation-only data;
 runtime imports exchange physical words and consult the byte-level heap. The
-remaining mutation/ownership/reset-reuse families, strings, externals, initial
-heap loading, and browser client stay on the semantic runner until their
-concrete counterparts join this explicit allowlist. An unsupported import is
-rejected while constructing the concrete import object, before instantiation.
+remaining strings, externals, initial heap loading, and browser client stay on the semantic runner
+until their concrete counterparts join this explicit allowlist. An unsupported
+import is rejected while constructing the concrete import object, before
+instantiation.
+
+The historical hand-written `mutation` fixture is intentionally not in that
+success allowlist: it uses packed-scalar slot index `1` despite a one-object,
+one-`USize` prefix. The concrete runner asserts its exact
+`scalarFieldMissing(1, 0)` failure, while `compiler-shaped-mutation` uses Lean
+4.32's emitted index `2` and passes `USize` plus `UInt64` write/read execution.
 
 The W5 corpus also covers an effect-producing external call and a zero-argument
 external cached across two source calls. V8 and Talos agree on the returned

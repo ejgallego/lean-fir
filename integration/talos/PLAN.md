@@ -2336,6 +2336,26 @@ the semantic runner remains in parallel for the wider corpus while mutation,
 ownership, reset/reuse, strings, externals, initial heaps, and the browser
 client are ported in subsequent slices. No shared semantic contract changed.
 
+W6.6an widens that external-engine host across the concrete mutation and
+ownership protocol. Checked object-slot and constructor-tag writes now frame
+the byte-level header/payload exactly; increment, recursive decrement,
+`isShared`, delete, and unique/shared reset/reuse update physical reference
+counts and released headers without semantic handles. Four existing artifacts
+for object/tag mutation and both reuse branches now pass concretely. Two new
+Wasm-specific constructor fixtures exercise balanced increment/decrement,
+recursive owned-graph release, and the exact logical-location dead-object
+observation after deletion without
+weakening the still-gated string representation. A compiler-shaped
+packed-layout fixture executes `USize` and `UInt64` write/read at Lean 4.32's
+emitted slot index; cached-constructor execution covers miss publication,
+recursive graph persistence, and the subsequent hit; and maximum-`UInt64`
+fixtures cover both heap boxing and box/unbox round-trip. The Node concrete
+allowlist therefore contains 34 artifacts. The malformed historical
+scalar-layout fixture remains an exact `scalarFieldMissing(1, 0)` expected
+failure tied to its existing bug card; strings, externals, initial heaps, and
+browser execution remain subsequent slices. No shared semantic contract
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

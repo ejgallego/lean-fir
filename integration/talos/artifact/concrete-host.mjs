@@ -474,6 +474,113 @@ export class ConcreteHost {
     return signed32(this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * operation.index));
   }
 
+  objectSet(operation, args) {
+    assert.equal(args.length, 2, "object mutation host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    const field = this.checkedWord(operation.field, args[1]);
+    if (operation.index >= header.aux1) {
+      throw new ConcreteFault({
+        kind: "objectFieldOutOfBounds",
+        index: operation.index,
+        size: header.aux1,
+      });
+    }
+    this.writeU32(address + HEADER_BYTES + SLOT_BYTES * operation.index, field);
+  }
+
+  usizeProj(operation, args) {
+    assert.equal(args.length, 1, "usize projection host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    if (operation.index >= header.aux2) {
+      throw new ConcreteFault({
+        kind: "usizeFieldOutOfBounds",
+        index: operation.index,
+        size: header.aux2,
+      });
+    }
+    return BigInt.asIntN(64,
+      this.readU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + operation.index)));
+  }
+
+  usizeSet(operation, args) {
+    assert.equal(args.length, 2, "usize mutation host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    assert.equal(typeof args[1], "bigint", "usize mutation must use the WebAssembly i64 lane");
+    if (operation.index >= header.aux2) {
+      throw new ConcreteFault({
+        kind: "usizeFieldOutOfBounds",
+        index: operation.index,
+        size: header.aux2,
+      });
+    }
+    this.writeU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + operation.index), args[1]);
+  }
+
+  scalarByteWidth(kind) {
+    switch (kind) {
+      case "uint8": return 1;
+      case "uint16": return 2;
+      case "uint32": return 4;
+      case "uint64": return 8;
+      default: throw new Error(`unsupported concrete packed scalar kind: ${kind}`);
+    }
+  }
+
+  scalarAddress(operation, address, header) {
+    const bytes = this.scalarByteWidth(operation.result ?? operation.field);
+    if (operation.width !== header.aux1 + header.aux2 ||
+        operation.offset + bytes > header.aux3) {
+      throw new ConcreteFault({
+        kind: "scalarFieldMissing",
+        width: operation.width,
+        offset: operation.offset,
+      });
+    }
+    return address + HEADER_BYTES + SLOT_BYTES * operation.width + operation.offset;
+  }
+
+  scalarProj(operation, args) {
+    assert.equal(args.length, 1, "scalar projection host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    const fieldAddress = this.scalarAddress(operation, address, header);
+    switch (operation.result) {
+      case "uint8": return this.view.getUint8(fieldAddress);
+      case "uint16": return this.view.getUint16(fieldAddress, true);
+      case "uint32": return signed32(this.readU32(fieldAddress));
+      case "uint64": return BigInt.asIntN(64, this.readU64(fieldAddress));
+      default: throw new Error(`unsupported concrete packed scalar kind: ${operation.result}`);
+    }
+  }
+
+  scalarSet(operation, args) {
+    assert.equal(args.length, 2, "scalar mutation host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    const fieldAddress = this.scalarAddress(operation, address, header);
+    switch (operation.field) {
+      case "uint8":
+        this.view.setUint8(fieldAddress, unsigned32(args[1]));
+        return;
+      case "uint16":
+        this.view.setUint16(fieldAddress, unsigned32(args[1]), true);
+        return;
+      case "uint32":
+        this.writeU32(fieldAddress, args[1]);
+        return;
+      case "uint64":
+        assert.equal(typeof args[1], "bigint", "uint64 mutation must use i64");
+        this.writeU64(fieldAddress, args[1]);
+        return;
+      default:
+        throw new Error(`unsupported concrete packed scalar kind: ${operation.field}`);
+    }
+  }
+
+  setTag(operation, args) {
+    assert.equal(args.length, 1, "setTag host arity mismatch");
+    const [address, header] = this.constructorHeader(args[0]);
+    this.writeHeader(address, { ...header, aux0: Number(operation.tag) });
+  }
+
   getTag(args) {
     assert.equal(args.length, 1, "getTag host arity mismatch");
     const word = this.checkedWord("tobject", args[0]);
@@ -563,6 +670,295 @@ export class ConcreteHost {
       operation.result);
   }
 
+  markPersistentWord(word) {
+    const value = unsigned32(word);
+    const classification = this.classify(value);
+    if (classification === "immediate" || classification === "sentinel") return;
+    if (classification !== "heap") {
+      throw new ConcreteFault({ kind: "expectedObject" });
+    }
+    const header = this.readHeader(value);
+    if (header.persistent) return;
+    const owned = this.ownedWords(value, header);
+    this.writeHeader(value, { ...header, persistent: true, rc: 0 });
+    for (const child of owned) this.markPersistentWord(child);
+  }
+
+  cacheSet(operation, args) {
+    assert.equal(args.length, 1, "cacheSet host arity mismatch");
+    const physical = args[0];
+    if (OBJECT_KINDS.has(operation.value) || operation.value === "erased" ||
+        operation.value === "reuseToken") {
+      const word = this.checkedWord(operation.value, physical);
+      this.markPersistentWord(word);
+    }
+    this.globals.set(operation.declaration, { kind: operation.value, physical });
+    return physical;
+  }
+
+  boxedScalarCode(kind) {
+    switch (kind) {
+      case "uint8": return 1;
+      case "uint16": return 2;
+      case "uint32": return 3;
+      case "uint64": return 4;
+      case "usize": return 5;
+      default: throw new Error(`unsupported concrete boxed scalar kind: ${kind}`);
+    }
+  }
+
+  boxedScalarPayload(kind, physical) {
+    if (["uint8", "uint16", "uint32"].includes(kind)) {
+      assert.equal(typeof physical, "number", `${kind} box operand must use i32`);
+      return BigInt(unsigned32(physical));
+    }
+    assert.equal(typeof physical, "bigint", `${kind} box operand must use i64`);
+    return BigInt.asUintN(64, physical);
+  }
+
+  physicalScalar(kind, payload) {
+    return ["uint64", "usize"].includes(kind)
+      ? BigInt.asIntN(64, payload)
+      : signed32(payload);
+  }
+
+  box(operation, args) {
+    assert.equal(args.length, 1, "box host arity mismatch");
+    const payload = this.boxedScalarPayload(operation.scalar, args[0]);
+    if (payload <= MAX_TAGGED_PAYLOAD) {
+      return signed32(this.encodeTagged(payload));
+    }
+    const payloadBytes = ["uint64", "usize"].includes(operation.scalar) ? 8 : 4;
+    const address = this.allocate(KIND.boxed, SLOT_BYTES, {
+      aux0: this.boxedScalarCode(operation.scalar),
+      aux1: payloadBytes,
+    });
+    this.writeU64(address + HEADER_BYTES, payload);
+    this.descriptors.set(address, { kind: "boxed", scalarKind: operation.scalar });
+    return signed32(address);
+  }
+
+  unbox(operation, args) {
+    assert.equal(args.length, 1, "unbox host arity mismatch");
+    const word = this.checkedWord("tobject", args[0]);
+    const classification = this.classify(word);
+    if (classification === "immediate" || this.isPromotedTag(this.readHeader(word))) {
+      return this.physicalScalar(operation.scalar, this.taggedPayload(word));
+    }
+    const header = this.readHeader(word);
+    if (header.kind !== KIND.boxed) {
+      throw new ConcreteFault({ kind: "expectedScalar" });
+    }
+    const descriptor = this.descriptors.get(word);
+    assert.equal(descriptor?.kind, "boxed", "missing concrete boxed-scalar descriptor");
+    assert.equal(descriptor.scalarKind, operation.scalar,
+      "concrete boxed scalar kind does not match unbox operation");
+    return this.physicalScalar(operation.scalar, this.readU64(word + HEADER_BYTES));
+  }
+
+  isPromotedTag(header) {
+    return header.kind === KIND.natural && header.persistent && header.aux0 === 1;
+  }
+
+  isShared(args) {
+    assert.equal(args.length, 1, "isShared host arity mismatch");
+    const word = this.checkedWord("tobject", args[0]);
+    if (this.classify(word) === "immediate") return 1;
+    const header = this.readHeader(word);
+    return header.persistent || header.rc !== 1 ? 1 : 0;
+  }
+
+  inc(operation, args) {
+    assert.equal(args.length, 1, "inc host arity mismatch");
+    const word = unsigned32(args[0]);
+    const classification = this.classify(word);
+    if (classification === "immediate") {
+      if (operation.check) return;
+      throw new ConcreteFault({ kind: "expectedHeapReference" });
+    }
+    if (classification !== "heap") {
+      throw new ConcreteFault({ kind: "expectedObject" });
+    }
+    const header = this.readHeader(word);
+    if (this.isPromotedTag(header)) {
+      if (operation.check) return;
+      throw new ConcreteFault({ kind: "expectedHeapReference" });
+    }
+    if (!header.persistent) {
+      assert.ok(header.rc + operation.amount <= 0xffffffff,
+        "concrete reference count overflow");
+      this.writeHeader(word, { ...header, rc: header.rc + operation.amount });
+    }
+  }
+
+  ownedWords(address, header) {
+    const descriptor = this.descriptors.get(address);
+    const kinds = header.kind === KIND.constructor && descriptor?.kind === "constructor"
+      ? descriptor.fieldKinds
+      : header.kind === KIND.closure
+        ? this.closureDescriptors[header.aux3]
+        : [];
+    const result = [];
+    kinds.forEach((kind, index) => {
+      if (OBJECT_FIELD_KINDS.has(kind)) {
+        result.push(this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index));
+      }
+    });
+    return result;
+  }
+
+  releaseWord(word, check) {
+    const value = unsigned32(word);
+    const classification = this.classify(value);
+    if (classification === "immediate" || classification === "sentinel") {
+      if (check) return;
+      throw new ConcreteFault({
+        kind: classification === "immediate" ? "expectedHeapReference" : "expectedObject",
+      });
+    }
+    if (classification !== "heap") {
+      throw new ConcreteFault({ kind: "expectedObject" });
+    }
+    const header = this.readHeader(value);
+    if (this.isPromotedTag(header)) {
+      if (check) return;
+      throw new ConcreteFault({ kind: "expectedHeapReference" });
+    }
+    if (header.persistent) return;
+    if (header.rc === 0) {
+      throw new ConcreteFault({
+        kind: "referenceCountUnderflow",
+        location: this.locationOf(value),
+      });
+    }
+    if (header.rc > 1) {
+      this.writeHeader(value, { ...header, rc: header.rc - 1 });
+      return;
+    }
+    const owned = this.ownedWords(value, header);
+    this.writeHeader(value, {
+      kind: KIND.freed,
+      persistent: false,
+      live: false,
+      rc: 0,
+      bytes: header.bytes,
+      aux0: 0,
+      aux1: 0,
+      aux2: 0,
+      aux3: 0,
+    });
+    for (const child of owned) this.releaseWord(child, true);
+  }
+
+  dec(operation, args) {
+    assert.equal(args.length, 1, "dec host arity mismatch");
+    for (let index = 0; index < operation.amount; ++index) {
+      this.releaseWord(args[0], operation.check);
+    }
+  }
+
+  deleteObject(args) {
+    assert.equal(args.length, 1, "delete host arity mismatch");
+    const word = unsigned32(args[0]);
+    if (word === 0) return;
+    if (this.classify(word) !== "heap") {
+      throw new ConcreteFault({ kind: "expectedHeapReference" });
+    }
+    const header = this.readHeader(word);
+    if (this.isPromotedTag(header)) {
+      throw new ConcreteFault({ kind: "expectedHeapReference" });
+    }
+    this.writeHeader(word, {
+      kind: KIND.freed,
+      persistent: false,
+      live: false,
+      rc: 0,
+      bytes: header.bytes,
+      aux0: 0,
+      aux1: 0,
+      aux2: 0,
+      aux3: 0,
+    });
+  }
+
+  reset(operation, args) {
+    assert.equal(args.length, 1, "reset host arity mismatch");
+    const word = unsigned32(args[0]);
+    const classification = this.classify(word);
+    if (classification === "immediate") return 0;
+    if (classification !== "heap") {
+      throw new ConcreteFault({ kind: "expectedObject" });
+    }
+    const header = this.readHeader(word);
+    if (this.isPromotedTag(header) || header.persistent || header.rc !== 1) {
+      this.releaseWord(word, true);
+      return 0;
+    }
+    if (header.kind !== KIND.constructor) {
+      throw new ConcreteFault({ kind: "expectedConstructor" });
+    }
+    if (operation.objectFields > header.aux1) {
+      throw new ConcreteFault({
+        kind: "objectFieldOutOfBounds",
+        index: operation.objectFields,
+        size: header.aux1,
+      });
+    }
+    const owned = Array.from({ length: operation.objectFields }, (_, index) =>
+      this.readWordSlot(word + HEADER_BYTES + SLOT_BYTES * index));
+    for (let index = 0; index < operation.objectFields; ++index) {
+      this.writeWordSlot(word + HEADER_BYTES + SLOT_BYTES * index, this.encodeImmediate(0n));
+    }
+    for (const child of owned) this.releaseWord(child, true);
+    return signed32(word);
+  }
+
+  allocateConstructorOperation(operation, args) {
+    return this.allocCtor({
+      ...operation,
+      kind: "allocCtor",
+    }, args);
+  }
+
+  reuse(operation, args) {
+    assert.equal(args.length, operation.fields.length + 1, "reuse host arity mismatch");
+    const token = unsigned32(args[0]);
+    const fields = operation.fields.map((kind, index) =>
+      this.checkedWord(kind, args[index + 1]));
+    if (token === 0) {
+      return this.allocateConstructorOperation(operation, args.slice(1));
+    }
+    if (this.classify(token) !== "heap") {
+      throw new ConcreteFault({ kind: "expectedReuseToken" });
+    }
+    const header = this.readHeader(token);
+    if (header.kind !== KIND.constructor) {
+      throw new ConcreteFault({ kind: "expectedConstructor" });
+    }
+    const requiredBytes = align8(HEADER_BYTES + SLOT_BYTES * (operation.size + operation.usize) +
+      operation.ssize);
+    assert.ok(requiredBytes <= header.bytes,
+      `concrete reuse allocation is too small: ${header.bytes} < ${requiredBytes}`);
+    new Uint8Array(this.buffer, token + HEADER_BYTES, header.bytes - HEADER_BYTES).fill(0);
+    fields.forEach((field, index) =>
+      this.writeWordSlot(token + HEADER_BYTES + SLOT_BYTES * index, field));
+    this.writeHeader(token, {
+      ...header,
+      kind: KIND.constructor,
+      persistent: false,
+      live: true,
+      aux0: operation.updateHeader ? Number(operation.tag) : header.aux0,
+      aux1: operation.size,
+      aux2: operation.usize,
+      aux3: operation.ssize,
+    });
+    this.descriptors.set(token, {
+      kind: "constructor",
+      fieldKinds: [...operation.fields],
+    });
+    return signed32(token);
+  }
+
   importFunction(operation) {
     switch (operation.kind) {
       case "naturalLiteral":
@@ -571,6 +967,18 @@ export class ConcreteHost {
         return (...args) => this.allocCtor(operation, args);
       case "objectProj":
         return (...args) => this.objectProj(operation, args);
+      case "objectSet":
+        return (...args) => this.objectSet(operation, args);
+      case "usizeProj":
+        return (...args) => this.usizeProj(operation, args);
+      case "usizeSet":
+        return (...args) => this.usizeSet(operation, args);
+      case "scalarProj":
+        return (...args) => this.scalarProj(operation, args);
+      case "scalarSet":
+        return (...args) => this.scalarSet(operation, args);
+      case "setTag":
+        return (...args) => this.setTag(operation, args);
       case "getTag":
         return (...args) => this.getTag(args);
       case "partialApply":
@@ -579,6 +987,24 @@ export class ConcreteHost {
         return (...args) => this.closureMatches(operation, args);
       case "closureProj":
         return (...args) => this.closureProj(operation, args);
+      case "cacheSet":
+        return (...args) => this.cacheSet(operation, args);
+      case "box":
+        return (...args) => this.box(operation, args);
+      case "unbox":
+        return (...args) => this.unbox(operation, args);
+      case "isShared":
+        return (...args) => this.isShared(args);
+      case "inc":
+        return (...args) => this.inc(operation, args);
+      case "dec":
+        return (...args) => this.dec(operation, args);
+      case "delete":
+        return (...args) => this.deleteObject(args);
+      case "reset":
+        return (...args) => this.reset(operation, args);
+      case "reuse":
+        return (...args) => this.reuse(operation, args);
       default:
         throw new Error(`unsupported concrete artifact operation: ${operation.kind}`);
     }
