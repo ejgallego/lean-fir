@@ -33,7 +33,7 @@ private def RuntimeFixture.importsResolveExactly (fixture : RuntimeFixture) : Bo
     fixture.target.imports.length == fixture.hosts.env.funcs.length &&
     fixture.hosts.env.funcs.length == fixture.hosts.spec.contracts.length &&
     (fixture.source.imports.toList.zip fixture.hosts.hosts).all fun pair =>
-      pair.fst.operation? == some pair.snd.operation &&
+      pair.fst.key == pair.snd.key &&
         pair.snd.function.params ==
           pair.fst.signature.params.toList.map FirTalos.abiKind &&
         pair.snd.function.results ==
@@ -42,6 +42,11 @@ private def RuntimeFixture.importsResolveExactly (fixture : RuntimeFixture) : Bo
 private def RuntimeFixture.runMain (fixture : RuntimeFixture) : Wasm.Result Host :=
   Wasm.run 100 fixture.target ((fixture.target.findExport "main").getD 0)
     (initialStore fixture.source fixture.target) [] fixture.hosts.env
+
+private def RuntimeFixture.runMainWithExternals (fixture : RuntimeFixture)
+    (externals : Fir.Wasm.Concrete.ConcreteExternalImpl) : Wasm.Result Host :=
+  Wasm.run 100 fixture.target ((fixture.target.findExport "main").getD 0)
+    (initialStore fixture.source fixture.target externals) [] fixture.hosts.env
 
 private def fixtureReturnsWord? (program : Fir.LeanIR.ImpureProgram)
     (expected : UInt32) : Bool :=
@@ -209,10 +214,68 @@ theorem initialUnicodeString_liveHeapRel
 -- than reaching a concrete host that only traps after instantiation.
 #guard (hostFn? (.scalarProj 1 0 .float32)).isNone
 
-#guard Fir.Wasm.externalModule?.any fun source =>
-  match resolveHosts source with
-  | .error (.unsupportedExternalImport 0 `external) => true
-  | _ => false
+private def echoConcreteExternal : Fir.Wasm.Concrete.ConcreteExternalImpl where
+  call request before :=
+    match request.args[0]? with
+    | some value => .ok {
+        value
+        heap := before.heap
+        world := before.world + 1 }
+    | none =>
+        .error (.source (.externalFailure request.name "missing argument"))
+
+/-- The complete lowered external fixture resolves its source metadata,
+decodes UInt64 directly from the i64 lane, updates concrete world/trace state,
+and returns the same physical lane without a semantic handle table. -/
+private def externalFixtureReturnsAndRecords : Bool :=
+  (runtimeFixture? externalProgram).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMainWithExternals echoConcreteExternal with
+      | .Success [.i64 result] store =>
+          result == 90 && store.host.failure?.isNone &&
+            store.host.runtime.world == 1 &&
+            store.host.runtime.trace.size == 1 &&
+            store.host.runtime.trace[0]?.any fun event =>
+              event.name == `external &&
+                event.paramKinds == #[.uint64] &&
+                event.resultKind == .uint64 &&
+                match event.args[0]?, event.result with
+                | some (LaneValue.word64 argument),
+                    LaneValue.word64 returned =>
+                    event.args.size == 1 && argument == 90 && returned == 90
+                | _, _ => false
+      | _ => false
+
+#guard externalFixtureReturnsAndRecords
+
+private def externalFixtureRejectsByDefault : Bool :=
+  (runtimeFixture? externalProgram).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Trap store _ =>
+          store.host.failure? == some (.runtime (.source (.runtime
+            (.externalFailure `external
+              "no concrete external implementation installed"))))
+      | _ => false
+
+#guard externalFixtureRejectsByDefault
+
+private def wrongLaneConcreteExternal :
+    Fir.Wasm.Concrete.ConcreteExternalImpl where
+  call _ before := .ok {
+    value := .word32 (Word32.ofUInt32 90)
+    heap := before.heap
+    world := before.world }
+
+private def externalFixtureRejectsWrongResultLane : Bool :=
+  (runtimeFixture? externalProgram).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMainWithExternals wrongLaneConcreteExternal with
+      | .Trap store _ =>
+          store.host.failure? == some (.resultLaneMismatch .i64 .i32)
+      | _ => false
+
+#guard externalFixtureRejectsWrongResultLane
 
 private def emptyHostStore : Wasm.Store Host :=
   ({ funcs := [] } : Wasm.Module).initialStore

@@ -568,8 +568,17 @@ inductive HostFailure where
   | runtime (failure : ConcreteTrap)
   | arityMismatch (expected actual : Nat)
   | laneMismatch (index : Nat) (expected : Fir.Wasm.ValueType)
+  | resultLaneMismatch (expected actual : Fir.Wasm.ValueType)
   | unsupportedScalarKind (kind : AbiKind)
   deriving Inhabited, BEq, Repr
+
+/-- Safe executable default for modules whose caller has not installed a
+concrete foreign-function implementation. The source-shaped failure is
+retained by `ConcreteError.toTrap` at the Talos boundary. -/
+def rejectExternalImpl : ConcreteExternalImpl where
+  call request _ :=
+    .error (.source (.externalFailure request.name
+      "no concrete external implementation installed"))
 
 /-- Host-owned concrete linear memory and its latest structured failure. The
 semantic runtime is deliberately absent: it occurs only in the refinement
@@ -578,6 +587,7 @@ structure Host where
   runtime : ConcreteRuntimeState := {}
   closureDispatch : ClosureDispatchTable := #[]
   closureDescriptors : ClosureDescriptorTable := #[]
+  externals : ConcreteExternalImpl := rejectExternalImpl
   failure? : Option HostFailure := none
   deriving Inhabited
 
@@ -1241,6 +1251,55 @@ def physicalOfLane : LaneValue → Wasm.Value
   | .float32Bits bits => .f32 bits
   | .float64Bits bits => .f64 bits
 
+/-- Construct the exact physical request carried by one resolved external
+import. Source types come from the validated import and concrete lanes come
+from the signature-directed Talos decoder. -/
+def concreteExternalRequest (operation : ExternalOperation)
+    (resultKind : AbiKind) (args : Array LaneValue) :
+    ConcreteExternalRequest := {
+  name := operation.name
+  paramTypes := operation.paramTypes
+  resultType := operation.resultType
+  paramKinds := operation.signature.params
+  resultKind
+  args }
+
+/-- Execute one resolved foreign import directly over concrete runtime state.
+The host implementation may replace the heap and world token; the shared
+external runtime layer appends the exact concrete event. -/
+def externalStep (operation : ExternalOperation) (resultKind : AbiKind)
+    (store : Wasm.Store Host) (physicalArgs : List Wasm.Value) :
+    Wasm.HostResult Host :=
+  match decodePhysicalLanes 0 operation.signature.params.toList physicalArgs with
+  | .error failure => trap (clearFailure store) failure
+  | .ok args =>
+      let request := concreteExternalRequest operation resultKind args.toArray
+      match store.host.externals.invoke request store.host.runtime with
+      | .error failure => trap (clearFailure store) (.runtime failure.toTrap)
+      | .ok (runtime, result) =>
+          if result.valueType == resultKind.valueType then
+            .Return [physicalOfLane result] (replaceRuntime store runtime)
+          else
+            trap (clearFailure store)
+              (.resultLaneMismatch resultKind.valueType result.valueType)
+
+def externalFn (operation : ExternalOperation) (resultKind : AbiKind) :
+    Wasm.HostFn Host := {
+  params := operation.signature.params.toList.map FirTalos.abiKind
+  results := [FirTalos.abiKind resultKind]
+  invoke := externalStep operation resultKind }
+
+def externalContract (operation : ExternalOperation) (resultKind : AbiKind) :
+    Wasm.HostContract Host :=
+  fun initial args result =>
+    result = externalStep operation resultKind initial args
+
+theorem externalFn_satisfies_contract
+    (operation resultKind initial args) :
+    externalContract operation resultKind initial args
+      ((externalFn operation resultKind).invoke initial args) := by
+  rfl
+
 theorem physicalOfLane_related
     {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
     {semantic : Value} (related : ValueRel witness kind lane semantic) :
@@ -1257,6 +1316,66 @@ theorem physicalOfLane_related
   | uint32 encoded => exact .word32 (.uint32 encoded)
   | uint64 => exact .word64 .uint64
   | usize => exact .word64 .usize
+
+theorem valueRel_physical_type_beq
+    {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
+    {semantic : Value} (related : ValueRel witness kind lane semantic) :
+    (lane.valueType == kind.valueType) = true := by
+  cases related <;> rfl
+
+/-- A successful concrete external host call preserves the full W6 runtime
+relation and returns the physical lane related to the source response. The
+foreign-call equations stay explicit so resolver/code-WP composition cannot
+substitute an unconstrained response. -/
+theorem externalStep_of_refines
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store Host) (physicalArgs : List Wasm.Value)
+    (concreteArgs : List LaneValue) (semanticArgs : Array Value)
+    (witness : RefinementWitness) (semanticRuntime : RuntimeState)
+    (semanticImplementation : ExternalImpl)
+    (afterWitness : RefinementWitness)
+    (concreteResponse : ConcreteExternalResponse)
+    (semanticResponse : ExternalResponse)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness
+      semanticRuntime)
+    (requestRelated : ConcreteExternalRequestRel witness
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      (operation.request semanticArgs))
+    (concreteCalled : initial.host.externals.call
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      initial.host.runtime = .ok concreteResponse)
+    (semanticCalled : semanticImplementation.call
+      (operation.request semanticArgs) semanticRuntime = .ok semanticResponse)
+    (responseRelated : ConcreteExternalResponseRel witness afterWitness
+      (operation.request semanticArgs) semanticRuntime resultKind
+      concreteResponse semanticResponse) :
+    externalStep operation resultKind initial physicalArgs =
+        .Return [physicalOfLane concreteResponse.value]
+          (replaceRuntime initial
+            (initial.host.runtime.applyExternalResponse
+              (concreteExternalRequest operation resultKind concreteArgs.toArray)
+              concreteResponse)) ∧
+      semanticImplementation.call (operation.request semanticArgs)
+          semanticRuntime = .ok semanticResponse ∧
+      ConcreteRuntimeRel
+        (initial.host.runtime.applyExternalResponse
+          (concreteExternalRequest operation resultKind concreteArgs.toArray)
+          concreteResponse)
+        afterWitness
+        (semanticExternalRuntimeAfter (operation.request semanticArgs)
+          semanticRuntime semanticResponse) ∧
+      PhysicalValueRel afterWitness resultKind
+        (physicalOfLane concreteResponse.value) semanticResponse.value := by
+  have refined := ConcreteExternalImpl.invoke_refines runtimeRelated
+    requestRelated concreteCalled semanticCalled responseRelated
+  have resultLaneMatches :
+      (concreteResponse.value.valueType == resultKind.valueType) = true := by
+    exact valueRel_physical_type_beq refined.2.2.2
+  refine ⟨?_, refined.2.1, refined.2.2.1,
+    physicalOfLane_related refined.2.2.2⟩
+  simp [externalStep, decoded, refined.1, resultLaneMatches]
 
 /-- Decode one supported integer/USize operand into the concrete boxing
 vocabulary while retaining ABI-shape failures at the Talos boundary. -/
@@ -3556,7 +3675,8 @@ theorem StateRelated.clearFailure
   rcases targetStore with
     ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
       gcHeap, host⟩
-  rcases host with ⟨runtime, closureDispatch, closureDescriptors, failure⟩
+  rcases host with
+    ⟨runtime, closureDispatch, closureDescriptors, externals, failure⟩
   have failureEq : failure = none := related.2.1
   subst failure
   rfl

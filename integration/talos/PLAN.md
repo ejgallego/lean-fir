@@ -2436,6 +2436,21 @@ same allocation boundary. This also tightens W6.6at's result relation from the
 wider `.tobject` lane to the compiler's precise `.object` ABI. No executable
 layout or shared semantic contract changed.
 
+W6.6av crosses the concrete Talos external-call boundary. The positional
+resolver now accepts validated source external imports with exactly one result,
+retains their stable import key and source type metadata, and selects an
+executable signature-directed host function. That host decodes i32/i64/f32/f64
+arguments directly into concrete lanes, invokes an explicitly installed
+`ConcreteExternalImpl`, installs its heap/world response, appends the exact
+concrete event, and returns a response only when its lane matches the declared
+physical result type. The safe default remains reject-by-default.
+`externalStep_of_refines` connects the
+executable step to the existing request/response witness extension theorem,
+and the complete lowered UInt64 echo fixture now resolves and executes with an
+exact world increment and trace event. The Node/browser concrete host still
+retains its explicit external import gate for the next slice. No shared
+semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

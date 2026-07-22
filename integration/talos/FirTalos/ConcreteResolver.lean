@@ -5,8 +5,8 @@ namespace FirTalos.Concrete
 open Fir.Wasm
 
 /-- Operations omitted from the concrete resolver are honest fragment gates:
-floating-point scalar storage, legacy closure callbacks, and external
-implementations still need concrete executable counterparts. -/
+floating-point scalar storage and legacy closure callbacks still need
+concrete executable counterparts. -/
 private def boxedScalarKind? :
     AbiKind → Option Fir.Wasm.Concrete.BoxedScalarKind
   | .uint8 => some Fir.Wasm.Concrete.BoxedScalarKind.uint8
@@ -73,13 +73,13 @@ inductive ResolverError where
   | invalidModule (error : SymbolicError)
   | malformedRuntimeImport (index : Nat)
   | unsupportedRuntimeImport (index : Nat) (operation : RuntimeOp)
-  | unsupportedExternalImport (index : Nat) (declaration : Lean.Name)
+  | malformedExternalImport (index : Nat) (declaration : Lean.Name)
   deriving Inhabited, BEq
 
 /-- One positional import paired with the exact concrete executable selected
 from its stable runtime identity. -/
 structure ResolvedHost where
-  operation : RuntimeOp
+  key : ImportKey
   function : Wasm.HostFn Host
 
 def ResolvedHost.contract (resolved : ResolvedHost) : Wasm.HostContract Host :=
@@ -127,16 +127,21 @@ def closureDescriptors (source : Fir.Wasm.Module) :
 /-- Prepare host-owned runtime state for a validated module. Physical Wasm
 globals remain in Talos's store; this table is the typed concrete counterpart
 used by `cacheSet`. -/
-def initialHost (source : Fir.Wasm.Module) : Host :=
+def initialHost (source : Fir.Wasm.Module)
+    (externals : Fir.Wasm.Concrete.ConcreteExternalImpl :=
+      rejectExternalImpl) : Host :=
   { runtime := {
       globals := Fir.Wasm.Concrete.ConcreteGlobals.declare
         (cacheDeclarations source) }
     closureDispatch := closureDispatch source
-    closureDescriptors := closureDescriptors source }
+    closureDescriptors := closureDescriptors source
+    externals }
 
-def initialStore (source : Fir.Wasm.Module) (target : Wasm.Module) :
+def initialStore (source : Fir.Wasm.Module) (target : Wasm.Module)
+    (externals : Fir.Wasm.Concrete.ConcreteExternalImpl :=
+      rejectExternalImpl) :
     Wasm.Store Host :=
-  { target.initialStore (α := Host) with host := initialHost source }
+  { target.initialStore (α := Host) with host := initialHost source externals }
 
 private def resolveImports (index : Nat) :
     List Import → Except ResolverError (List ResolvedHost)
@@ -153,9 +158,23 @@ private def resolveImports (index : Nat) :
                 function.results !=
                   operation.signature.results.toList.map FirTalos.abiKind then
               throw (.malformedRuntimeImport index)
-            pure { operation, function }
+            pure { key := sourceImport.key, function }
         | .external declaration =>
-            throw (.unsupportedExternalImport index declaration)
+            let some types := sourceImport.externalTypes? |
+              throw (.malformedExternalImport index declaration)
+            let some resultKind := sourceImport.signature.results[0]? |
+              throw (.malformedExternalImport index declaration)
+            if types.params.size != sourceImport.signature.params.size ||
+                sourceImport.signature.results.size != 1 then
+              throw (.malformedExternalImport index declaration)
+            let operation : ExternalOperation := {
+              name := declaration
+              paramTypes := types.params
+              resultType := types.result
+              signature := sourceImport.signature }
+            pure {
+              key := sourceImport.key
+              function := externalFn operation resultKind }
       return resolved :: (← resolveImports (index + 1) imports)
 
 /-- Validate and resolve every source import in declaration order. A successful

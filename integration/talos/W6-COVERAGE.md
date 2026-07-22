@@ -40,7 +40,11 @@ Cross-cutting W6.5 state:
   `LiveHeapRel` with exact checked decoding, descriptor-region disjointness,
   and a related `.object` result;
 - globals, world, trace, successful external calls, and failed external calls
-  have `ConcreteRuntimeRel`/trap boundaries;
+  have `ConcreteRuntimeRel`/trap boundaries; validated singleton-result source
+  externals now also resolve to an executable concrete Talos host, decode and
+  encode exact physical lanes, reject mismatched response lanes structurally,
+  and pass a whole-module UInt64 world/trace fixture; the Node/browser concrete
+  external-engine handler remains pending;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing underflow back to semantic locations;
 - the full per-operation failure matrix is not yet proved; and
@@ -105,7 +109,8 @@ Cross-cutting W6.5 state:
   fixtures through literals, constructor/case/projection, direct and recursive
   calls, ordinary/erased/multi-stage closure application, cache hit/miss
   publication, mutation, boxing, sharing, ownership, deletion, and reset/reuse
-  without semantic handles; unsupported runtime families fail during
+  plus a source external call without semantic handles; unsupported runtime
+  families and malformed or non-singleton external imports fail during
   resolution; and
 - a browser-safe external-engine host now mirrors the proved concrete word,
   header, slot, natural, constructor, closure, mutation, ownership, and reuse
