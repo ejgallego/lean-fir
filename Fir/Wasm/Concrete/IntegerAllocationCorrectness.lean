@@ -14,7 +14,7 @@ theorem integerOfSignMagnitude_roundtrip (value : Int) :
     integerOfSignMagnitude (integerSign value == 1)
       (integerMagnitude value) = value := by
   cases value <;> simp [integerSign, integerMagnitude,
-    integerOfSignMagnitude, Int.ofNat_eq_coe] <;> omega
+    integerOfSignMagnitude] <;> omega
 
 theorem integerMagnitude_ne_zero_of_negative {value : Int}
     (negative : integerSign value = 1) : integerMagnitude value ≠ 0 := by
@@ -54,7 +54,9 @@ theorem allocateInteger_decompose
           false integerSignMagnitudeMarker limbCount (integerSign value) 0 with
       | error failure =>
           rw [objectAllocation] at allocated
-          cases failure <;> simp [liftMemory] at allocated
+          change Except.error (ConcreteError.ofMemory failure) =
+            .ok (result, address) at allocated
+          contradiction
       | ok pair =>
           rcases pair with ⟨middle, actualAddress⟩
           rw [objectAllocation] at allocated
@@ -63,7 +65,9 @@ theorem allocateInteger_decompose
               (naturalLimbs (integerMagnitude value)) with
           | error failure =>
               rw [limbWrite] at allocated
-              cases failure <;> simp [liftMemory] at allocated
+              change Except.error (ConcreteError.ofMemory failure) =
+                .ok (result, address) at allocated
+              contradiction
           | ok finalMemory =>
               rw [limbWrite] at allocated
               change Except.ok ({ middle with memory := finalMemory }, actualAddress) =
@@ -252,7 +256,7 @@ theorem allocateInteger_objectRel
           decide (header.allocationBytes.toNat = align8
             (headerBytes + target.semanticSlotBytes * header.aux1.toNat))) = true := by
       simp [header, Header.forAllocation, countToNat, allocationToNat,
-        allocationBytes, limbCountPositive, allocationLt, signValid]
+        allocationBytes, limbCountPositive, signValid]
     rw [metadata]
     simp only [↓reduceIte]
     change (do
@@ -274,13 +278,12 @@ theorem allocateInteger_objectRel
           Except ConcreteError Int) = .ok (.ofNat magnitude)
         rfl
     | negSucc magnitude =>
-        have nonzero : magnitude + 1 ≠ 0 := by omega
         change (if magnitude + 1 == 0 then
           (Except.error (ConcreteError.target
             (.malformedIntegerHeader address.value)) : Except ConcreteError Int)
         else Except.ok (integerOfSignMagnitude true (magnitude + 1))) =
           Except.ok (.negSucc magnitude)
-        simp [nonzero, integerOfSignMagnitude]
+        simp [integerOfSignMagnitude]
         omega
   refine ⟨finalValid, allocateInteger_prefixExtension state result value address
     valid allocated, header, {

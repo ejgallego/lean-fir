@@ -182,7 +182,7 @@ theorem MemoryState.PrefixExtension.readClosureMetadata
         unfold Fir.Wasm.Concrete.readClosureMetadata readClosureHeader at read
         simp only [heap, if_true] at read
         rw [headerResult] at read
-        change Except.error (ConcreteError.target failure) = .ok metadata at read
+        change Except.error (ConcreteError.ofMemory failure) = .ok metadata at read
         contradiction
     | ok header =>
         have headerAfter := extension.readLiveHeader_eq_ok address header

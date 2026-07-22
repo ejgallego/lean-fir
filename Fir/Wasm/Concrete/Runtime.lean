@@ -54,10 +54,16 @@ def ConcreteError.toTrap : ConcreteError → ConcreteTrap
   | .target failure => .target (.memory failure)
   | .targetGlobal failure => .target (.global failure)
 
+/-- Translate a concrete-memory failure without inspecting successful payloads.
+The catch-all keeps new target-side memory failures on the target lane while
+retaining the one shared dead-address classification. -/
+def ConcreteError.ofMemory : MemoryError → ConcreteError
+  | .deadObject address => .sourceAddress (.deadObject address)
+  | failure => .target failure
+
 def liftMemory {α : Type} : Except MemoryError α → Except ConcreteError α
   | .ok value => .ok value
-  | .error (.deadObject address) => .error (.sourceAddress (.deadObject address))
-  | .error failure => .error (.target failure)
+  | .error failure => .error (.ofMemory failure)
 
 /-- Checked conversion for object-header metadata.  It is public so operation
 refinement proofs can expose the exact failure/success boundary. -/

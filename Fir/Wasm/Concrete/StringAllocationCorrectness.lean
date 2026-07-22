@@ -63,7 +63,7 @@ theorem writeStringBytes_spec (memory : LinearMemory) (base index : Nat)
                     LinearMemory.readByte next slot := by
                       apply tailPost.byteFrame
                       left
-                      simp [slot]
+                      simp
                 _ = .ok byte := by
                       exact LinearMemory.readByte_set_same memory slot byte
                         slotInBounds
@@ -251,6 +251,8 @@ theorem allocateString_decompose
           (stringUtf8Bytes value).length false stringUtf8Marker byteCount with
       | error failure =>
           rw [objectAllocation] at allocated
+          change Except.error (ConcreteError.ofMemory failure) =
+            .ok (result, address) at allocated
           contradiction
       | ok pair =>
           rcases pair with ⟨middle, actualAddress⟩
@@ -265,6 +267,8 @@ theorem allocateString_decompose
               (stringUtf8Bytes value) with
           | error failure =>
               rw [byteWrite] at allocated
+              change Except.error (ConcreteError.ofMemory failure) =
+                .ok (result, address) at allocated
               contradiction
           | ok finalMemory =>
               rw [byteWrite] at allocated
