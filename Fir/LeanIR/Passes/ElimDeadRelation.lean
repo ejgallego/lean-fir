@@ -243,6 +243,34 @@ theorem LiveFramesRelated.refl (frames : List Frame) :
   | nil => exact .nil
   | cons frame rest ih => exact .cons (.refl frame) ih
 
+/-- Adding the interpreter's extra-argument and nullary-cache frames to both
+related stacks preserves their relation. -/
+theorem LiveFramesRelated.prepareCall
+    (name : Name) (params : Array (LCNF.Param .impure))
+    (arguments extraArguments : Array Value)
+    (related : LiveFramesRelated leftFrames rightFrames) :
+    LiveFramesRelated
+      (let frames := if extraArguments.isEmpty then leftFrames
+        else .apply extraArguments :: leftFrames
+       if params.isEmpty && arguments.isEmpty then .cache name :: frames
+       else frames)
+      (let frames := if extraArguments.isEmpty then rightFrames
+        else .apply extraArguments :: rightFrames
+       if params.isEmpty && arguments.isEmpty then .cache name :: frames
+       else frames) := by
+  unfold LiveFramesRelated at related ⊢
+  by_cases extraEmpty : extraArguments.isEmpty
+  · by_cases cache : params.isEmpty && arguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        ListRel.cons (LiveFrameRelated.cache name) related
+    · simpa [extraEmpty, cache] using related
+  · by_cases cache : params.isEmpty && arguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        ListRel.cons (LiveFrameRelated.cache name)
+          (ListRel.cons (LiveFrameRelated.apply extraArguments) related)
+    · simpa [extraEmpty, cache] using
+        ListRel.cons (LiveFrameRelated.apply extraArguments) related
+
 /-- Active controls are identical.  Code controls additionally distinguish
 an exact environment from one that agrees only on a covered used set.  The
 current environment and joins are irrelevant while a value or invocation is
@@ -285,6 +313,21 @@ theorem LiveControlRelated.refl
     LiveControlRelated env joins control env joins control := by
   cases control with
   | code code => exact .codeExact env joins code
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
+
+/-- Related controls are syntactically equal, so resetting both lexical
+contexts to one exact environment and join environment preserves the control
+relation.  Named calls use this when entering a declaration. -/
+theorem LiveControlRelated.exactAt
+    (related : LiveControlRelated leftEnv leftJoins leftControl
+      rightEnv rightJoins rightControl)
+    (env : Env) (joins : JoinEnv) :
+    LiveControlRelated env joins leftControl env joins rightControl := by
+  cases related with
+  | codeExact _ _ code => exact .codeExact env joins code
+  | codeLive _ _ _ => exact .codeExact env joins _
   | yielded value => exact .yielded value
   | invokeName name arguments => exact .invokeName name arguments
   | invokeValue function arguments => exact .invokeValue function arguments
@@ -1220,6 +1263,299 @@ theorem coreStep_yielded_liveRelated
             control := .yielded value
           }
 
+/-- Invoking the same top-level declaration from live-related machines
+preserves the relation through partial application, internal code entry,
+external waiting, and faults. -/
+theorem invokeDecl_liveRelated
+    (related : LiveMachineRelated left right) :
+    LiveCoreResultRelated
+      (invokeDecl left name arguments)
+      (invokeDecl right name arguments) := by
+  have foundEq : left.program.findDecl? name =
+      right.program.findDecl? name :=
+    congrArg (fun program : ImpureProgram => program.findDecl? name)
+      related.program_eq
+  unfold invokeDecl
+  rw [foundEq]
+  generalize found : right.program.findDecl? name = declaration
+  cases declaration with
+  | none => exact fail_liveRelated related.runtime_eq (.unknownDecl name)
+  | some declaration =>
+      simp only
+      by_cases tooFew : arguments.size < declaration.params.size
+      · simp only [tooFew, ↓reduceIte]
+        have allocationEq :
+            alloc left.runtime
+                (.closure name declaration.params.size arguments) =
+              alloc right.runtime
+                (.closure name declaration.params.size arguments) :=
+          congrArg
+            (fun runtime =>
+              alloc runtime (.closure name declaration.params.size arguments))
+            related.runtime_eq
+        rw [allocationEq]
+        generalize allocation :
+          alloc right.runtime
+            (.closure name declaration.params.size arguments) = allocated
+        obtain ⟨nextRuntime, reference⟩ := allocated
+        exact .next {
+          program_eq := related.program_eq
+          runtime_eq := rfl
+          frames := related.frames
+          control := .yielded (.object reference)
+        }
+      · simp only [tooFew, ↓reduceIte]
+        let callArguments := arguments.extract 0 declaration.params.size
+        let extraArguments :=
+          arguments.extract declaration.params.size arguments.size
+        let leftPreparedFrames :=
+          let frames := if extraArguments.isEmpty then left.frames
+            else .apply extraArguments :: left.frames
+          if declaration.params.isEmpty && arguments.isEmpty then
+            .cache name :: frames
+          else frames
+        let rightPreparedFrames :=
+          let frames := if extraArguments.isEmpty then right.frames
+            else .apply extraArguments :: right.frames
+          if declaration.params.isEmpty && arguments.isEmpty then
+            .cache name :: frames
+          else frames
+        have preparedFrames : LiveFramesRelated
+            leftPreparedFrames rightPreparedFrames :=
+          related.frames.prepareCall name declaration.params arguments
+            extraArguments
+        generalize binding :
+          bindParams declaration.params callArguments = bound
+        cases bound with
+        | error fault => exact fail_liveRelated related.runtime_eq fault
+        | ok env =>
+            cases valueEq : declaration.value with
+            | code code =>
+                exact .next {
+                  program_eq := related.program_eq
+                  runtime_eq := related.runtime_eq
+                  frames := preparedFrames
+                  control := .codeExact env [] code
+                }
+            | extern metadata =>
+                exact .external {
+                  name
+                  paramTypes := declaration.params.map (·.type)
+                  resultType := declaration.type
+                  args := callArguments
+                } {
+                  program_eq := related.program_eq
+                  runtime_eq := related.runtime_eq
+                  frames := preparedFrames
+                  control := related.control.exactAt env []
+                }
+
+/-- Closure invocation observes equal runtime heaps and delegates closure
+objects to the named-declaration theorem. -/
+theorem invokeClosure_liveRelated
+    (related : LiveMachineRelated left right)
+    (function : Value) (arguments : Array Value) :
+    LiveCoreResultRelated
+      (invokeClosure
+        { left with control := .invokeValue function arguments }
+        function arguments)
+      (invokeClosure
+        { right with control := .invokeValue function arguments }
+        function arguments) := by
+  let leftInvoke := { left with control := .invokeValue function arguments }
+  let rightInvoke := { right with control := .invokeValue function arguments }
+  have invokeRelated : LiveMachineRelated leftInvoke rightInvoke := {
+    program_eq := related.program_eq
+    runtime_eq := related.runtime_eq
+    frames := related.frames
+    control := .invokeValue function arguments
+  }
+  have failure (fault : RuntimeFault) :
+      LiveCoreResultRelated
+        (fail leftInvoke fault) (fail rightInvoke fault) :=
+    fail_liveRelated related.runtime_eq fault
+  unfold invokeClosure
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp only
+          exact failure .expectedClosure
+      | heap location =>
+          simp only
+          have cellEq : getLiveCell left.runtime location =
+              getLiveCell right.runtime location :=
+            congrArg (fun runtime => getLiveCell runtime location)
+              related.runtime_eq
+          rw [cellEq]
+          generalize cellRead : getLiveCell right.runtime location = result
+          cases result with
+          | error fault =>
+              simp only
+              exact failure fault
+          | ok cell =>
+              simp only
+              cases cell.object with
+              | closure name arity fixed =>
+                  exact invokeDecl_liveRelated invokeRelated
+              | ctor object => exact failure .expectedClosure
+              | boxed type value => exact failure .expectedClosure
+              | string value => exact failure .expectedClosure
+              | natural value => exact failure .expectedClosure
+              | integer value => exact failure .expectedClosure
+              | byteArray value => exact failure .expectedClosure
+              | «opaque» typeName => exact failure .expectedClosure
+  | usize value =>
+      simp only
+      exact failure .expectedClosure
+  | scalar value =>
+      simp only
+      exact failure .expectedClosure
+  | erased =>
+      simp only
+      exact failure .expectedClosure
+  | reuseToken location =>
+      simp only
+      exact failure .expectedClosure
+
+/-- Every interpreter control step preserves the live machine relation.
+The code cases use the exact/live theorems, while calls reset lexical state
+on declaration entry and yielded values resume the related frame stack. -/
+theorem coreStep_machine_liveRelated
+    (related : LiveMachineRelated left right) :
+    LiveCoreResultRelated (coreStep left) (coreStep right) := by
+  let leftMachine := left
+  let rightMachine := right
+  cases left with
+  | mk leftProgram leftControl leftEnv leftJoins leftFrames leftRuntime =>
+    cases right with
+    | mk rightProgram rightControl rightEnv rightJoins rightFrames rightRuntime =>
+      rcases related with
+        ⟨programEq, runtimeEq, framesRelated, controlRelated⟩
+      simp only [MachineState.program] at programEq
+      simp only [MachineState.runtime] at runtimeEq
+      simp only [MachineState.frames] at framesRelated
+      cases controlRelated with
+      | codeExact env joins code =>
+          subst rightProgram
+          subst rightRuntime
+          simpa [leftMachine, rightMachine, exactCodeState] using
+            coreStep_codeExact_related leftProgram leftRuntime leftEnv leftJoins
+              framesRelated code
+      | codeLive covered joinsCovered agree =>
+          subst rightProgram
+          subst rightRuntime
+          simpa [leftMachine, rightMachine] using
+            coreStep_codeLive_related leftMachine rightMachine rfl rfl
+              framesRelated covered joinsCovered agree
+      | yielded value =>
+          subst rightProgram
+          subst rightRuntime
+          simpa [leftMachine, rightMachine] using
+            coreStep_yielded_liveRelated leftMachine rightMachine rfl rfl
+              framesRelated
+      | invokeName name arguments =>
+          subst rightProgram
+          subst rightRuntime
+          have current : LiveMachineRelated leftMachine rightMachine := {
+            program_eq := rfl
+            runtime_eq := rfl
+            frames := framesRelated
+            control := .invokeName name arguments
+          }
+          by_cases argumentsEmpty : arguments.isEmpty
+          · simp only [leftMachine, rightMachine, coreStep, argumentsEmpty]
+            generalize globalRead :
+              findGlobal? leftRuntime.globals name = global
+            cases global with
+            | none =>
+                simpa [leftMachine, rightMachine] using
+                  invokeDecl_liveRelated current
+            | some value =>
+                exact .next {
+                  program_eq := rfl
+                  runtime_eq := rfl
+                  frames := framesRelated
+                  control := .yielded value
+                }
+          · simp only [leftMachine, rightMachine, coreStep, argumentsEmpty]
+            simpa [leftMachine, rightMachine] using
+              invokeDecl_liveRelated current
+      | invokeValue function arguments =>
+          subst rightProgram
+          subst rightRuntime
+          have current : LiveMachineRelated leftMachine rightMachine := {
+            program_eq := rfl
+            runtime_eq := rfl
+            frames := framesRelated
+            control := .invokeValue function arguments
+          }
+          simpa [leftMachine, rightMachine, coreStep] using
+            invokeClosure_liveRelated current function arguments
+
+/-- One semantic step from a live-related source state is matched by one
+semantic step from the target state.  External calls use the identical
+request and transport the admissible response across equal runtimes. -/
+theorem step_liveRelated
+    (related : LiveMachineRelated leftBefore rightBefore)
+    (step : Step externals leftBefore leftAfter) :
+    ∃ rightAfter, Step externals rightBefore rightAfter ∧
+      LiveMachineRelated leftAfter rightAfter := by
+  have results := coreStep_machine_liveRelated related
+  generalize rightTransition : coreStep rightBefore = rightResult at results
+  cases step with
+  | internal leftTransition =>
+      rw [leftTransition] at results
+      cases results with
+      | next nextRelated =>
+          exact ⟨_, .internal rightTransition, nextRelated⟩
+  | external leftTransition external =>
+      rw [leftTransition] at results
+      cases results with
+      | external request waitingRelated =>
+          have rightExternal := external
+          rw [related.runtime_eq] at rightExternal
+          exact ⟨_, .external rightTransition rightExternal,
+            resumeExternal_liveRelated waitingRelated⟩
+
+/-- Equal-length finite executions preserve the live machine relation. -/
+theorem steps_liveRelated
+    (related : LiveMachineRelated leftBefore rightBefore)
+    (steps : Steps externals count leftBefore leftAfter) :
+    ∃ rightAfter, Steps externals count rightBefore rightAfter ∧
+      LiveMachineRelated leftAfter rightAfter := by
+  induction steps generalizing rightBefore with
+  | refl state => exact ⟨rightBefore, .refl rightBefore, related⟩
+  | step head tail ih =>
+      rcases step_liveRelated related head with
+        ⟨rightSecond, rightHead, secondRelated⟩
+      rcases ih secondRelated with
+        ⟨rightAfter, rightTail, finalRelated⟩
+      exact ⟨rightAfter, .step rightHead rightTail, finalRelated⟩
+
+/-- Every terminating observation from a live-related state is reproduced by
+the other state with the same number of semantic steps. -/
+theorem evaluatesState_liveRelated
+    (related : LiveMachineRelated leftBefore rightBefore) :
+    SimpCase.EvaluatesState externals leftBefore observation →
+      SimpCase.EvaluatesState externals rightBefore observation := by
+  rintro ⟨count, leftFinal, leftSteps, leftDone⟩
+  rcases steps_liveRelated related leftSteps with
+    ⟨rightFinal, rightSteps, finalRelated⟩
+  have finalResults :
+      LiveCoreResultRelated (.done observation) (coreStep rightFinal) := by
+    simpa only [leftDone] using coreStep_machine_liveRelated finalRelated
+  exact ⟨count, rightFinal, rightSteps, finalResults.done_right⟩
+
+/-- The symmetric live relation gives observational equivalence for every
+terminating observation. -/
+theorem evaluatesState_iff_of_liveRelated
+    (related : LiveMachineRelated left right) :
+    SimpCase.EvaluatesState externals left observation ↔
+      SimpCase.EvaluatesState externals right observation :=
+  ⟨evaluatesState_liveRelated related,
+    evaluatesState_liveRelated related.symm⟩
+
 /-- The direct bridge from backwards liveness to the execution relation:
 adding an absent binder on one side preserves every lookup available to the
 active code and its installed joins. -/
@@ -1240,5 +1576,38 @@ theorem liveMachineRelated_bindLeft_of_absent
   control := .codeLive covered joinsCovered
     ((EnvsAgreeOn.refl used state.env).bindLeft_of_absent absent)
 }
+
+/-- Backwards coverage turns absence from the used set into the semantic
+`BindingIrrelevantAt` premise required by the one-step/zero-step let
+elimination theorem. -/
+theorem bindingIrrelevantAt_of_coverage
+    (state : MachineState) (declaration : LCNF.LetDecl .impure)
+    (value : Value) (continuation : LCNF.Code .impure)
+    (covered : CodeCovered used continuation)
+    (joinsCovered : JoinEnvCovered used state.joins)
+    (absent : used.contains declaration.fvarId = false) :
+    BindingIrrelevantAt externals state declaration value continuation := by
+  intro observation
+  exact evaluatesState_iff_of_liveRelated
+    (liveMachineRelated_bindLeft_of_absent state declaration.fvarId value
+      continuation covered joinsCovered absent)
+
+/-- Concrete non-lockstep deletion rule: a runtime-neutral dead let takes one
+source step while the target stutters, after which coverage supplies the
+lockstep live relation. -/
+theorem eliminateLet_correct_of_runtimeNeutral_coverage
+    (evaluated : evalLetValue state declaration =
+      .ok (state.runtime, .value value))
+    (covered : CodeCovered used continuation)
+    (joinsCovered : JoinEnvCovered used state.joins)
+    (absent : used.contains declaration.fvarId = false) :
+    SimpCase.EvaluatesState externals
+        { state with control := .code (.let declaration continuation) }
+        observation ↔
+      SimpCase.EvaluatesState externals
+        { state with control := .code continuation } observation := by
+  apply eliminateLet_correct_of_runtimeNeutral evaluated
+  exact bindingIrrelevantAt_of_coverage state declaration value continuation
+    covered joinsCovered absent
 
 end Fir.LeanIR.Passes.ElimDead

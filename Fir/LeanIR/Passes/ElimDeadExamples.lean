@@ -209,6 +209,31 @@ theorem deadBindingCoreStepRelated :
       (rightState := neutralLiveState) rfl rfl (.nil)
       neutralAfterCovered (by simp [JoinEnvCovered]) agree
 
+/-- The one-step regression lifts to every terminating observation, including
+external calls reached later through the related continuation stacks. -/
+theorem deadBindingExecutionEquivalent (externals : ExternalSpec) :
+    EvaluatesState externals
+        { neutralLiveState with env := deadExtendedEnv } observation ↔
+      EvaluatesState externals neutralLiveState observation :=
+  evaluatesState_iff_of_liveRelated deadBindingMachineRelated
+
+/-- A dead erased binding before a live return is the concrete nonterminal
+one-step/zero-step deletion shape. -/
+theorem deadErasedBeforeReturnCorrect (externals : ExternalSpec) :
+    EvaluatesState externals
+        { neutralLiveState with
+          control := .code (.let deadErasedDecl (.return live)) }
+        observation ↔
+      EvaluatesState externals
+        { neutralLiveState with control := .code (.return live) }
+        observation := by
+  apply eliminateLet_correct_of_runtimeNeutral_coverage
+      (used := ({} : UsedLocals).insert live) (value := .erased)
+  · rfl
+  · exact .ret (by simp)
+  · simp [neutralLiveState, JoinEnvCovered]
+  · native_decide
+
 /- Runtime-neutral elimination satisfies the current raw-observation contract
 on a complete declaration-entry execution. -/
 #guard (match runMain neutralBeforeProgram, runMain neutralAfterProgram with
