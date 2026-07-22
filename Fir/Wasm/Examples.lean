@@ -549,7 +549,7 @@ def abiMutationProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl y tobjectType (.lit (.nat 2))) <|
       .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
       .let (letDecl u usizeType (.lit (.usize 55))) <|
-      .uset p 0 u <|
+      .uset p 1 u <|
       .let (letDecl s u64Type (.lit (.uint64 66))) <|
       .sset p 1 0 s u64Type <|
       .oset p 0 (.fvar y) <|

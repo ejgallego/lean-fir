@@ -360,7 +360,7 @@ theorem wp_usizeProjection_let
     (hResults : imp.results.length = 1)
     (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
       .ok #[sourceObject])
-    (projected : Fir.LeanIR.Impure.getUSizeField initial.host.runtime
+    (projected : Fir.LeanIR.Impure.getUSizeSlot initial.host.runtime
       sourceObject index = .ok (.usize value))
     (hSet : locals.set? resultIndex (.i64 value) = some updated)
     (continued :

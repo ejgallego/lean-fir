@@ -20,7 +20,7 @@ theorem allocatePromotedTag_decompose
       promotedTagMarker 1 with
   | error failure =>
       rw [objectAllocation] at allocated
-      change Except.error (ConcreteError.target failure) =
+      change Except.error (ConcreteError.ofMemory failure) =
         Except.ok (result, address) at allocated
       contradiction
   | ok pair =>
@@ -35,7 +35,7 @@ theorem allocatePromotedTag_decompose
           (actualAddress.value + headerBytes) payload with
       | error failure =>
           rw [payloadWrite] at allocated
-          change Except.error (ConcreteError.target failure) =
+          change Except.error (ConcreteError.ofMemory failure) =
             Except.ok (result, address) at allocated
           contradiction
       | ok finalMemory =>

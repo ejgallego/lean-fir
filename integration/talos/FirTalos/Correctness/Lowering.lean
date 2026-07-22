@@ -436,7 +436,7 @@ theorem usizeProjection_host_simulates
     (invariant : HandleTableInvariant initial.host.handles)
     (decodedArgs : decodeArgs initial.host.handles #[.tobject] physicalArgs =
       .ok #[sourceObject])
-    (projected : getUSizeField initial.host.runtime sourceObject index =
+    (projected : getUSizeSlot initial.host.runtime sourceObject index =
       .ok (.usize value)) :
     ∃ final,
       hostStep (.usizeProj index) initial physicalArgs =
@@ -681,7 +681,7 @@ theorem usizeSet_host_simulates
     (invariant : HandleTableInvariant initial.host.handles)
     (decodedArgs : decodeArgs initial.host.handles #[.object, .usize] physicalArgs =
       .ok #[sourceObject, sourceField])
-    (mutated : setUSizeField initial.host.runtime sourceObject index sourceField =
+    (mutated : setUSizeSlot initial.host.runtime sourceObject index sourceField =
       .ok sourceRuntime) :
     ∃ final,
       hostStep (.usizeSet index) initial physicalArgs = .Return [] final ∧
@@ -1318,7 +1318,7 @@ theorem wp_usizeProjection_call
     (hStack : locals.values = .i32 objectHandle :: tail)
     (decoded : decodeArgs initial.host.handles #[.tobject] [.i32 objectHandle] =
       .ok #[sourceObject])
-    (projected : getUSizeField initial.host.runtime sourceObject index =
+    (projected : getUSizeSlot initial.host.runtime sourceObject index =
       .ok (.usize value))
     (continued :
       Wasm.wp module rest Q

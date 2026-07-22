@@ -621,6 +621,94 @@ theorem LiveHeapRel.writeUSizeField_refines
       rw [objectEq] at storedObjectEq
       contradiction
 
+/-- Whole-heap refinement for final impure LCNF's absolute `USize` slot.
+The target and source adapters both translate through the object-field prefix
+before reusing the type-local mutation theorem. -/
+theorem LiveHeapRel.writeUSizeSlot_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (slot : Nat) (value : UInt64)
+    (slotStart : semantic.objectFields.size ≤ slot)
+    (slotEnd : slot < semantic.objectFields.size + semantic.usizeFields.size) :
+    ∃ result nextRuntime,
+      Fir.Wasm.Concrete.writeUSizeSlot state address slot value = .ok result ∧
+      Fir.LeanIR.Impure.setUSizeSlot runtime (.object (.heap location)) slot
+        (.usize value) = .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  let index := slot - semantic.objectFields.size
+  have indexValid : index < semantic.usizeFields.size := by
+    dsimp [index]
+    omega
+  obtain ⟨result, nextRuntime, concreteField, semanticField, finalRelated⟩ :=
+    related.writeUSizeField_refines mapped found live objectEq index value
+      indexValid
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | @constructor storedInfo storedKinds storedSemantic storedHeader _ descriptor
+      storedObjectEq objectRelated headerRead headerKind refCount persistent
+      cellLive =>
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst storedSemantic
+      obtain ⟨header, rawHeaderRead, constructorKind, _, _, objectCount,
+          usizeCount, _⟩ := objectRelated.header
+      have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+        state address header rawHeaderRead constructorKind
+      have objectCountEq : header.aux1.toNat =
+          semantic.objectFields.size := by
+        rw [objectCount, objectRelated.semanticObjectFields]
+      have usizeCountEq : header.aux2.toNat =
+          semantic.usizeFields.size := by
+        rw [usizeCount, objectRelated.semanticUSizeFields]
+      have concreteSlot : writeUSizeSlot state address slot value =
+          writeUSizeField state address index value := by
+        unfold writeUSizeSlot
+        rw [constructorHeader]
+        simp only [Bind.bind, Except.bind]
+        rw [objectCountEq, usizeCountEq]
+        simp [slotStart, slotEnd, index]
+      have constructor : getConstructor runtime (.object (.heap location)) =
+          .ok (location, cell, semantic) := by
+        unfold getConstructor
+        simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind,
+          Except.bind]
+        rw [objectEq]
+        rfl
+      have semanticSlot : setUSizeSlot runtime (.object (.heap location)) slot
+          (.usize value) = setUSizeField runtime (.object (.heap location))
+            index (.usize value) := by
+        unfold setUSizeSlot setUSizeField modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        simp [slotStart, indexValid, index]
+      exact ⟨result, nextRuntime, concreteSlot.trans concreteField,
+        semanticSlot.trans semanticField, finalRelated⟩
+  | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural descriptor storedObjectEq headerRead headerKind marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
 /-- Whole-heap refinement for a successful packed `UInt64` mutation. The
 static descriptor premise keeps scalar-capacity facts at the ABI boundary
 rather than adding them to semantic constructor values. -/

@@ -21,7 +21,7 @@ theorem allocateBoxedScalar_decompose
       scalar.kind.code (UInt32.ofNat scalar.kind.payloadBytes) with
   | error failure =>
       rw [objectAllocation] at allocated
-      change Except.error (ConcreteError.target failure) =
+      change Except.error (ConcreteError.ofMemory failure) =
         Except.ok (result, address) at allocated
       contradiction
   | ok pair =>
@@ -36,7 +36,7 @@ theorem allocateBoxedScalar_decompose
           (actualAddress.value + headerBytes) scalar.payload with
       | error failure =>
           rw [payloadWrite] at allocated
-          change Except.error (ConcreteError.target failure) =
+          change Except.error (ConcreteError.ofMemory failure) =
             Except.ok (result, address) at allocated
           contradiction
       | ok finalMemory =>

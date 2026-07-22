@@ -188,7 +188,7 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
   | .usizeProj index =>
       match args[0]? with
       | some object =>
-          match getUSizeField runtime object index with
+          match getUSizeSlot runtime object index with
           | .ok value => .ok (runtime, #[value])
           | .error fault => .error (.source fault)
       | none => .error (.target (.arityMismatch 1 args.size))
@@ -278,7 +278,7 @@ private def evaluate (operation : HostOperation) (runtime : RuntimeState)
   | .usizeSet index =>
       match args[0]?, args[1]? with
       | some object, some field =>
-          match setUSizeField runtime object index field with
+          match setUSizeSlot runtime object index field with
           | .ok runtime => .ok (runtime, #[])
           | .error fault => .error (.source fault)
       | _, _ => .error (.target (.arityMismatch 2 args.size))
@@ -570,7 +570,7 @@ theorem hostStep_usizeProj_of_decode
     (physicalArgs : List Wasm.Value) (sourceObject : Value) (value : UInt64)
     (decoded : decodeArgs initial.host.handles #[.tobject] physicalArgs =
       .ok #[sourceObject])
-    (projected : getUSizeField initial.host.runtime sourceObject index =
+    (projected : getUSizeSlot initial.host.runtime sourceObject index =
       .ok (.usize value)) :
     hostStep (.usizeProj index) initial physicalArgs =
       .Return [.i64 value] {
@@ -743,7 +743,7 @@ theorem hostStep_usizeSet_of_decode
     (sourceRuntime : RuntimeState)
     (decoded : decodeArgs initial.host.handles #[.object, .usize] physicalArgs =
       .ok #[sourceObject, sourceField])
-    (mutated : setUSizeField initial.host.runtime sourceObject index sourceField =
+    (mutated : setUSizeSlot initial.host.runtime sourceObject index sourceField =
       .ok sourceRuntime) :
     hostStep (.usizeSet index) initial physicalArgs =
       .Return [] {

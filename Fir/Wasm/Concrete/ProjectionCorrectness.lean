@@ -129,6 +129,37 @@ theorem ConstructorObjectRel.readUSizeField_outOfBounds
   simp [Nat.not_lt.mpr outOfBounds]
   rfl
 
+/-- The absolute-slot adapter reports bounds against the complete fixed-slot
+prefix, both before the `USize` interval and after it. -/
+theorem ConstructorObjectRel.readUSizeSlot_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {slot : Nat}
+    (outOfBounds : slot < semantic.objectFields.size ∨
+      semantic.objectFields.size + semantic.usizeFields.size ≤ slot) :
+    readUSizeSlot state address slot = .error (.source
+      (.usizeFieldOutOfBounds slot
+        (semantic.objectFields.size + semantic.usizeFields.size))) := by
+  obtain ⟨header, headerRead, headerKind, _, _, objectCount, usizeCount, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have objectCountEq : header.aux1.toNat = semantic.objectFields.size := by
+    rw [objectCount, related.semanticObjectFields]
+  have usizeCountEq : header.aux2.toNat = semantic.usizeFields.size := by
+    rw [usizeCount, related.semanticUSizeFields]
+  have rejected : ¬ (semantic.objectFields.size ≤ slot ∧
+      slot < semantic.objectFields.size + semantic.usizeFields.size) := by
+    omega
+  unfold readUSizeSlot
+  rw [constructorHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [objectCountEq, usizeCountEq]
+  simp [rejected]
+  rfl
+
 /-- A successful semantic packed-scalar projection identifies the exact
 field selected by its compiler operands. -/
 theorem scalarField_of_getScalarField_eq_ok_of_cell
@@ -358,6 +389,15 @@ theorem DeadCellRel.readUSizeField_eq
   rw [related.readConstructorHeader_eq]
   rfl
 
+theorem DeadCellRel.readUSizeSlot_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slot : Nat) :
+    readUSizeSlot state address slot =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold readUSizeSlot
+  rw [related.readConstructorHeader_eq]
+  rfl
+
 theorem DeadCellRel.writeObjectField_eq
     {state : MemoryState} {address field : Word32}
     (related : DeadCellRel state address) (index : Nat) :
@@ -373,6 +413,15 @@ theorem DeadCellRel.writeUSizeField_eq
     writeUSizeField state address index field =
       .error (.sourceAddress (.deadObject address)) := by
   unfold writeUSizeField
+  rw [related.readConstructorHeader_eq]
+  rfl
+
+theorem DeadCellRel.writeUSizeSlot_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (slot : Nat) (field : UInt64) :
+    writeUSizeSlot state address slot field =
+      .error (.sourceAddress (.deadObject address)) := by
+  unfold writeUSizeSlot
   rw [related.readConstructorHeader_eq]
   rfl
 
@@ -581,6 +630,81 @@ theorem LiveHeapRel.readUSizeField_refines
       have impossible := Option.some.inj descriptor
       cases impossible
 
+/-- The checked concrete absolute-slot projection refines final impure LCNF's
+`getUSizeSlot` operation. -/
+theorem LiveHeapRel.readUSizeSlot_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {slot : Nat} {value : UInt64}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeSlot runtime (.object (.heap location)) slot =
+      .ok (.usize value)) :
+    readUSizeSlot state address slot = .ok value ∧
+      ValueRel witness .usize (.word64 value) (.usize value) := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getUSizeSlot, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | @constructor storedInfo storedKinds semantic header _ storedDescriptor
+      objectEq objectRelated _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have descriptorEq := Option.some.inj descriptor
+      cases descriptorEq
+      have constructor : getConstructor runtime (.object (.heap location)) =
+          .ok (location, cell, semantic) := by
+        unfold getConstructor
+        simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind,
+          Except.bind]
+        rw [objectEq]
+        rfl
+      unfold getUSizeSlot at projected
+      rw [constructor] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      by_cases slotStart : semantic.objectFields.size ≤ slot
+      · rw [if_pos slotStart] at projected
+        cases valueAt : semantic.usizeFields[slot -
+            semantic.objectFields.size]? with
+        | none =>
+            rw [valueAt] at projected
+            contradiction
+        | some actual =>
+            rw [valueAt] at projected
+            have actualEq : actual = value := Value.usize.inj
+              (Except.ok.inj projected)
+            subst actual
+            exact objectRelated.readUSizeSlot_refines slotStart valueAt
+      · rw [if_neg slotStart] at projected
+        contradiction
+  | boxed _ objectEq _ _ _ _ =>
+      simp [getUSizeSlot, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      simp [getUSizeSlot, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+
 /-- An exact semantic object-projection bounds fault is preserved by the
 checked concrete reader for the mapped live constructor. -/
 theorem LiveHeapRel.readObjectField_outOfBounds_refines
@@ -689,6 +813,82 @@ theorem LiveHeapRel.readUSizeField_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
 
+/-- Exact absolute-slot bounds faults are preserved using the complete fixed
+slot count (`object + USize`) on both sides. -/
+theorem LiveHeapRel.readUSizeSlot_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {slot : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (descriptor : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeSlot runtime (.object (.heap location)) slot =
+      .error (.usizeFieldOutOfBounds slot (info.size + info.usize))) :
+    readUSizeSlot state address slot = .error (.source
+      (.usizeFieldOutOfBounds slot (info.size + info.usize))) := by
+  obtain ⟨cell, found, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  have live : cell.live = true := by
+    cases liveEq : cell.live with
+    | false =>
+        simp [getUSizeSlot, getConstructor, getLiveCell, found, liveEq,
+          Bind.bind, Except.bind] at projected
+    | true => rfl
+  have cellRelated := cellRelation.live_of_eq_true live
+  cases cellRelated with
+  | @constructor storedInfo storedKinds semantic header _ storedDescriptor
+      objectEq objectRelated _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have descriptorEq := Option.some.inj descriptor
+      cases descriptorEq
+      have constructor : getConstructor runtime (.object (.heap location)) =
+          .ok (location, cell, semantic) := by
+        unfold getConstructor
+        simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind,
+          Except.bind]
+        rw [objectEq]
+        rfl
+      unfold getUSizeSlot at projected
+      rw [constructor] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      have outOfBounds : slot < semantic.objectFields.size ∨
+          semantic.objectFields.size + semantic.usizeFields.size ≤ slot := by
+        by_cases slotStart : semantic.objectFields.size ≤ slot
+        · rw [if_pos slotStart] at projected
+          cases valueAt : semantic.usizeFields[slot -
+              semantic.objectFields.size]? with
+          | none =>
+              have localMissing := Array.getElem?_eq_none_iff.mp valueAt
+              right
+              omega
+          | some actual =>
+              rw [valueAt] at projected
+              contradiction
+        · left
+          omega
+      simpa [objectRelated.semanticObjectFields,
+        objectRelated.semanticUSizeFields] using
+          objectRelated.readUSizeSlot_outOfBounds outOfBounds
+  | boxed storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | string storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | closure closureRelated =>
+      obtain ⟨function, arity, captureKinds, storedDescriptor⟩ :=
+        closureRelated.descriptor
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+
 /-- Object mutation performs the same checked read before storing, so an
 out-of-bounds object slot fails without changing concrete memory. -/
 theorem ConstructorObjectRel.writeObjectField_outOfBounds
@@ -726,6 +926,37 @@ theorem ConstructorObjectRel.writeUSizeField_outOfBounds
   simp only [Bind.bind, Except.bind]
   rw [sizeEq]
   simp [Nat.not_lt.mpr outOfBounds]
+  rfl
+
+/-- Absolute-slot `USize` mutation rejects coordinates outside the complete
+fixed-slot interval before writing payload bytes. -/
+theorem ConstructorObjectRel.writeUSizeSlot_outOfBounds
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {slot : Nat} (value : UInt64)
+    (outOfBounds : slot < semantic.objectFields.size ∨
+      semantic.objectFields.size + semantic.usizeFields.size ≤ slot) :
+    writeUSizeSlot state address slot value = .error (.source
+      (.usizeFieldOutOfBounds slot
+        (semantic.objectFields.size + semantic.usizeFields.size))) := by
+  obtain ⟨header, headerRead, headerKind, _, _, objectCount, usizeCount, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have objectCountEq : header.aux1.toNat = semantic.objectFields.size := by
+    rw [objectCount, related.semanticObjectFields]
+  have usizeCountEq : header.aux2.toNat = semantic.usizeFields.size := by
+    rw [usizeCount, related.semanticUSizeFields]
+  have rejected : ¬ (semantic.objectFields.size ≤ slot ∧
+      slot < semantic.objectFields.size + semantic.usizeFields.size) := by
+    omega
+  unfold writeUSizeSlot
+  rw [constructorHeader]
+  simp only [Bind.bind, Except.bind]
+  rw [objectCountEq, usizeCountEq]
+  simp [rejected]
   rfl
 
 /-- A mapped live constructor's object setter preserves an exact semantic
@@ -816,6 +1047,69 @@ theorem LiveHeapRel.writeUSizeField_outOfBounds_refines
           found, live, objectEq, Bind.bind, Except.bind]
         simp only [pure, Except.pure]
         rw [dif_neg (Nat.not_lt.mpr outOfBounds)]
+  | boxed _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | string _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
+      rw [objectEq] at storedObjectEq
+      contradiction
+
+/-- A mapped live constructor preserves absolute-slot `USize` bounds faults
+and performs no concrete or semantic update. -/
+theorem LiveHeapRel.writeUSizeSlot_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {slot : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (value : UInt64)
+    (outOfBounds : slot < semantic.objectFields.size ∨
+      semantic.objectFields.size + semantic.usizeFields.size ≤ slot) :
+    writeUSizeSlot state address slot value = .error (.source
+        (.usizeFieldOutOfBounds slot
+          (semantic.objectFields.size + semantic.usizeFields.size))) ∧
+      setUSizeSlot runtime (.object (.heap location)) slot (.usize value) =
+        .error (.usizeFieldOutOfBounds slot
+          (semantic.objectFields.size + semantic.usizeFields.size)) := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | @constructor storedInfo storedKinds storedSemantic storedHeader _ descriptor
+      storedObjectEq objectRelated _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      have semanticEq := HeapObject.ctor.inj storedObjectEq
+      subst storedSemantic
+      constructor
+      · exact objectRelated.writeUSizeSlot_outOfBounds value outOfBounds
+      · have constructor : getConstructor runtime (.object (.heap location)) =
+            .ok (location, cell, semantic) := by
+          unfold getConstructor
+          simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind,
+            Except.bind]
+          rw [objectEq]
+          rfl
+        unfold setUSizeSlot modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        by_cases slotStart : semantic.objectFields.size ≤ slot
+        · have localOut : semantic.usizeFields.size ≤
+              slot - semantic.objectFields.size := by omega
+          simp [slotStart, Nat.not_lt.mpr localOut]
+        · simp [slotStart]
   | boxed _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -933,6 +1227,24 @@ theorem LiveHeapRel.readUSizeField_deadObject
     simp [getUSizeField, getConstructor, getLiveCell, found, dead]
     rfl⟩
 
+/-- Absolute-slot `USize` projection also rejects a mapped stale object before
+inspecting slot metadata. -/
+theorem LiveHeapRel.readUSizeSlot_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slot : Nat) :
+    readUSizeSlot state address slot =
+        .error (.sourceAddress (.deadObject address)) ∧
+      getUSizeSlot runtime (.object (.heap location)) slot =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readUSizeSlot_eq slot, by
+    simp [getUSizeSlot, getConstructor, getLiveCell, found, dead]
+    rfl⟩
+
 /-- Stale object-field mutation fails before validating the index, old field,
 or replacement word, so neither runtime has a post-state. -/
 theorem LiveHeapRel.writeObjectField_deadObject
@@ -967,6 +1279,24 @@ theorem LiveHeapRel.writeUSizeField_deadObject
   have deadRelated := related.deadCellRel mapped found dead
   exact ⟨deadRelated.writeUSizeField_eq index field, by
     simp [setUSizeField, modifyConstructor, getConstructor, getLiveCell,
+      found, dead]
+    rfl⟩
+
+/-- Absolute-slot `USize` mutation has the same stale-object boundary. -/
+theorem LiveHeapRel.writeUSizeSlot_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (slot : Nat) (field : UInt64) :
+    writeUSizeSlot state address slot field =
+        .error (.sourceAddress (.deadObject address)) ∧
+      setUSizeSlot runtime (.object (.heap location)) slot (.usize field) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.writeUSizeSlot_eq slot field, by
+    simp [setUSizeSlot, modifyConstructor, getConstructor, getLiveCell,
       found, dead]
     rfl⟩
 

@@ -52,7 +52,7 @@ theorem allocateConstructor_nonempty_decompose
       (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize) with
   | error failure =>
       rw [objectAllocation] at allocated
-      change Except.error (ConcreteError.target failure) =
+      change Except.error (ConcreteError.ofMemory failure) =
         Except.ok (result, address) at allocated
       contradiction
   | ok pair =>
@@ -67,7 +67,7 @@ theorem allocateConstructor_nonempty_decompose
           fields.toList with
       | error failure =>
           rw [fieldWrite] at allocated
-          change Except.error (ConcreteError.target failure) =
+          change Except.error (ConcreteError.ofMemory failure) =
             Except.ok (result, address) at allocated
           contradiction
       | ok finalMemory =>

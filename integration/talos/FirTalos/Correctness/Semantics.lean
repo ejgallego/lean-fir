@@ -1333,7 +1333,7 @@ theorem letStepSimulates_usizeProjection
     {sourceObject : Value} {value : UInt64}
     (valueEq : decl.value = .uproj index objectId)
     (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
-    (projected : getUSizeField initial.host.runtime sourceObject index =
+    (projected : getUSizeSlot initial.host.runtime sourceObject index =
       .ok (.usize value))
     (initialRelated :
       StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
@@ -1362,7 +1362,7 @@ theorem letStepSimulates_usizeProjection
     rw [objectLookup]
     change ((fun result : Value =>
       (initial.host.runtime, LetAction.value result)) <$>
-        getUSizeField initial.host.runtime sourceObject index) =
+        getUSizeSlot initial.host.runtime sourceObject index) =
       .ok (initial.host.runtime, .value (.usize value))
     rw [projected]
     rfl
@@ -1457,7 +1457,7 @@ theorem codeWP_usizeProjection_let
       findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
     (callFound : callIndex? sourceModule (.runtime (.usizeProj index)) = some id)
     (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
-    (projected : getUSizeField initial.host.runtime sourceObject index =
+    (projected : getUSizeSlot initial.host.runtime sourceObject index =
       .ok (.usize value))
     (initialRelated :
       StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)
@@ -1963,7 +1963,7 @@ theorem effectStepSimulates_usizeSet
     {targetRest : Wasm.Program}
     (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
     (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize fieldValue))
-    (mutated : setUSizeField initial.host.runtime sourceObject index
+    (mutated : setUSizeSlot initial.host.runtime sourceObject index
       (.usize fieldValue) = .ok sourceRuntime)
     (initialRelated :
       StateRelated sourceFunction initial.host.runtime sourceEnv initial locals)

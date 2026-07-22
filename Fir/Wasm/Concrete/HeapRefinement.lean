@@ -1115,6 +1115,42 @@ theorem ConstructorObjectRel.readUSizeField_refines
       ValueRel witness .usize (.word64 value) (.usize value) := by
   exact ⟨related.usizeFields index value valueAt, .usize⟩
 
+/-- The absolute fixed-slot reader agrees with the type-local `USize` relation
+after translating through the constructor's object-field prefix. -/
+theorem ConstructorObjectRel.readUSizeSlot_refines
+    {state : MemoryState} {witness : RefinementWitness} {address : Word32}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {semantic : ConstructorObject}
+    (related : ConstructorObjectRel state witness address info fieldKinds semantic)
+    {slot : Nat} {value : UInt64}
+    (slotStart : semantic.objectFields.size ≤ slot)
+    (valueAt : semantic.usizeFields[slot - semantic.objectFields.size]? =
+      some value) :
+    readUSizeSlot state address slot = .ok value ∧
+      ValueRel witness .usize (.word64 value) (.usize value) := by
+  obtain ⟨header, headerRead, headerKind, _, _, objectCount, usizeCount, _⟩ :=
+    related.header
+  have constructorHeader := readConstructorHeader_eq_ok_of_readLiveHeader
+    state address header headerRead headerKind
+  have objectCountEq : header.aux1.toNat = semantic.objectFields.size := by
+    rw [objectCount, related.semanticObjectFields]
+  have usizeCountEq : header.aux2.toNat = semantic.usizeFields.size := by
+    rw [usizeCount, related.semanticUSizeFields]
+  have localLt : slot - semantic.objectFields.size <
+      semantic.usizeFields.size :=
+    (Array.getElem?_eq_some_iff.mp valueAt).1
+  have slotEnd : slot <
+      semantic.objectFields.size + semantic.usizeFields.size := by omega
+  have slotRead : readUSizeSlot state address slot =
+      readUSizeField state address (slot - semantic.objectFields.size) := by
+    unfold readUSizeSlot
+    rw [constructorHeader]
+    simp only [Bind.bind, Except.bind]
+    rw [objectCountEq, usizeCountEq]
+    simp [slotStart, slotEnd]
+  rw [slotRead]
+  exact related.readUSizeField_refines valueAt
+
 theorem ValueRel.new_constructor_result (witness : RefinementWitness)
     (location : Location) (address : Word32) (info : LCNF.CtorInfo)
     (fieldKinds : Array AbiKind) :

@@ -412,6 +412,17 @@ def readUSizeField (state : MemoryState) (object : Word32) (index : Nat) :
     target.semanticSlotBytes * (objectFields + index)
   liftMemory <| state.memory.readUInt64 offset
 
+/-- Read a constructor `USize` using Lean final-LCNF's absolute fixed-slot
+coordinate. The type-local reader remains available to refinement internals. -/
+def readUSizeSlot (state : MemoryState) (object : Word32) (slot : Nat) :
+    Except ConcreteError UInt64 := do
+  let header ← readConstructorHeader state object
+  let objectFields := header.aux1.toNat
+  let usizeFields := header.aux2.toNat
+  unless objectFields ≤ slot && slot < objectFields + usizeFields do
+    throw (.source (.usizeFieldOutOfBounds slot (objectFields + usizeFields)))
+  readUSizeField state object (slot - objectFields)
+
 /-- Replace the mutable constructor tag while preserving the checked common
 header. Rewriting the complete header keeps one canonical encoding path for
 all metadata updates and leaves the payload bytes untouched. -/
@@ -436,6 +447,17 @@ def writeUSizeField (state : MemoryState) (object : Word32) (index : Nat)
     target.semanticSlotBytes * (objectFields + index)
   let memory ← liftMemory <| state.memory.writeUInt64 offset value
   return { state with memory }
+
+/-- Write a constructor `USize` using Lean final-LCNF's absolute fixed-slot
+coordinate, translating through the decoded object-field prefix. -/
+def writeUSizeSlot (state : MemoryState) (object : Word32) (slot : Nat)
+    (value : UInt64) : Except ConcreteError MemoryState := do
+  let header ← readConstructorHeader state object
+  let objectFields := header.aux1.toNat
+  let usizeFields := header.aux2.toNat
+  unless objectFields ≤ slot && slot < objectFields + usizeFields do
+    throw (.source (.usizeFieldOutOfBounds slot (objectFields + usizeFields)))
+  writeUSizeField state object (slot - objectFields) value
 
 /-- Validate a compiler-shaped packed scalar address. The first operand is
 the number of fixed semantic slots, not the scalar type width. -/

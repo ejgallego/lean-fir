@@ -683,7 +683,7 @@ def usizeProjStep (index : Nat) (store : Wasm.Store Host)
   let store := clearFailure store
   match args with
   | [.i32 bits] =>
-      match readUSizeField store.host.runtime.heap (Word32.ofUInt32 bits) index with
+      match readUSizeSlot store.host.runtime.heap (Word32.ofUInt32 bits) index with
       | .ok value => .Return [.i64 value] store
       | .error failure => trap store (.runtime failure.toTrap)
   | [_] => trap store (.laneMismatch 0 .i32)
@@ -1121,7 +1121,7 @@ def usizeSetStep (index : Nat) (store : Wasm.Store Host)
   let store := clearFailure store
   match args with
   | [.i32 objectBits, .i64 field] =>
-      match writeUSizeField store.host.runtime.heap
+      match writeUSizeSlot store.host.runtime.heap
           (Word32.ofUInt32 objectBits) index field with
       | .ok heap => .Return [] (replaceHeap store heap)
       | .error failure => trap store (.runtime failure.toTrap)
@@ -1715,6 +1715,30 @@ theorem ConcreteRuntimeRel.readUSizeField_refines
           cases taggedRelated <;>
             simp [getUSizeField, getConstructor, Bind.bind, Except.bind] at projected
 
+theorem ConcreteRuntimeRel.readUSizeSlot_refines
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {slot : Nat} {value : UInt64}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeSlot runtime sourceObject slot = .ok (.usize value)) :
+    readUSizeSlot concrete.heap objectWord slot = .ok value ∧
+      ValueRel witness .usize (.word64 value) (.usize value) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap mapped =>
+          cases mapped with
+          | mapped found =>
+              exact related.heap.readUSizeSlot_refines found descriptor projected
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind] at projected
+
 theorem ConcreteRuntimeRel.readObjectField_outOfBounds_refines
     {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
@@ -1773,6 +1797,37 @@ theorem ConcreteRuntimeRel.readUSizeField_outOfBounds_refines
           <;> have faultEq := Except.error.inj projected
           <;> cases faultEq
 
+theorem ConcreteRuntimeRel.readUSizeSlot_outOfBounds_refines
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {slot : Nat}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (projected : getUSizeSlot runtime sourceObject slot =
+      .error (.usizeFieldOutOfBounds slot (info.size + info.usize))) :
+    readUSizeSlot concrete.heap objectWord slot =
+      .error (.source (.usizeFieldOutOfBounds slot
+        (info.size + info.usize))) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap mapped =>
+          cases mapped with
+          | mapped found =>
+              exact related.heap.readUSizeSlot_outOfBounds_refines found
+                descriptor projected
+      | tagged taggedRelated =>
+          cases taggedRelated
+          <;> change Except.error RuntimeFault.expectedConstructor =
+              Except.error (.usizeFieldOutOfBounds slot
+                (info.size + info.usize)) at projected
+          <;> have faultEq := Except.error.inj projected
+          <;> cases faultEq
+
 theorem objectProjStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
@@ -1808,13 +1863,13 @@ theorem usizeProjStep_of_refines
       ValueRel witness .tobject (.word32 objectWord) sourceObject)
     (descriptor : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (projected : getUSizeField runtime sourceObject index = .ok (.usize value)) :
-    readUSizeField initial.host.runtime.heap objectWord index = .ok value ∧
+    (projected : getUSizeSlot runtime sourceObject index = .ok (.usize value)) :
+    readUSizeSlot initial.host.runtime.heap objectWord index = .ok value ∧
       usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
         .Return [.i64 value] (clearFailure initial) ∧
       ValueRel witness .usize (.word64 value) (.usize value) := by
   obtain ⟨read, valueRelated⟩ :=
-    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeField_refines runtimeRelated
+    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeSlot_refines runtimeRelated
       objectRelated descriptor projected
   refine ⟨read, ?_, valueRelated⟩
   simp [usizeProjStep, clearFailure, read]
@@ -1855,13 +1910,13 @@ theorem usizeProjStep_outOfBounds_of_refines
       ValueRel witness .tobject (.word32 objectWord) sourceObject)
     (descriptor : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (projected : getUSizeField runtime sourceObject index =
-      .error (.usizeFieldOutOfBounds index info.usize)) :
+    (projected : getUSizeSlot runtime sourceObject index =
+      .error (.usizeFieldOutOfBounds index (info.size + info.usize))) :
     usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
       trap (clearFailure initial) (.runtime (.source (.runtime
-        (.usizeFieldOutOfBounds index info.usize)))) := by
+        (.usizeFieldOutOfBounds index (info.size + info.usize))))) := by
   have read :=
-    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeField_outOfBounds_refines
+    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeSlot_outOfBounds_refines
       runtimeRelated objectRelated descriptor projected
   simp [usizeProjStep, clearFailure, read, ConcreteError.toTrap]
 
@@ -1910,7 +1965,7 @@ theorem usizeProjStep_deadObject_of_refines
     usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
         trap (clearFailure initial)
           (.runtime (.source (.address (.deadObject objectWord)))) ∧
-      getUSizeField runtime (.object (.heap location)) index =
+      getUSizeSlot runtime (.object (.heap location)) index =
         .error (.deadObject location) ∧
       ConcreteErrorSourceRel witness
         (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
@@ -1919,7 +1974,7 @@ theorem usizeProjStep_deadObject_of_refines
       cases referenceRelated with
       | heap heapRelated =>
           obtain ⟨concrete, semantic⟩ :=
-            runtimeRelated.heap.readUSizeField_deadObject heapRelated found dead index
+            runtimeRelated.heap.readUSizeSlot_deadObject heapRelated found dead index
           refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
           simp [usizeProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
@@ -3756,8 +3811,9 @@ theorem usizeSetStep_of_refines
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true)
     (objectEq : cell.object = .ctor semantic)
-    (indexValid : index < semantic.usizeFields.size)
-    (updated : setUSizeField runtime (.object (.heap location)) index
+    (slotStart : semantic.objectFields.size ≤ index)
+    (slotEnd : index < semantic.objectFields.size + semantic.usizeFields.size)
+    (updated : setUSizeSlot runtime (.object (.heap location)) index
       (.usize field) = .ok nextRuntime) :
     ∃ heap,
       usizeSetStep index initial
@@ -3771,8 +3827,8 @@ theorem usizeSetStep_of_refines
       | mapped mapped =>
           obtain ⟨heap, semanticAfter, concreteOperation,
               semanticOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.writeUSizeField_refines mapped found live
-              objectEq index field indexValid
+            runtimeRelated.heap.writeUSizeSlot_refines mapped found live
+              objectEq index field slotStart slotEnd
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
@@ -3782,7 +3838,7 @@ theorem usizeSetStep_of_refines
           · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
               finalHeapRelated
             apply modifyConstructor_heapOnly
-            simpa [setUSizeField] using updated
+            simpa [setUSizeSlot] using updated
 
 /-- An out-of-bounds object-slot mutation reaches the Talos boundary as the
 exact source-classified FIR bounds fault and leaves both runtimes unchanged. -/
@@ -3836,19 +3892,22 @@ theorem usizeSetStep_outOfBounds_of_refines
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true)
     (objectEq : cell.object = .ctor semantic)
-    (outOfBounds : semantic.usizeFields.size ≤ index) :
+    (outOfBounds : index < semantic.objectFields.size ∨
+      semantic.objectFields.size + semantic.usizeFields.size ≤ index) :
     usizeSetStep index initial
         [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
         trap (clearFailure initial) (.runtime (.source (.runtime
-          (.usizeFieldOutOfBounds index semantic.usizeFields.size)))) ∧
-      setUSizeField runtime (.object (.heap location)) index (.usize field) =
-        .error (.usizeFieldOutOfBounds index semantic.usizeFields.size) := by
+          (.usizeFieldOutOfBounds index
+            (semantic.objectFields.size + semantic.usizeFields.size))))) ∧
+      setUSizeSlot runtime (.object (.heap location)) index (.usize field) =
+        .error (.usizeFieldOutOfBounds index
+          (semantic.objectFields.size + semantic.usizeFields.size)) := by
   cases objectRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
           obtain ⟨concreteFailure, semanticFailure⟩ :=
-            runtimeRelated.heap.writeUSizeField_outOfBounds_refines mapped found
+            runtimeRelated.heap.writeUSizeSlot_outOfBounds_refines mapped found
               live objectEq field outOfBounds
           constructor
           · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
@@ -3902,14 +3961,14 @@ theorem usizeSetStep_deadObject_of_refines
         [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
         trap (clearFailure initial)
           (.runtime (.source (.address (.deadObject objectWord)))) ∧
-      setUSizeField runtime (.object (.heap location)) index (.usize field) =
+      setUSizeSlot runtime (.object (.heap location)) index (.usize field) =
         .error (.deadObject location) ∧
       ConcreteErrorSourceRel witness
         (.sourceAddress (.deadObject objectWord)) (.deadObject location) := by
   cases objectRelated with
   | object heapRelated =>
       obtain ⟨concrete, semantic⟩ :=
-        runtimeRelated.heap.writeUSizeField_deadObject heapRelated found dead
+        runtimeRelated.heap.writeUSizeSlot_deadObject heapRelated found dead
           index field
       refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
       simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
@@ -5783,7 +5842,7 @@ theorem effectStepSimulates_usizeSet
     (objectLookup : lookupValue sourceEnv objectId =
       .ok (.object (.heap location)))
     (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize field))
-    (updated : setUSizeField sourceRuntime (.object (.heap location)) index
+    (updated : setUSizeSlot sourceRuntime (.object (.heap location)) index
       (.usize field) = .ok nextRuntime)
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
       initial locals witness)
@@ -5811,7 +5870,8 @@ theorem effectStepSimulates_usizeSet
     (found : findCell? sourceRuntime.heap location = some cell)
     (live : cell.live = true)
     (objectEq : cell.object = .ctor semantic)
-    (indexValid : index < semantic.usizeFields.size) :
+    (slotStart : semantic.objectFields.size ≤ index)
+    (slotEnd : index < semantic.objectFields.size + semantic.usizeFields.size) :
     ∃ heap,
       EffectStepSimulates context sourceModule sourceFunction labels module
         hostEnv sourceRuntime nextRuntime sourceEnv
@@ -5847,7 +5907,7 @@ theorem effectStepSimulates_usizeSet
           | usize =>
               obtain ⟨heap, operation, runtimeRelated⟩ :=
                 usizeSetStep_of_refines initialRelated.1 objectRelated found live
-                  objectEq indexValid updated
+                  objectEq slotStart slotEnd updated
               refine ⟨heap, ?_⟩
               apply effectStepSimulates_binaryHost (step := usizeSetStep index)
               · intro externals
@@ -6388,7 +6448,7 @@ theorem wp_usizeProjection_let
       ValueRel witness .tobject (.word32 objectWord) sourceObject)
     (descriptor : witness.descriptors.lookup? objectWord =
       some (.constructor info fieldKinds))
-    (projected : getUSizeField runtime sourceObject index = .ok (.usize value))
+    (projected : getUSizeSlot runtime sourceObject index = .ok (.usize value))
     (hSet : locals.set? resultIndex (.i64 value) = some updated)
     (continued :
       Wasm.wp module rest Q (clearFailure initial)
@@ -8063,7 +8123,7 @@ theorem letStepSimulates_usizeProjection
     {fieldKinds : Array AbiKind}
     (valueEq : decl.value = .uproj index objectId)
     (sourceLookup : lookup sourceEnv objectId = some sourceObject)
-    (projected : getUSizeField sourceRuntime sourceObject index =
+    (projected : getUSizeSlot sourceRuntime sourceObject index =
       .ok (.usize value))
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
       initial locals witness)
@@ -8089,7 +8149,7 @@ theorem letStepSimulates_usizeProjection
       sourceRuntime sourceRuntime sourceEnv (.usize value) initial
       (clearFailure initial) locals updated resultIndex witness witness := by
   obtain ⟨_, valueRelated⟩ :=
-    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeField_refines
+    FirTalos.Concrete.ConcreteRuntimeRel.readUSizeSlot_refines
       initialRelated.1 objectRelated descriptor projected
   refine ⟨?_, initialRelated,
     initialRelated.bindWord64 resultFound resultKindAt valueRelated targetSet,
@@ -8101,7 +8161,7 @@ theorem letStepSimulates_usizeProjection
     rw [objectLookup]
     change ((fun projectedValue : Value =>
       (sourceRuntime, LetAction.value projectedValue)) <$>
-        getUSizeField sourceRuntime sourceObject index) =
+        getUSizeSlot sourceRuntime sourceObject index) =
       .ok (sourceRuntime, .value (.usize value))
     rw [projected]
     rfl
@@ -8134,7 +8194,7 @@ theorem codeWP_usizeProjection_let
     (callFound :
       callIndex? sourceModule (.runtime (.usizeProj index)) = some id)
     (sourceLookup : lookup sourceEnv objectId = some sourceObject)
-    (projected : getUSizeField sourceRuntime sourceObject index =
+    (projected : getUSizeSlot sourceRuntime sourceObject index =
       .ok (.usize value))
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
       initial locals witness)

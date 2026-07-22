@@ -347,7 +347,7 @@ theorem allocateNatural_heap_decompose
           bigNaturalMarker limbCount with
       | error failure =>
           rw [objectAllocation] at allocated
-          change Except.error (ConcreteError.target failure) =
+          change Except.error (ConcreteError.ofMemory failure) =
             Except.ok (result, address) at allocated
           contradiction
       | ok pair =>
@@ -363,6 +363,8 @@ theorem allocateNatural_heap_decompose
               (naturalLimbs value) with
           | error failure =>
               rw [limbWrite] at allocated
+              change Except.error (ConcreteError.ofMemory failure) =
+                Except.ok (result, address) at allocated
               contradiction
           | ok finalMemory =>
               rw [limbWrite] at allocated

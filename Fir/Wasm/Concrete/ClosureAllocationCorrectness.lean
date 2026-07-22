@@ -339,7 +339,7 @@ theorem allocateClosure_decompose
         descriptorId with
   | error failure =>
       rw [objectAllocation] at allocated
-      change Except.error (ConcreteError.target failure) =
+      change Except.error (ConcreteError.ofMemory failure) =
         Except.ok (result, address) at allocated
       contradiction
   | ok pair =>
@@ -354,7 +354,7 @@ theorem allocateClosure_decompose
           actualAddress.value 0 (captureKinds.toList.zip captures.toList) with
       | error failure =>
           rw [captureWrite] at allocated
-          change Except.error (ConcreteError.target failure) =
+          change Except.error (ConcreteError.ofMemory failure) =
             Except.ok (result, address) at allocated
           contradiction
       | ok finalMemory =>
