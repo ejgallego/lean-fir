@@ -51,6 +51,108 @@ theorem ShadowCodeGraph.mono
   rcases graph with ⟨remaining, initial, final, bounded, result, coveredBy⟩
   exact ⟨remaining, initial, final, bounded, result, coveredBy.trans subset⟩
 
+theorem continuationGraph_of_insert
+    (result : shadowCode? remaining initial sourceContinuation =
+      some (targetContinuation, final))
+    (bounded : remaining + 1 ≤ fuel)
+    (subset : UsedSubset (final.insert object) used) :
+    ShadowCodeGraph fuel used sourceContinuation targetContinuation ∧
+      used.contains object = true := by
+  have remainingBound : remaining ≤ fuel :=
+    Nat.le_trans (Nat.le_succ remaining) bounded
+  have finalSubset : UsedSubset final used :=
+    (usedSubset_insert final object).trans subset
+  exact ⟨⟨remaining, initial, final, remainingBound, result, finalSubset⟩,
+    subset object (by simp)⟩
+
+theorem ShadowCodeGraph.setTagResidual
+    (graph : ShadowCodeGraph fuel used
+      (.setTag object tag sourceContinuation) target) :
+    ∃ targetContinuation,
+      target = .setTag object tag targetContinuation ∧
+      ShadowCodeGraph fuel used sourceContinuation targetContinuation ∧
+      used.contains object = true := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          simp [shadowCode?, continuationResult] at result
+          rcases result with ⟨rfl, rfl⟩
+          obtain ⟨continuation, member⟩ := continuationGraph_of_insert
+            continuationResult bounded subset
+          exact ⟨targetContinuation, rfl, continuation, member⟩
+
+theorem ShadowCodeGraph.incrementResidual
+    (graph : ShadowCodeGraph fuel used
+      (.inc object amount check persistent sourceContinuation) target) :
+    ∃ targetContinuation,
+      target = .inc object amount check persistent targetContinuation ∧
+      ShadowCodeGraph fuel used sourceContinuation targetContinuation ∧
+      used.contains object = true := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          simp [shadowCode?, continuationResult] at result
+          rcases result with ⟨rfl, rfl⟩
+          obtain ⟨continuation, member⟩ := continuationGraph_of_insert
+            continuationResult bounded subset
+          exact ⟨targetContinuation, rfl, continuation, member⟩
+
+theorem ShadowCodeGraph.decrementResidual
+    (graph : ShadowCodeGraph fuel used
+      (.dec object amount check persistent objects sourceContinuation) target) :
+    ∃ targetContinuation,
+      target = .dec object amount check persistent objects targetContinuation ∧
+      ShadowCodeGraph fuel used sourceContinuation targetContinuation ∧
+      used.contains object = true := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          simp [shadowCode?, continuationResult] at result
+          rcases result with ⟨rfl, rfl⟩
+          obtain ⟨continuation, member⟩ := continuationGraph_of_insert
+            continuationResult bounded subset
+          exact ⟨targetContinuation, rfl, continuation, member⟩
+
+theorem ShadowCodeGraph.deleteResidual
+    (graph : ShadowCodeGraph fuel used
+      (.del object sourceContinuation) target) :
+    ∃ targetContinuation,
+      target = .del object targetContinuation ∧
+      ShadowCodeGraph fuel used sourceContinuation targetContinuation ∧
+      used.contains object = true := by
+  rcases graph with ⟨remaining, initial, final, bounded, result, subset⟩
+  cases remaining with
+  | zero => simp [shadowCode?] at result
+  | succ nextFuel =>
+      cases continuationResult :
+          shadowCode? nextFuel initial sourceContinuation with
+      | none => simp [shadowCode?, continuationResult] at result
+      | some output =>
+          obtain ⟨targetContinuation, continuationUsed⟩ := output
+          simp [shadowCode?, continuationResult] at result
+          rcases result with ⟨rfl, rfl⟩
+          obtain ⟨continuation, member⟩ := continuationGraph_of_insert
+            continuationResult bounded subset
+          exact ⟨targetContinuation, rfl, continuation, member⟩
+
 theorem ShadowCodeGraph.jumpTarget
     (graph : ShadowCodeGraph fuel used (.jmp join arguments) target) :
     target = .jmp join arguments := by
@@ -579,8 +681,9 @@ inductive ShadowJoinReadyAt (fuel : Nat) (used : UsedLocals)
         (.deleted targetContinuation continuation)
 
 /-- The currently certified exact-runtime fragment of the shadow graph.
-Heap-effect nodes are intentionally absent until the runtime relation is
-weakened from raw equality to reachable-heap equivalence. -/
+Unconditionally retained heap-effect nodes are included.  Conditionally
+eliminated field writes remain outside this fragment until the runtime
+relation is weakened from raw equality to reachable-heap equivalence. -/
 inductive ShadowCodeReadyAt (fuel : Nat) (used : UsedLocals)
     (state : MachineState) :
     {source target : LCNF.Code .impure} →
@@ -609,6 +712,21 @@ inductive ShadowCodeReadyAt (fuel : Nat) (used : UsedLocals)
       ShadowCodeReadyAt fuel used state graph
   | unreachable
       (graph : ShadowCodeGraph fuel used (.unreach type) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | setTag
+      (graph : ShadowCodeGraph fuel used
+        (.setTag object tag continuation) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | increment
+      (graph : ShadowCodeGraph fuel used
+        (.inc object amount check persistent continuation) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | decrement
+      (graph : ShadowCodeGraph fuel used
+        (.dec object amount check persistent objects continuation) target) :
+      ShadowCodeReadyAt fuel used state graph
+  | delete
+      (graph : ShadowCodeGraph fuel used (.del object continuation) target) :
       ShadowCodeReadyAt fuel used state graph
 
 /-- Readiness for an arbitrary control override.  Only code controls impose an
@@ -760,6 +878,34 @@ theorem shadowFail_related
   unfold fail
   rw [observe_eq_of_runtime_eq_live runtimeEq]
   exact .done _
+
+/-- A shared heap operation either faults equally or resumes the two residual
+continuations with its common updated runtime. -/
+theorem shadowRuntimeResult_related
+    (related : ShadowMachineRelated fuel source target)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used source.joins target.joins)
+    (agree : EnvsAgreeOn used source.env target.env)
+    (result : Except RuntimeFault RuntimeState) :
+    ShadowCoreResultRelated fuel
+      (match result with
+      | .ok runtime => .next
+          { source with runtime, control := .code sourceContinuation }
+      | .error fault => fail source fault)
+      (match result with
+      | .ok runtime => .next
+          { target with runtime, control := .code targetContinuation }
+      | .error fault => fail target fault) := by
+  cases result with
+  | error fault => exact shadowFail_related related.runtime_eq fault
+  | ok runtime =>
+      exact .next {
+        programs := related.programs
+        runtime_eq := rfl
+        frames := related.frames
+        control := .code continuation joins agree
+      }
 
 /-- A retained let evaluates identically on both sides.  Ordinary values bind
 on both sides, while calls save recursively related continuations in the two
@@ -980,6 +1126,211 @@ theorem coreStep_join_shadowProgress
   | deleted targetContinuation continuation absent =>
       exact coreStep_deletedJoin_shadowProgress sourceState targetState
         programs runtimeEq framesRelated continuation joins agree absent
+
+/-- Tag mutation is always retained by the transparent pass.  Its object is
+live, so both environments select the same value and runtime equality makes
+the heap operation identical. -/
+theorem coreStep_setTag_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.setTag object tag sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.setTag object tag sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  rcases graph.setTagResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  let sourceCurrent := { sourceState with control :=
+    (.code (.setTag object tag sourceContinuation)) }
+  let targetCurrent := { targetState with control :=
+    (.code (.setTag object tag targetContinuation)) }
+  have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+    programs
+    runtime_eq := runtimeEq
+    frames := framesRelated
+    control := .code graph joins agree
+  }
+  simp only [coreStep]
+  rw [agree object objectMember]
+  generalize objectRead : lookupValue targetState.env object = objectResult
+  cases objectResult with
+  | error fault => exact shadowFail_related runtimeEq fault
+  | ok value =>
+      dsimp
+      have effectEq : setTag sourceState.runtime value tag =
+          setTag targetState.runtime value tag :=
+        congrArg (fun runtime => setTag runtime value tag) runtimeEq
+      rw [effectEq]
+      exact shadowRuntimeResult_related current continuation joins agree
+        (setTag targetState.runtime value tag)
+
+/-- Non-persistent reference increments are equal heap operations on the same
+live object; persistent increments are identical administrative steps. -/
+theorem coreStep_increment_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.inc object amount check persistent sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.inc object amount check persistent sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  rcases graph.incrementResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  let sourceCurrent := { sourceState with control :=
+    (.code (.inc object amount check persistent sourceContinuation)) }
+  let targetCurrent := { targetState with control :=
+    (.code (.inc object amount check persistent targetContinuation)) }
+  have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+    programs
+    runtime_eq := runtimeEq
+    frames := framesRelated
+    control := .code graph joins agree
+  }
+  cases persistent with
+  | true =>
+      simp only [coreStep, ↓reduceIte]
+      exact .next {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code continuation joins agree
+      }
+  | false =>
+      simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+      rw [agree object objectMember]
+      generalize objectRead : lookupValue targetState.env object = objectResult
+      cases objectResult with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok value =>
+          dsimp
+          have effectEq : incValue sourceState.runtime value amount check =
+              incValue targetState.runtime value amount check :=
+            congrArg
+              (fun runtime => incValue runtime value amount check) runtimeEq
+          rw [effectEq]
+          exact shadowRuntimeResult_related current continuation joins agree
+            (incValue targetState.runtime value amount check)
+
+/-- Decrements have the same retained-node argument as increments.  The
+compiler-only object-count annotation is operationally irrelevant here. -/
+theorem coreStep_decrement_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.dec object amount check persistent objects sourceContinuation)
+        targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.dec object amount check persistent objects
+          sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  rcases graph.decrementResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  let sourceCurrent := { sourceState with control :=
+    (.code (.dec object amount check persistent objects sourceContinuation)) }
+  let targetCurrent := { targetState with control :=
+    (.code (.dec object amount check persistent objects targetContinuation)) }
+  have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+    programs
+    runtime_eq := runtimeEq
+    frames := framesRelated
+    control := .code graph joins agree
+  }
+  cases persistent with
+  | true =>
+      simp only [coreStep, ↓reduceIte]
+      exact .next {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code continuation joins agree
+      }
+  | false =>
+      simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+      rw [agree object objectMember]
+      generalize objectRead : lookupValue targetState.env object = objectResult
+      cases objectResult with
+      | error fault => exact shadowFail_related runtimeEq fault
+      | ok value =>
+          dsimp
+          have effectEq : decValue sourceState.runtime value amount check =
+              decValue targetState.runtime value amount check :=
+            congrArg
+              (fun runtime => decValue runtime value amount check) runtimeEq
+          rw [effectEq]
+          exact shadowRuntimeResult_related current continuation joins agree
+            (decValue targetState.runtime value amount check)
+
+/-- Explicit deletion is retained and therefore executes in lockstep on the
+same live object. -/
+theorem coreStep_delete_shadowRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (runtimeEq : sourceState.runtime = targetState.runtime)
+    (framesRelated : ShadowFramesRelated fuel
+      sourceState.frames targetState.frames)
+    (graph : ShadowCodeGraph fuel used
+      (.del object sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (agree : EnvsAgreeOn used sourceState.env targetState.env) :
+    ShadowCoreResultRelated fuel
+      (coreStep { sourceState with control :=
+        (.code (.del object sourceContinuation)) })
+      (coreStep { targetState with control := .code targetCode }) := by
+  rcases graph.deleteResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  let sourceCurrent := { sourceState with control :=
+    (.code (.del object sourceContinuation)) }
+  let targetCurrent := { targetState with control :=
+    (.code (.del object targetContinuation)) }
+  have current : ShadowMachineRelated fuel sourceCurrent targetCurrent := {
+    programs
+    runtime_eq := runtimeEq
+    frames := framesRelated
+    control := .code graph joins agree
+  }
+  simp only [coreStep]
+  rw [agree object objectMember]
+  generalize objectRead : lookupValue targetState.env object = objectResult
+  cases objectResult with
+  | error fault => exact shadowFail_related runtimeEq fault
+  | ok value =>
+      dsimp
+      have effectEq : deleteValue sourceState.runtime value =
+          deleteValue targetState.runtime value :=
+        congrArg (fun runtime => deleteValue runtime value) runtimeEq
+      rw [effectEq]
+      exact shadowRuntimeResult_related current continuation joins agree
+        (deleteValue targetState.runtime value)
 
 /-- Return nodes are unchanged by the pass.  Coverage makes their value
 lookup equal even when dead source bindings make the environments differ. -/
@@ -1497,6 +1848,24 @@ theorem shadowMachineProgress_withControl
           apply ShadowMachineProgress.lockstep
           exact coreStep_unreach_shadowRelated source target related.programs
             related.runtime_eq related.frames graph joins agree
+      | setTag graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_setTag_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree
+      | increment graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_increment_shadowRelated source target
+            related.programs related.runtime_eq related.frames graph joins
+              agree
+      | decrement graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_decrement_shadowRelated source target
+            related.programs related.runtime_eq related.frames graph joins
+              agree
+      | delete graph =>
+          apply ShadowMachineProgress.lockstep
+          exact coreStep_delete_shadowRelated source target related.programs
+            related.runtime_eq related.frames graph joins agree
   | yielded value =>
       apply ShadowMachineProgress.lockstep
       exact coreStep_yielded_shadowRelated source target related.programs
@@ -1913,13 +2282,65 @@ theorem shadowCode_lockstepNormalizes
         (refined := { structural, invariant := invariantAt })
       exact coreStep_unreach_shadowRelated sourceState targetState programs
         runtimeEq framesRelated graph joins agree
+  | setTag object tag continuation =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control :=
+            (.code (.setTag object tag continuation)) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_setTag_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | inc object amount check persistent continuation =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control :=
+            (.code (.inc object amount check persistent continuation)) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_increment_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | dec object amount check persistent objects continuation =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control :=
+            (.code (.dec object amount check persistent objects
+              continuation)) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_decrement_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
+  | del object continuation =>
+      have structural : ShadowMachineRelated fuel
+          { sourceState with control := (.code (.del object continuation)) }
+          { targetState with control := .code targetCode } := {
+        programs
+        runtime_eq := runtimeEq
+        frames := framesRelated
+        control := .code graph joins agree
+      }
+      apply shadowLockstepNormalizes_of_results
+        (refined := { structural, invariant := invariantAt })
+      exact coreStep_delete_shadowRelated sourceState targetState programs
+        runtimeEq framesRelated graph joins agree
   | oset object index field continuation
   | uset object index field continuation
-  | sset object width offset field type continuation
-  | setTag object tag continuation
-  | inc object amount check persistent continuation
-  | dec object amount check persistent objects continuation
-  | del object continuation =>
+  | sset object width offset field type continuation =>
       exact (unsupported sourceState targetState programs runtimeEq
         framesRelated graph joins agree invariantAt
           (by intro ready; cases ready)).elim
