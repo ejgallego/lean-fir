@@ -2531,6 +2531,14 @@ after the second write. The narrower writers still require same-coordinate
 replacement and are the next framing slices. No executable layout or shared
 semantic contract changed.
 
+W6.6bd carries retained packed-field framing through the `UInt32` writer. Its
+four-byte concrete store now preserves disjoint retained fields of every
+supported integer width, and that invariant reaches the complete heap, Talos
+host, and generated `sset` theorem. A closed module writes offsets zero and
+four, then projects the first `UInt32` after the second write. `UInt8` and
+`UInt16` writers still use the same-coordinate replacement boundary. No
+executable layout or shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

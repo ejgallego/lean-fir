@@ -153,6 +153,20 @@ private def disjointUInt64ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsI64? disjointUInt64ScalarMutationProgram 66
 
+/-- The corresponding 32-bit writer frames an earlier disjoint coordinate. -/
+private def disjointUInt32ScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.uint32 (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+      .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
+      .let (letDecl s LCNF.ImpureType.uint32 (.lit (.uint32 66))) <|
+      .sset p 2 0 s LCNF.ImpureType.uint32 <|
+      .let (letDecl u LCNF.ImpureType.uint32 (.lit (.uint32 77))) <|
+      .sset p 2 4 u LCNF.ImpureType.uint32 <|
+      .let (letDecl r LCNF.ImpureType.uint32 (.sproj 2 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? disjointUInt32ScalarMutationProgram 66
+
 private def decrementGraphProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 10))) <|
