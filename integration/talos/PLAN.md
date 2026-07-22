@@ -2497,6 +2497,17 @@ lowering and concrete execution. Framing retained fields at physically
 disjoint offsets remains the next scalar proof slice. No executable layout or
 shared semantic contract changed.
 
+W6.6ba closes `objectSet` composition for the remaining `LCNF.Arg` branch.
+The compiler's erased argument becomes the canonical wasm32 zero, and a new
+local/constant exact-host-call WP connects that emitted prefix to the checked
+concrete writer. The operation theorem retains exact `.erased` descriptor
+typing, so ordinary object decoding is not weakened. A closed module allocates
+an erased object slot, overwrites it with erased, projects it, and returns zero
+through lowering, adaptation, host resolution, and concrete execution. Since
+impure LCNF arguments are either FVars or erased, object-field write
+composition now covers the complete argument syntax. No executable layout or
+shared semantic contract changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

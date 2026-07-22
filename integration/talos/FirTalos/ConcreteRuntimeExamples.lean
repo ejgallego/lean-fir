@@ -182,6 +182,18 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? Fir.Wasm.abiObjectMutationProgram 177
 
+/-- Erased object arguments remain canonical physical zeroes across allocation,
+mutation, projection, and the complete generated-module return path. -/
+private def erasedObjectMutationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.erased (.code <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.erased])) <|
+      .oset p 0 .erased <|
+      .let (letDecl r LCNF.ImpureType.erased (.oproj 0 p)) <|
+      .return r)] }
+
+#guard fixtureReturnsWord? erasedObjectMutationProgram 0
+
 #guard fixtureReturnsWord? Fir.Wasm.abiTagMutationProgram 199
 
 #guard fixtureReturnsI64?
