@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.ElimDeadRelation
+import Fir.LeanIR.Passes.ElimDeadProgram
 import Fir.LeanIR.InterpreterExamples
 import Lean.Compiler.LCNF.ElimDead
 import Lean.Elab.Command
@@ -12,6 +12,7 @@ open Fir.LeanIR.Impure
 open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Passes.ElimDead
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.NonLockstep.Structural
 
 def live : FVarId := ⟨`live⟩
 def dead : FVarId := ⟨`dead⟩
@@ -128,6 +129,27 @@ def allocatingBeforeProgram : ImpureProgram :=
 
 def allocatingAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main allocatingAfter] }
+
+def neutralUsed : UsedLocals :=
+  ({} : UsedLocals).insert live
+
+theorem neutralShadowRun :
+    shadowCode? 3 {} neutralBefore = some (neutralAfter, neutralUsed) := by
+  change shadowCode? 3 {} neutralBefore =
+    some (neutralAfter, ({} : UsedLocals).insert live)
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by native_decide
+  simp [neutralBefore, neutralAfter, liveDecl, deadErasedDecl, letDecl,
+    shadowCode?, safeToElim, collectLetValue, liveMember, deadAbsent]
+
+/-- The transparent declaration/program lifting relates the complete neutral
+fixture, rather than only its local code output. -/
+theorem neutralProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 3)
+      neutralBeforeProgram neutralAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?, neutralBeforeProgram,
+    neutralAfterProgram, fixtureDecl, decl, neutralShadowRun]
 
 def liveEnv : Env :=
   bind [] live .erased
