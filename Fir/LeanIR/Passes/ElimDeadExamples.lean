@@ -20,6 +20,7 @@ def usizeField : FVarId := ⟨`usizeField⟩
 def scalarField : FVarId := ⟨`scalarField⟩
 def reuseTokenVar : FVarId := ⟨`reuseToken⟩
 def reuseArgVar : FVarId := ⟨`reuseArg⟩
+def resetObjectVar : FVarId := ⟨`resetObject⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -70,6 +71,15 @@ def deletedReuseBefore : LCNF.Code .impure :=
   .let deadReuseDecl (.return live)
 
 def deletedReuseAfter : LCNF.Code .impure :=
+  .return live
+
+def deadResetDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.reset 1 resetObjectVar)
+
+def deletedResetBefore : LCNF.Code .impure :=
+  .let deadResetDecl (.return live)
+
+def deletedResetAfter : LCNF.Code .impure :=
   .return live
 
 #guard safeToElim deadErasedDecl.value
@@ -136,6 +146,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
+  checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -166,6 +177,12 @@ def deletedReuseBeforeProgram : ImpureProgram :=
 
 def deletedReuseAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedReuseAfter] }
+
+def deletedResetBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedResetBefore] }
+
+def deletedResetAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main deletedResetAfter] }
 
 def neutralUsed : UsedLocals :=
   ({} : UsedLocals).insert live
@@ -231,6 +248,16 @@ theorem deletedReuseShadowRun :
   simp [deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl,
     neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem deletedResetShadowRun :
+    shadowCode? 2 {} deletedResetBefore =
+      some (deletedResetAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedResetBefore, deletedResetAfter, deadResetDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
+
 /-- The transparent declaration/program lifting relates the complete neutral
 fixture, rather than only its local code output. -/
 theorem neutralProgramShadowRelated :
@@ -262,6 +289,14 @@ theorem deletedReuseProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedReuseBeforeProgram, deletedReuseAfterProgram,
     fixtureDecl, decl, deletedReuseShadowRun]
+
+theorem deletedResetProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 2)
+      deletedResetBeforeProgram deletedResetAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    deletedResetBeforeProgram, deletedResetAfterProgram,
+    fixtureDecl, decl, deletedResetShadowRun]
 
 theorem neutralInitialShadowRelated (entry : Name)
     (arguments : Array Value) :
@@ -335,6 +370,39 @@ def deletedReuseSomeSourceState : MachineState :=
 def deletedReuseTargetState : MachineState :=
   { program := deletedReuseAfterProgram
     control := .code deletedReuseAfter
+    env := liveEnv }
+
+def deletedResetObject : ConstructorObject :=
+  { tag := 0
+    objectFields := #[.object (.tagged 7)]
+    usizeFields := #[]
+    scalarFields := [] }
+
+def deletedResetClearedObject : ConstructorObject :=
+  { deletedResetObject with objectFields := #[.object (.tagged 0)] }
+
+def deletedResetSourceRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) (.ctor deletedResetObject)).1
+
+def deletedResetReplacementCell : HeapCell :=
+  { object := .ctor deletedResetClearedObject }
+
+def deletedResetNextRuntime : RuntimeState :=
+  { deletedResetSourceRuntime with
+    heap := [(0, deletedResetReplacementCell)] }
+
+def deletedResetSourceEnv : Env :=
+  bind liveEnv resetObjectVar (.object (.heap 0))
+
+def deletedResetSourceState : MachineState :=
+  { program := deletedResetBeforeProgram
+    control := .code deletedResetBefore
+    env := deletedResetSourceEnv
+    runtime := deletedResetSourceRuntime }
+
+def deletedResetTargetState : MachineState :=
+  { program := deletedResetAfterProgram
+    control := .code deletedResetAfter
     env := liveEnv }
 
 /-- A binding absent from the backwards used set can be added to one side
@@ -506,6 +574,73 @@ theorem deletedReuseSomeDestinationUnreachable :
         (envRootsOn neutralUsed deletedReuseSomeSourceState.env)) 0 := by
   apply deletedReuseSomeRuntimeRelated.leftUnreachable_of_forward_unmapped
   simp [emptyAddressRenaming]
+
+theorem deletedResetEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming neutralUsed deletedResetSourceEnv
+      liveEnv := by
+  unfold deletedResetSourceEnv
+  apply EnvRelOn.bindLeft_of_absent liveEnvReachableRelated
+  native_decide
+
+theorem deletedResetRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      deletedResetSourceState.runtime deletedResetTargetState.runtime
+      (envRootsOn neutralUsed deletedResetSourceState.env)
+      (envRootsOn neutralUsed deletedResetTargetState.env) := by
+  have base := emptyRuntime_shadowRelated_of_roots
+    (envRootsOn_related deletedResetEnvReachableRelated)
+  simpa [deletedResetSourceState, deletedResetTargetState,
+    deletedResetSourceRuntime] using
+      base.allocLeftGarbage (.ctor deletedResetObject) false
+
+theorem deletedResetDestinationUnreachable :
+    ¬Reachable deletedResetSourceState.runtime.heap
+      (runtimeRoots deletedResetSourceState.runtime
+        (envRootsOn neutralUsed deletedResetSourceState.env)) 0 := by
+  apply deletedResetRuntimeRelated.leftUnreachable_of_forward_unmapped
+  simp [emptyAddressRenaming]
+
+theorem deletedResetSetCellEffect :
+    setCell deletedResetSourceRuntime 0 deletedResetReplacementCell =
+      .ok deletedResetNextRuntime := by
+  rfl
+
+theorem deletedResetEffect :
+    reset deletedResetSourceRuntime 1 (.object (.heap 0)) =
+      .ok (deletedResetNextRuntime, .reuseToken (some 0)) := by
+  rfl
+
+theorem deletedResetRuntimeFrame :
+    RuntimeReachableFrame deletedResetSourceState.runtime
+      deletedResetNextRuntime
+      (runtimeRoots deletedResetSourceState.runtime
+        (envRootsOn neutralUsed deletedResetSourceState.env)) := by
+  have found : findCell? deletedResetSourceState.runtime.heap 0 =
+      some ({ object := .ctor deletedResetObject } : HeapCell) := by
+    rfl
+  rcases setCell_reachableFrame_of_unreachable found
+      deletedResetDestinationUnreachable
+      deletedResetRuntimeRelated.leftHeapFresh deletedResetReplacementCell with
+    ⟨after, effect, frame⟩
+  have known : setCell deletedResetSourceState.runtime 0
+      deletedResetReplacementCell = .ok deletedResetNextRuntime := by
+    simpa [deletedResetSourceState] using deletedResetSetCellEffect
+  rw [known] at effect
+  injection effect with same
+  subst after
+  exact frame
+
+theorem deletedResetReady :
+    DeletedResetReadyAt deletedResetSourceState
+      (runtimeRoots deletedResetSourceState.runtime
+        (envRootsOn neutralUsed deletedResetSourceState.env))
+      1 resetObjectVar := by
+  apply DeletedResetReadyAt.mk (.object (.heap 0))
+    (.reuseToken (some 0)) deletedResetNextRuntime
+  · simp [deletedResetSourceState, deletedResetSourceEnv,
+      lookupValue, Impure.bind, lookup, resetObjectVar]
+  · simpa [deletedResetSourceState] using deletedResetEffect
+  · exact deletedResetRuntimeFrame
 
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
@@ -800,6 +935,48 @@ theorem deletedReuseSomeSourceOnlyMachineStep :
     runtime (by simpa using deletedReuseSomeReady)
   simpa [deletedReuseSomeSourceState, deletedReuseTargetState,
     deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl] using progress
+
+/-- The concrete reset clears and releases an unreachable constructor field.
+Every cell reachable from the live return remains fixed, so the target can
+delete the reset and stutter. -/
+theorem deletedResetSourceOnlyMachineStep :
+    ∃ nextRuntime token,
+      let sourceAfter := {
+        deletedResetSourceState with
+        runtime := nextRuntime
+        env := bind deletedResetSourceState.env dead token
+        control := .code (.return live) }
+      coreStep deletedResetSourceState = .next sourceAfter ∧
+        ReachableMachineRelated 2 emptyAddressRenaming sourceAfter
+          deletedResetTargetState := by
+  have programs : ProgramRelated (ShadowCodeRelated 2)
+      deletedResetSourceState.program deletedResetTargetState.program := by
+    simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetProgramShadowRelated
+  have frames : ReachableFramesRelated 2 emptyAddressRenaming
+      deletedResetSourceState.frames deletedResetTargetState.frames [] [] :=
+    .nil
+  have env : EnvRelOn emptyAddressRenaming neutralUsed
+      deletedResetSourceState.env deletedResetTargetState.env := by
+    simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetEnvReachableRelated
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedResetSourceState.runtime deletedResetTargetState.runtime
+      (envRootsOn neutralUsed deletedResetSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedResetTargetState.env ++ []) := by
+    simpa using deletedResetRuntimeRelated
+  have progress := coreStep_deletedReset_of_ready
+    (sourceState := deletedResetSourceState)
+    (targetState := deletedResetTargetState)
+    (sourceContinuation := .return live)
+    (targetContinuation := .return live)
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (count := 1) (object := resetObjectVar)
+    programs frames returnLiveShadowGraph2
+    (ShadowJoinEnvRelated.empty 2 neutralUsed) env (by native_decide)
+    runtime (by simpa using deletedResetReady)
+  simpa [deletedResetSourceState, deletedResetTargetState,
+    deletedResetBefore, deletedResetAfter, deadResetDecl, letDecl] using progress
 
 /-- The concrete dead-constructor fixture now reaches the generalized
 machine relation after one source interpreter step and zero target steps. -/

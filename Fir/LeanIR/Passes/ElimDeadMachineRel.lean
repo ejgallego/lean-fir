@@ -603,6 +603,71 @@ theorem coreStep_deletedReuse_of_ready
         coreStep_deletedLet_reachableRelated sourceState targetState
           programs frames continuation joins env absent evaluated next⟩
 
+/-- Proof-visible ownership contract for deleting a `reset`.  The interpreter
+effect must succeed and preserve every heap cell reachable from the active
+runtime roots; recursively adjusted garbage remains unconstrained. -/
+inductive DeletedResetReadyAt (state : MachineState) (roots : List Value)
+    (count : Nat) (object : FVarId) : Prop where
+  | mk (objectValue token : Value) (nextRuntime : RuntimeState)
+      (objectRead : lookupValue state.env object = .ok objectValue)
+      (effect : reset state.runtime count objectValue =
+        .ok (nextRuntime, token))
+      (frame : RuntimeReachableFrame state.runtime nextRuntime roots) :
+      DeletedResetReadyAt state roots count object
+
+/-- Machine-level deleted-`reset` rule under the explicit ownership frame. -/
+theorem coreStep_deletedReset_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedResetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      count object) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .reset count object }
+    ∃ nextRuntime token,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId token
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases ready with
+    ⟨objectValue, token, nextRuntime, objectRead, effect, frame⟩
+  have evaluated : evalLetValue sourceState {
+      fvarId
+      binderName
+      type
+      value := .reset count object
+    } = .ok (nextRuntime, .value token) := by
+    simp only [evalLetValue, objectRead, Bind.bind, Except.bind]
+    rw [effect]
+    rfl
+  have next := runtime.frameLeft frame
+  exact ⟨nextRuntime, token,
+    coreStep_deletedLet_reachableRelated sourceState targetState
+      programs frames continuation joins env absent evaluated next⟩
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation

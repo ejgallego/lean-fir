@@ -482,6 +482,68 @@ theorem heapRel_frameLeft_of_unreachable
     exact ⟨mapped, targetCell, sourceCell, mapping, targetFound,
       by simpa [frame mapped different] using sourceFound, cells⟩
 
+/-- A whole-heap update is observationally outside `roots` when every cell
+reachable before the update has exactly the same lookup afterwards. -/
+def HeapReachableFrame (before after : Heap) (roots : List Value) : Prop :=
+  ∀ location, Reachable before roots location →
+    findCell? after location = findCell? before location
+
+theorem reachable_of_heapReachableFrame
+    (frame : HeapReachableFrame before after roots)
+    (reachable : Reachable after roots location) :
+    Reachable before roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have beforeFound : findCell? before parent = some cell := by
+        rw [← frame parent ih]
+        exact cellFound
+      exact .child ih beforeFound member reference
+
+theorem reachable_heapReachableFrame
+    (frame : HeapReachableFrame before after roots)
+    (reachable : Reachable before roots location) :
+    Reachable after roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have afterFound : findCell? after parent = some cell := by
+        rw [frame parent parentReachable]
+        exact cellFound
+      exact .child ih afterFound member reference
+
+/-- A whole-heap source update preserving every live-root-reachable lookup
+preserves the bidirectional reachable heap relation. -/
+theorem heapRel_frameLeft_of_reachableFrame
+    (roots : ListRel (ValueRel rho) leftRoots rightRoots)
+    (related : HeapRel rho before right leftRoots rightRoots)
+    (frame : HeapReachableFrame before after leftRoots) :
+    HeapRel rho after right leftRoots rightRoots := by
+  constructor
+  · intro location afterReachable
+    have beforeReachable :=
+      reachable_of_heapReachableFrame frame afterReachable
+    rcases related.1 location beforeReachable with
+      ⟨mapped, sourceCell, targetCell, mapping, sourceFound,
+        targetFound, cells⟩
+    exact ⟨mapped, sourceCell, targetCell, mapping,
+      by simpa [frame location beforeReachable] using sourceFound,
+      targetFound, cells⟩
+  · intro location targetReachable
+    rcases related.2 location targetReachable with
+      ⟨mapped, targetCell, sourceCell, mapping, targetFound,
+        sourceFound, cells⟩
+    rcases reachable_reverse roots related targetReachable with
+      ⟨reachableSource, reachableMapping, sourceReachable⟩
+    have sourceEq : reachableSource = mapped := by
+      rw [mapping] at reachableMapping
+      exact (Option.some.inj reachableMapping).symm
+    subst reachableSource
+    exact ⟨mapped, targetCell, sourceCell, mapping, targetFound,
+      by simpa [frame mapped sourceReachable] using sourceFound, cells⟩
+
 /-- Prepending a cell at an unmapped source location cannot make it reachable
 from roots already governed by the old heap relation. -/
 theorem reachable_cons_of_forward_unmapped
@@ -894,6 +956,92 @@ theorem ShadowRuntimeRel.roots
   exact listRel_append
     (listRel_append related.extra (globalsRoots_related related.globals))
     (traceRoots_related related.trace)
+
+/-- Observable frame condition for a possibly multi-cell runtime update.
+The operation may rewrite unreachable garbage, but every cell reachable from
+the published pre-state roots and every non-heap observable is fixed. -/
+structure RuntimeReachableFrame (before after : RuntimeState)
+    (roots : List Value) : Prop where
+  nextLocation_eq : after.nextLocation = before.nextLocation
+  globals_eq : after.globals = before.globals
+  world_eq : after.world = before.world
+  trace_eq : after.trace = before.trace
+  heap : HeapReachableFrame before.heap after.heap roots
+  heapFresh : ∀ location, after.nextLocation ≤ location →
+    findCell? after.heap location = none
+
+/-- Any source runtime transition satisfying the reachable-frame contract
+preserves the complete live-runtime relation. -/
+theorem ShadowRuntimeRel.frameLeft
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (frame : RuntimeReachableFrame left after
+      (runtimeRoots left leftExtra)) :
+    ShadowRuntimeRel rho after right leftExtra rightExtra := by
+  exact {
+    extra := related.extra
+    globals := by
+      rw [frame.globals_eq]
+      exact related.globals
+    world_eq := frame.world_eq.trans related.world_eq
+    trace := by
+      rw [frame.trace_eq]
+      exact related.trace
+    heap := by
+      have preserved := heapRel_frameLeft_of_reachableFrame related.roots
+        related.heap frame.heap
+      simpa [runtimeRoots, frame.globals_eq, frame.trace_eq] using preserved
+    leftMappingFresh := by
+      intro location bounded
+      exact related.leftMappingFresh location
+        (frame.nextLocation_eq ▸ bounded)
+    rightMappingFresh := related.rightMappingFresh
+    leftHeapFresh := frame.heapFresh
+    rightHeapFresh := related.rightHeapFresh
+  }
+
+/-- Replacing one unreachable existing cell produces a reachable runtime
+frame.  This packages the common postcondition needed by reset/reuse-style
+ownership operations. -/
+theorem setCell_reachableFrame_of_unreachable
+    (found : findCell? before.heap modified = some current)
+    (unreachable : ¬Reachable before.heap roots modified)
+    (fresh : ∀ location, before.nextLocation ≤ location →
+      findCell? before.heap location = none)
+    (replacement : HeapCell) :
+    ∃ after,
+      setCell before modified replacement = .ok after ∧
+      RuntimeReachableFrame before after roots := by
+  rcases setCell_spec_of_find before modified current replacement found with
+    ⟨after, effect, target, lookupFrame, length, nextLocation,
+      globals, world, trace⟩
+  have modifiedLt : modified < before.nextLocation := by
+    apply Nat.lt_of_not_ge
+    intro bounded
+    have absent := fresh modified bounded
+    rw [found] at absent
+    contradiction
+  refine ⟨after, effect, ?_⟩
+  exact {
+    nextLocation_eq := nextLocation
+    globals_eq := globals
+    world_eq := world
+    trace_eq := trace
+    heap := by
+      intro location reachable
+      have different : location ≠ modified := by
+        intro same
+        subst location
+        exact unreachable reachable
+      exact lookupFrame location different
+    heapFresh := by
+      intro location bounded
+      have oldBounded : before.nextLocation ≤ location :=
+        nextLocation ▸ bounded
+      have different : location ≠ modified :=
+        (Nat.ne_of_lt (Nat.lt_of_lt_of_le modifiedLt oldBounded)).symm
+      rw [lookupFrame location different]
+      exact fresh location oldBounded
+  }
 
 theorem ShadowRuntimeRel.leftUnreachable_of_forward_unmapped
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
