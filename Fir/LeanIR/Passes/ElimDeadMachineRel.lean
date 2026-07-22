@@ -147,6 +147,37 @@ theorem RelationalStutteringSimulation.evaluatesState
         NonLockstep.evaluatesState_of_reaches targetPath targetEvaluation,
         observations⟩
 
+/-- A pair of immediate equal-fault results discharges the relational
+terminal contract from the reachable runtime invariant. -/
+theorem relatedFault_terminal
+    (runtime : ShadowRuntimeRel rho source.runtime target.runtime
+      sourceRoots targetRoots)
+    (sourceDone : coreStep source =
+      .done (observe source (.fault fault)))
+    (targetDone : coreStep target =
+      .done (observe target (.fault fault)))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have observations : ObservationRel
+      (observe source (.fault fault))
+      (observe target (.fault fault)) := by
+    apply runtime.observationRel
+        (leftOutcome := .fault fault) (rightOutcome := .fault fault)
+    · rfl
+    · intro value member
+      simp [outcomeRoots] at member
+    · intro value member
+      simp [outcomeRoots] at member
+  have observationEq : sourceObservation =
+      observe source (.fault fault) := by
+    rw [sourceDone] at done
+    exact (CoreResult.done.inj done).symm
+  refine ⟨observe target (.fault fault), ?_, ?_⟩
+  · exact ⟨0, target, .refl target, targetDone⟩
+  · simpa [observationEq] using observations
+
 /-- One-way, reachable-observation correctness for a same-phase pass.  This
 is the compiler-facing statement appropriate for transformations that may
 change unreachable heap garbage. -/
@@ -726,6 +757,82 @@ theorem invokeDecl_unknown_reachableObservation
         · intro value member
           simp [outcomeRoots] at member
 
+/-- Related declarations and argument arrays produce the same parameter
+binding fault before declaration bodies or external metadata are inspected. -/
+theorem invokeDecl_bindingFault_reachableObservation
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .error fault)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots) :
+    ∃ targetDeclaration,
+      targetState.program.findDecl? name = some targetDeclaration ∧
+      invokeDecl sourceState name sourceArguments =
+        .done (observe sourceState (.fault fault)) ∧
+      invokeDecl targetState name targetArguments =
+        .done (observe targetState (.fault fault)) ∧
+      ObservationRel
+        (observe sourceState (.fault fault))
+        (observe targetState (.fault fault)) := by
+  have found := programs.findDecl? name
+  rw [sourceFound] at found
+  generalize targetFound : targetState.program.findDecl? name = targetResult
+    at found
+  cases found with
+  | some declarations =>
+      rename_i targetDeclaration
+      have argumentSize := arrayRel_size_eq arguments
+      have targetEnough :
+          ¬ targetArguments.size < targetDeclaration.params.size := by
+        rw [← declarations.params_eq, ← argumentSize]
+        exact sourceEnough
+      have callArguments : ArrayRel (ValueRel rho)
+          (sourceArguments.extract 0 sourceDeclaration.params.size)
+          (targetArguments.extract 0 sourceDeclaration.params.size) :=
+        arrayRel_extract arguments 0 sourceDeclaration.params.size
+      have binding := bindParams_relOn (rho := rho)
+        (params := sourceDeclaration.params) ({} : UsedLocals) callArguments
+      rw [sourceBinding] at binding
+      generalize targetBinding : bindParams sourceDeclaration.params
+          (targetArguments.extract 0 sourceDeclaration.params.size) =
+            targetBindingResult at binding
+      cases targetBindingResult with
+      | ok targetEnv => cases binding
+      | error targetFault =>
+          cases binding with
+          | error =>
+              have targetBinding' : bindParams targetDeclaration.params
+                  (targetArguments.extract 0 targetDeclaration.params.size) =
+                    .error fault := by
+                simpa [← declarations.params_eq] using targetBinding
+              refine ⟨targetDeclaration, rfl, ?_, ?_, ?_⟩
+              · unfold invokeDecl
+                rw [sourceFound]
+                simp only
+                rw [if_neg sourceEnough, sourceBinding]
+                rfl
+              · unfold invokeDecl
+                rw [targetFound]
+                simp only
+                rw [if_neg targetEnough, targetBinding']
+                rfl
+              · apply runtime.observationRel
+                    (leftOutcome := .fault fault)
+                    (rightOutcome := .fault fault)
+                · rfl
+                · intro value member
+                  simp [outcomeRoots] at member
+                · intro value member
+                  simp [outcomeRoots] at member
+
 /-- The named-call dispatcher reaches `invokeDecl` either because arguments
 are nonempty or because an empty call missed the global cache. -/
 inductive InvokeNameDeclReady (runtime : RuntimeState) (name : Name)
@@ -846,6 +953,69 @@ theorem coreStep_invokeName_unknown_terminal
   refine ⟨observe targetInvoke (.fault (.unknownDecl name)), ?_, ?_⟩
   · exact ⟨0, targetInvoke, .refl targetInvoke, targetCore⟩
   · simpa [sourceInvoke, targetInvoke, observationEq] using observations
+
+/-- A declaration-ready named call whose source parameter binding fails
+satisfies the terminal simulation contract with the same target fault. -/
+theorem coreStep_invokeName_bindingFault_terminal
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .error fault)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots)
+    (done : coreStep { sourceState with
+      control := .invokeName name sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeName name targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime sourceRoots targetRoots := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_bindingFault_reachableObservation
+      sourceInvoke targetInvoke invokePrograms arguments invokeFound
+      sourceEnough sourceBinding invokeRuntime with
+    ⟨targetDeclaration, targetFound, sourceFault, targetFault, observations⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have sourceCore : coreStep sourceInvoke =
+      .done (observe sourceInvoke (.fault fault)) := by
+    cases sourceReady with
+    | nonempty nonempty =>
+        simpa [sourceInvoke, coreStep, nonempty] using sourceFault
+    | cacheMiss empty miss =>
+        simpa [sourceInvoke, coreStep, empty, miss] using sourceFault
+  have targetCore : coreStep targetInvoke =
+      .done (observe targetInvoke (.fault fault)) := by
+    cases targetReady with
+    | nonempty nonempty =>
+        simpa [targetInvoke, coreStep, nonempty] using targetFault
+    | cacheMiss empty miss =>
+        simpa [targetInvoke, coreStep, empty, miss] using targetFault
+  have terminal := relatedFault_terminal
+    (externals := externals) invokeRuntime sourceCore targetCore
+    (by simpa [sourceInvoke] using done)
+  simpa [targetInvoke] using terminal
 
 /-- A retained under-application is matched at `coreStep` whenever named-call
 dispatch is known to reach `invokeDecl`; this includes both nonempty calls and
@@ -1398,6 +1568,110 @@ theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
       sourceObject] using sourceStep
   · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
       targetObject] using targetStep
+
+/-- Related immediate values and reuse tokens are equally invalid as closure
+callees.  Their invocation terminates with the address-free
+`expectedClosure` fault on both sides. -/
+theorem coreStep_invokeValue_nonHeap_terminal
+    (sourceState targetState : MachineState)
+    (function : ValueRel rho sourceFunction targetFunction)
+    (sourceNotHeap : ∀ location,
+      sourceFunction ≠ .object (.heap location))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      sourceRoots targetRoots)
+    (done : coreStep { sourceState with
+      control := .invokeValue sourceFunction sourceArguments } =
+        .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeValue targetFunction targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  let sourceInvoke := {
+    sourceState with control := .invokeValue sourceFunction sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeValue targetFunction targetArguments }
+  have faults :
+      coreStep sourceInvoke =
+          .done (observe sourceInvoke (.fault .expectedClosure)) ∧
+        coreStep targetInvoke =
+          .done (observe targetInvoke (.fault .expectedClosure)) := by
+    cases function <;>
+      simp_all [sourceInvoke, targetInvoke, coreStep, invokeClosure, fail]
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime sourceRoots targetRoots := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  have terminal := relatedFault_terminal
+    (externals := externals) invokeRuntime faults.1 faults.2
+    (by simpa [sourceInvoke] using done)
+  simpa [targetInvoke] using terminal
+
+/-- A live mapped heap cell whose object is not a closure has a related live
+non-closure target cell, so both invocations terminate with
+`expectedClosure`. -/
+theorem coreStep_invokeValue_liveNonClosure_terminal
+    (sourceState targetState : MachineState)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceNotClosure : ∀ name arity fixed,
+      sourceCell.object ≠ .closure name arity fixed)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .invokeValue (.object (.heap sourceLocation))
+        sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeValue (.object (.heap targetLocation))
+            targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases runtime.readMappedCell mapping sourceCellFound with
+    ⟨targetCell, targetCellFound, cells⟩
+  have targetLive : targetCell.live = true := by
+    rw [← cells.2.2.1]
+    exact sourceLive
+  have objects := cells.2.2.2
+  generalize sourceObjectEq : sourceCell.object = sourceObject at objects
+  generalize targetObjectEq : targetCell.object = targetObject at objects
+  let sourceInvoke := {
+    sourceState with
+    control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
+  let targetInvoke := {
+    targetState with
+    control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
+      .ok sourceCell := by
+    simp [getLiveCell, sourceCellFound, sourceLive]
+  have targetRead : getLiveCell targetState.runtime targetLocation =
+      .ok targetCell := by
+    simp [getLiveCell, targetCellFound, targetLive]
+  have faults :
+      coreStep sourceInvoke =
+          .done (observe sourceInvoke (.fault .expectedClosure)) ∧
+        coreStep targetInvoke =
+          .done (observe targetInvoke (.fault .expectedClosure)) := by
+    cases objects <;>
+      simp_all [sourceInvoke, targetInvoke, coreStep, invokeClosure,
+        sourceRead, targetRead, fail]
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  have terminal := relatedFault_terminal
+    (externals := externals) invokeRuntime faults.1 faults.2
+    (by simpa [sourceInvoke] using done)
+  simpa [targetInvoke] using terminal
 
 /-- Transport the entire machine invariant after extending the address
 renaming, as happens when both executions retain an allocation. -/

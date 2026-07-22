@@ -1330,6 +1330,37 @@ theorem ShadowRuntimeRel.reindexClosureCall
     exact reachable_monoRootReachability
       (closureCallRoots_reachable rightFound rightObject) reachable
 
+/-- Reading a mapped heap reference that is published as a control root
+returns related cells at the mapped locations. -/
+theorem ShadowRuntimeRel.readMappedCell
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftTail) ++ leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightTail) ++ rightFrameRoots))
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell) :
+    ∃ rightCell,
+      findCell? right.heap rightLocation = some rightCell ∧
+      HeapCellRel rho leftCell rightCell := by
+  have leftReachable : Reachable left.heap
+      (runtimeRoots left
+        ((.object (.heap leftLocation) :: leftTail) ++ leftFrameRoots))
+      leftLocation := by
+    apply Reachable.root
+    apply extra_subset_runtimeRoots
+    exact List.mem_append_left _ List.mem_cons_self
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have locationEq : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have cellEq : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  exact ⟨rightCell, rightFound, cells⟩
+
 /-- Reading a reachable source closure through a mapped reference determines
 the corresponding live target closure and reindexes both runtimes to the
 concatenated argument arrays consumed by `invokeDecl`. -/
