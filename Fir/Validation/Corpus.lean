@@ -1074,9 +1074,13 @@ def cases : Array Case := #[
     argSchemas := #[.seq .nat]
     resultSchema := .nat
     native := fun _ => .nat (Source.recursiveTraversal [])
-    tags := #["quick", "constructor", "recursion", "boundary"]
+    tags := #["quick", "constructor", "recursion", "boundary", "path-exclusion"]
     requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
-    requiredExecutedLcnfForms := #["cases", "inc", "fap", "return"] },
+    requiredExecutedLcnfForms := #["cases", "inc", "fap", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 0, maximum := some 0 }] },
   { id := "local-tail"
     entry := ``Source.localTailControl
     dependencies := #[`Fir.Validation.Corpus.Source.localTailControl.loop]
@@ -1794,13 +1798,21 @@ def cases : Array Case := #[
     argSchemas := #[.bool, .ctor "GrowSwitch.left" 0 #[.nat]]
     resultSchema := .ctor "GrowSwitch.right" 1 #[.nat]
     native := fun _ => growSwitchDatum (Source.changeOrGrow true (.left 7))
-    tags := #["stress", "ownership", "reuse", "constructor", "set-tag", "boundary"]
+    tags :=
+      #["stress", "ownership", "reuse", "constructor", "set-tag", "boundary",
+        "path-exclusion"]
     requiredLcnfForms :=
       #["cases", "oproj", "join", "fap", "dec", "del", "inc", "ctor", "return",
         "setTag", "oset", "jump", "isShared"]
     requiredExecutedLcnfForms :=
       #["cases", "oproj", "join", "isShared", "jump", "fap", "inc", "return", "dec",
         "setTag", "oset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "setTag", minimum := 1, maximum := some 1 },
+        { form := "oset", minimum := 1, maximum := some 1 },
+        { form := "del", minimum := 0, maximum := some 0 },
+        { form := "ctor", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Reuse a unique constructor at the same size while changing its runtime tag" },
   { id := "reuse-grow-delete"
@@ -1810,13 +1822,21 @@ def cases : Array Case := #[
     argSchemas := #[.bool, .ctor "GrowSwitch.left" 0 #[.nat]]
     resultSchema := .ctor "GrowSwitch.big" 2 #[.nat, .nat]
     native := fun _ => growSwitchDatum (Source.changeOrGrow false (.left 7))
-    tags := #["stress", "ownership", "reuse", "constructor", "delete", "boundary"]
+    tags :=
+      #["stress", "ownership", "reuse", "constructor", "delete", "boundary",
+        "path-exclusion"]
     requiredLcnfForms :=
       #["cases", "oproj", "join", "fap", "dec", "del", "inc", "ctor", "return",
         "setTag", "oset", "jump", "isShared"]
     requiredExecutedLcnfForms :=
       #["cases", "oproj", "join", "isShared", "jump", "fap", "inc", "return", "dec",
         "del", "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "del", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "setTag", minimum := 0, maximum := some 0 },
+        { form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Delete a unique constructor before allocating a larger replacement" },
   { id := "reuse-grow-delete-shared"
@@ -1829,11 +1849,20 @@ def cases : Array Case := #[
       .ctor "GrowSwitch.big" 2 #[.nat, .nat]]
     native := fun _ => growSwitchPairDatum
       (Source.changeOrGrowShared false (.left 7))
-    tags := #["stress", "ownership", "reuse", "constructor", "delete", "shared"]
+    tags :=
+      #["stress", "ownership", "reuse", "constructor", "delete", "shared",
+        "path-exclusion"]
     requiredLcnfForms :=
-      #["inc", "fap", "cases", "join", "isShared", "jump", "del", "ctor", "return"]
+      #["inc", "fap", "cases", "join", "isShared", "jump", "del", "ctor", "return",
+        "setTag", "oset"]
     requiredExecutedLcnfForms :=
       #["inc", "fap", "cases", "join", "isShared", "jump", "del", "ctor", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "del", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "setTag", minimum := 0, maximum := some 0 },
+        { form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Retain the original constructor while growing a shared replacement" },
   { id := "capture-17-list"

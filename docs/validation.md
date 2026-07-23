@@ -907,12 +907,21 @@ bounded maxima. Per-case `requiredObservations` materializes every obligation's
 observed count, including zero even though the positive-only runtime telemetry
 correctly omits absent forms.
 
-The `path-exclusion` tag groups five shared copy-on-write fixtures. Each
-statically retains `oset` because the compiled update machinery contains the
-unique-object branch, but requires an exact executed count of zero. The two
-multi-object projections, aliased-child replacement, shared self-replacement,
-and distinct-child swap must therefore take the allocation/copy path without
-silently performing an in-place object write.
+The `path-exclusion` tag groups fixtures that pin negative control-flow
+evidence. Five shared copy-on-write fixtures statically retain `oset` because
+the compiled update machinery contains the unique-object branch, but require an
+exact executed count of zero. The two multi-object projections, aliased-child
+replacement, shared self-replacement, and distinct-child swap must therefore
+take the allocation/copy path without silently performing an in-place object
+write.
+
+Four branch-signature fixtures pair exact-zero obligations with exact positive
+counts. Empty recursion executes one `cases` and one `fap` but no `oproj`.
+Same-size unique reuse executes one `isShared`, `setTag`, and `oset`, while
+executing neither `del` nor `ctor`. Both grow/delete variants execute one
+`isShared` and one `del` while excluding `setTag` and `oset`; the unique result
+executes one `ctor`, and the shared wrapper executes two because it also
+constructs the returned pair.
 
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
