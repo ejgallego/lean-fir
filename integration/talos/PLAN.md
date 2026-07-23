@@ -2773,6 +2773,15 @@ fuel-free call, miss publication, and subsequent-hit chain. Other declaration
 body forms remain incremental instances over the same boundary. No shared
 semantic contract or executable ABI changed.
 
+W6.6cd extends the first cached-body family across the object lane.
+`cachedDeclarationBodyWP_stringLiteral` composes the compiler-generated UTF-8
+literal call, checked fresh string allocation, monotone witness extension,
+updated `.object` local, and the same exact generated return suffix. Its result
+is the identical zero-argument/singleton-result package consumed by W6.6cb,
+showing that the cache handoff is representation-polymorphic across the
+natural `.tobject` and string `.object` lanes. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

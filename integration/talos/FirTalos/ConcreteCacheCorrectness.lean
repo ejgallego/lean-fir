@@ -261,6 +261,72 @@ theorem cachedDeclarationBodyWP_naturalLiteral
       (literal sourceRuntime (.nat value)).2)
     nextState (localUpdate_of_set? targetSet).1 resultEq
 
+/-- Cached-declaration body family for a compiler-generated UTF-8 string
+literal. This is the object-lane counterpart of the natural theorem above and
+uses the fresh-string heap refinement unchanged. -/
+theorem cachedDeclarationBodyWP_stringLiteral
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host} {heap : MemoryState} {word : Word32}
+    {targetFunction : Wasm.Function} {updated : Wasm.Locals}
+    {resultIndex : Nat} {value : String} {witness : RefinementWitness}
+    (valueEq : decl.value = .lit (.str value))
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.call (.runtime (.literal (.str value) .object))])
+    (callFound : callIndex? sourceModule
+      (.runtime (.literal (.str value) .object)) = some id)
+    (initialRelated : StateRelated sourceFunction sourceRuntime []
+      initial (targetFunction.toLocals []) witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .object)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .object))
+    (allocated : allocateString initial.host.runtime.heap value =
+      .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (stringLiteralContract value))
+    (hParams : imp.params.length = 0)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      (targetFunction.toLocals []).set? resultIndex
+          (.i32 (UInt32.ofNat word.value)) =
+        some updated)
+    (paramsEq : targetFunction.numParams = 0)
+    (resultEq : targetFunction.results.length = 1)
+    (bodyEq : targetFunction.body = [
+      .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+    CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
+      sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
+      (replaceHeap initial heap) witness (.i32 (UInt32.ofNat word.value)) := by
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
+  rw [bodyEq]
+  apply codeWP_stringLiteral_let valueEq valueCompiled callFound
+    initialRelated resultFound resultKindAt allocated hImp hSat hi hContract
+    hParams hResults targetSet
+  intro nextWitness extension nextRuntimeRelated valueRelated
+  have failureClear :
+      (replaceHeap initial heap).host.failure? = none := by
+    simp [replaceHeap, clearFailure]
+  have nextState := initialRelated.bindAfter extension nextRuntimeRelated
+    failureClear resultFound resultKindAt valueRelated targetSet
+  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+    (lookup_bind_self [] decl.fvarId
+      (literal sourceRuntime (.str value)).2)
+    nextState (localUpdate_of_set? targetSet).1 resultEq
+
 /-- A per-declaration body package supplies the store-specific, fuel-free
 termination theorem expected by generated direct calls. -/
 theorem CachedDeclarationBodyWP.terminatesWith
