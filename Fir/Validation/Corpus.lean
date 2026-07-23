@@ -355,6 +355,55 @@ def multiObjectSharedFirstUpdate (first : Nat) (middle : String)
   let updated := MultiObjectLayout.setFirst original replacement
   chooseNat selectUpdated updated.first original.first
 
+/-- Two object fields sharing one `ByteArray`, followed by fixed-width neighbors. -/
+structure AliasedByteArrayLayout where
+  first : ByteArray
+  second : ByteArray
+  usize : USize
+  scalar : UInt32
+
+@[noinline]
+def mkAliasedByteArrayLayout (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) : AliasedByteArrayLayout :=
+  { first := shared, second := shared, usize, scalar }
+
+@[noinline]
+def AliasedByteArrayLayout.setFirst (value : AliasedByteArrayLayout)
+    (replacement : ByteArray) : AliasedByteArrayLayout :=
+  { value with first := replacement }
+
+@[noinline]
+def AliasedByteArrayLayout.setSecond (value : AliasedByteArrayLayout)
+    (replacement : ByteArray) : AliasedByteArrayLayout :=
+  { value with second := replacement }
+
+def aliasedByteArrayUpdateFirst (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) (replacement : ByteArray) : ByteArray × ByteArray :=
+  let updated := AliasedByteArrayLayout.setFirst
+    (mkAliasedByteArrayLayout shared usize scalar) replacement
+  (updated.first, updated.second)
+
+def aliasedByteArrayUpdateSecond (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) (replacement : ByteArray) : ByteArray × ByteArray :=
+  let updated := AliasedByteArrayLayout.setSecond
+    (mkAliasedByteArrayLayout shared usize scalar) replacement
+  (updated.first, updated.second)
+
+def aliasedByteArraySharedFirstUpdate (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) (replacement : ByteArray) :
+    (ByteArray × ByteArray) × (ByteArray × ByteArray) :=
+  let original := mkAliasedByteArrayLayout shared usize scalar
+  let updated := AliasedByteArrayLayout.setFirst original replacement
+  ((updated.first, updated.second), (original.first, original.second))
+
+def aliasedByteArrayChildCopyOnWrite (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) (replacement : ByteArray) : ByteArray × ByteArray :=
+  let layout := AliasedByteArrayLayout.setFirst
+    (mkAliasedByteArrayLayout shared usize scalar) replacement
+  let original := layout.second
+  let updated := original.set! 0 42
+  (original, updated)
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -686,6 +735,10 @@ private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
+private def byteArrayPairPairDatum
+    (value : (ByteArray × ByteArray) × (ByteArray × ByteArray)) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayPairDatum value.1, byteArrayPairDatum value.2]
+
 private def mixedLayoutText : String :=
   "FIR\nα🙂"
 
@@ -798,6 +851,23 @@ private def objectUpdateForms : Array String :=
 
 private def objectUniqueUpdateExecutedForms : Array String :=
   mixedUniqueUpdateExecutedForms.push "oset"
+
+private def aliasedByteArrayArgs : Array ValidationDatum :=
+  #[byteArrayDatum mixedLayoutBytes, .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 32 (UInt64.ofNat Source.maxUInt32.toNat),
+    byteArrayDatum multiObjectReplacementBytes]
+
+private def aliasedByteArrayArgSchemas : Array ValidationSchema :=
+  #[.bytes, .usize, .bits 32, .bytes]
+
+private def byteArrayPairSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.bytes, .bytes]
+
+private def byteArrayPairPairSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
+
+private def aliasedChildCopyOnWriteForms : Array String :=
+  objectUpdateForms ++ #["extern", "lit"]
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -1396,6 +1466,76 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := mixedUpdateForms
     provenance := firProvenance
       "Force shared replacement of heap-natural object slot 0 while retaining the original" },
+  { id := "aliased-byte-array-update-first"
+    entry := ``Source.aliasedByteArrayUpdateFirst
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArrayArgs
+    argSchemas := aliasedByteArrayArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aliasedByteArrayUpdateFirst mixedLayoutBytes Source.maxUSize
+        Source.maxUInt32 multiObjectReplacementBytes)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "alias", "refcount",
+        "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUpdateForms
+    provenance := firProvenance
+      "Replace aliased object slot 0 while returning its replacement and surviving slot-1 alias" },
+  { id := "aliased-byte-array-update-second"
+    entry := ``Source.aliasedByteArrayUpdateSecond
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setSecond]
+    args := aliasedByteArrayArgs
+    argSchemas := aliasedByteArrayArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aliasedByteArrayUpdateSecond mixedLayoutBytes Source.maxUSize
+        Source.maxUInt32 multiObjectReplacementBytes)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "alias", "refcount",
+        "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUpdateForms
+    provenance := firProvenance
+      "Replace aliased object slot 1 while returning the surviving slot-0 alias and replacement" },
+  { id := "aliased-byte-array-shared-first"
+    entry := ``Source.aliasedByteArraySharedFirstUpdate
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArrayArgs
+    argSchemas := aliasedByteArrayArgSchemas
+    resultSchema := byteArrayPairPairSchema
+    native := fun _ => byteArrayPairPairDatum
+      (Source.aliasedByteArraySharedFirstUpdate mixedLayoutBytes Source.maxUSize
+        Source.maxUInt32 multiObjectReplacementBytes)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "alias",
+        "refcount", "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Return both updated and original field pairs after replacing slot 0 of a shared aggregate" },
+  { id := "aliased-byte-array-child-copy-on-write"
+    entry := ``Source.aliasedByteArrayChildCopyOnWrite
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArrayArgs
+    argSchemas := aliasedByteArrayArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aliasedByteArrayChildCopyOnWrite mixedLayoutBytes Source.maxUSize
+        Source.maxUInt32 multiObjectReplacementBytes)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "alias", "refcount",
+        "bytearray", "external", "copy-on-write", "heap", "boundary"]
+    requiredLcnfForms := aliasedChildCopyOnWriteForms
+    requiredExecutedLcnfForms := aliasedChildCopyOnWriteForms
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    provenance := firProvenance
+      "Replace one alias, then retain and mutate the surviving child to test nested copy-on-write" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]
