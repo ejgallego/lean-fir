@@ -8,6 +8,8 @@ trap 'rm -rf "$first" "$second"' EXIT
 
 cd "$here"
 lake build
+lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
+node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
@@ -155,6 +157,10 @@ if [[ -n "${FIR_BROWSER:-}" ]]; then
 fi
 lake exe fir-wasm-artifact all "$first"
 lake exe fir-wasm-artifact all "$second"
+lake exe fir-wasm-artifact resident-get-tag "$first/resident/get-tag.wasm"
+lake exe fir-wasm-artifact resident-get-tag "$second/resident/get-tag.wasm"
+cmp "$first/resident/get-tag.wasm" "$second/resident/get-tag.wasm"
+cmp "$first/resident/get-tag.wasm.json" "$second/resident/get-tag.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

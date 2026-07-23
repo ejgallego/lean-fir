@@ -1,5 +1,6 @@
 import FirTalos.Runtime
 import Fir.Wasm.Emit.Examples
+import Fir.Wasm.Emit.ResidentRuntime
 import Fir.Wasm.Examples
 import Interpreter.Wasm.Examples.Harness
 
@@ -145,6 +146,15 @@ def residentLoadBody? : List Wasm.Instruction → Bool
           residentBitsBody? function.body &&
         adapted.wasmModule.funcs[1]?.any fun function =>
           residentLoadBody? function.body
+  | .error _ => false
+
+#guard match adapt Fir.Wasm.Emit.ResidentRuntime.getTagModule with
+  | .ok adapted =>
+      adapted.wasmModule.imports.isEmpty &&
+      adapted.wasmModule.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.pagesMax.isNone &&
+        adapted.wasmModule.memoryExports == [("memory", 0)] &&
+        adapted.wasmModule.funcs.length == 1
   | .error _ => false
 
 end FirTalos

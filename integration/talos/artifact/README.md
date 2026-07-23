@@ -69,6 +69,23 @@ Run the complete lane-local check with:
 ./check.sh
 ```
 
+W7 also emits the first standalone Wasm-resident runtime slice. Its module
+defines and exports one-page memory, has no imports, and exports the raw
+`tobject → UInt32` helper `fir_getTag`. The browser-neutral smoke client writes
+ordinary W6 immediate, constructor, and promoted-tag layouts directly into the
+exported memory; no JavaScript runtime handler participates in the calls:
+
+```text
+lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
+node run-resident-get-tag.mjs _build/resident-get-tag.wasm
+```
+
+The module and its `.wasm.json` descriptor are generated deterministically.
+This is a generation-readiness artifact, not the later theorem that the helper
+satisfies the W6 `getTag` contract on related states. Setting
+`FIR_BROWSER=google-chrome` while running `./check.sh` executes the same smoke
+client in a browser Worker alongside the existing `prettyM` check.
+
 This builds the Lean emitter, runs the semantic oracle through Lean, emits the corpus and oracle
 results twice, byte-compares all outputs, validates and instantiates every module in Node,
 executes `main`, and compares the V8 observation with FIR. It requires Lean 4.32, the

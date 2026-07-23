@@ -9,6 +9,9 @@ debug_port=$((port + 1))
 url="http://127.0.0.1:$port/integration/talos/artifact/browser-pretty-format.html"
 chrome_data="$(mktemp -d)"
 
+test -s "$here/_build/resident-get-tag.wasm"
+test -s "$here/_build/resident-get-tag.wasm.json"
+
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &
 server_pid=$!

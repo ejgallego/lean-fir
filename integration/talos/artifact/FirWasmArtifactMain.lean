@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.Examples
 import Fir.Wasm.Emit.Manifest
+import Fir.Wasm.Emit.ResidentRuntime
 
 open Fir.Wasm
 open Fir.Wasm.Emit
@@ -35,9 +36,22 @@ def emitFixture (fixture : CorpusFixture) (path : System.FilePath) : IO Unit := 
   IO.FS.writeFile manifestPath manifest
   IO.println s!"{fixture.name}: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentGetTag (path : System.FilePath) : IO Unit := do
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
+    Fir.Wasm.Emit.ResidentRuntime.getTagModule).mapError fun error =>
+      s!"resident getTag encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentRuntime.getTagManifest.compress
+  IO.println s!"resident-get-tag: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def usage : String :=
   let names := String.intercalate "|" (fixtures.map (·.name))
   s!"usage: fir-wasm-artifact <{names}> <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-get-tag <output.wasm>\n" ++
     "       fir-wasm-artifact all <output-directory>"
 
 def main (args : List String) : IO UInt32 := do
@@ -47,6 +61,9 @@ def main (args : List String) : IO UInt32 := do
         let outputDirectory : System.FilePath := outputDirectory
         for fixture in fixtures do
           emitFixture fixture (outputDirectory / s!"{fixture.name}.wasm")
+        return 0
+    | ["resident-get-tag", output] =>
+        emitResidentGetTag output
         return 0
     | [name, output] =>
         let some fixture := findFixture? name | throw (IO.userError s!"unknown fixture: {name}")
