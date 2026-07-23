@@ -292,6 +292,68 @@ theorem arrayRel_append
   unfold ArrayRel at first second ⊢
   simpa using listRel_append first second
 
+/-- A successful indexed read from the left list of a `ListRel` has a
+successful related read at the same index on the right. -/
+theorem listRel_getElem?_some
+    {left : List α} {right : List β} {leftValue : α}
+    (related : ListRel relation left right)
+    (index : Nat)
+    (found : left[index]? = some leftValue) :
+    ∃ rightValue,
+      right[index]? = some rightValue ∧ relation leftValue rightValue := by
+  induction related generalizing index leftValue with
+  | nil => simp at found
+  | cons head tail ih =>
+      cases index with
+      | zero =>
+          simp at found
+          subst leftValue
+          exact ⟨_, by simp, head⟩
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at found
+          rcases ih index found with ⟨rightValue, rightFound, values⟩
+          exact ⟨rightValue, by simpa using rightFound, values⟩
+
+/-- Array form of `listRel_getElem?_some`. -/
+theorem arrayRel_getElem?_some
+    {left : Array α} {right : Array β} {leftValue : α}
+    (related : ArrayRel relation left right)
+    (index : Nat)
+    (found : left[index]? = some leftValue) :
+    ∃ rightValue,
+      right[index]? = some rightValue ∧ relation leftValue rightValue := by
+  unfold ArrayRel at related
+  have listFound : left.toList[index]? = some leftValue := by
+    simpa using found
+  rcases listRel_getElem?_some related index listFound with
+    ⟨rightValue, rightFound, values⟩
+  exact ⟨rightValue, by simpa using rightFound, values⟩
+
+/-- A successful optional list read returns a member of that list. -/
+theorem list_mem_of_getElem?_eq_some
+    {values : List α} (index : Nat)
+    (found : values[index]? = some value) :
+    value ∈ values := by
+  induction values generalizing index with
+  | nil => simp at found
+  | cons head tail ih =>
+      cases index with
+      | zero =>
+          simp at found
+          subst value
+          exact List.mem_cons_self
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at found
+          exact List.mem_cons_of_mem head (ih index found)
+
+/-- Array form of `list_mem_of_getElem?_eq_some`. -/
+theorem array_mem_of_getElem?_eq_some
+    {values : Array α} (index : Nat)
+    (found : values[index]? = some value) :
+    value ∈ values.toList := by
+  apply list_mem_of_getElem?_eq_some index
+  simpa using found
+
 theorem heapObjectRel_mono
     (extension : RenamingExtends smaller larger)
     (related : HeapObjectRel smaller left right) :
@@ -1970,6 +2032,44 @@ theorem reachable_without_nonHeap_root
   | child parent found owned reference ih =>
       exact .child ih found owned reference
 
+/-- Promoting an already semantically reachable value to a direct root does
+not enlarge the reachable heap.  Non-heap values satisfy `rooted` vacuously;
+heap children use the existing parent-to-child reachability derivation. -/
+theorem reachable_without_reachable_root
+    (rooted : ∀ candidate,
+      root = .object (.heap candidate) → Reachable heap roots candidate)
+    (reachable : Reachable heap (root :: roots) location) :
+    Reachable heap roots location := by
+  induction reachable with
+  | root member =>
+      simp only [List.mem_cons] at member
+      rcases member with same | member
+      · exact rooted _ same.symm
+      · exact .root member
+  | child parent found owned reference ih =>
+      exact .child ih found owned reference
+
+/-- A related pair already reachable through the published roots may be
+promoted to direct continuation roots on both sides. -/
+theorem ShadowRuntimeRel.prependReachable
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (values : ValueRel rho leftRoot rightRoot)
+    (leftRooted : ∀ location,
+      leftRoot = .object (.heap location) →
+        Reachable left.heap (runtimeRoots left leftExtra) location)
+    (rightRooted : ∀ location,
+      rightRoot = .object (.heap location) →
+        Reachable right.heap (runtimeRoots right rightExtra) location) :
+    ShadowRuntimeRel rho left right
+      (leftRoot :: leftExtra) (rightRoot :: rightExtra) := by
+  apply related.reindexExtra (.cons values related.extra)
+  · intro location reachable
+    apply reachable_without_reachable_root leftRooted
+    simpa [runtimeRoots] using reachable
+  · intro location reachable
+    apply reachable_without_reachable_root rightRooted
+    simpa [runtimeRoots] using reachable
+
 /-- A pair of related immediate values may be published as direct roots
 without changing either reachable heap. -/
 theorem ShadowRuntimeRel.prependNonHeap
@@ -2219,6 +2319,154 @@ theorem ShadowRuntimeRel.isSharedBoth_of_related
               ← persistentEq, ← rcEq, Functor.map, Except.map]
           · exact related.prependNonHeap (.scalar _)
               (by intro location; simp) (by intro location; simp)
+
+/-- A successful object-field projection from a related published
+constructor succeeds at the same index on the target.  The selected fields
+are related and, as children of already reachable constructor roots, may be
+promoted to direct continuation roots. -/
+theorem ShadowRuntimeRel.getObjectFieldBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceRead : getObjectField left leftObject index = .ok leftField) :
+    ∃ rightField,
+      getObjectField right rightObject index = .ok rightField ∧
+      ValueRel rho leftField rightField ∧
+      ShadowRuntimeRel rho left right
+        (leftField :: leftExtra) (rightField :: rightExtra) := by
+  cases objects with
+  | tagged payload =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | usize value =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | scalar value =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | erased =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseNone =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseSome mapped =>
+      simp [getObjectField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      have rightReachable : Reachable right.heap
+          (runtimeRoots right rightExtra) rightLocation := by
+        rcases reachable_forward related.roots related.heap
+            leftReachable with
+          ⟨mappedLocation, mappedEq, reachable⟩
+        have locationEq : mappedLocation = rightLocation := by
+          rw [mapping] at mappedEq
+          exact (Option.some.inj mappedEq).symm
+        simpa [locationEq] using reachable
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have heapObjects := cells.2.2.2
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            rw [liveEq]
+            exact rightLiveEq
+          simp [getObjectField, getConstructor, getLiveCell, leftFound,
+            leftLiveEq, Bind.bind, Except.bind] at sourceRead
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            rw [liveEq]
+            exact rightLiveEq
+          generalize leftObjectEq :
+            leftCell.object = leftHeapObject at heapObjects
+          generalize rightObjectEq :
+            rightCell.object = rightHeapObject at heapObjects
+          cases heapObjects with
+          | @ctor leftConstructor rightConstructor tag fields usizes scalars =>
+              generalize leftFieldEq :
+                leftConstructor.objectFields[index]? = leftFieldResult
+                  at sourceRead
+              cases leftFieldResult with
+              | none =>
+                  simp [getObjectField, getConstructor, getLiveCell,
+                    leftFound, leftLiveEq, leftObjectEq, leftFieldEq,
+                    Bind.bind, Except.bind, Pure.pure, Except.pure]
+                    at sourceRead
+              | some sourceValue =>
+                  have valueEq : leftField = sourceValue := by
+                    have normalized := sourceRead
+                    simp [getObjectField, getConstructor, getLiveCell,
+                      leftFound, leftLiveEq, leftObjectEq, leftFieldEq,
+                      Bind.bind, Except.bind, Pure.pure, Except.pure]
+                      at normalized
+                    exact normalized.symm
+                  subst leftField
+                  rcases arrayRel_getElem?_some fields index leftFieldEq with
+                    ⟨targetValue, rightFieldEq, values⟩
+                  have targetRead :
+                      getObjectField right
+                        (.object (.heap rightLocation)) index =
+                          .ok targetValue := by
+                    simp [getObjectField, getConstructor, getLiveCell,
+                      rightFound, rightLiveEq, rightObjectEq, rightFieldEq,
+                      Bind.bind, Except.bind, Pure.pure, Except.pure]
+                  have leftRooted : ∀ location,
+                      sourceValue = .object (.heap location) →
+                        Reachable left.heap
+                          (runtimeRoots left leftExtra) location := by
+                    intro location reference
+                    exact .child leftReachable leftFound
+                      (by simpa [leftObjectEq, HeapObject.ownedValues] using
+                        array_mem_of_getElem?_eq_some index leftFieldEq)
+                      reference
+                  have rightRooted : ∀ location,
+                      targetValue = .object (.heap location) →
+                        Reachable right.heap
+                          (runtimeRoots right rightExtra) location := by
+                    intro location reference
+                    exact .child rightReachable rightFound
+                      (by simpa [rightObjectEq, HeapObject.ownedValues] using
+                        array_mem_of_getElem?_eq_some index rightFieldEq)
+                      reference
+                  exact ⟨targetValue, targetRead, values,
+                    related.prependReachable values leftRooted rightRooted⟩
+          | closure fixed =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | boxed value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | string value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | natural value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | integer value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | byteArray value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | «opaque» value =>
+              simp [getObjectField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
 
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
