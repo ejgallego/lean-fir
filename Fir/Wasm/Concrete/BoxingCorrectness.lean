@@ -503,6 +503,10 @@ theorem LiveHeapRel.readBoxedScalar_heap_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  case integer storedDescriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   case string storedDescriptor objectEq objectRelated refCount persistent cellLive =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
