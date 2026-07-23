@@ -1954,6 +1954,39 @@ theorem reachable_without_erased_root
   | child parent found owned reference ih =>
       exact .child ih found owned reference
 
+/-- A direct root which is not a heap reference cannot introduce a reachable
+heap location.  This packages the common immediate-value argument used by
+tagged naturals, scalars, unboxed words, and erased values. -/
+theorem reachable_without_nonHeap_root
+    (nonHeap : ∀ candidate, root ≠ .object (.heap candidate))
+    (reachable : Reachable heap (root :: roots) location) :
+    Reachable heap roots location := by
+  induction reachable with
+  | root member =>
+      simp only [List.mem_cons] at member
+      rcases member with same | member
+      · exact (nonHeap _ same.symm).elim
+      · exact .root member
+  | child parent found owned reference ih =>
+      exact .child ih found owned reference
+
+/-- A pair of related immediate values may be published as direct roots
+without changing either reachable heap. -/
+theorem ShadowRuntimeRel.prependNonHeap
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (values : ValueRel rho leftRoot rightRoot)
+    (leftNonHeap : ∀ location, leftRoot ≠ .object (.heap location))
+    (rightNonHeap : ∀ location, rightRoot ≠ .object (.heap location)) :
+    ShadowRuntimeRel rho left right
+      (leftRoot :: leftExtra) (rightRoot :: rightExtra) := by
+  apply related.reindexExtra (.cons values related.extra)
+  · intro location reachable
+    apply reachable_without_nonHeap_root leftNonHeap
+    simpa [runtimeRoots] using reachable
+  · intro location reachable
+    apply reachable_without_nonHeap_root rightNonHeap
+    simpa [runtimeRoots] using reachable
+
 /-- The runtime relation may publish `.erased` as an additional direct root:
 it is related to itself and carries no heap address. -/
 theorem ShadowRuntimeRel.prependErased
@@ -4514,6 +4547,75 @@ theorem ShadowRuntimeRel.allocBoth
       leftHeapFresh := heapFresh_succ related.leftHeapFresh
       rightHeapFresh := heapFresh_succ related.rightHeapFresh
     }
+
+/-- Evaluating the same literal in related runtimes produces related values.
+Immediate literals preserve the current address renaming; heap-backed
+literals allocate a fresh related pair and extend it. -/
+theorem ShadowRuntimeRel.literalBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (literalValue : LCNF.LitValue) :
+    ∃ larger,
+      RenamingExtends rho larger ∧
+      ValueRel larger (literal left literalValue).2
+        (literal right literalValue).2 ∧
+      ShadowRuntimeRel larger
+        (literal left literalValue).1 (literal right literalValue).1
+        ((literal left literalValue).2 :: leftExtra)
+        ((literal right literalValue).2 :: rightExtra) := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+        · simpa [literal, small] using
+            (ValueRel.tagged (rho := rho) (UInt64.ofNat value))
+        · simpa [literal, small] using related.prependNonHeap
+            (ValueRel.tagged (rho := rho) (UInt64.ofNat value))
+            (by intro location; simp) (by intro location; simp)
+      · rcases related.allocBoth (HeapObjectRel.natural value)
+            (by simp [RootSubset, HeapObject.ownedValues])
+            (by simp [RootSubset, HeapObject.ownedValues]) false with
+          ⟨larger, extension, values, runtime⟩
+        exact ⟨larger, extension,
+          by simpa [literal, small] using values,
+          by simpa [literal, small] using runtime⟩
+  | str value =>
+      rcases related.allocBoth (HeapObjectRel.string value)
+            (by simp [RootSubset, HeapObject.ownedValues])
+            (by simp [RootSubset, HeapObject.ownedValues]) false with
+        ⟨larger, extension, values, runtime⟩
+      exact ⟨larger, extension,
+        by simpa [literal] using values,
+        by simpa [literal] using runtime⟩
+  | uint8 value =>
+      refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+      · exact .scalar (.uint8 value)
+      · simpa [literal] using related.prependNonHeap
+          (ValueRel.scalar (rho := rho) (.uint8 value))
+          (by intro location; simp) (by intro location; simp)
+  | uint16 value =>
+      refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+      · exact .scalar (.uint16 value)
+      · simpa [literal] using related.prependNonHeap
+          (ValueRel.scalar (rho := rho) (.uint16 value))
+          (by intro location; simp) (by intro location; simp)
+  | uint32 value =>
+      refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+      · exact .scalar (.uint32 value)
+      · simpa [literal] using related.prependNonHeap
+          (ValueRel.scalar (rho := rho) (.uint32 value))
+          (by intro location; simp) (by intro location; simp)
+  | uint64 value =>
+      refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+      · exact .scalar (.uint64 value)
+      · simpa [literal] using related.prependNonHeap
+          (ValueRel.scalar (rho := rho) (.uint64 value))
+          (by intro location; simp) (by intro location; simp)
+  | usize value =>
+      refine ⟨rho, RenamingExtends.refl rho, ?_, ?_⟩
+      · exact .usize value
+      · simpa [literal] using related.prependNonHeap
+          (ValueRel.usize (rho := rho) value)
+          (by intro location; simp) (by intro location; simp)
 
 /-- A well-formed dead constructor evaluation either produces an immediate
 tag without changing the runtime, or allocates source-only unreachable
