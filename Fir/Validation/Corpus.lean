@@ -191,6 +191,50 @@ def mixedLayoutUInt32 (natural : Nat) (text : String) (bytes : ByteArray)
     (usize : USize) (scalar : UInt32) : UInt32 :=
   (mkMixedLayout natural text bytes usize scalar).scalar
 
+/-- Two adjacent `USize` fields after a nonempty object-field prefix. -/
+structure MultiUSizeLayout where
+  natural : Nat
+  text : String
+  first : USize
+  second : USize
+  scalar : UInt32
+
+@[noinline]
+def mkMultiUSizeLayout (natural : Nat) (text : String) (first second : USize)
+    (scalar : UInt32) : MultiUSizeLayout :=
+  { natural, text, first, second, scalar }
+
+@[noinline]
+def MultiUSizeLayout.setFirst (value : MultiUSizeLayout)
+    (replacement : USize) : MultiUSizeLayout :=
+  { value with first := replacement }
+
+@[noinline]
+def MultiUSizeLayout.setSecond (value : MultiUSizeLayout)
+    (replacement : USize) : MultiUSizeLayout :=
+  { value with second := replacement }
+
+def multiUSizeUpdateFirstPreservesSecond (natural : Nat) (text : String)
+    (first second : USize) (scalar : UInt32) (replacement : USize) : USize :=
+  (MultiUSizeLayout.setFirst
+    (mkMultiUSizeLayout natural text first second scalar) replacement).second
+
+def multiUSizeUpdateSecondPreservesFirst (natural : Nat) (text : String)
+    (first second : USize) (scalar : UInt32) (replacement : USize) : USize :=
+  (MultiUSizeLayout.setSecond
+    (mkMultiUSizeLayout natural text first second scalar) replacement).first
+
+@[noinline]
+def chooseUSize (selectUpdated : Bool) (updated original : USize) : USize :=
+  if selectUpdated then updated else original
+
+def multiUSizeSharedUpdate (natural : Nat) (text : String)
+    (first second : USize) (scalar : UInt32) (replacement : USize)
+    (selectUpdated : Bool) : USize :=
+  let original := mkMultiUSizeLayout natural text first second scalar
+  let updated := MultiUSizeLayout.setFirst original replacement
+  chooseUSize selectUpdated updated.first original.first
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -535,6 +579,28 @@ private def mixedLayoutArgs : Array ValidationDatum :=
 
 private def mixedLayoutArgSchemas : Array ValidationSchema :=
   #[.nat, .string, .bytes, .usize, .bits 32]
+
+private def multiUSizeArgs : Array ValidationDatum :=
+  #[.nat Source.largeNat, .string mixedLayoutText, .usize 17,
+    .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 32 (UInt64.ofNat Source.maxUInt32.toNat), .usize 42]
+
+private def multiUSizeArgSchemas : Array ValidationSchema :=
+  #[.nat, .string, .usize, .usize, .bits 32, .usize]
+
+private def multiUSizeSharedArgs (selectUpdated : Bool) : Array ValidationDatum :=
+  multiUSizeArgs.push (.bool selectUpdated)
+
+private def multiUSizeSharedArgSchemas : Array ValidationSchema :=
+  multiUSizeArgSchemas.push .bool
+
+private def multiUSizeForms : Array String :=
+  #["cases", "ctor", "dec", "fap", "inc", "isShared", "join", "jump", "oproj",
+    "return", "sproj", "sset", "uproj", "uset"]
+
+private def multiUSizeUniqueExecutedForms : Array String :=
+  #["cases", "ctor", "dec", "fap", "isShared", "join", "jump", "oproj", "return",
+    "sproj", "sset", "uproj", "uset"]
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -907,6 +973,68 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["ctor", "uset", "sset", "fap", "sproj", "dec", "return"]
     provenance := firProvenance
       "Project maximum UInt32 from an aggregate mixing object and USize slots" },
+  { id := "multi-usize-update-first-preserves-second"
+    entry := ``Source.multiUSizeUpdateFirstPreservesSecond
+    dependencies := #[``Source.mkMultiUSizeLayout, ``Source.MultiUSizeLayout.setFirst]
+    args := multiUSizeArgs
+    argSchemas := multiUSizeArgSchemas
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat
+      (Source.multiUSizeUpdateFirstPreservesSecond Source.largeNat mixedLayoutText
+        17 Source.maxUSize Source.maxUInt32 42).toNat)
+    tags :=
+      #["stress", "mixed-layout", "usize", "mutation", "unique", "neighbor", "boundary"]
+    requiredLcnfForms := multiUSizeForms
+    requiredExecutedLcnfForms := multiUSizeUniqueExecutedForms
+    provenance := firProvenance
+      "Update absolute USize slot 2 while preserving adjacent slot 3 on the unique path" },
+  { id := "multi-usize-update-second-preserves-first"
+    entry := ``Source.multiUSizeUpdateSecondPreservesFirst
+    dependencies := #[``Source.mkMultiUSizeLayout, ``Source.MultiUSizeLayout.setSecond]
+    args := multiUSizeArgs
+    argSchemas := multiUSizeArgSchemas
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat
+      (Source.multiUSizeUpdateSecondPreservesFirst Source.largeNat mixedLayoutText
+        17 Source.maxUSize Source.maxUInt32 42).toNat)
+    tags :=
+      #["stress", "mixed-layout", "usize", "mutation", "unique", "neighbor", "boundary"]
+    requiredLcnfForms := multiUSizeForms
+    requiredExecutedLcnfForms := multiUSizeUniqueExecutedForms
+    provenance := firProvenance
+      "Update absolute USize slot 3 while preserving adjacent slot 2 on the unique path" },
+  { id := "multi-usize-shared-updated"
+    entry := ``Source.multiUSizeSharedUpdate
+    dependencies :=
+      #[``Source.mkMultiUSizeLayout, ``Source.MultiUSizeLayout.setFirst, ``Source.chooseUSize]
+    args := multiUSizeSharedArgs true
+    argSchemas := multiUSizeSharedArgSchemas
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat
+      (Source.multiUSizeSharedUpdate Source.largeNat mixedLayoutText
+        17 Source.maxUSize Source.maxUInt32 42 true).toNat)
+    tags :=
+      #["stress", "mixed-layout", "usize", "mutation", "shared", "copy-on-write", "updated"]
+    requiredLcnfForms := multiUSizeForms
+    requiredExecutedLcnfForms := multiUSizeForms
+    provenance := firProvenance
+      "Force shared update of absolute USize slot 2 and observe the replacement" },
+  { id := "multi-usize-shared-original"
+    entry := ``Source.multiUSizeSharedUpdate
+    dependencies :=
+      #[``Source.mkMultiUSizeLayout, ``Source.MultiUSizeLayout.setFirst, ``Source.chooseUSize]
+    args := multiUSizeSharedArgs false
+    argSchemas := multiUSizeSharedArgSchemas
+    resultSchema := .usize
+    native := fun _ => .usize (UInt64.ofNat
+      (Source.multiUSizeSharedUpdate Source.largeNat mixedLayoutText
+        17 Source.maxUSize Source.maxUInt32 42 false).toNat)
+    tags :=
+      #["stress", "mixed-layout", "usize", "mutation", "shared", "copy-on-write", "original"]
+    requiredLcnfForms := multiUSizeForms
+    requiredExecutedLcnfForms := multiUSizeForms
+    provenance := firProvenance
+      "Force shared update of absolute USize slot 2 while observing the retained original" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]
