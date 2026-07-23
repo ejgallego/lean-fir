@@ -2799,6 +2799,30 @@ layout. This aligns the proof boundary with the twice-called cached
 constructor-graph execution already covered by the concrete artifact lane. No
 shared semantic contract or executable ABI changed.
 
+W6.6cf states the concrete program theorem ladder independently of operation
+coverage. `SuccessfulDeclaration` joins an actual FIR `ExecEvaluates` witness,
+generated-function resolution, compiler/adaptor `CodeWP`, and exact final
+runtime/value refinement. Its public theorem yields fuel-free Talos
+termination under `RefinedReturnPost`, which includes the complete
+`ConcreteRuntimeRel`, clear structured failure, ABI-indexed physical result,
+and unchanged caller operand tail. The body judgment supports arbitrary
+physical parameters and caller tails; nullary instances convert directly to
+and from `CachedDeclarationBodyWP`. `W6-THEOREM-ROADMAP.md` separates this
+sound certificate boundary from the syntax-directed construction, whole-export
+success, structured faults, W7 runtime linking, and final import-closure
+theorems. No shared semantic contract or executable ABI changed.
+
+W6.6cg begins that syntax-directed construction. `ConcreteCodeSimulation`
+currently covers generated return, direct non-calling `let`, and no-result
+effect nodes. One induction derives the exact concrete `CodeWP` for every
+caller tail and successful source evaluation; companion inductions derive the
+final runtime relation, clear failure channel, and physical result relation
+from the return leaf rather than accepting them as declaration-level
+assumptions. `toSuccessfulDeclaration` and `correct` therefore close T2 for
+this initial spine. Calls, externals, lazy paths, and cases remain constructors
+to add over the same result indices. No shared semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
