@@ -117,8 +117,9 @@ cache, while hits skip evaluation. Differential coverage checks that two calls
 produce one external event, and the proof surface covers exact cache host
 steps, the compiler/adapter cache shape, zero-argument declaration-body
 packages, hit/miss WP composition, miss-publication-to-hit facts, recursive
-`CodeWP`, and the checked-export boundary. Internal direct and recursive calls
-now use ordinary Wasm calls.
+`CodeWP`, and the checked-export boundary. The first concrete body family
+composes a witness-growing natural literal with the generated return suffix.
+Internal direct and recursive calls now use ordinary Wasm calls.
 Statically tracked closures use a generated metadata trampoline with typed
 capture projection, semantic underapplication, and saturated direct dispatch;
 the supported gate rejects oversaturation and unknown closure provenance.

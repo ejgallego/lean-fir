@@ -117,6 +117,52 @@ theorem concreteCodeWP_conseq
       sourceRuntime sourceEnv sourceCode target initial locals witness tail Q' :=
   ⟨correct.1, correct.2.1, Wasm.wp.conseq post correct.2.2⟩
 
+/-- Concrete-host base rule for a generated source return installed as the
+last two instructions of a singleton-result Wasm body. The related source
+binding identifies the exact physical local returned to the caller. -/
+theorem codeWP_return_to_bodyPost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetFunction : Wasm.Function}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {result : Lean.FVarId} {sourceValue : Value} {kind : AbiKind}
+    {resultIndex : Nat} {physical : Wasm.Value}
+    (localCompiled :
+      Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (sourceLookup : lookup sourceEnv result = some sourceValue)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (targetLookup : targetLocals.get resultIndex = some physical)
+    (resultEq : targetFunction.results.length = 1) :
+    CodeWP context sourceModule sourceFunction [] module hostEnv sourceRuntime
+      sourceEnv (.return result) [.localGet resultIndex, .ret]
+      targetStore targetLocals witness []
+      (ConcreteFunctionBodyPost targetFunction []
+        (fun final results =>
+          final = targetStore ∧ results = [physical])) := by
+  obtain ⟨actual, actualLookup, _⟩ :=
+    stateRelated.resolve sourceLookup resultFound kindAt
+  rw [targetLookup] at actualLookup
+  injection actualLookup with physicalEq
+  subst actual
+  refine ⟨codeAdapted_return localCompiled resultFound, stateRelated, ?_⟩
+  rw [Wasm.wp_localGet_cons]
+  have targetLookupWithStack :
+      ({ targetLocals with values := [] } : Wasm.Locals).get resultIndex =
+        some physical := by
+    simpa [Wasm.Locals.get] using targetLookup
+  simp only [targetLookupWithStack]
+  rw [Wasm.wp_ret_cons]
+  simp [ConcreteFunctionBodyPost, resultEq]
+
 /-- For a zero-argument, singleton-result declaration it is enough to prove
 the generated body once with an empty caller remainder. Wasm's function-body
 postcondition restores every arbitrary caller tail structurally. -/
@@ -146,6 +192,74 @@ theorem CachedDeclarationBodyWP.of_emptyTail
   intro continuation post
   cases continuation <;>
     simp_all [ConcreteFunctionBodyPost]
+
+/-- First declaration-specific cache body family: a compiler-generated
+zero-argument declaration that allocates one natural literal and returns it.
+All heap growth and physical-value refinement come from the existing literal
+rule; this theorem supplies the concrete return base case and packages the
+complete generated body for lazy-cache callers. -/
+theorem cachedDeclarationBodyWP_naturalLiteral
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host} {heap : MemoryState} {word : Word32}
+    {targetFunction : Wasm.Function} {updated : Wasm.Locals}
+    {resultIndex value : Nat} {witness : RefinementWitness}
+    (valueEq : decl.value = .lit (.nat value))
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok [.call (.runtime (.literal (.nat value) .tobject))])
+    (callFound : callIndex? sourceModule
+      (.runtime (.literal (.nat value) .tobject)) = some id)
+    (initialRelated : StateRelated sourceFunction sourceRuntime []
+      initial (targetFunction.toLocals []) witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .tobject)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .tobject))
+    (allocated : allocateNatural initial.host.runtime.heap value =
+      .ok (heap, word))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (naturalLiteralContract value))
+    (hParams : imp.params.length = 0)
+    (hResults : imp.results.length = 1)
+    (targetSet :
+      (targetFunction.toLocals []).set? resultIndex
+          (.i32 (UInt32.ofNat word.value)) =
+        some updated)
+    (paramsEq : targetFunction.numParams = 0)
+    (resultEq : targetFunction.results.length = 1)
+    (bodyEq : targetFunction.body = [
+      .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+    CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
+      sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
+      (replaceHeap initial heap) witness (.i32 (UInt32.ofNat word.value)) := by
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
+  rw [bodyEq]
+  apply codeWP_naturalLiteral_let valueEq valueCompiled callFound
+    initialRelated resultFound resultKindAt allocated hImp hSat hi hContract
+    hParams hResults targetSet
+  intro nextWitness extension nextRuntimeRelated valueRelated
+  have failureClear :
+      (replaceHeap initial heap).host.failure? = none := by
+    simp [replaceHeap, clearFailure]
+  have nextState := initialRelated.bindAfter extension nextRuntimeRelated
+    failureClear resultFound resultKindAt valueRelated targetSet
+  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+    (lookup_bind_self [] decl.fvarId
+      (literal sourceRuntime (.nat value)).2)
+    nextState (localUpdate_of_set? targetSet).1 resultEq
 
 /-- A per-declaration body package supplies the store-specific, fuel-free
 termination theorem expected by generated direct calls. -/

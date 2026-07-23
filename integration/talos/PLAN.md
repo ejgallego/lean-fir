@@ -2761,6 +2761,18 @@ compiler/body/miss/publication/hit chain; declaration-specific body-package
 instances remain incremental composition work. No shared semantic contract or
 executable ABI changed.
 
+W6.6cc supplies the first actual cached-declaration body family.
+`codeWP_return_to_bodyPost` is the concrete-host base rule for the generated
+`local.get; return` suffix: it resolves the source binding to the exact
+physical local and establishes the singleton Wasm function postcondition.
+`cachedDeclarationBodyWP_naturalLiteral` composes that suffix with the
+compiler/adapter natural-literal `let`, concrete heap allocation, monotone
+witness extension, and updated source environment. The result is the
+zero-argument declaration-body package consumed directly by W6.6cb's
+fuel-free call, miss publication, and subsequent-hit chain. Other declaration
+body forms remain incremental instances over the same boundary. No shared
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
