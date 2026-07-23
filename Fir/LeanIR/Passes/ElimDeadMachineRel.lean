@@ -4549,6 +4549,153 @@ theorem match_jumpCodeStep
                   afterRelated step with ⟨targetPath, finalRelated⟩
               exact ⟨computedTargetAfter, targetPath, ⟨rho, finalRelated⟩⟩
 
+/-- Graph-level semantic-step dispatcher for retained case tables.  A source
+step determines a successful discriminant lookup, tag read, and arm choice.
+The reachable runtime transports the successful tag read across the address
+renaming, while the transparent alternative graph selects the related target
+body. -/
+theorem match_casesCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.cases (.mk typeName resultType discr sourceAlternatives)) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.cases
+          (.mk typeName resultType discr sourceAlternatives)) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases graph.casesResidual with
+    ⟨targetAlternatives, targetEq, alternatives, discrMember⟩
+  subst targetCode
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.cases
+      (.mk typeName resultType discr sourceAlternatives)) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.cases
+      (.mk typeName resultType discr targetAlternatives)) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.cases
+            (.mk typeName resultType discr sourceAlternatives)) } =
+              sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.cases
+            (.mk typeName resultType discr sourceAlternatives)) } =
+              sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize discrRead :
+    lookupValue sourceState.env discr = discrResult
+  cases discrResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, LCNF.Cases.discr, LCNF.Cases.alts,
+          discrRead, fail]
+      exact (noStep done).elim
+  | ok sourceValue =>
+      generalize tagRead :
+        getTag sourceState.runtime sourceValue = tagResult
+      cases tagResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, coreStep, LCNF.Cases.discr, LCNF.Cases.alts,
+              discrRead, tagRead, fail]
+          exact (noStep done).elim
+      | ok tag =>
+          generalize sourceChoiceEq :
+            chooseAlt tag sourceAlternatives.toList = sourceChoice
+          cases sourceChoice with
+          | none =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault .invalidCases)) := by
+                simp [sourceCurrent, coreStep, LCNF.Cases.discr,
+                  LCNF.Cases.alts, discrRead, tagRead, sourceChoiceEq, fail]
+              exact (noStep done).elim
+          | some sourceBody =>
+              have sourceLookup :=
+                lookupValue_eq_ok_iff.mp discrRead
+              have values := env discr discrMember
+              rw [sourceLookup] at values
+              generalize targetLookup :
+                lookup targetState.env discr = targetOption at values
+              cases values with
+              | some discrValues =>
+                  rename_i targetValue
+                  have targetRead :
+                      lookupValue targetState.env discr = .ok targetValue :=
+                    lookupValue_eq_ok_iff.mpr targetLookup
+                  have sourceRoot :
+                      sourceValue ∈
+                        envRootsOn used sourceState.env ++
+                          sourceFrameRoots := by
+                    exact List.mem_append_left _
+                      (lookup_mem_envRootsOn discrMember sourceLookup)
+                  have targetTagRead :=
+                    runtime.getTagBoth_of_related sourceRoot discrValues
+                      tagRead
+                  generalize targetChoiceEq :
+                    chooseAlt tag targetAlternatives.toList = targetChoice
+                  have selected : OptionalRel
+                      (ShadowCodeGraph fuel used)
+                      (some sourceBody) targetChoice := by
+                    rw [← sourceChoiceEq, ← targetChoiceEq]
+                    exact alternatives.choose
+                  cases selected with
+                  | some body =>
+                      rename_i targetBody
+                      let sourceExpected := {
+                        sourceState with control := .code sourceBody }
+                      let targetExpected := {
+                        targetState with control := .code targetBody }
+                      have sourceTransition :
+                          coreStep sourceCurrent = .next sourceExpected := by
+                        simp [sourceCurrent, sourceExpected, coreStep,
+                          LCNF.Cases.discr, LCNF.Cases.alts, discrRead,
+                          tagRead, sourceChoiceEq]
+                      have targetTransition :
+                          coreStep targetCurrent = .next targetExpected := by
+                        simp [targetCurrent, targetExpected, coreStep,
+                          LCNF.Cases.discr, LCNF.Cases.alts, targetRead,
+                          targetTagRead, targetChoiceEq]
+                      have afterRelated :
+                          ReachableMachineRelated fuel rho
+                            sourceExpected targetExpected := by
+                        unfold ReachableMachineRelated
+                        exact ⟨envRootsOn used sourceState.env,
+                          envRootsOn used targetState.env,
+                          sourceFrameRoots, targetFrameRoots,
+                          programs, .code body joins env, frames, runtime⟩
+                      rcases match_internalCoreSteps sourceTransition
+                          targetTransition afterRelated
+                          (by simpa [sourceCurrent] using step) with
+                        ⟨targetPath, finalRelated⟩
+                      exact ⟨targetExpected,
+                        by simpa [targetCurrent] using targetPath,
+                        ⟨rho, finalRelated⟩⟩
+
 /-- A deleted join declaration installs one source-only join entry.  Its
 identifier is absent from the active liveness set, so all resumable join
 lookups and all reachable runtime roots remain unchanged. -/

@@ -2004,6 +2004,51 @@ theorem ShadowRuntimeRel.reindexClosureCall
     exact reachable_monoRootReachability
       (closureCallRoots_reachable rightFound rightObject) reachable
 
+/-- A successful constructor-tag read of a related published value succeeds
+with the same tag on the target.  The heap-reference case uses reachability of
+the source root to recover the mapped target cell; immediate, scalar, and
+`USize` tags are representation-identical by `ValueRel`.
+
+This is intentionally a success-transport theorem rather than unconditional
+result equality: faults on dead heap references contain concrete locations,
+which may differ across the address renaming. -/
+theorem ShadowRuntimeRel.getTagBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue)
+    (sourceRead : getTag left leftValue = .ok tag) :
+    getTag right rightValue = .ok tag := by
+  cases values with
+  | tagged payload => simpa [getTag] using sourceRead
+  | usize value => simpa [getTag] using sourceRead
+  | scalar value => simpa [getTag] using sourceRead
+  | erased => simp [getTag] at sourceRead
+  | reuseNone => simp [getTag] at sourceRead
+  | reuseSome mapped => simp [getTag] at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have objects := cells.2.2.2
+      generalize leftObjectEq : leftCell.object = leftObject at objects
+      generalize rightObjectEq : rightCell.object = rightObject at objects
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          simp_all [getTag, getLiveCell, leftFound, rightFound,
+            Bind.bind, Except.bind]
+      | true =>
+          cases objects <;>
+            simp_all [getTag, getLiveCell, leftFound, rightFound,
+              Bind.bind, Except.bind]
+
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
 theorem ShadowRuntimeRel.readMappedCell
