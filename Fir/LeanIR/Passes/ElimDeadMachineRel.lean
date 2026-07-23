@@ -2709,6 +2709,128 @@ theorem lookupValue_eq_ok_iff :
   unfold lookupValue
   cases foundEq : lookup env fvarId <;> simp_all
 
+/-- A retained object-field write succeeds on both related machines.  The
+inserted covered argument is already a live root on each side, so changing the
+constructor ownership edge preserves the reachable machine relation. -/
+theorem coreStep_retainedObjectSet_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (fieldCovered : ArgCovered used field)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : evalArg sourceState.env field = .ok fieldValue)
+    (effect : setObjectField sourceState.runtime objectValue index fieldValue =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetFieldValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      evalArg targetState.env field = .ok targetFieldValue ∧
+      setObjectField targetState.runtime targetObjectValue index
+          targetFieldValue = .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.oset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.oset object index field targetContinuation)) =
+          .next targetAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have fields := evalArg_relOn env fieldCovered
+      generalize targetFieldRead :
+        evalArg targetState.env field = targetFieldResult at fields
+      rw [fieldRead] at fields
+      cases fields with
+      | ok fieldValues =>
+          rename_i targetFieldValue
+          have objectRoot :
+              objectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots := by
+            exact List.mem_append_left _
+              (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+          have sourceFieldRoot : ∀ {location},
+              fieldValue = .object (.heap location) →
+                Reachable sourceState.runtime.heap
+                  (runtimeRoots sourceState.runtime
+                    (envRootsOn used sourceState.env ++ sourceFrameRoots))
+                  location := by
+            intro location fieldEq
+            rcases evalArg_value_rooted fieldCovered fieldRead with
+              erased | member
+            · rw [fieldEq] at erased
+              contradiction
+            · exact .root (extra_subset_runtimeRoots sourceState.runtime
+                (envRootsOn used sourceState.env ++ sourceFrameRoots)
+                (.object (.heap location))
+                (by simpa [fieldEq] using
+                  List.mem_append_left sourceFrameRoots member))
+          have targetFieldRoot : ∀ {location},
+              targetFieldValue = .object (.heap location) →
+                Reachable targetState.runtime.heap
+                  (runtimeRoots targetState.runtime
+                    (envRootsOn used targetState.env ++ targetFrameRoots))
+                  location := by
+            intro location fieldEq
+            rcases evalArg_value_rooted fieldCovered targetFieldRead with
+              erased | member
+            · rw [fieldEq] at erased
+              contradiction
+            · exact .root (extra_subset_runtimeRoots targetState.runtime
+                (envRootsOn used targetState.env ++ targetFrameRoots)
+                (.object (.heap location))
+                (by simpa [fieldEq] using
+                  List.mem_append_left targetFrameRoots member))
+          rcases runtime.setObjectFieldBoth_of_related objectRoot objectValues
+              fieldValues sourceFieldRoot targetFieldRoot effect with
+            ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+          refine ⟨targetObjectValue, targetFieldValue, targetNextRuntime,
+            targetObjectRead, rfl, targetEffect, ?_⟩
+          dsimp only
+          refine ⟨?_, ?_, ?_⟩
+          · unfold withCodeControl
+            simp only [coreStep]
+            rw [objectRead, fieldRead]
+            simp only
+            rw [effect]
+          · unfold withCodeControl
+            simp only [coreStep]
+            rw [targetObjectRead, targetFieldRead]
+            simp only
+            rw [targetEffect]
+          · unfold ReachableMachineRelated
+            exact ⟨envRootsOn used sourceState.env,
+              envRootsOn used targetState.env,
+              sourceFrameRoots, targetFrameRoots,
+              programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- A retained absolute-slot write succeeds on both related machines and
 preserves the reachable machine relation. -/
 theorem coreStep_retainedUSizeSet_reachableRelated
@@ -4127,6 +4249,92 @@ theorem match_joinCodeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- Semantic-step form of a retained object-field write. Source lookup,
+argument, and bounds faults are terminal; a successful write is matched by
+one related target write. -/
+theorem match_retainedObjectSetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (fieldCovered : ArgCovered used field)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.oset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.oset object index field targetContinuation)) targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.oset object index field sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.oset object index field sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.oset object index field sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize fieldRead :
+        evalArg sourceState.env field = fieldResult
+      cases fieldResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              fieldRead, fail]
+          exact (noStep done).elim
+      | ok fieldValue =>
+          generalize effect :
+            setObjectField sourceState.runtime objectValue index fieldValue =
+              effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  fieldRead, effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_retainedObjectSet_reachableRelated
+                  sourceState targetState programs frames continuation joins
+                  env objectMember fieldCovered objectRead fieldRead effect
+                  runtime with
+                ⟨targetObjectValue, targetFieldValue, targetNextRuntime,
+                  targetObjectRead, targetFieldRead, targetEffect,
+                  sourceTransition, targetTransition, afterRelated⟩
+              rcases match_internalCoreSteps sourceTransition targetTransition
+                  afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
 /-- Semantic-step form of a certified deleted object-field write. -/
 theorem match_deletedObjectSetStep_of_ready
     (sourceState targetState : MachineState)
@@ -4158,6 +4366,46 @@ theorem match_deletedObjectSetStep_of_ready
       programs frames continuation joins env runtime ready with
     ⟨nextRuntime, transition, related⟩
   exact match_sourceOnlyCoreStep transition related step
+
+/-- Complete graph-level dispatcher for an object-field write. The retained
+branch takes one target step; the deleted unreachable branch stutters. -/
+theorem match_objectSetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.oset object index field sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableObjectSetReadyAt fuel used object index field
+      sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.objectSetResidual)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.oset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation objectMember fieldCovered =>
+      rcases match_retainedObjectSetStep sourceState targetState programs
+          frames continuation joins env objectMember fieldCovered runtime step
+        with ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | deleted targetContinuation continuation deletedReady =>
+      rcases match_deletedObjectSetStep_of_ready sourceState targetState
+          programs frames continuation joins env runtime deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
 /-- Semantic-step form of a retained absolute-slot write. Every source fault is
 terminal; the successful branch is matched by one target write. -/
