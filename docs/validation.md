@@ -152,9 +152,9 @@ the exact object for discovery without opening the matrix. Both verification
 commands print a compact rendering such as:
 
 ```text
-coverage results: 228/228 successful, 228/228 present, findings 0 (0 unassigned)
-coverage pair native -> v8: compared 76/76, equal 76, findings 0
-coverage consumer v8 <- lean-wasm-semantic: receipts 76/76, product references 152, unique products 152, opened 152/152 unique products with strace (<N> trace paths)
+coverage results: 243/243 successful, 243/243 present, findings 0 (0 unassigned)
+coverage pair native -> v8: compared 81/81, equal 81, findings 0
+coverage consumer v8 <- lean-wasm-semantic: receipts 81/81, product references 162, unique products 162, opened 162/162 unique products with strace (<N> trace paths)
 ```
 
 This is evidence-derived coverage, not a trusted counter channel. Offline
@@ -929,7 +929,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 76 cases.  Beyond literals,
+The compiler-generated corpus currently has 81 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -947,9 +947,18 @@ the untouched neighbor. Shared paths retain the original alias, force
 copy-on-write through the same slot-2 update, and independently return the
 updated and original values. Their executed-form obligations distinguish the
 unique path from the shared path's additional `inc` while retaining constructor,
-object, USize, scalar, join, and decrement coverage. Stress fixtures
-additionally execute
-compiler-lowered ownership/reuse during recursive reassociation, change the
+object, USize, scalar, join, and decrement coverage.
+
+Five multi-width scalar mutation fixtures use a one-object, one-`USize`,
+15-byte scalar layout. Final LCNF packs the source fields in reverse byte
+offsets: `UInt64@0`, `UInt32@8`, `UInt16@12`, and `UInt8@14`. Unique paths
+update the first, middle, and last packed regions while returning an untouched
+neighbor; shared paths update `UInt32@8` and independently return the updated
+and original values. The same exact executed-form obligations cover object,
+USize, and scalar copying around the changed region.
+
+Stress fixtures additionally execute compiler-lowered ownership/reuse during
+recursive reassociation, change the
 tag of a uniquely reused constructor through `setTag`, delete a unique object
 before allocating a larger replacement, retain 17 closure captures,
 allocate/project a 70-object-field constructor, and match a nullary enum that
@@ -1073,7 +1082,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 76 corpus cases, including a natural
+The default native-to-V8 matrix covers all 81 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
 five mixed-layout projections. `make validate-v8` delegates whole-corpus

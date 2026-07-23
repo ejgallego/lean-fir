@@ -235,6 +235,69 @@ def multiUSizeSharedUpdate (natural : Nat) (text : String)
   let updated := MultiUSizeLayout.setFirst original replacement
   chooseUSize selectUpdated updated.first original.first
 
+/-- Every packed scalar width after one object field and one `USize` field. -/
+structure MultiScalarLayout where
+  natural : Nat
+  usize : USize
+  byte : UInt8
+  half : UInt16
+  word : UInt32
+  wide : UInt64
+
+@[noinline]
+def mkMultiScalarLayout (natural : Nat) (usize : USize) (byte : UInt8)
+    (half : UInt16) (word : UInt32) (wide : UInt64) : MultiScalarLayout :=
+  { natural, usize, byte, half, word, wide }
+
+@[noinline]
+def MultiScalarLayout.setByte (value : MultiScalarLayout)
+    (replacement : UInt8) : MultiScalarLayout :=
+  { value with byte := replacement }
+
+@[noinline]
+def MultiScalarLayout.setHalf (value : MultiScalarLayout)
+    (replacement : UInt16) : MultiScalarLayout :=
+  { value with half := replacement }
+
+@[noinline]
+def MultiScalarLayout.setWord (value : MultiScalarLayout)
+    (replacement : UInt32) : MultiScalarLayout :=
+  { value with word := replacement }
+
+@[noinline]
+def MultiScalarLayout.setWide (value : MultiScalarLayout)
+    (replacement : UInt64) : MultiScalarLayout :=
+  { value with wide := replacement }
+
+def multiScalarUpdateBytePreservesWide (natural : Nat) (usize : USize)
+    (byte : UInt8) (half : UInt16) (word : UInt32) (wide : UInt64)
+    (replacement : UInt8) : UInt64 :=
+  (MultiScalarLayout.setByte
+    (mkMultiScalarLayout natural usize byte half word wide) replacement).wide
+
+def multiScalarUpdateHalfPreservesWord (natural : Nat) (usize : USize)
+    (byte : UInt8) (half : UInt16) (word : UInt32) (wide : UInt64)
+    (replacement : UInt16) : UInt32 :=
+  (MultiScalarLayout.setHalf
+    (mkMultiScalarLayout natural usize byte half word wide) replacement).word
+
+def multiScalarUpdateWidePreservesByte (natural : Nat) (usize : USize)
+    (byte : UInt8) (half : UInt16) (word : UInt32) (wide : UInt64)
+    (replacement : UInt64) : UInt8 :=
+  (MultiScalarLayout.setWide
+    (mkMultiScalarLayout natural usize byte half word wide) replacement).byte
+
+@[noinline]
+def chooseUInt32 (selectUpdated : Bool) (updated original : UInt32) : UInt32 :=
+  if selectUpdated then updated else original
+
+def multiScalarSharedWordUpdate (natural : Nat) (usize : USize)
+    (byte : UInt8) (half : UInt16) (word : UInt32) (wide : UInt64)
+    (replacement : UInt32) (selectUpdated : Bool) : UInt32 :=
+  let original := mkMultiScalarLayout natural usize byte half word wide
+  let updated := MultiScalarLayout.setWord original replacement
+  chooseUInt32 selectUpdated updated.word original.word
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -594,13 +657,45 @@ private def multiUSizeSharedArgs (selectUpdated : Bool) : Array ValidationDatum 
 private def multiUSizeSharedArgSchemas : Array ValidationSchema :=
   multiUSizeArgSchemas.push .bool
 
-private def multiUSizeForms : Array String :=
+private def mixedUpdateForms : Array String :=
   #["cases", "ctor", "dec", "fap", "inc", "isShared", "join", "jump", "oproj",
     "return", "sproj", "sset", "uproj", "uset"]
 
-private def multiUSizeUniqueExecutedForms : Array String :=
+private def mixedUniqueUpdateExecutedForms : Array String :=
   #["cases", "ctor", "dec", "fap", "isShared", "join", "jump", "oproj", "return",
     "sproj", "sset", "uproj", "uset"]
+
+private def multiScalarBaseArgs : Array ValidationDatum :=
+  #[.nat Source.largeNat, .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 8 17, .bits 16 4660, .bits 32 (UInt64.ofNat Source.maxUInt32.toNat),
+    .bits 64 Source.maxUInt64]
+
+private def multiScalarBaseArgSchemas : Array ValidationSchema :=
+  #[.nat, .usize, .bits 8, .bits 16, .bits 32, .bits 64]
+
+private def multiScalarByteArgs : Array ValidationDatum :=
+  multiScalarBaseArgs.push (.bits 8 255)
+
+private def multiScalarByteArgSchemas : Array ValidationSchema :=
+  multiScalarBaseArgSchemas.push (.bits 8)
+
+private def multiScalarHalfArgs : Array ValidationDatum :=
+  multiScalarBaseArgs.push (.bits 16 65535)
+
+private def multiScalarHalfArgSchemas : Array ValidationSchema :=
+  multiScalarBaseArgSchemas.push (.bits 16)
+
+private def multiScalarWideArgs : Array ValidationDatum :=
+  multiScalarBaseArgs.push (.bits 64 42)
+
+private def multiScalarWideArgSchemas : Array ValidationSchema :=
+  multiScalarBaseArgSchemas.push (.bits 64)
+
+private def multiScalarSharedArgs (selectUpdated : Bool) : Array ValidationDatum :=
+  multiScalarBaseArgs |>.push (.bits 32 42) |>.push (.bool selectUpdated)
+
+private def multiScalarSharedArgSchemas : Array ValidationSchema :=
+  multiScalarBaseArgSchemas |>.push (.bits 32) |>.push .bool
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -984,8 +1079,8 @@ def cases : Array Case := #[
         17 Source.maxUSize Source.maxUInt32 42).toNat)
     tags :=
       #["stress", "mixed-layout", "usize", "mutation", "unique", "neighbor", "boundary"]
-    requiredLcnfForms := multiUSizeForms
-    requiredExecutedLcnfForms := multiUSizeUniqueExecutedForms
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUniqueUpdateExecutedForms
     provenance := firProvenance
       "Update absolute USize slot 2 while preserving adjacent slot 3 on the unique path" },
   { id := "multi-usize-update-second-preserves-first"
@@ -999,8 +1094,8 @@ def cases : Array Case := #[
         17 Source.maxUSize Source.maxUInt32 42).toNat)
     tags :=
       #["stress", "mixed-layout", "usize", "mutation", "unique", "neighbor", "boundary"]
-    requiredLcnfForms := multiUSizeForms
-    requiredExecutedLcnfForms := multiUSizeUniqueExecutedForms
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUniqueUpdateExecutedForms
     provenance := firProvenance
       "Update absolute USize slot 3 while preserving adjacent slot 2 on the unique path" },
   { id := "multi-usize-shared-updated"
@@ -1015,8 +1110,8 @@ def cases : Array Case := #[
         17 Source.maxUSize Source.maxUInt32 42 true).toNat)
     tags :=
       #["stress", "mixed-layout", "usize", "mutation", "shared", "copy-on-write", "updated"]
-    requiredLcnfForms := multiUSizeForms
-    requiredExecutedLcnfForms := multiUSizeForms
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
     provenance := firProvenance
       "Force shared update of absolute USize slot 2 and observe the replacement" },
   { id := "multi-usize-shared-original"
@@ -1031,10 +1126,92 @@ def cases : Array Case := #[
         17 Source.maxUSize Source.maxUInt32 42 false).toNat)
     tags :=
       #["stress", "mixed-layout", "usize", "mutation", "shared", "copy-on-write", "original"]
-    requiredLcnfForms := multiUSizeForms
-    requiredExecutedLcnfForms := multiUSizeForms
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
     provenance := firProvenance
       "Force shared update of absolute USize slot 2 while observing the retained original" },
+  { id := "multi-scalar-update-byte-preserves-wide"
+    entry := ``Source.multiScalarUpdateBytePreservesWide
+    dependencies := #[``Source.mkMultiScalarLayout, ``Source.MultiScalarLayout.setByte]
+    args := multiScalarByteArgs
+    argSchemas := multiScalarByteArgSchemas
+    resultSchema := .bits 64
+    native := fun _ =>
+      .bits 64 (Source.multiScalarUpdateBytePreservesWide Source.largeNat Source.maxUSize
+        17 4660 Source.maxUInt32 Source.maxUInt64 255)
+    tags :=
+      #["stress", "mixed-layout", "scalar", "mutation", "unique", "neighbor", "uint8",
+        "uint64", "boundary"]
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update source-leading UInt8 at scalar offset 14 while preserving UInt64 at offset 0" },
+  { id := "multi-scalar-update-half-preserves-word"
+    entry := ``Source.multiScalarUpdateHalfPreservesWord
+    dependencies := #[``Source.mkMultiScalarLayout, ``Source.MultiScalarLayout.setHalf]
+    args := multiScalarHalfArgs
+    argSchemas := multiScalarHalfArgSchemas
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat
+      (Source.multiScalarUpdateHalfPreservesWord Source.largeNat Source.maxUSize
+        17 4660 Source.maxUInt32 Source.maxUInt64 65535).toNat)
+    tags :=
+      #["stress", "mixed-layout", "scalar", "mutation", "unique", "neighbor", "uint16",
+        "uint32", "boundary"]
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update UInt16 at scalar offset 12 while preserving UInt32 at offset 8 on the unique path" },
+  { id := "multi-scalar-update-wide-preserves-byte"
+    entry := ``Source.multiScalarUpdateWidePreservesByte
+    dependencies := #[``Source.mkMultiScalarLayout, ``Source.MultiScalarLayout.setWide]
+    args := multiScalarWideArgs
+    argSchemas := multiScalarWideArgSchemas
+    resultSchema := .bits 8
+    native := fun _ => .bits 8 (UInt64.ofNat
+      (Source.multiScalarUpdateWidePreservesByte Source.largeNat Source.maxUSize
+        17 4660 Source.maxUInt32 Source.maxUInt64 42).toNat)
+    tags :=
+      #["stress", "mixed-layout", "scalar", "mutation", "unique", "neighbor", "uint64",
+        "uint8", "boundary"]
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update source-trailing UInt64 at scalar offset 0 while preserving UInt8 at offset 14" },
+  { id := "multi-scalar-shared-updated"
+    entry := ``Source.multiScalarSharedWordUpdate
+    dependencies :=
+      #[``Source.mkMultiScalarLayout, ``Source.MultiScalarLayout.setWord, ``Source.chooseUInt32]
+    args := multiScalarSharedArgs true
+    argSchemas := multiScalarSharedArgSchemas
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat
+      (Source.multiScalarSharedWordUpdate Source.largeNat Source.maxUSize
+        17 4660 Source.maxUInt32 Source.maxUInt64 42 true).toNat)
+    tags :=
+      #["stress", "mixed-layout", "scalar", "mutation", "shared", "copy-on-write", "uint32",
+        "updated"]
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Force a shared UInt32 update at scalar offset 8 and observe the replacement" },
+  { id := "multi-scalar-shared-original"
+    entry := ``Source.multiScalarSharedWordUpdate
+    dependencies :=
+      #[``Source.mkMultiScalarLayout, ``Source.MultiScalarLayout.setWord, ``Source.chooseUInt32]
+    args := multiScalarSharedArgs false
+    argSchemas := multiScalarSharedArgSchemas
+    resultSchema := .bits 32
+    native := fun _ => .bits 32 (UInt64.ofNat
+      (Source.multiScalarSharedWordUpdate Source.largeNat Source.maxUSize
+        17 4660 Source.maxUInt32 Source.maxUInt64 42 false).toNat)
+    tags :=
+      #["stress", "mixed-layout", "scalar", "mutation", "shared", "copy-on-write", "uint32",
+        "original"]
+    requiredLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Force a shared UInt32 update at scalar offset 8 while observing the retained original" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]
