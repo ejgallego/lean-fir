@@ -195,8 +195,8 @@ acceptance tests pass.
 
 1. Implement T1 and derive the existing nullary cache package from it.
 2. Introduce the return/direct-let spine of `ConcreteCodeSimulation`.
-3. Add effect, call, external, lazy, and case constructors by consuming the
-   existing W6.6 step theorems.
+3. Add case constructors by consuming the existing W6.6 step theorems; effect,
+   call, external, and lazy constructors are now present.
 4. Package the whole generated export as T3.
 5. Build the fault induction T4 in parallel with remaining success
    constructors.

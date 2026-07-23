@@ -2825,6 +2825,17 @@ this initial spine. Calls, externals, lazy paths, and cases remain constructors
 to add over the same result indices. No shared semantic contract or executable
 ABI changed.
 
+W6.6ch extends the same certificate across generated calls, external calls,
+and both lazy-cache paths. A single `sourceExternals` index now ties each
+source step to the complete source execution. Finite `ExecSteps` prefix
+composition replaces the earlier call-free `CodeEvaluates` shortcut, so the
+syntax induction directly derives an exact `ExecEvaluates` witness while its
+target induction consumes the existing concrete `codeWP_callLet`,
+`codeWP_externalLet`, and `codeWP_lazyLet` rules. The final runtime, failure,
+and physical-value facts still come only from the return leaf. Case nodes
+remain the next T2 constructor family. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
