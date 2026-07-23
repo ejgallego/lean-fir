@@ -2606,6 +2606,137 @@ theorem ShadowRuntimeRel.getUSizeSlotBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
 
+/-- Every successful packed-scalar read returns an unboxed scalar value. -/
+theorem getScalarField_ok_eq_scalar
+    (read : getScalarField runtime object width offset = .ok result) :
+    ∃ scalar, result = .scalar scalar := by
+  unfold getScalarField at read
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at read
+  cases constructorResult with
+  | error fault =>
+      simp [constructorEq, Bind.bind, Except.bind] at read
+  | ok constructor =>
+      obtain ⟨location, cell, value⟩ := constructor
+      simp only [constructorEq, Bind.bind, Except.bind] at read
+      generalize fieldEq :
+        value.scalarFields.find? (fun field =>
+          field.width == width && field.offset == offset) = fieldResult
+          at read
+      cases fieldResult with
+      | none =>
+          simp [fieldEq] at read
+      | some field =>
+          simp [fieldEq, Pure.pure, Except.pure] at read
+          cases read
+          exact ⟨field.value, rfl⟩
+
+/-- A packed-scalar projection from a related published constructor succeeds
+with the same immediate scalar on the target. -/
+theorem ShadowRuntimeRel.getScalarFieldBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceRead :
+      getScalarField left leftObject width offset = .ok leftField) :
+    ∃ rightField,
+      getScalarField right rightObject width offset = .ok rightField ∧
+      ValueRel rho leftField rightField ∧
+      ShadowRuntimeRel rho left right
+        (leftField :: leftExtra) (rightField :: rightExtra) := by
+  cases objects with
+  | tagged payload =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | usize value =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | scalar value =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | erased =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseNone =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseSome mapped =>
+      simp [getScalarField, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have heapObjects := cells.2.2.2
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            rw [liveEq]
+            exact rightLiveEq
+          simp [getScalarField, getConstructor, getLiveCell, leftFound,
+            leftLiveEq, Bind.bind, Except.bind] at sourceRead
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            rw [liveEq]
+            exact rightLiveEq
+          generalize leftObjectEq :
+            leftCell.object = leftHeapObject at heapObjects
+          generalize rightObjectEq :
+            rightCell.object = rightHeapObject at heapObjects
+          cases heapObjects with
+          | @ctor leftConstructor rightConstructor tag fields usizes scalars =>
+              have targetRead :
+                  getScalarField right
+                    (.object (.heap rightLocation)) width offset =
+                      .ok leftField := by
+                simpa [getScalarField, getConstructor, getLiveCell,
+                  leftFound, rightFound, leftLiveEq, rightLiveEq,
+                  leftObjectEq, rightObjectEq, scalars,
+                  Bind.bind, Except.bind, Pure.pure, Except.pure]
+                  using sourceRead
+              rcases getScalarField_ok_eq_scalar sourceRead with
+                ⟨scalar, resultEq⟩
+              subst leftField
+              exact ⟨.scalar scalar, targetRead, .scalar scalar,
+                related.prependNonHeap (.scalar scalar)
+                  (by intro location; simp) (by intro location; simp)⟩
+          | closure fixed =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | boxed value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | string value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | natural value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | integer value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | byteArray value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | «opaque» value =>
+              simp [getScalarField, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
 theorem ShadowRuntimeRel.readMappedCell
