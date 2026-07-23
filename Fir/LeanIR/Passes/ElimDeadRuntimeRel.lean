@@ -2737,6 +2737,168 @@ theorem ShadowRuntimeRel.getScalarFieldBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
 
+/-- Successful tagged-object unboxing always produces an immediate scalar or
+`USize` word. -/
+theorem scalarFromType_ok_eq_immediate
+    (read : scalarFromType type payload = .ok result) :
+    (∃ scalar, result = .scalar scalar) ∨
+      ∃ word, result = .usize word := by
+  by_cases uint8 : type == LCNF.ImpureType.uint8
+  · left
+    have normalized := read
+    simp [scalarFromType, uint8] at normalized
+    exact ⟨.uint8 payload.toUInt8, normalized.symm⟩
+  · by_cases uint16 : type == LCNF.ImpureType.uint16
+    · left
+      have normalized := read
+      simp [scalarFromType, uint8, uint16] at normalized
+      exact ⟨.uint16 payload.toUInt16, normalized.symm⟩
+    · by_cases uint32 : type == LCNF.ImpureType.uint32
+      · left
+        have normalized := read
+        simp [scalarFromType, uint8, uint16, uint32] at normalized
+        exact ⟨.uint32 payload.toUInt32, normalized.symm⟩
+      · by_cases uint64 : type == LCNF.ImpureType.uint64
+        · left
+          have normalized := read
+          simp [scalarFromType, uint8, uint16, uint32, uint64] at normalized
+          exact ⟨.uint64 payload, normalized.symm⟩
+        · by_cases usize : type == LCNF.ImpureType.usize
+          · right
+            have normalized := read
+            simp [scalarFromType, uint8, uint16, uint32, uint64, usize]
+              at normalized
+            exact ⟨payload, normalized.symm⟩
+          · simp [scalarFromType, uint8, uint16, uint32, uint64, usize]
+              at read
+
+/-- Unboxing a related published object succeeds on the target with a related
+payload. Heap-box payloads are promoted from child reachability to direct
+continuation roots. -/
+theorem ShadowRuntimeRel.unboxBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceRead : unbox left type leftObject = .ok leftResult) :
+    ∃ rightResult,
+      unbox right type rightObject = .ok rightResult ∧
+      ValueRel rho leftResult rightResult ∧
+      ShadowRuntimeRel rho left right
+        (leftResult :: leftExtra) (rightResult :: rightExtra) := by
+  cases objects with
+  | tagged payload =>
+      have scalarRead : scalarFromType type payload = .ok leftResult := by
+        simpa [unbox] using sourceRead
+      have targetRead :
+          unbox right type (.object (.tagged payload)) = .ok leftResult := by
+        simpa [unbox] using scalarRead
+      rcases scalarFromType_ok_eq_immediate scalarRead with
+        ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
+      · subst leftResult
+        exact ⟨.scalar scalar, targetRead, .scalar scalar,
+          related.prependNonHeap (.scalar scalar)
+            (by intro location; simp) (by intro location; simp)⟩
+      · subst leftResult
+        exact ⟨.usize word, targetRead, .usize word,
+          related.prependNonHeap (.usize word)
+            (by intro location; simp) (by intro location; simp)⟩
+  | usize value => simp [unbox] at sourceRead
+  | scalar value => simp [unbox] at sourceRead
+  | erased => simp [unbox] at sourceRead
+  | reuseNone => simp [unbox] at sourceRead
+  | reuseSome mapped => simp [unbox] at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      have rightReachable : Reachable right.heap
+          (runtimeRoots right rightExtra) rightLocation := by
+        rcases reachable_forward related.roots related.heap
+            leftReachable with
+          ⟨mappedLocation, mappedEq, reachable⟩
+        have locationEq : mappedLocation = rightLocation := by
+          rw [mapping] at mappedEq
+          exact (Option.some.inj mappedEq).symm
+        simpa [locationEq] using reachable
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have heapObjects := cells.2.2.2
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            rw [liveEq]
+            exact rightLiveEq
+          simp [unbox, getLiveCell, leftFound, leftLiveEq,
+            Bind.bind, Except.bind] at sourceRead
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            rw [liveEq]
+            exact rightLiveEq
+          generalize leftObjectEq :
+            leftCell.object = leftHeapObject at heapObjects
+          generalize rightObjectEq :
+            rightCell.object = rightHeapObject at heapObjects
+          cases heapObjects with
+          | ctor tag fields usizes scalars =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | closure fixed =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | @boxed boxedType leftValue rightValue values =>
+              have resultEq : leftResult = leftValue := by
+                have normalized := sourceRead
+                simp [unbox, getLiveCell, leftFound, leftLiveEq,
+                  leftObjectEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure] at normalized
+                exact normalized.symm
+              subst leftResult
+              have targetRead :
+                  unbox right type (.object (.heap rightLocation)) =
+                    .ok rightValue := by
+                simp [unbox, getLiveCell, rightFound, rightLiveEq,
+                  rightObjectEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have leftRooted : ∀ location,
+                  leftValue = .object (.heap location) →
+                    Reachable left.heap
+                      (runtimeRoots left leftExtra) location := by
+                intro location reference
+                exact .child leftReachable leftFound
+                  (by simp [leftObjectEq, HeapObject.ownedValues])
+                  reference
+              have rightRooted : ∀ location,
+                  rightValue = .object (.heap location) →
+                    Reachable right.heap
+                      (runtimeRoots right rightExtra) location := by
+                intro location reference
+                exact .child rightReachable rightFound
+                  (by simp [rightObjectEq, HeapObject.ownedValues])
+                  reference
+              exact ⟨rightValue, targetRead, values,
+                related.prependReachable values leftRooted rightRooted⟩
+          | string value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | natural value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | integer value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | byteArray value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | «opaque» value =>
+              simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
 theorem ShadowRuntimeRel.readMappedCell
