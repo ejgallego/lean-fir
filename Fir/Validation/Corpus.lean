@@ -404,6 +404,27 @@ def aliasedByteArrayChildCopyOnWrite (shared : ByteArray) (usize : USize)
   let updated := original.set! 0 42
   (original, updated)
 
+def aliasedByteArraySelfReplace (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) : ByteArray × ByteArray :=
+  let updated := AliasedByteArrayLayout.setFirst
+    (mkAliasedByteArrayLayout shared usize scalar) shared
+  (updated.first, updated.second)
+
+def aliasedByteArraySharedSelfReplace (shared : ByteArray) (usize : USize)
+    (scalar : UInt32) :
+    (ByteArray × ByteArray) × (ByteArray × ByteArray) :=
+  let original := mkAliasedByteArrayLayout shared usize scalar
+  let updated := AliasedByteArrayLayout.setFirst original shared
+  ((updated.first, updated.second), (original.first, original.second))
+
+def aliasedByteArraySelfReplaceChildCopyOnWrite (shared : ByteArray)
+    (usize : USize) (scalar : UInt32) : ByteArray × ByteArray :=
+  let layout := AliasedByteArrayLayout.setFirst
+    (mkAliasedByteArrayLayout shared usize scalar) shared
+  let original := layout.second
+  let updated := layout.first.set! 0 42
+  (original, updated)
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -859,6 +880,13 @@ private def aliasedByteArrayArgs : Array ValidationDatum :=
 
 private def aliasedByteArrayArgSchemas : Array ValidationSchema :=
   #[.bytes, .usize, .bits 32, .bytes]
+
+private def aliasedByteArraySelfArgs : Array ValidationDatum :=
+  #[byteArrayDatum mixedLayoutBytes, .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 32 (UInt64.ofNat Source.maxUInt32.toNat)]
+
+private def aliasedByteArraySelfArgSchemas : Array ValidationSchema :=
+  #[.bytes, .usize, .bits 32]
 
 private def byteArrayPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .bytes]
@@ -1536,6 +1564,58 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     provenance := firProvenance
       "Replace one alias, then retain and mutate the surviving child to test nested copy-on-write" },
+  { id := "aliased-byte-array-self-replace"
+    entry := ``Source.aliasedByteArraySelfReplace
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArraySelfArgs
+    argSchemas := aliasedByteArraySelfArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aliasedByteArraySelfReplace mixedLayoutBytes Source.maxUSize Source.maxUInt32)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "alias", "self-replace",
+        "refcount", "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUpdateForms
+    provenance := firProvenance
+      "Replace slot 0 with its existing aliased child and return both surviving occurrences" },
+  { id := "aliased-byte-array-shared-self-replace"
+    entry := ``Source.aliasedByteArraySharedSelfReplace
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArraySelfArgs
+    argSchemas := aliasedByteArraySelfArgSchemas
+    resultSchema := byteArrayPairPairSchema
+    native := fun _ => byteArrayPairPairDatum
+      (Source.aliasedByteArraySharedSelfReplace
+        mixedLayoutBytes Source.maxUSize Source.maxUInt32)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "alias",
+        "self-replace", "refcount", "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Self-replace slot 0 on a shared aggregate and return updated and original field pairs" },
+  { id := "aliased-byte-array-self-replace-child-copy-on-write"
+    entry := ``Source.aliasedByteArraySelfReplaceChildCopyOnWrite
+    dependencies :=
+      #[``Source.mkAliasedByteArrayLayout, ``Source.AliasedByteArrayLayout.setFirst]
+    args := aliasedByteArraySelfArgs
+    argSchemas := aliasedByteArraySelfArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.aliasedByteArraySelfReplaceChildCopyOnWrite
+        mixedLayoutBytes Source.maxUSize Source.maxUInt32)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "alias", "self-replace",
+        "refcount", "bytearray", "external", "copy-on-write", "heap", "boundary"]
+    requiredLcnfForms := aliasedChildCopyOnWriteForms
+    requiredExecutedLcnfForms := aliasedChildCopyOnWriteForms
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    provenance := firProvenance
+      "Self-replace one alias, then mutate it while returning the untouched sibling occurrence" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]
