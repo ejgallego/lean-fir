@@ -289,9 +289,11 @@ requires and canonicalizes `requiredLcnfForms`, `requiredExecutedLcnfForms`,
 `requiredExecutedLcnfFormCounts`, `requiredExternals`, and
 `requiredExecutedExternals`, plus `requiredExecutedExternalCounts`. Count
 requirements are positive, unique by form or external name, and may only
-strengthen an already-required executed form or external. Effect projections
-retain the independent invariant that every projected external is both present
-and executed. Thus a
+strengthen an already-required executed form or external. Each requirement has
+an optional inclusive maximum no smaller than its minimum; equal bounds express
+an exact count, while `null` remains minimum-only. Effect projections retain
+the independent invariant that every projected external is both present and
+executed. Thus a
 `native`–`v8` or `v8`–`talos` run does not acquire LCNF obligations merely
 because the current native corpus happens to emit them.
 
@@ -894,11 +896,12 @@ report for the selected cases.  It keeps two kinds of evidence separate:
 Set membership cannot distinguish one write from a sequence of writes. The
 runner therefore also emits `executed-lcnf-form-counts` as a JSON array of
 positive `{form, count}` records. The manifest's optional
-`requiredExecutedLcnfFormCounts` records `{form, minimum}` obligations. The
-harness requires count telemetry for every LCNF result, validates it
-independently, checks that its keys exactly match `executed-lcnf-forms`, and
-reports any per-case shortfall. Corpus-wide summaries retain both summed
-observations and summed required minima.
+`requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
+obligations. The harness requires count telemetry for every LCNF result,
+validates it independently, checks that its keys exactly match
+`executed-lcnf-forms`, and reports counts below or above their inclusive
+bounds. Corpus-wide summaries retain summed observations, required minima, and
+bounded maxima.
 
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
@@ -912,9 +915,9 @@ Set membership cannot distinguish repeated calls to one primitive from calls
 to several different primitives. The runner therefore also emits
 `executed-external-counts` as positive `{external, count}` records, with keys
 that must exactly match `executed-externals`.
-`requiredExecutedExternalCounts` supplies per-symbol `{external, minimum}`
-obligations, and the coverage report retains both per-case shortfalls and
-corpus-wide required and observed totals.
+`requiredExecutedExternalCounts` supplies per-symbol
+`{external, minimum, maximum}` obligations, and the coverage report retains
+both per-case bound violations and corpus-wide required and observed totals.
 
 The LCNF backend also emits `missing-externals` and
 `missing-executed-externals`.  The harness computes both missing sets itself,

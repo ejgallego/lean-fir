@@ -712,25 +712,29 @@ def EffectProjection.descriptor (projection : EffectProjection) : EffectProjecti
 structure ExecutedFormCountRequirement where
   form : String
   minimum : Nat
+  maximum : Option Nat := none
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
 /-- Minimum dynamic dispatch count required for one imported external. -/
 structure ExecutedExternalCountRequirement where
   external : Lean.Name
   minimum : Nat
+  maximum : Option Nat := none
   deriving Inhabited, BEq, Repr
 
 /-- Closure-free external-count obligation retained in the corpus manifest. -/
 structure ExecutedExternalCountRequirementDescriptor where
   external : String
   minimum : Nat
+  maximum : Option Nat
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
 def ExecutedExternalCountRequirement.descriptor
     (requirement : ExecutedExternalCountRequirement) :
     ExecutedExternalCountRequirementDescriptor := {
   external := toString requirement.external
-  minimum := requirement.minimum }
+  minimum := requirement.minimum
+  maximum := requirement.maximum }
 
 /-- A source case and the backend-neutral metadata needed to run it. -/
 structure Case where

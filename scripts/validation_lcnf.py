@@ -60,90 +60,73 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                 )
             return sorted(values)
 
+        def checked_count_requirements(
+            field_name: str, name_key: str, required_names: list[str]
+        ) -> list[dict]:
+            requirements = descriptor[field_name]
+            if not isinstance(requirements, list):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed {field_name}"
+                )
+            prepared_requirements: list[dict] = []
+            counted_names: set[str] = set()
+            for requirement in requirements:
+                if (
+                    not isinstance(requirement, dict)
+                    or set(requirement) != {name_key, "minimum", "maximum"}
+                    or not isinstance(requirement[name_key], str)
+                    or not requirement[name_key]
+                    or not isinstance(requirement["minimum"], int)
+                    or isinstance(requirement["minimum"], bool)
+                    or requirement["minimum"] <= 0
+                    or (
+                        requirement["maximum"] is not None
+                        and (
+                            not isinstance(requirement["maximum"], int)
+                            or isinstance(requirement["maximum"], bool)
+                            or requirement["maximum"] < requirement["minimum"]
+                        )
+                    )
+                ):
+                    raise ValidationError(
+                        f"native corpus manifest/{case_id}: malformed {field_name}"
+                    )
+                name = requirement[name_key]
+                if name in counted_names:
+                    raise ValidationError(
+                        f"native corpus manifest/{case_id}: duplicate {field_name}"
+                    )
+                counted_names.add(name)
+                prepared_requirements.append(
+                    {
+                        name_key: name,
+                        "minimum": requirement["minimum"],
+                        "maximum": requirement["maximum"],
+                    }
+                )
+            if not counted_names <= set(required_names):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: counted executed "
+                    f"{'LCNF forms' if name_key == 'form' else 'externals'} "
+                    "must also be required"
+                )
+            return sorted(
+                prepared_requirements,
+                key=lambda requirement: requirement[name_key],
+            )
+
         required_forms = checked_names("requiredLcnfForms")
         required_executed_forms = checked_names("requiredExecutedLcnfForms")
-
-        count_requirements = descriptor["requiredExecutedLcnfFormCounts"]
-        if not isinstance(count_requirements, list):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed "
-                "requiredExecutedLcnfFormCounts"
-            )
-        prepared_count_requirements: list[dict] = []
-        count_forms: set[str] = set()
-        for requirement in count_requirements:
-            if (
-                not isinstance(requirement, dict)
-                or set(requirement) != {"form", "minimum"}
-                or not isinstance(requirement["form"], str)
-                or not requirement["form"]
-                or not isinstance(requirement["minimum"], int)
-                or isinstance(requirement["minimum"], bool)
-                or requirement["minimum"] <= 0
-            ):
-                raise ValidationError(
-                    f"native corpus manifest/{case_id}: malformed "
-                    "requiredExecutedLcnfFormCounts"
-                )
-            form = requirement["form"]
-            if form in count_forms:
-                raise ValidationError(
-                    f"native corpus manifest/{case_id}: duplicate "
-                    "requiredExecutedLcnfFormCounts"
-                )
-            count_forms.add(form)
-            prepared_count_requirements.append(
-                {"form": form, "minimum": requirement["minimum"]}
-            )
-        if not count_forms <= set(required_executed_forms):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: counted executed LCNF forms "
-                "must also be required"
-            )
-        prepared_count_requirements.sort(key=lambda requirement: requirement["form"])
+        prepared_count_requirements = checked_count_requirements(
+            "requiredExecutedLcnfFormCounts", "form", required_executed_forms
+        )
 
         required_externals = checked_names("requiredExternals")
         required_executed_externals = checked_names("requiredExecutedExternals")
-
-        external_count_requirements = descriptor["requiredExecutedExternalCounts"]
-        if not isinstance(external_count_requirements, list):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: malformed "
-                "requiredExecutedExternalCounts"
-            )
-        prepared_external_count_requirements: list[dict] = []
-        counted_externals: set[str] = set()
-        for requirement in external_count_requirements:
-            if (
-                not isinstance(requirement, dict)
-                or set(requirement) != {"external", "minimum"}
-                or not isinstance(requirement["external"], str)
-                or not requirement["external"]
-                or not isinstance(requirement["minimum"], int)
-                or isinstance(requirement["minimum"], bool)
-                or requirement["minimum"] <= 0
-            ):
-                raise ValidationError(
-                    f"native corpus manifest/{case_id}: malformed "
-                    "requiredExecutedExternalCounts"
-                )
-            external = requirement["external"]
-            if external in counted_externals:
-                raise ValidationError(
-                    f"native corpus manifest/{case_id}: duplicate "
-                    "requiredExecutedExternalCounts"
-                )
-            counted_externals.add(external)
-            prepared_external_count_requirements.append(
-                {"external": external, "minimum": requirement["minimum"]}
-            )
-        if not counted_externals <= set(required_executed_externals):
-            raise ValidationError(
-                f"native corpus manifest/{case_id}: counted executed externals "
-                "must also be required"
-            )
-        prepared_external_count_requirements.sort(
-            key=lambda requirement: requirement["external"]
+        prepared_external_count_requirements = checked_count_requirements(
+            "requiredExecutedExternalCounts",
+            "external",
+            required_executed_externals,
         )
 
         effect_externals = {
@@ -250,6 +233,36 @@ def named_count_items(
     ]
 
 
+def unsatisfied_count_requirements(
+    requirements: list[dict], observed: dict[str, int], name_key: str
+) -> list[dict]:
+    """Return count requirements violated below or above their inclusive bounds."""
+    unsatisfied: list[dict] = []
+    for requirement in requirements:
+        count = observed.get(requirement[name_key], 0)
+        maximum = requirement["maximum"]
+        if count < requirement["minimum"] or (
+            maximum is not None and count > maximum
+        ):
+            unsatisfied.append({**requirement, "observed": count})
+    return unsatisfied
+
+
+def render_count_violations(items: list[dict], name_key: str) -> str:
+    """Render deterministic below-minimum and above-maximum count failures."""
+    rendered: list[str] = []
+    for item in items:
+        if item["observed"] < item["minimum"]:
+            rendered.append(
+                f"{item[name_key]}={item['observed']}<{item['minimum']}"
+            )
+        else:
+            rendered.append(
+                f"{item[name_key]}={item['observed']}>{item['maximum']}"
+            )
+    return ",".join(rendered)
+
+
 def positive_int_diagnostic(record: dict | None, key: str) -> tuple[bool, int | None]:
     """Return a positive decimal diagnostic, preserving absence vs invalidity."""
     if record is None:
@@ -282,8 +295,10 @@ def coverage_report(
     executed_count_diagnostic_count = 0
     executed_count_valid_diagnostic_count = 0
     executed_count_requirement_count = 0
+    executed_count_upper_bound_case_count = 0
     executed_count_missing_count = 0
     executed_count_required_totals: dict[str, int] = {}
+    executed_count_bounded_maximum_totals: dict[str, int] = {}
     executed_count_observed_totals: dict[str, int] = {}
     static_external_required: set[str] = set()
     static_external_observed: set[str] = set()
@@ -300,8 +315,10 @@ def coverage_report(
     executed_external_count_diagnostic_count = 0
     executed_external_count_valid_diagnostic_count = 0
     executed_external_count_requirement_count = 0
+    executed_external_count_upper_bound_case_count = 0
     executed_external_count_missing_count = 0
     executed_external_count_required_totals: dict[str, int] = {}
+    executed_external_count_bounded_maximum_totals: dict[str, int] = {}
     executed_external_count_observed_totals: dict[str, int] = {}
     interpreter_steps: list[int] = []
 
@@ -342,24 +359,25 @@ def coverage_report(
         ]
         executed_obligations_active = bool(required_executed)
         executed_count_obligations_active = bool(required_executed_counts)
+        executed_count_upper_bounds_active = any(
+            requirement["maximum"] is not None
+            for requirement in required_executed_counts
+        )
         static_external_obligations_active = bool(required_static_externals)
         executed_external_obligations_active = bool(required_executed_externals)
         executed_external_count_obligations_active = bool(
             required_executed_external_counts
         )
+        executed_external_count_upper_bounds_active = any(
+            requirement["maximum"] is not None
+            for requirement in required_executed_external_counts
+        )
         missing_static = sorted(set(required_static) - set(observed_static))
         missing_executed = sorted(set(required_executed) - set(observed_executed))
         observed_count_map = observed_executed_counts or {}
-        unsatisfied_executed_counts = [
-            {
-                "form": requirement["form"],
-                "minimum": requirement["minimum"],
-                "observed": observed_count_map.get(requirement["form"], 0),
-            }
-            for requirement in required_executed_counts
-            if observed_count_map.get(requirement["form"], 0)
-            < requirement["minimum"]
-        ]
+        unsatisfied_executed_counts = unsatisfied_count_requirements(
+            required_executed_counts, observed_count_map, "form"
+        )
         missing_static_externals = sorted(
             set(required_static_externals) - set(observed_static_externals)
         )
@@ -367,18 +385,11 @@ def coverage_report(
             set(required_executed_externals) - set(observed_executed_externals)
         )
         observed_external_count_map = observed_executed_external_counts or {}
-        unsatisfied_executed_external_counts = [
-            {
-                "external": requirement["external"],
-                "minimum": requirement["minimum"],
-                "observed": observed_external_count_map.get(
-                    requirement["external"], 0
-                ),
-            }
-            for requirement in required_executed_external_counts
-            if observed_external_count_map.get(requirement["external"], 0)
-            < requirement["minimum"]
-        ]
+        unsatisfied_executed_external_counts = unsatisfied_count_requirements(
+            required_executed_external_counts,
+            observed_external_count_map,
+            "external",
+        )
 
         static_required.update(required_static)
         static_observed.update(observed_static)
@@ -393,6 +404,9 @@ def coverage_report(
             executed_counts_present and observed_executed_counts is not None
         )
         executed_count_requirement_count += int(executed_count_obligations_active)
+        executed_count_upper_bound_case_count += int(
+            executed_count_upper_bounds_active
+        )
         executed_count_missing_count += len(unsatisfied_executed_counts)
         for requirement in required_executed_counts:
             form = requirement["form"]
@@ -400,6 +414,11 @@ def coverage_report(
                 executed_count_required_totals.get(form, 0)
                 + requirement["minimum"]
             )
+            if requirement["maximum"] is not None:
+                executed_count_bounded_maximum_totals[form] = (
+                    executed_count_bounded_maximum_totals.get(form, 0)
+                    + requirement["maximum"]
+                )
         if observed_executed_counts is not None:
             for form, count in observed_executed_counts.items():
                 executed_count_observed_totals[form] = (
@@ -433,6 +452,9 @@ def coverage_report(
         executed_external_count_requirement_count += int(
             executed_external_count_obligations_active
         )
+        executed_external_count_upper_bound_case_count += int(
+            executed_external_count_upper_bounds_active
+        )
         executed_external_count_missing_count += len(
             unsatisfied_executed_external_counts
         )
@@ -442,6 +464,11 @@ def coverage_report(
                 executed_external_count_required_totals.get(external, 0)
                 + requirement["minimum"]
             )
+            if requirement["maximum"] is not None:
+                executed_external_count_bounded_maximum_totals[external] = (
+                    executed_external_count_bounded_maximum_totals.get(external, 0)
+                    + requirement["maximum"]
+                )
         if observed_executed_external_counts is not None:
             for external, count in observed_executed_external_counts.items():
                 executed_external_count_observed_totals[external] = (
@@ -465,11 +492,8 @@ def coverage_report(
             )
         if unsatisfied_executed_counts:
             audit_finding(
-                "executed LCNF form counts below required minima: "
-                + ",".join(
-                    f"{item['form']}={item['observed']}<{item['minimum']}"
-                    for item in unsatisfied_executed_counts
-                )
+                "executed LCNF form counts outside required bounds: "
+                + render_count_violations(unsatisfied_executed_counts, "form")
             )
         if missing_static_externals:
             audit_finding(
@@ -483,10 +507,9 @@ def coverage_report(
             )
         if unsatisfied_executed_external_counts:
             audit_finding(
-                "executed external counts below required minima: "
-                + ",".join(
-                    f"{item['external']}={item['observed']}<{item['minimum']}"
-                    for item in unsatisfied_executed_external_counts
+                "executed external counts outside required bounds: "
+                + render_count_violations(
+                    unsatisfied_executed_external_counts, "external"
                 )
             )
         if record is not None and not executed_present:
@@ -572,6 +595,7 @@ def coverage_report(
                             and observed_executed_counts is not None
                         ),
                         "obligationsActive": executed_count_obligations_active,
+                        "upperBoundsActive": executed_count_upper_bounds_active,
                         "required": required_executed_counts,
                         "observed": named_count_items(
                             observed_count_map, "form", "count"
@@ -607,6 +631,9 @@ def coverage_report(
                             "obligationsActive": (
                                 executed_external_count_obligations_active
                             ),
+                            "upperBoundsActive": (
+                                executed_external_count_upper_bounds_active
+                            ),
                             "required": required_executed_external_counts,
                             "observed": named_count_items(
                                 observed_external_count_map, "external", "count"
@@ -636,12 +663,18 @@ def coverage_report(
                 "missingObligationCount": executed_missing_count,
                 "formCounts": {
                     "casesWithRequirements": executed_count_requirement_count,
+                    "casesWithUpperBounds": executed_count_upper_bound_case_count,
                     "casesWithDiagnostics": executed_count_diagnostic_count,
                     "casesWithValidDiagnostics": (
                         executed_count_valid_diagnostic_count
                     ),
                     "requiredMinimums": named_count_items(
                         executed_count_required_totals, "form", "minimum"
+                    ),
+                    "boundedMaximums": named_count_items(
+                        executed_count_bounded_maximum_totals,
+                        "form",
+                        "maximum",
                     ),
                     "observed": named_count_items(
                         executed_count_observed_totals, "form", "count"
@@ -676,6 +709,9 @@ def coverage_report(
                         "casesWithRequirements": (
                             executed_external_count_requirement_count
                         ),
+                        "casesWithUpperBounds": (
+                            executed_external_count_upper_bound_case_count
+                        ),
                         "casesWithDiagnostics": (
                             executed_external_count_diagnostic_count
                         ),
@@ -686,6 +722,11 @@ def coverage_report(
                             executed_external_count_required_totals,
                             "external",
                             "minimum",
+                        ),
+                        "boundedMaximums": named_count_items(
+                            executed_external_count_bounded_maximum_totals,
+                            "external",
+                            "maximum",
                         ),
                         "observed": named_count_items(
                             executed_external_count_observed_totals,
