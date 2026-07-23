@@ -84,19 +84,20 @@ retains its one exact expected concrete-layout fault. Two previously omitted
 but already executable fixtures, `reference-counting` and `delete-fault`, are
 part of that oracle-matched corpus.
 
-The same report preflights all 13 compiler-produced source artifacts. Twelve
-are concrete-resolvable. The concrete registry executes all five integer, five
+The same report preflights all 13 compiler-produced source artifacts, and all
+13 are concrete-resolvable. The concrete registry executes all five integer, five
 natural, eight UTF-8/string, and two unreachable-fallback declarations retained
 by `prettyM`; focused tests cover immediate/heap integer boundaries, large heap
 naturals, Unicode byte/code-point navigation, fresh results, stale inputs, and
-exact fallback traps. Only the coverage invocation remains blocked, because
-its manifest requires packed initial-constructor loading. Every module-local import site is
+exact fallback traps. Packed initial-constructor loading validates the
+compiler-shaped fixed-slot coordinate and scalar range, derives the minimal
+packed extent, and writes all four integer widths little-endian. The
+all-constructor `prettyM` manifest now round-trips its 23-cell initial heap and
+executes concretely in Node and the browser. Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
 artifact/readiness audit: it deliberately does not claim W6 proof completion,
 concrete execution of every merely preflight-ready source, or concrete
-execution of the shared 64-case validation product. The invocation-free
-`prettyM` module is executed concretely by the low-level client described
-below.
+execution of the shared validation product bundle.
 
 A standalone report can be generated after the source and artifact manifests
 exist with:
@@ -212,6 +213,14 @@ adapter:
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
+The invocation-bearing coverage artifact exercises the same export after its
+ordinary `Format` graph has crossed the initial-runtime manifest boundary:
+
+```text
+node call-concrete-pretty-format-invocation.mjs \
+  _build/source-pretty-format-coverage.wasm
+```
+
 `module-client.mjs` is the transport-neutral loading boundary. Its core entry
 accepts Wasm bytes, the parsed invocation-free descriptor, and a caller-owned
 semantic ABI host; `fetchModuleArtifact` obtains the first two inputs through
@@ -250,7 +259,7 @@ adapter and browser Worker share `scripts/wasm_validation_case.mjs` for ABI
 argument checking, module import/export checking, result normalization, and
 effect projection. The Worker fetches `matrix.json`, `corpus.json`, and each
 case-bound manifest/module, verifies every product digest with Web Crypto,
-executes all 64 selected cases, and compares each observation with the
+executes every selected case, and compares each observation with the
 canonical Node/V8 result from that same run. Generate the products and run the
 standalone browser check with:
 
@@ -264,8 +273,9 @@ the complete shared-product Worker. It also materializes the live-oracle
 artifact corpus under `_build`, then runs the same 43 concrete artifacts, one
 default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
-`List Nat` and Unicode string sources, plus the invocation-free `prettyM`
-module through the same concrete raw-layout checker used by Node.
+`List Nat`, Unicode string, and all-constructor `prettyM` sources, plus the
+invocation-free `prettyM` module through the same concrete raw-layout checkers
+used by Node.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

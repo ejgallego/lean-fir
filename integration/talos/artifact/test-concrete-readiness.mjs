@@ -15,9 +15,9 @@ assert.equal(report.summary.artifactRejectedFixtures, 0);
 assert.equal(report.summary.readyArtifactFixtures, 44);
 assert.equal(report.summary.artifactSwitchReady, true);
 assert.equal(report.summary.sourceProbes, 13);
-assert.equal(report.summary.readySourceProbes, 12);
-assert.equal(report.summary.blockedSourceProbes, 1);
-assert.equal(report.summary.sourceProbeSwitchReady, false);
+assert.equal(report.summary.readySourceProbes, 13);
+assert.equal(report.summary.blockedSourceProbes, 0);
+assert.equal(report.summary.sourceProbeSwitchReady, true);
 assert.equal(report.summary.proofCoverageComplete, false);
 for (const id of ["delete-fault", "reference-counting"]) {
   const fixture = report.artifactFixtures.find((item) => item.id === id);
@@ -26,13 +26,8 @@ for (const id of ["delete-fault", "reference-counting"]) {
 }
 
 const blocked = report.sourceProbes.filter((probe) => !probe.ready);
-assert.deepStrictEqual(blocked.map((probe) => probe.id), [
-  "source-pretty-format-coverage",
-]);
-assert.deepStrictEqual(
-  blocked[0].blockers.map((item) => item.kind),
-  ["initial-runtime"],
-);
+assert.deepStrictEqual(blocked, []);
+assert.ok(report.sourceProbes.every((probe) => probe.blockers.length === 0));
 
 assert.ok(report.imports.length > 0);
 assert.equal(report.summary.importIdentities, report.imports.length);

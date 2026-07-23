@@ -24,6 +24,8 @@ test -s "$here/_build/source-string-input.wasm"
 test -s "$here/_build/source-string-input.wasm.json"
 test -s "$here/_build/source-pretty-format-module.wasm"
 test -s "$here/_build/source-pretty-format-module.wasm.json"
+test -s "$here/_build/source-pretty-format-coverage.wasm"
+test -s "$here/_build/source-pretty-format-coverage.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &

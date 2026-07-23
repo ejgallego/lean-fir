@@ -160,6 +160,48 @@ export class ConcreteHost {
     throw new Error(`unsupported concrete initial constructor field: ${value.kind}`);
   }
 
+  initialScalarField(field, fixedSlots) {
+    assert.ok(field && typeof field === "object",
+      "initial constructor scalar field must be an object");
+    assert.ok(Number.isSafeInteger(field.width) && field.width >= 0,
+      "initial constructor scalar width must be a nonnegative safe integer");
+    assert.equal(field.width, fixedSlots,
+      "initial constructor scalar width must equal its fixed-slot prefix");
+    assert.ok(Number.isSafeInteger(field.offset) && field.offset >= 0,
+      "initial constructor scalar offset must be a nonnegative safe integer");
+    assert.ok(field.value && typeof field.value === "object",
+      "initial constructor scalar value must be an object");
+    const kind = field.value.kind;
+    const bytes = this.scalarByteWidth(kind);
+    const value = BigInt(field.value.value);
+    assert.ok(value >= 0n && value < (1n << BigInt(8 * bytes)),
+      `initial constructor ${kind} value is out of range`);
+    const end = field.offset + bytes;
+    assert.ok(Number.isSafeInteger(end) && end <= 0xffffffff,
+      "initial constructor packed scalar extent must fit UInt32");
+    return { width: field.width, offset: field.offset, kind, value, bytes, end };
+  }
+
+  initialScalarLayout(fields, fixedSlots) {
+    const scalarFields = fields.map((field) => this.initialScalarField(field, fixedSlots));
+    const bytes = new Map();
+    let scalarBytes = 0;
+    for (const field of scalarFields) {
+      scalarBytes = Math.max(scalarBytes, field.end);
+      for (let index = 0; index < field.bytes; ++index) {
+        const offset = field.offset + index;
+        const byte = Number((field.value >> BigInt(8 * index)) & 0xffn);
+        if (bytes.has(offset)) {
+          assert.equal(bytes.get(offset), byte,
+            "overlapping initial constructor scalar fields disagree");
+        } else {
+          bytes.set(offset, byte);
+        }
+      }
+    }
+    return { scalarFields, scalarBytes };
+  }
+
   initialCellLayout(cell) {
     const object = cell.object;
     assert.ok(object && typeof object === "object", "initial heap object must be an object");
@@ -171,23 +213,30 @@ export class ConcreteHost {
           "initial constructor usizeFields must be an array");
         assert.ok(Array.isArray(object.scalarFields),
           "initial constructor scalarFields must be an array");
-        assert.equal(object.scalarFields.length, 0,
-          "packed initial constructors remain outside the concrete loader fragment");
         const tag = BigInt(object.tag);
         assert.ok(tag >= 0n && tag <= 0xffffffffn,
           "initial constructor tag must fit UInt32");
         const fieldKinds = object.objectFields.map((value) =>
           this.initialObjectFieldKind(value));
+        const fixedSlots = object.objectFields.length + object.usizeFields.length;
+        const { scalarFields, scalarBytes } =
+          this.initialScalarLayout(object.scalarFields, fixedSlots);
         return {
           kind: KIND.constructor,
-          payloadBytes: SLOT_BYTES * (object.objectFields.length + object.usizeFields.length),
+          payloadBytes: SLOT_BYTES * fixedSlots + scalarBytes,
           auxiliaries: {
             aux0: Number(tag),
             aux1: object.objectFields.length,
             aux2: object.usizeFields.length,
-            aux3: 0,
+            aux3: scalarBytes,
           },
-          descriptor: { kind: "constructor", fieldKinds },
+          descriptor: {
+            kind: "constructor",
+            fieldKinds,
+            scalarFields: scalarFields.map(({ width, offset, kind }) =>
+              ({ width, offset, kind })),
+          },
+          scalarFields,
         };
       }
       case "natural": {
@@ -257,6 +306,40 @@ export class ConcreteHost {
     throw new Error(`unsupported initial object reference: ${value.reference.kind}`);
   }
 
+  writeInitialScalarField(address, fixedSlots, field) {
+    const fieldAddress =
+      address + HEADER_BYTES + SLOT_BYTES * fixedSlots + field.offset;
+    switch (field.kind) {
+      case "uint8":
+        this.view.setUint8(fieldAddress, Number(field.value));
+        return;
+      case "uint16":
+        this.view.setUint16(fieldAddress, Number(field.value), true);
+        return;
+      case "uint32":
+        this.view.setUint32(fieldAddress, Number(field.value), true);
+        return;
+      case "uint64":
+        this.view.setBigUint64(fieldAddress, field.value, true);
+        return;
+      default:
+        throw new Error(`unsupported concrete initial scalar kind: ${field.kind}`);
+    }
+  }
+
+  readInitialScalarField(address, fixedSlots, field) {
+    const fieldAddress =
+      address + HEADER_BYTES + SLOT_BYTES * fixedSlots + field.offset;
+    switch (field.kind) {
+      case "uint8": return BigInt(this.view.getUint8(fieldAddress));
+      case "uint16": return BigInt(this.view.getUint16(fieldAddress, true));
+      case "uint32": return BigInt(this.view.getUint32(fieldAddress, true));
+      case "uint64": return this.view.getBigUint64(fieldAddress, true);
+      default:
+        throw new Error(`unsupported concrete initial scalar kind: ${field.kind}`);
+    }
+  }
+
   loadInitialRuntime(runtime) {
     assert.ok(runtime && typeof runtime === "object", "initialRuntime must be an object");
     assert.ok(Number.isSafeInteger(runtime.nextLocation) && runtime.nextLocation >= 0,
@@ -299,6 +382,10 @@ export class ConcreteHost {
         cell.object.usizeFields.forEach((value, index) =>
           this.writeU64(address + HEADER_BYTES +
             SLOT_BYTES * (cell.object.objectFields.length + index), BigInt(value)));
+        const fixedSlots =
+          cell.object.objectFields.length + cell.object.usizeFields.length;
+        layout.scalarFields.forEach((field) =>
+          this.writeInitialScalarField(address, fixedSlots, field));
       } else if (cell.object.kind === "natural" || cell.object.kind === "integer") {
         layout.limbs.forEach((limb, index) =>
           this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
@@ -1365,12 +1452,21 @@ export class ConcreteHost {
         this.decode(kind, signed32(this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index))));
       const usizeFields = Array.from({ length: header.aux2 }, (_, index) =>
         this.readU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + index)).toString());
+      const scalarFields = (descriptor.scalarFields ?? []).map((field) => ({
+        width: field.width,
+        offset: field.offset,
+        value: {
+          kind: field.kind,
+          value: this.readInitialScalarField(
+            address, header.aux1 + header.aux2, field).toString(),
+        },
+      }));
       return {
         kind: "ctor",
         tag: header.aux0.toString(),
         objectFields: objectFields.map((value) => this.valueJson(value)),
         usizeFields,
-        scalarFields: [],
+        scalarFields,
       };
     }
     if (header.kind === KIND.closure) {

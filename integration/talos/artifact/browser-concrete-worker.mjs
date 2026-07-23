@@ -12,6 +12,9 @@ import {
   REJECTED_FRAGMENT_FIXTURES,
 } from "./concrete-corpus.mjs";
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
+import {
+  checkConcretePrettyFormatInvocation,
+} from "./check-concrete-pretty-format-invocation.mjs";
 import { checkConcretePrettyFormatModule } from "./check-concrete-pretty-format-module.mjs";
 import { instantiateModuleArtifact } from "./module-client.mjs";
 
@@ -187,6 +190,15 @@ async function runConcretePrettyFormatModule() {
   return checkConcretePrettyFormatModule(artifact);
 }
 
+async function runConcretePrettyFormatInvocation() {
+  const sourceBase = new URL("./_build/", import.meta.url);
+  const name = "source-pretty-format-coverage.wasm";
+  const manifest = await fetchJson(`${name}.json`,
+    "prettyM coverage invocation manifest", sourceBase);
+  const bytes = await fetchBytes(name, "prettyM coverage invocation", sourceBase);
+  return checkConcretePrettyFormatInvocation({ bytes, manifest });
+}
+
 async function runConcreteBrowserCorpus() {
   for (const fixture of CONCRETE_FIXTURES) {
     await runConcreteArtifact(fixture);
@@ -202,6 +214,7 @@ async function runConcreteBrowserCorpus() {
   }
   await runInitialRuntimeSource();
   await runInitialRuntimeStringSource();
+  await runConcretePrettyFormatInvocation();
   await runConcretePrettyFormatModule();
   const fragmentCount = REJECTED_FRAGMENT_FIXTURES.length;
   return `PASS browser Worker concrete Wasm corpus ` +
@@ -209,7 +222,7 @@ async function runConcreteBrowserCorpus() {
     `${fragmentCount} fragment gate${fragmentCount === 1 ? "" : "s"}, ` +
     `${DEFAULT_EXTERNAL_FAULTS.length} default external fault, ` +
     `${EXPECTED_CONCRETE_FAULTS.length} expected failure, ` +
-    `2 initial-runtime sources, 1 raw-layout prettyM module)`;
+    `3 initial-runtime sources, 1 raw-layout prettyM module)`;
 }
 
 try {
