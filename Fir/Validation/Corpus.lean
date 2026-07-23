@@ -368,6 +368,11 @@ def mkAliasedByteArrayLayout (shared : ByteArray) (usize : USize)
   { first := shared, second := shared, usize, scalar }
 
 @[noinline]
+def mkByteArrayPairLayout (first second : ByteArray) (usize : USize)
+    (scalar : UInt32) : AliasedByteArrayLayout :=
+  { first, second, usize, scalar }
+
+@[noinline]
 def AliasedByteArrayLayout.setFirst (value : AliasedByteArrayLayout)
     (replacement : ByteArray) : AliasedByteArrayLayout :=
   { value with first := replacement }
@@ -376,6 +381,11 @@ def AliasedByteArrayLayout.setFirst (value : AliasedByteArrayLayout)
 def AliasedByteArrayLayout.setSecond (value : AliasedByteArrayLayout)
     (replacement : ByteArray) : AliasedByteArrayLayout :=
   { value with second := replacement }
+
+@[noinline]
+def AliasedByteArrayLayout.swap (value : AliasedByteArrayLayout) :
+    AliasedByteArrayLayout :=
+  { value with first := value.second, second := value.first }
 
 def aliasedByteArrayUpdateFirst (shared : ByteArray) (usize : USize)
     (scalar : UInt32) (replacement : ByteArray) : ByteArray × ByteArray :=
@@ -424,6 +434,19 @@ def aliasedByteArraySelfReplaceChildCopyOnWrite (shared : ByteArray)
   let original := layout.second
   let updated := layout.first.set! 0 42
   (original, updated)
+
+def byteArrayObjectSwap (first second : ByteArray) (usize : USize)
+    (scalar : UInt32) : ByteArray × ByteArray :=
+  let swapped := AliasedByteArrayLayout.swap
+    (mkByteArrayPairLayout first second usize scalar)
+  (swapped.first, swapped.second)
+
+def byteArrayObjectSwapShared (first second : ByteArray) (usize : USize)
+    (scalar : UInt32) :
+    (ByteArray × ByteArray) × (ByteArray × ByteArray) :=
+  let original := mkByteArrayPairLayout first second usize scalar
+  let swapped := AliasedByteArrayLayout.swap original
+  ((swapped.first, swapped.second), (original.first, original.second))
 
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
@@ -897,6 +920,14 @@ private def aliasedByteArraySelfArgs : Array ValidationDatum :=
 
 private def aliasedByteArraySelfArgSchemas : Array ValidationSchema :=
   #[.bytes, .usize, .bits 32]
+
+private def byteArrayObjectSwapArgs : Array ValidationDatum :=
+  #[byteArrayDatum mixedLayoutBytes, byteArrayDatum multiObjectReplacementBytes,
+    .usize (UInt64.ofNat Source.maxUSize.toNat),
+    .bits 32 (UInt64.ofNat Source.maxUInt32.toNat)]
+
+private def byteArrayObjectSwapArgSchemas : Array ValidationSchema :=
+  #[.bytes, .bytes, .usize, .bits 32]
 
 private def byteArrayPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .bytes]
@@ -1626,6 +1657,41 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     provenance := firProvenance
       "Self-replace one alias, then mutate it while returning the untouched sibling occurrence" },
+  { id := "byte-array-object-swap-unique"
+    entry := ``Source.byteArrayObjectSwap
+    dependencies :=
+      #[``Source.mkByteArrayPairLayout, ``Source.AliasedByteArrayLayout.swap]
+    args := byteArrayObjectSwapArgs
+    argSchemas := byteArrayObjectSwapArgSchemas
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.byteArrayObjectSwap mixedLayoutBytes multiObjectReplacementBytes
+        Source.maxUSize Source.maxUInt32)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "swap", "refcount",
+        "bytearray", "heap", "multiplicity", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUpdateForms
+    requiredExecutedLcnfFormCounts := #[{ form := "oset", minimum := 2 }]
+    provenance := firProvenance
+      "Swap two distinct heap children on the unique path and require both object writes" },
+  { id := "byte-array-object-swap-shared"
+    entry := ``Source.byteArrayObjectSwapShared
+    dependencies :=
+      #[``Source.mkByteArrayPairLayout, ``Source.AliasedByteArrayLayout.swap]
+    args := byteArrayObjectSwapArgs
+    argSchemas := byteArrayObjectSwapArgSchemas
+    resultSchema := byteArrayPairPairSchema
+    native := fun _ => byteArrayPairPairDatum
+      (Source.byteArrayObjectSwapShared mixedLayoutBytes multiObjectReplacementBytes
+        Source.maxUSize Source.maxUInt32)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "swap",
+        "refcount", "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Swap two distinct heap children on a copied aggregate while retaining the original pair" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]

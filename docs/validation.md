@@ -152,9 +152,9 @@ the exact object for discovery without opening the matrix. Both verification
 commands print a compact rendering such as:
 
 ```text
-coverage results: 279/279 successful, 279/279 present, findings 0 (0 unassigned)
-coverage pair native -> v8: compared 93/93, equal 93, findings 0
-coverage consumer v8 <- lean-wasm-semantic: receipts 93/93, product references 186, unique products 186, opened 186/186 unique products with strace (<N> trace paths)
+coverage results: 285/285 successful, 285/285 present, findings 0 (0 unassigned)
+coverage pair native -> v8: compared 95/95, equal 95, findings 0
+coverage consumer v8 <- lean-wasm-semantic: receipts 95/95, product references 190, unique products 190, opened 190/190 unique products with strace (<N> trace paths)
 ```
 
 This is evidence-derived coverage, not a trusted counter channel. Offline
@@ -943,7 +943,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 93 cases.  Beyond literals,
+The compiler-generated corpus currently has 95 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -996,6 +996,13 @@ child mutation that must preserve the sibling alias. The unique traces execute
 the allocation/copy branch. This makes increment/decrement ordering around
 pointer-identical field assignment observable through the later child
 copy-on-write result.
+
+Two distinct-child swap fixtures exercise a simultaneous exchange of object
+slots 0 and 1. The unique path returns the reversed `ByteArray` pair and carries
+the first multiplicity obligation in the corpus: `oset` must execute at least
+twice. Its retained telemetry observes exactly two writes. The shared path
+returns both the swapped copy and original pair and executes no `oset`, instead
+taking the allocation/copy branch.
 
 Stress fixtures additionally execute compiler-lowered ownership/reuse during
 recursive reassociation, change the
@@ -1122,7 +1129,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 93 corpus cases, including a natural
+The default native-to-V8 matrix covers all 95 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
 five mixed-layout projections. `make validate-v8` delegates whole-corpus
