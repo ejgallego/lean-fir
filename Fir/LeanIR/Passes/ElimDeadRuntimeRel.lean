@@ -1887,6 +1887,29 @@ theorem ShadowRuntimeRel.restrictExtra
     rightHeapFresh := related.rightHeapFresh
   }
 
+/-- An already-published related value may be repeated as a direct control
+root without changing the reachable heap relation. -/
+theorem ShadowRuntimeRel.prependRelatedRoot
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (rightMember : rightValue ∈ rightExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ShadowRuntimeRel rho left right
+      (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+  apply related.restrictExtra (.cons values related.extra)
+  · intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | old
+    · subst value
+      exact leftMember
+    · exact old
+  · intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | old
+    · subst value
+      exact rightMember
+    · exact old
+
 /-- Replace the explicit roots using semantic reachability inclusions.  This
 is strictly more general than `restrictExtra` and is needed when captured
 closure fields become call arguments: they are reachable through the closure
