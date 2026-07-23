@@ -538,6 +538,127 @@ theorem reachable_heapFrame_of_unreachable
         exact cellFound
       exact .child ih afterFound member reference
 
+/-- Replacing one cell without changing its owned values preserves the
+reachability graph.  This is the live-cell counterpart of the unreachable
+frame lemmas above: mutation may change metadata or non-owning fields, but it
+cannot add or remove an ownership edge. -/
+theorem reachable_replace_of_ownedValues_eq
+    (beforeFound : findCell? before modified = some beforeCell)
+    (afterFound : findCell? after modified = some afterCell)
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (owned : afterCell.object.ownedValues = beforeCell.object.ownedValues)
+    (reachable : Reachable after roots location) :
+    Reachable before roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      by_cases same : parent = modified
+      · subst parent
+        have cellEq : cell = afterCell := by
+          rw [afterFound] at cellFound
+          exact (Option.some.inj cellFound).symm
+        subst cell
+        exact .child ih beforeFound (by simpa [owned] using member) reference
+      · have found : findCell? before parent = some cell := by
+          rw [← frame parent same]
+          exact cellFound
+        exact .child ih found member reference
+
+/-- Replacing one mapped pair with related cells while preserving ownership
+edges preserves the bidirectional reachable-heap relation. -/
+theorem heapRel_replaceBoth
+    (related : HeapRel rho leftBefore rightBefore leftRoots rightRoots)
+    (mapping : rho.forward leftModified = some rightModified)
+    (leftBeforeFound :
+      findCell? leftBefore leftModified = some leftBeforeCell)
+    (rightBeforeFound :
+      findCell? rightBefore rightModified = some rightBeforeCell)
+    (leftAfterFound :
+      findCell? leftAfter leftModified = some leftAfterCell)
+    (rightAfterFound :
+      findCell? rightAfter rightModified = some rightAfterCell)
+    (leftFrame : ∀ other, other ≠ leftModified →
+      findCell? leftAfter other = findCell? leftBefore other)
+    (rightFrame : ∀ other, other ≠ rightModified →
+      findCell? rightAfter other = findCell? rightBefore other)
+    (leftOwned :
+      leftAfterCell.object.ownedValues =
+        leftBeforeCell.object.ownedValues)
+    (rightOwned :
+      rightAfterCell.object.ownedValues =
+        rightBeforeCell.object.ownedValues)
+    (cells : HeapCellRel rho leftAfterCell rightAfterCell) :
+    HeapRel rho leftAfter rightAfter leftRoots rightRoots := by
+  constructor
+  · intro location afterReachable
+    have beforeReachable := reachable_replace_of_ownedValues_eq
+      leftBeforeFound leftAfterFound leftFrame leftOwned afterReachable
+    rcases related.1 location beforeReachable with
+      ⟨mapped, leftCell, rightCell, mappedEq, leftFound, rightFound,
+        oldCells⟩
+    by_cases same : location = leftModified
+    · subst location
+      have mappedSame : mapped = rightModified := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mapped
+      have leftCellSame : leftCell = leftBeforeCell := by
+        rw [leftBeforeFound] at leftFound
+        exact (Option.some.inj leftFound).symm
+      have rightCellSame : rightCell = rightBeforeCell := by
+        rw [rightBeforeFound] at rightFound
+        exact (Option.some.inj rightFound).symm
+      subst leftCell
+      subst rightCell
+      exact ⟨rightModified, leftAfterCell, rightAfterCell, mapping,
+        leftAfterFound, rightAfterFound, cells⟩
+    · have mappedDifferent : mapped ≠ rightModified := by
+        intro mappedSame
+        subst mapped
+        have oldInverse := rho.leftInverse mappedEq
+        have newInverse := rho.leftInverse mapping
+        rw [newInverse] at oldInverse
+        exact same (Option.some.inj oldInverse).symm
+      exact ⟨mapped, leftCell, rightCell, mappedEq,
+        by simpa [leftFrame location same] using leftFound,
+        by simpa [rightFrame mapped mappedDifferent] using rightFound,
+        oldCells⟩
+  · intro location afterReachable
+    have beforeReachable := reachable_replace_of_ownedValues_eq
+      rightBeforeFound rightAfterFound rightFrame rightOwned afterReachable
+    rcases related.2 location beforeReachable with
+      ⟨mapped, rightCell, leftCell, mappedEq, rightFound, leftFound,
+        oldCells⟩
+    have reverseMapping := rho.leftInverse mapping
+    by_cases same : location = rightModified
+    · subst location
+      have mappedSame : mapped = leftModified := by
+        rw [reverseMapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mapped
+      have rightCellSame : rightCell = rightBeforeCell := by
+        rw [rightBeforeFound] at rightFound
+        exact (Option.some.inj rightFound).symm
+      have leftCellSame : leftCell = leftBeforeCell := by
+        rw [leftBeforeFound] at leftFound
+        exact (Option.some.inj leftFound).symm
+      subst rightCell
+      subst leftCell
+      exact ⟨leftModified, rightAfterCell, leftAfterCell, reverseMapping,
+        rightAfterFound, leftAfterFound, cells⟩
+    · have mappedDifferent : mapped ≠ leftModified := by
+        intro mappedSame
+        subst mapped
+        have oldForward := rho.rightInverse mappedEq
+        rw [mapping] at oldForward
+        exact same (Option.some.inj oldForward).symm
+      exact ⟨mapped, rightCell, leftCell, mappedEq,
+        by simpa [rightFrame location same] using rightFound,
+        by simpa [leftFrame mapped mappedDifferent] using leftFound,
+        oldCells⟩
+
 /-- Updating a source cell outside the reachable subgraph preserves the
 reachable-heap relation.  Target-to-source reachability transport is what
 rules out the modified cell in the reverse half of `HeapRel`. -/
@@ -1409,6 +1530,82 @@ structure ShadowRuntimeRel (rho : AddressRenaming)
   rightHeapFresh : ∀ location, right.nextLocation ≤ location →
     findCell? right.heap location = none
 
+/-- Updating one mapped live cell on each side preserves the complete runtime
+relation when the replacement cells remain related and keep the same ownership
+edges. -/
+theorem ShadowRuntimeRel.setCellBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (rightFound : findCell? right.heap rightLocation = some rightCell)
+    (leftOwned :
+      leftReplacement.object.ownedValues = leftCell.object.ownedValues)
+    (rightOwned :
+      rightReplacement.object.ownedValues = rightCell.object.ownedValues)
+    (replacement :
+      HeapCellRel rho leftReplacement rightReplacement) :
+    ∃ leftResult rightResult,
+      setCell left leftLocation leftReplacement = .ok leftResult ∧
+      setCell right rightLocation rightReplacement = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  rcases setCell_spec_of_find left leftLocation leftCell leftReplacement
+      leftFound with
+    ⟨leftResult, leftEffect, leftTarget, leftFrame, _leftLength,
+      leftNext, leftGlobals, leftWorld, leftTrace⟩
+  rcases setCell_spec_of_find right rightLocation rightCell rightReplacement
+      rightFound with
+    ⟨rightResult, rightEffect, rightTarget, rightFrame, _rightLength,
+      rightNext, rightGlobals, rightWorld, rightTrace⟩
+  refine ⟨leftResult, rightResult, leftEffect, rightEffect, ?_⟩
+  have leftLocationLt : leftLocation < left.nextLocation := by
+    apply Nat.lt_of_not_ge
+    intro bounded
+    have fresh := related.leftHeapFresh leftLocation bounded
+    rw [leftFound] at fresh
+    contradiction
+  have rightLocationLt : rightLocation < right.nextLocation := by
+    apply Nat.lt_of_not_ge
+    intro bounded
+    have fresh := related.rightHeapFresh rightLocation bounded
+    rw [rightFound] at fresh
+    contradiction
+  exact {
+    extra := related.extra
+    globals := by
+      rw [leftGlobals, rightGlobals]
+      exact related.globals
+    world_eq := leftWorld.trans (related.world_eq.trans rightWorld.symm)
+    trace := by
+      rw [leftTrace, rightTrace]
+      exact related.trace
+    heap := by
+      have heaps := heapRel_replaceBoth related.heap mapping
+        leftFound rightFound leftTarget rightTarget leftFrame rightFrame
+        leftOwned rightOwned replacement
+      simpa [runtimeRoots, leftGlobals, rightGlobals, leftTrace, rightTrace]
+        using heaps
+    leftMappingFresh := by
+      intro location bounded
+      exact related.leftMappingFresh location (leftNext ▸ bounded)
+    rightMappingFresh := by
+      intro location bounded
+      exact related.rightMappingFresh location (rightNext ▸ bounded)
+    leftHeapFresh := by
+      intro location bounded
+      have oldBounded : left.nextLocation ≤ location := leftNext ▸ bounded
+      have different : location ≠ leftLocation :=
+        (Nat.ne_of_lt (Nat.lt_of_lt_of_le leftLocationLt oldBounded)).symm
+      rw [leftFrame location different]
+      exact related.leftHeapFresh location oldBounded
+    rightHeapFresh := by
+      intro location bounded
+      have oldBounded : right.nextLocation ≤ location := rightNext ▸ bounded
+      have different : location ≠ rightLocation :=
+        (Nat.ne_of_lt (Nat.lt_of_lt_of_le rightLocationLt oldBounded)).symm
+      rw [rightFrame location different]
+      exact related.rightHeapFresh location oldBounded
+  }
+
 theorem ShadowRuntimeRel.roots
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
     ListRel (ValueRel rho)
@@ -1907,6 +2104,220 @@ theorem ShadowRuntimeRel.setUSizeFieldLeftUnreachable
   simp only [Bind.bind, Except.bind]
   rw [dif_pos bounded]
   simpa [replacement] using effect
+
+/-- A successful constructor lookup through a heap reference exposes the
+exact live semantic cell used by the mutation operations below. -/
+theorem getConstructor_heap_spec
+    (effect : getConstructor runtime (.object (.heap location)) =
+      .ok (resultLocation, cell, object)) :
+    resultLocation = location ∧
+      findCell? runtime.heap location = some cell ∧
+      cell.live = true ∧
+      cell.object = .ctor object := by
+  unfold getConstructor at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize foundEq : findCell? runtime.heap location = found at effect
+  cases found with
+  | none => simp [getLiveCell, foundEq] at effect
+  | some foundCell =>
+      cases liveEq : foundCell.live with
+      | false => simp [getLiveCell, foundEq, liveEq] at effect
+      | true =>
+          cases objectEq : foundCell.object <;>
+            simp [getLiveCell, foundEq, liveEq, objectEq] at effect
+          case ctor =>
+            cases effect
+            exact ⟨rfl, rfl, liveEq, objectEq⟩
+
+/-- A successful absolute-slot write to one reachable mapped constructor is
+matched by the same write to the related constructor. The slot is interpreted
+against the complete fixed-slot layout on both sides. -/
+theorem ShadowRuntimeRel.setUSizeSlotBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (leftLive : leftCell.live = true)
+    (leftObjectEq : leftCell.object = .ctor leftObject)
+    (lower : leftObject.objectFields.size ≤ slot)
+    (bounded :
+      slot - leftObject.objectFields.size < leftObject.usizeFields.size)
+    (field : UInt64) :
+    ∃ leftResult rightResult,
+      setUSizeSlot left (.object (.heap leftLocation)) slot (.usize field) =
+        .ok leftResult ∧
+      setUSizeSlot right (.object (.heap rightLocation)) slot (.usize field) =
+        .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have mappedSame : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have leftCellSame : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  have rightLive : rightCell.live = true := by
+    rw [← cells.2.2.1]
+    exact leftLive
+  have objects := cells.2.2.2
+  generalize rightObjectEq : rightCell.object = targetObject at objects
+  rw [leftObjectEq] at objects
+  cases objects with
+  | ctor tag objectFields usizes scalars =>
+      rename_i rightObject
+      have objectSize :
+          leftObject.objectFields.size = rightObject.objectFields.size :=
+        arrayRel_size_eq objectFields
+      have usizeSize :
+          leftObject.usizeFields.size = rightObject.usizeFields.size :=
+        congrArg Array.size usizes
+      have rightLower : rightObject.objectFields.size ≤ slot := by
+        omega
+      have rightBounded :
+          slot - rightObject.objectFields.size <
+            rightObject.usizeFields.size := by
+        omega
+      let leftIndex := slot - leftObject.objectFields.size
+      let rightIndex := slot - rightObject.objectFields.size
+      let leftReplacement : HeapCell :=
+        { leftCell with object := .ctor {
+            leftObject with
+            usizeFields := leftObject.usizeFields.set leftIndex field } }
+      let rightReplacement : HeapCell :=
+        { rightCell with object := .ctor {
+            rightObject with
+            usizeFields := rightObject.usizeFields.set rightIndex field } }
+      have replacement :
+          HeapCellRel rho leftReplacement rightReplacement := by
+        refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+        dsimp only [leftReplacement, rightReplacement]
+        refine @HeapObjectRel.ctor rho
+          { leftObject with
+            usizeFields := leftObject.usizeFields.set leftIndex field }
+          { rightObject with
+            usizeFields := rightObject.usizeFields.set rightIndex field }
+          tag objectFields ?_ scalars
+        simp [leftIndex, rightIndex, objectSize, usizes]
+      have leftOwned :
+          leftReplacement.object.ownedValues =
+            leftCell.object.ownedValues := by
+        simp [leftReplacement, leftObjectEq, HeapObject.ownedValues]
+      have rightOwned :
+          rightReplacement.object.ownedValues =
+            rightCell.object.ownedValues := by
+        simp [rightReplacement, rightObjectEq, HeapObject.ownedValues]
+      rcases related.setCellBoth mapping leftFound rightFound
+          leftOwned rightOwned replacement with
+        ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+      refine ⟨leftResult, rightResult, ?_, ?_, next⟩
+      · have constructor :
+            getConstructor left (.object (.heap leftLocation)) =
+              .ok (leftLocation, leftCell, leftObject) := by
+          simp [getConstructor, getLiveCell, leftFound, leftLive,
+            leftObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setUSizeSlot modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos lower, dif_pos bounded]
+        simpa [leftIndex, leftReplacement] using leftEffect
+      · have constructor :
+            getConstructor right (.object (.heap rightLocation)) =
+              .ok (rightLocation, rightCell, rightObject) := by
+          simp [getConstructor, getLiveCell, rightFound, rightLive,
+            rightObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setUSizeSlot modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos rightLower, dif_pos rightBounded]
+        simpa [rightIndex, rightReplacement] using rightEffect
+
+/-- Interpreter-facing retained absolute-slot write: related live operands and
+one successful source update determine a successful related target update. -/
+theorem ShadowRuntimeRel.setUSizeSlotBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (fields : ValueRel rho leftField rightField)
+    (sourceEffect :
+      setUSizeSlot left leftObject slot leftField = .ok leftResult) :
+    ∃ rightResult,
+      setUSizeSlot right rightObject slot rightField = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases fields with
+  | tagged payload => simp [setUSizeSlot] at sourceEffect
+  | heap fieldMapping => simp [setUSizeSlot] at sourceEffect
+  | scalar field => simp [setUSizeSlot] at sourceEffect
+  | erased => simp [setUSizeSlot] at sourceEffect
+  | reuseNone => simp [setUSizeSlot] at sourceEffect
+  | reuseSome fieldMapping => simp [setUSizeSlot] at sourceEffect
+  | usize field =>
+      cases objects with
+      | tagged payload =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | usize value =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | scalar value =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | erased =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | reuseNone =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | reuseSome mapping =>
+          simp [setUSizeSlot, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | heap mapping =>
+          rename_i leftLocation rightLocation
+          have originalSourceEffect := sourceEffect
+          unfold setUSizeSlot modifyConstructor at sourceEffect
+          simp only [Bind.bind, Except.bind] at sourceEffect
+          generalize constructorEq :
+            getConstructor left (.object (.heap leftLocation)) =
+              constructorResult at sourceEffect
+          cases constructorResult with
+          | error fault =>
+              simp at sourceEffect
+          | ok result =>
+              obtain ⟨resultLocation, leftCell, leftConstructor⟩ := result
+              simp only at sourceEffect
+              by_cases lower :
+                  leftConstructor.objectFields.size ≤ slot
+              · rw [if_pos lower] at sourceEffect
+                by_cases bounded :
+                    slot - leftConstructor.objectFields.size <
+                      leftConstructor.usizeFields.size
+                · rw [dif_pos bounded] at sourceEffect
+                  simp only at sourceEffect
+                  rcases getConstructor_heap_spec constructorEq with
+                    ⟨resultLocationEq, leftFound, leftLive, leftObjectEq⟩
+                  subst resultLocation
+                  have reachable :
+                      Reachable left.heap (runtimeRoots left leftExtra)
+                        leftLocation := by
+                    exact .root (extra_subset_runtimeRoots left leftExtra
+                      (.object (.heap leftLocation)) objectRoot)
+                  rcases related.setUSizeSlotBoth mapping reachable leftFound
+                      leftLive leftObjectEq lower bounded field with
+                    ⟨computedLeft, rightResult, leftEffect, rightEffect,
+                      next⟩
+                  rw [originalSourceEffect] at leftEffect
+                  cases leftEffect
+                  exact ⟨rightResult, rightEffect, next⟩
+                · rw [dif_neg bounded] at sourceEffect
+                  simp at sourceEffect
+              · rw [if_neg lower] at sourceEffect
+                simp at sourceEffect
 
 /-- An absolute final-LCNF unboxed-word slot changes only an unreachable cell.
 Object fields occupy the fixed-slot prefix before the type-local `USize`
