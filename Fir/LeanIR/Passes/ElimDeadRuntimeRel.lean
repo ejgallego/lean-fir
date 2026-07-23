@@ -3303,6 +3303,70 @@ theorem ShadowRuntimeRel.publishOwnedValues
     · exact .root (by simp [runtimeRoots, global])
     · exact .root (by simp [runtimeRoots, trace])
 
+/-- Number of currently live semantic heap entries. Recursive release strictly
+decreases this measure before descending into owned children. -/
+def liveCellCount : Heap → Nat
+  | [] => 0
+  | (_, cell) :: rest =>
+      (if cell.live then 1 else 0) + liveCellCount rest
+
+theorem liveCellCount_le_length (heap : Heap) :
+    liveCellCount heap ≤ heap.length := by
+  induction heap with
+  | nil => exact Nat.zero_le 0
+  | cons entry rest ih =>
+      obtain ⟨location, cell⟩ := entry
+      simp only [liveCellCount, List.length_cons]
+      cases cell.live <;> simp <;> omega
+
+/-- Replacing the first matching heap entry exchanges exactly the liveness
+contribution of the old and new cells. -/
+theorem replaceCell_liveCellCount
+    (found : findCell? before location = some current)
+    (replaced : replaceCell before location replacement = some after) :
+    liveCellCount after + (if current.live then 1 else 0) =
+      liveCellCount before + (if replacement.live then 1 else 0) := by
+  induction before generalizing after with
+  | nil => simp [findCell?] at found
+  | cons entry rest recurse =>
+      obtain ⟨candidate, cell⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        simp [findCell?] at found
+        subst current
+        simp [replaceCell] at replaced
+        subst after
+        simp only [liveCellCount]
+        omega
+      · have tailFound : findCell? rest location = some current := by
+          simpa [findCell?, here] using found
+        generalize tailEq :
+          replaceCell rest location replacement = tailResult at replaced
+        cases tailResult with
+        | none => simp [replaceCell, here, tailEq] at replaced
+        | some tailAfter =>
+            simp [replaceCell, here, tailEq] at replaced
+            subst after
+            have tailCount := recurse tailFound tailEq
+            simp only [liveCellCount]
+            omega
+
+/-- Runtime-level form of `replaceCell_liveCellCount`. -/
+theorem setCell_liveCellCount
+    (found : findCell? runtime.heap location = some current)
+    (effect : setCell runtime location replacement = .ok result) :
+    liveCellCount result.heap + (if current.live then 1 else 0) =
+      liveCellCount runtime.heap + (if replacement.live then 1 else 0) := by
+  unfold setCell at effect
+  generalize replacedEq :
+    replaceCell runtime.heap location replacement = replaced at effect
+  cases replaced with
+  | none => simp at effect
+  | some heap =>
+      simp only at effect
+      cases effect
+      exact replaceCell_liveCellCount found replacedEq
+
 /-- Successful semantic recursive release is monotone in fuel. Enlarging the
 depth budget cannot change the selected branch or final runtime. -/
 theorem decLocationFuel_ok_mono
@@ -3390,6 +3454,233 @@ theorem decLocationFuel_ok_mono
                         rw [← Array.foldlM_toList] at operation ⊢
                         exact foldMono cell.object.ownedValues.toList
                           released result operation
+
+/-- Successful recursive release never increases the number of live heap
+entries. -/
+theorem decLocationFuel_liveCellCount_le
+    (operation : decLocationFuel fuel runtime location = .ok result) :
+    liveCellCount result.heap ≤ liveCellCount runtime.heap := by
+  induction fuel generalizing runtime result location with
+  | zero =>
+      simp [decLocationFuel] at operation
+  | succ fuel recurse =>
+      generalize cellEq : getLiveCell runtime location = cellResult
+      cases cellResult with
+      | error fault =>
+          simp [decLocationFuel, cellEq, Bind.bind, Except.bind] at operation
+      | ok cell =>
+          rcases getLiveCell_spec cellEq with ⟨found, live⟩
+          by_cases persistent : cell.persistent = true
+          · have noop :
+                decLocationFuel (fuel + 1) runtime location = .ok runtime := by
+              simp only [decLocationFuel, cellEq, Bind.bind, Except.bind]
+              rw [if_pos persistent]
+              rfl
+            rw [noop] at operation
+            have resultEq := Except.ok.inj operation
+            subst result
+            exact Nat.le_refl _
+          · by_cases zero : cell.rc = 0
+            · simp [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                persistent, zero] at operation
+            · by_cases above : 1 < cell.rc
+              · have count := setCell_liveCellCount found
+                  (by simpa [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                    persistent, zero, above] using operation)
+                simp [live] at count
+                omega
+              · simp only [decLocationFuel, cellEq, Bind.bind,
+                  Except.bind] at operation
+                rw [if_neg persistent, if_neg zero, if_neg above] at operation
+                generalize parentEq :
+                  setCell runtime location { cell with rc := 0, live := false } =
+                    parentResult at operation
+                cases parentResult with
+                | error fault =>
+                    simp [parentEq] at operation
+                | ok parent =>
+                    dsimp only at operation
+                    have parentCount := setCell_liveCellCount found parentEq
+                    simp [live] at parentCount
+                    have foldLe : ∀ (values : List Value)
+                        (before after : RuntimeState),
+                        values.foldlM (init := before) (fun next value =>
+                          match value with
+                          | .object (.heap child) =>
+                              decLocationFuel fuel next child
+                          | _ => .ok next) = .ok after →
+                        liveCellCount after.heap ≤
+                          liveCellCount before.heap := by
+                      intro values
+                      induction values with
+                      | nil =>
+                          intro before after folded
+                          have same := Except.ok.inj folded
+                          subst after
+                          exact Nat.le_refl _
+                      | cons value values tailIH =>
+                          intro before after folded
+                          simp only [List.foldlM_cons, Bind.bind,
+                            Except.bind] at folded
+                          cases value with
+                          | object reference =>
+                              cases reference with
+                              | tagged payload =>
+                                  exact tailIH before after folded
+                              | heap child =>
+                                  dsimp only at folded
+                                  cases childEq :
+                                      decLocationFuel fuel before child with
+                                  | error fault =>
+                                      rw [childEq] at folded
+                                      contradiction
+                                  | ok middle =>
+                                      rw [childEq] at folded
+                                      exact Nat.le_trans (tailIH middle after folded)
+                                        (recurse childEq)
+                          | usize | scalar | erased | reuseToken =>
+                              exact tailIH before after folded
+                    rw [← Array.foldlM_toList] at operation
+                    have finalLe := foldLe cell.object.ownedValues.toList
+                      parent result operation
+                    omega
+
+/-- Any successful recursive release can be replayed with every budget that
+strictly dominates the current number of live heap cells. This is the
+fuel-adequacy theorem needed to forget unreachable allocations. -/
+theorem decLocationFuel_ok_of_liveCellCount_lt
+    (enough : liveCellCount runtime.heap < fuel)
+    (operation : decLocationFuel more runtime location = .ok result) :
+    decLocationFuel fuel runtime location = .ok result := by
+  generalize countEq : liveCellCount runtime.heap = count at enough
+  induction count using Nat.strongRecOn generalizing
+      fuel more runtime result location with
+  | ind count smaller =>
+      cases fuel with
+      | zero => omega
+      | succ fuel =>
+          cases more with
+          | zero =>
+              simp [decLocationFuel] at operation
+          | succ more =>
+              generalize cellEq :
+                getLiveCell runtime location = cellResult at operation ⊢
+              cases cellResult with
+              | error fault =>
+                  simp [decLocationFuel, cellEq, Bind.bind, Except.bind]
+                    at operation
+              | ok cell =>
+                  rcases getLiveCell_spec cellEq with ⟨found, live⟩
+                  by_cases persistent : cell.persistent = true
+                  · have sourceNoop :
+                        decLocationFuel (more + 1) runtime location =
+                          .ok runtime := by
+                      simp only [decLocationFuel, cellEq, Bind.bind,
+                        Except.bind]
+                      rw [if_pos persistent]
+                      rfl
+                    rw [sourceNoop] at operation
+                    have resultEq := Except.ok.inj operation
+                    subst result
+                    simp only [decLocationFuel, cellEq, Bind.bind,
+                      Except.bind]
+                    rw [if_pos persistent]
+                    rfl
+                  · by_cases zero : cell.rc = 0
+                    · simp [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                        persistent, zero] at operation
+                    · by_cases above : 1 < cell.rc
+                      · simpa [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                          persistent, zero, above] using operation
+                      · simp only [decLocationFuel, cellEq, Bind.bind,
+                          Except.bind] at operation ⊢
+                        rw [if_neg persistent, if_neg zero, if_neg above]
+                          at operation ⊢
+                        generalize parentEq :
+                          setCell runtime location
+                              { cell with rc := 0, live := false } =
+                            parentResult at operation ⊢
+                        cases parentResult with
+                        | error fault =>
+                            simp at operation
+                        | ok parent =>
+                            dsimp only at operation ⊢
+                            have parentCount :=
+                              setCell_liveCellCount found parentEq
+                            simp [live] at parentCount
+                            have parentLtCount :
+                                liveCellCount parent.heap < count := by
+                              rw [← countEq]
+                              omega
+                            have parentLtFuel :
+                                liveCellCount parent.heap < fuel := by
+                              omega
+                            have foldCap : ∀ (values : List Value)
+                                (before after : RuntimeState),
+                                liveCellCount before.heap < count →
+                                liveCellCount before.heap < fuel →
+                                values.foldlM (init := before)
+                                    (fun next value =>
+                                  match value with
+                                  | .object (.heap child) =>
+                                      decLocationFuel more next child
+                                  | _ => .ok next) = .ok after →
+                                values.foldlM (init := before)
+                                    (fun next value =>
+                                  match value with
+                                  | .object (.heap child) =>
+                                      decLocationFuel fuel next child
+                                  | _ => .ok next) = .ok after := by
+                              intro values
+                              induction values with
+                              | nil =>
+                                  intro before after _ _ folded
+                                  simpa using folded
+                              | cons value values tailIH =>
+                                  intro before after beforeLtCount beforeLtFuel folded
+                                  simp only [List.foldlM_cons, Bind.bind,
+                                    Except.bind] at folded ⊢
+                                  cases value with
+                                  | object reference =>
+                                      cases reference with
+                                      | tagged payload =>
+                                          exact tailIH before after beforeLtCount
+                                            beforeLtFuel folded
+                                      | heap child =>
+                                          dsimp only at folded ⊢
+                                          cases childEq :
+                                              decLocationFuel more before child with
+                                          | error fault =>
+                                              rw [childEq] at folded
+                                              contradiction
+                                          | ok middle =>
+                                              rw [childEq] at folded
+                                              have childCapped :=
+                                                smaller
+                                                  (liveCellCount before.heap)
+                                                  beforeLtCount
+                                                  (runtime := before)
+                                                  (result := middle)
+                                                  (location := child)
+                                                  (fuel := fuel)
+                                                  (more := more)
+                                                  childEq rfl beforeLtFuel
+                                              rw [childCapped]
+                                              have middleLe :=
+                                                decLocationFuel_liveCellCount_le
+                                                  childEq
+                                              exact tailIH middle after
+                                                (Nat.lt_of_le_of_lt middleLe
+                                                  beforeLtCount)
+                                                (Nat.lt_of_le_of_lt middleLe
+                                                  beforeLtFuel)
+                                                folded
+                                  | usize | scalar | erased | reuseToken =>
+                                      exact tailIH before after beforeLtCount
+                                        beforeLtFuel folded
+                            rw [← Array.foldlM_toList] at operation ⊢
+                            exact foldCap cell.object.ownedValues.toList
+                              parent result parentLtCount parentLtFuel operation
 
 /-- One common positive fuel budget drives corresponding recursive releases
 through the same ownership graph. The source's successful execution fixes the
@@ -3648,6 +3939,98 @@ theorem ShadowRuntimeRel.decLocationFuelBoth
                       intro value member
                       exact List.mem_append_right _ member)
                   exact ⟨rightResult, targetEffect, finalRelated⟩
+
+/-- Public recursive release is independent of the two heaps' unreachable
+allocation counts: simulate at the source budget, then replay the successful
+target run at its own adequate public budget. -/
+theorem ShadowRuntimeRel.decLocationBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (sourceEffect : decLocation left leftLocation = .ok leftResult) :
+    ∃ rightResult,
+      decLocation right rightLocation = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  unfold decLocation at sourceEffect
+  rcases related.decLocationFuelBoth mapping leftReachable sourceEffect with
+    ⟨rightResult, sameFuel, next⟩
+  have adequate :
+      liveCellCount right.heap < right.heap.length + 1 := by
+    have bounded := liveCellCount_le_length right.heap
+    omega
+  have publicEffect := decLocationFuel_ok_of_liveCellCount_lt
+    adequate sameFuel
+  exact ⟨rightResult, by simpa [decLocation] using publicEffect, next⟩
+
+/-- One public decrement on a related operand preserves the runtime relation.
+Checked tagged references and persistent heap cells are synchronized no-ops. -/
+theorem ShadowRuntimeRel.decValueOnceBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect : decValueOnce left leftObject check = .ok leftResult) :
+    ∃ rightResult,
+      decValueOnce right rightObject check = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases objects with
+  | tagged payload =>
+      cases check with
+      | false => simp [decValueOnce] at sourceEffect
+      | true =>
+          simp [decValueOnce] at sourceEffect
+          subst leftResult
+          exact ⟨right, by simp [decValueOnce], related⟩
+  | usize value => simp [decValueOnce] at sourceEffect
+  | scalar value => simp [decValueOnce] at sourceEffect
+  | erased => simp [decValueOnce] at sourceEffect
+  | reuseNone => simp [decValueOnce] at sourceEffect
+  | reuseSome mapping => simp [decValueOnce] at sourceEffect
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      have reachable :
+          Reachable left.heap (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra
+          (.object (.heap leftLocation)) objectRoot)
+      rcases related.decLocationBoth mapping reachable
+          (by simpa [decValueOnce] using sourceEffect) with
+        ⟨rightResult, targetEffect, next⟩
+      exact ⟨rightResult, by simpa [decValueOnce] using targetEffect, next⟩
+
+/-- Repeating a related public decrement preserves the relation after every
+successful source iteration. -/
+theorem ShadowRuntimeRel.decValueBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      decValue left leftObject amount check = .ok leftResult) :
+    ∃ rightResult,
+      decValue right rightObject amount check = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  induction amount generalizing left right leftResult with
+  | zero =>
+      have sourceNoop : decValue left leftObject 0 check = .ok left := by
+        rfl
+      rw [sourceNoop] at sourceEffect
+      have resultEq := Except.ok.inj sourceEffect
+      subst leftResult
+      exact ⟨right, by rfl, related⟩
+  | succ amount recurse =>
+      simp only [decValue, List.replicate_succ, List.foldlM_cons,
+        Bind.bind, Except.bind] at sourceEffect ⊢
+      cases firstEffect :
+          decValueOnce left leftObject check with
+      | error fault =>
+          rw [firstEffect] at sourceEffect
+          contradiction
+      | ok middleLeft =>
+          rw [firstEffect] at sourceEffect
+          rcases related.decValueOnceBoth_of_related objectRoot objects
+              firstEffect with
+            ⟨middleRight, targetFirst, middleRelated⟩
+          rw [targetFirst]
+          exact recurse middleRelated sourceEffect
 
 /-- Interpreter-facing retained delete. Erased failed-reset tokens are
 synchronized no-ops; a related live heap operand marks the mapped cells dead

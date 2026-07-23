@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-elimDead-release-fuel-renaming
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: e64abaf
@@ -82,7 +82,7 @@ intentionally forgets unreachable allocations. The proof track owns the local
 relational theorem; a general runtime theorem would require integration-owner
 coordination.
 
-## Candidate resolutions
+## Resolution design
 
 Prove a fuel-adequacy/irrelevance theorem for `decLocationFuel`: whenever a
 release succeeds with any budget, the public `heap.length + 1` budget succeeds
@@ -101,7 +101,16 @@ none
 
 ## Resolution and regression
 
-Unresolved. `ShadowRuntimeRel.decLocationFuelBoth` is the permanent
-same-fuel regression boundary; resolution must add a public-budget theorem or
-an equivalent invariant without requiring equal source and target heap
-lengths.
+Resolved in the proof track by measuring live heap entries rather than total
+allocations. `decLocationFuel_liveCellCount_le` proves that release never
+increases the measure, and `decLocationFuel_ok_of_liveCellCount_lt` proves by
+strong induction that any successful release can be replayed with a budget
+strictly larger than the current live-cell count. Since
+`liveCellCount heap ≤ heap.length`, every runtime's public budget is adequate
+independently.
+
+`ShadowRuntimeRel.decLocationBoth` first applies the complete same-fuel
+simulation and then replays the successful target execution at the target's
+own public budget. `decValueBoth_of_related` lifts the result through repeated
+decrements, and `match_decrementCodeStep` is the permanent machine-level
+regression. No heap-length equality or weakened decrement readiness was added.

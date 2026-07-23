@@ -3175,6 +3175,84 @@ theorem coreStep_increment_reachableRelated
           sourceFrameRoots, targetFrameRoots,
           programs, .code continuation joins env, frames, nextRuntime⟩
 
+/-- A successful non-persistent decrement is matched on the related operand,
+including recursive count-one ownership release. -/
+theorem coreStep_decrement_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : decValue sourceState.runtime objectValue amount check =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      decValue targetState.runtime targetObjectValue amount check =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.dec object amount check false compilerObjects sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.dec object amount check false compilerObjects targetContinuation)) =
+          .next targetAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.decValueBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold ReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- A successful retained delete is matched on the related live operand and
 preserves the reachable machine relation. -/
 theorem coreStep_delete_reachableRelated
@@ -5215,6 +5293,109 @@ theorem match_incrementCodeStep
               exact (noStep done).elim
           | ok sourceNextRuntime =>
               rcases coreStep_increment_reachableRelated sourceState
+                  targetState programs frames continuation joins env
+                  objectMember objectRead effect runtime with
+                ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+                  targetEffect, sourceTransition, targetTransition,
+                  afterRelated⟩
+              rcases match_internalCoreSteps sourceTransition targetTransition
+                  afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
+
+/-- Complete graph-level matcher for reference-count decrements. Persistent
+instructions are synchronized administrative steps; ordinary decrements use
+the public fuel-adequate recursive ownership simulation. -/
+theorem match_decrementCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.dec object amount check persistent compilerObjects sourceContinuation)
+        targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.dec object amount check persistent compilerObjects sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases graph.decrementResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  cases persistent with
+  | true =>
+      let sourceNext := {
+        sourceState with control := .code sourceContinuation }
+      let targetNext := {
+        targetState with control := .code targetContinuation }
+      have sourceTransition :
+          coreStep (withCodeControl sourceState
+            (.dec object amount check true compilerObjects
+              sourceContinuation)) =
+            .next sourceNext := by
+        simp [sourceNext, withCodeControl, coreStep]
+      have targetTransition :
+          coreStep (withCodeControl targetState
+            (.dec object amount check true compilerObjects
+              targetContinuation)) =
+            .next targetNext := by
+        simp [targetNext, withCodeControl, coreStep]
+      have afterRelated : ReachableMachineRelated fuel rho
+          sourceNext targetNext := by
+        exact continueCode_reachableRelated sourceState targetState programs
+          frames continuation joins env runtime
+      rcases match_internalCoreSteps sourceTransition targetTransition
+          afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨targetNext, targetPath, ⟨rho, finalRelated⟩⟩
+  | false =>
+      let sourceCurrent := withCodeControl sourceState
+        (.dec object amount check false compilerObjects sourceContinuation)
+      have noStep {observation : Observation}
+          (done : coreStep sourceCurrent = .done observation) : False := by
+        cases step with
+        | internal transition =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+        | external transition externalProof =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+      generalize objectRead :
+        lookupValue sourceState.env object = objectResult
+      cases objectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+          exact (noStep done).elim
+      | ok objectValue =>
+          generalize effect :
+            decValue sourceState.runtime objectValue amount check = effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_decrement_reachableRelated sourceState
                   targetState programs frames continuation joins env
                   objectMember objectRead effect runtime with
                 ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
