@@ -5525,6 +5525,196 @@ theorem match_unboxLetCodeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- A retained box reads related covered immediate inputs and either produces
+the same tagged object or allocates related boxed cells at fresh mapped
+locations. -/
+theorem match_retainedBoxLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (inputMember : used.contains input = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceInputRead :
+    lookupValue sourceState.env input = sourceInputResult
+  cases sourceInputResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceInputRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceInput =>
+      have sourceInputLookup :=
+        lookupValue_eq_ok_iff.mp sourceInputRead
+      have inputs := env input inputMember
+      rw [sourceInputLookup] at inputs
+      generalize targetInputLookup :
+        lookup targetState.env input = targetInputOption at inputs
+      cases inputs with
+      | some inputValues =>
+          rename_i targetInput
+          have targetInputRead :
+              lookupValue targetState.env input = .ok targetInput :=
+            lookupValue_eq_ok_iff.mpr targetInputLookup
+          generalize sourceBoxEq :
+            box sourceState.runtime boxedType sourceInput = sourceBoxResult
+          cases sourceBoxResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceResult =>
+              obtain ⟨sourceRuntime, sourceValue⟩ := sourceResult
+              have sourceInputRoot :
+                  sourceInput ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn inputMember sourceInputLookup)
+              rcases runtime.boxBoth_of_related sourceInputRoot inputValues
+                  sourceBoxEq with
+                ⟨larger, targetRuntime, targetValue, extension,
+                  targetBoxEq, resultValues, boxedRuntime⟩
+              let sourceExpected := {
+                sourceState with
+                runtime := sourceRuntime
+                env := bind sourceState.env fvarId sourceValue
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                runtime := targetRuntime
+                env := bind targetState.env fvarId targetValue
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetInputRead, targetBoxEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have afterRelated :
+                  ReachableMachineRelated fuel larger
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_reachableRelated
+                  sourceState targetState sourceRuntime targetRuntime
+                  programs (frames.monoRenaming extension) continuation joins
+                  (envRelOn_monoRenaming extension env) resultValues
+                  boxedRuntime
+              exact ⟨larger, targetExpected, extension,
+                match_internalCoreSteps sourceTransition targetTransition
+                  afterRelated (by simpa [sourceCurrent] using step)⟩
+
+/-- Complete graph-level matcher for box lets. -/
+theorem match_boxLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type := resultType,
+        value := .box boxedType input
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type := resultType,
+        value := .box boxedType input
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered =>
+      rcases match_retainedBoxLetStep
+          sourceState targetState programs frames continuation joins env
+          covered runtime step with
+        ⟨larger, targetAfter, extension, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨larger, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent ready =>
+      rcases match_deletedLetStep_of_ready sourceState targetState programs
+          frames continuation joins env absent runtime ready step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- A retained full application evaluates related covered arguments, saves
 the related bind continuations, and enters related named-invocation controls.
 This includes the nullary case: unlike a deleted full application, it must

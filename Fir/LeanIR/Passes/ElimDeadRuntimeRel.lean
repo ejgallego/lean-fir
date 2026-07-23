@@ -5368,6 +5368,127 @@ theorem ShadowRuntimeRel.literalBoth
           (ValueRel.usize (rho := rho) value)
           (by intro location; simp) (by intro location; simp)
 
+/-- Boxing related published scalar inputs produces related retained values.
+Small payloads remain identical tagged objects; large payloads allocate a
+fresh related pair and extend the address renaming. -/
+theorem ShadowRuntimeRel.boxBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue)
+    (sourceBox : box left type leftValue = .ok (leftRuntime, leftResult)) :
+    ∃ larger rightRuntime rightResult,
+      RenamingExtends rho larger ∧
+      box right type rightValue = .ok (rightRuntime, rightResult) ∧
+      ValueRel larger leftResult rightResult ∧
+      ShadowRuntimeRel larger leftRuntime rightRuntime
+        (leftResult :: leftExtra) (rightResult :: rightExtra) := by
+  cases values with
+  | tagged payload => simp [box, Bind.bind, Except.bind] at sourceBox
+  | erased => simp [box, Bind.bind, Except.bind] at sourceBox
+  | reuseNone => simp [box, Bind.bind, Except.bind] at sourceBox
+  | reuseSome mapped => simp [box, Bind.bind, Except.bind] at sourceBox
+  | heap mapped => simp [box, Bind.bind, Except.bind] at sourceBox
+  | scalar scalar =>
+      have rightMember : Value.scalar scalar ∈ rightExtra := by
+        rcases listRel_exists_right_of_mem related.extra leftMember with
+          ⟨target, targetMember, targetRelated⟩
+        cases targetRelated
+        exact targetMember
+      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        refine ⟨rho, right, .object (.tagged scalar.toUInt64),
+          .refl rho, ?_, .tagged _, ?_⟩
+        · simp [box, small, Bind.bind, Except.bind,
+            Pure.pure, Except.pure]
+        · exact related.prependNonHeap (.tagged _)
+            (by intro location; simp) (by intro location; simp)
+      · let leftObject : HeapObject := .boxed type (.scalar scalar)
+        let rightObject : HeapObject := .boxed type (.scalar scalar)
+        have objects : HeapObjectRel rho leftObject rightObject := by
+          exact .boxed (.scalar scalar)
+        have leftOwned : RootSubset leftObject.ownedValues.toList
+            (runtimeRoots left leftExtra) := by
+          intro value member
+          have same : value = .scalar scalar := by
+            simpa [leftObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots left leftExtra _ leftMember
+        have rightOwned : RootSubset rightObject.ownedValues.toList
+            (runtimeRoots right rightExtra) := by
+          intro value member
+          have same : value = .scalar scalar := by
+            simpa [rightObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots right rightExtra _ rightMember
+        rcases related.allocBoth objects leftOwned rightOwned false with
+          ⟨larger, extension, resultValues, nextRuntime⟩
+        have normalized := sourceBox
+        simp [box, small, leftObject, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨larger, (alloc right rightObject).1,
+          .object (alloc right rightObject).2, extension,
+          by simp [box, small, rightObject, Bind.bind, Except.bind,
+            Pure.pure, Except.pure],
+          resultValues, nextRuntime⟩
+  | usize word =>
+      have rightMember : Value.usize word ∈ rightExtra := by
+        rcases listRel_exists_right_of_mem related.extra leftMember with
+          ⟨target, targetMember, targetRelated⟩
+        cases targetRelated
+        exact targetMember
+      by_cases small : word.toNat ≤ maxTaggedPayload
+      · have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        refine ⟨rho, right, .object (.tagged word),
+          .refl rho, ?_, .tagged _, ?_⟩
+        · simp [box, small, Bind.bind, Except.bind,
+            Pure.pure, Except.pure]
+        · exact related.prependNonHeap (.tagged _)
+            (by intro location; simp) (by intro location; simp)
+      · let leftObject : HeapObject := .boxed type (.usize word)
+        let rightObject : HeapObject := .boxed type (.usize word)
+        have objects : HeapObjectRel rho leftObject rightObject := by
+          exact .boxed (.usize word)
+        have leftOwned : RootSubset leftObject.ownedValues.toList
+            (runtimeRoots left leftExtra) := by
+          intro value member
+          have same : value = .usize word := by
+            simpa [leftObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots left leftExtra _ leftMember
+        have rightOwned : RootSubset rightObject.ownedValues.toList
+            (runtimeRoots right rightExtra) := by
+          intro value member
+          have same : value = .usize word := by
+            simpa [rightObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots right rightExtra _ rightMember
+        rcases related.allocBoth objects leftOwned rightOwned false with
+          ⟨larger, extension, resultValues, nextRuntime⟩
+        have normalized := sourceBox
+        simp [box, small, leftObject, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨larger, (alloc right rightObject).1,
+          .object (alloc right rightObject).2, extension,
+          by simp [box, small, rightObject, Bind.bind, Except.bind,
+            Pure.pure, Except.pure],
+          resultValues, nextRuntime⟩
+
 /-- Related constructor arguments produce related retained constructor
 values.  Nullary constructors are the same immediate tag; every other shape
 allocates a fresh related object, then removes the now-owned arguments from
