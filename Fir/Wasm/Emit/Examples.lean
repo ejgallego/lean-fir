@@ -90,14 +90,14 @@ def abiConstructorGraphReleaseProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r tobjectType (.lit (.nat 12))) <|
       .return r)] }
 
-/-- Positive packed-layout artifact using the scalar slot index emitted by
-Lean 4.32 after one object and one `USize` slot. -/
+/-- Positive packed-layout artifact using the absolute `USize` and scalar slot
+indices emitted by Lean 4.32 after one object and one `USize` slot. -/
 def abiCompilerShapedMutationProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] u64Type (.code <|
       .let (letDecl x tobjectType (.lit (.nat 1))) <|
       .let (letDecl p objType (.ctor layoutInfo #[.fvar x])) <|
       .let (letDecl u usizeType (.lit (.usize 55))) <|
-      .uset p 0 u <|
+      .uset p 1 u <|
       .let (letDecl s u64Type (.lit (.uint64 66))) <|
       .sset p 2 0 s u64Type <|
       .let (letDecl r u64Type (.sproj 2 0 p)) <|

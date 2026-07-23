@@ -700,32 +700,33 @@ export class ConcreteHost {
     this.writeU32(address + HEADER_BYTES + SLOT_BYTES * operation.index, field);
   }
 
+  usizeFieldIndex(header, slot) {
+    const start = header.aux1;
+    const index = slot - start;
+    if (index < 0 || index >= header.aux2) {
+      throw new ConcreteFault({
+        kind: "usizeFieldOutOfBounds",
+        index: slot,
+        size: start + header.aux2,
+      });
+    }
+    return index;
+  }
+
   usizeProj(operation, args) {
     assert.equal(args.length, 1, "usize projection host arity mismatch");
     const [address, header] = this.constructorHeader(args[0]);
-    if (operation.index >= header.aux2) {
-      throw new ConcreteFault({
-        kind: "usizeFieldOutOfBounds",
-        index: operation.index,
-        size: header.aux2,
-      });
-    }
+    const index = this.usizeFieldIndex(header, operation.index);
     return BigInt.asIntN(64,
-      this.readU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + operation.index)));
+      this.readU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + index)));
   }
 
   usizeSet(operation, args) {
     assert.equal(args.length, 2, "usize mutation host arity mismatch");
     const [address, header] = this.constructorHeader(args[0]);
     assert.equal(typeof args[1], "bigint", "usize mutation must use the WebAssembly i64 lane");
-    if (operation.index >= header.aux2) {
-      throw new ConcreteFault({
-        kind: "usizeFieldOutOfBounds",
-        index: operation.index,
-        size: header.aux2,
-      });
-    }
-    this.writeU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + operation.index), args[1]);
+    const index = this.usizeFieldIndex(header, operation.index);
+    this.writeU64(address + HEADER_BYTES + SLOT_BYTES * (header.aux1 + index), args[1]);
   }
 
   scalarByteWidth(kind) {

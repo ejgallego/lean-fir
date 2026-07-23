@@ -54,14 +54,14 @@ function ctorRuntime() {
   const root = host.encode("object", { kind: "heap", location: 0 });
   const projected = host.importFunction({ kind: "objectProj", index: 1, result: "tobject" })(root);
   assert.deepStrictEqual(host.decode("tobject", projected), tagged(7));
-  assert.equal(host.importFunction({ kind: "usizeProj", index: 0 })(root), 3n);
+  assert.equal(host.importFunction({ kind: "usizeProj", index: 2 })(root), 3n);
   assert.equal(host.importFunction({
     kind: "scalarProj", width: 4, offset: 0, result: "uint32",
   })(root), 9);
 
   host.importFunction({ kind: "objectSet", index: 1, field: "tobject" })(
     root, host.encode("tobject", tagged(11)));
-  host.importFunction({ kind: "usizeSet", index: 0 })(
+  host.importFunction({ kind: "usizeSet", index: 2 })(
     root, host.encode("usize", { kind: "usize", value: 12n }));
   host.importFunction({ kind: "scalarSet", width: 4, offset: 0, field: "uint32" })(
     root, host.encode("uint32", scalar("uint32", 13)));
@@ -72,7 +72,7 @@ function ctorRuntime() {
     })(root)),
     tagged(11),
   );
-  assert.equal(host.importFunction({ kind: "usizeProj", index: 0 })(root), 12n);
+  assert.equal(host.importFunction({ kind: "usizeProj", index: 2 })(root), 12n);
   assert.equal(host.importFunction({
     kind: "scalarProj", width: 4, offset: 0, result: "uint32",
   })(root), 13);
