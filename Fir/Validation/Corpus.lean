@@ -1344,6 +1344,56 @@ def cases : Array Case := #[
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
     provenance := firProvenance "Read the maximum byte through ByteArray.get!" },
+  { id := "byte-array-get-empty"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[], .nat 0]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.byteArrayGet (⟨#[]⟩ : ByteArray) 0).toNat)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "pure", "index", "scalar",
+        "boundary", "out-of-bounds", "default"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance
+      "Read the default byte at index zero from an empty ByteArray through ByteArray.get!" },
+  { id := "byte-array-get-end"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[0, 127, 128, 255], .nat 4]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat (Source.byteArrayGet ⟨#[0, 127, 128, 255]⟩ 4).toNat)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "pure", "index", "scalar",
+        "boundary", "out-of-bounds", "default"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance
+      "Read the default byte at the exact end boundary through ByteArray.get!" },
+  { id := "byte-array-get-heap-oob"
+    entry := ``Source.byteArrayGet
+    args := #[.bytes #[0, 127, 128, 255], .nat Source.largeNat]
+    argSchemas := #[.bytes, .nat]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8
+        (UInt64.ofNat
+          (Source.byteArrayGet ⟨#[0, 127, 128, 255]⟩ Source.largeNat).toNat)
+    tags :=
+      #["stress", "bytes", "packed-layout", "external", "pure", "index", "scalar",
+        "boundary", "out-of-bounds", "default", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    provenance := firProvenance
+      "Read the default byte at a heap-natural index through ByteArray.get!" },
   { id := "byte-array-set-unique"
     entry := ``Source.byteArraySetUnique
     args := #[.bytes #[0, 127, 128, 255]]

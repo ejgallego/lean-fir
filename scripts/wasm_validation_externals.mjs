@@ -96,13 +96,14 @@ export const validationExternalRegistry = {
     assert.equal(args.length, 2, "ByteArray.get! external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.get! operand");
     const index = naturalValue(host, args[1], "ByteArray.get! index");
-    assert.ok(index >= 0n && index < BigInt(bytes.length),
-      `ByteArray.get! index ${index} is out of bounds`);
+    const value = index < BigInt(bytes.length)
+      ? BigInt(bytes[Number(index)])
+      : 0n;
     return {
       value: {
         kind: "scalar",
         scalarKind: "uint8",
-        value: BigInt(bytes[Number(index)]),
+        value,
       },
       world,
     };

@@ -288,8 +288,7 @@ private def byteArrayGetExternal (request : ExternalRequest) (runtime : RuntimeS
     | throw (.arityMismatch 2 request.args.size)
   let value ← externalByteArray request runtime value
   let index ← externalNat request runtime index
-  let some value := value[index]?
-    | throw (.externalFailure request.name s!"byte-array index {index} is out of bounds")
+  let value := value[index]?.getD 0
   return {
     value := .scalar (.uint8 value)
     heap := runtime.heap

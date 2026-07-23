@@ -152,9 +152,9 @@ the exact object for discovery without opening the matrix. Both verification
 commands print a compact rendering such as:
 
 ```text
-coverage results: 207/207 successful, 207/207 present, findings 0 (0 unassigned)
-coverage pair native -> v8: compared 69/69, equal 69, findings 0
-coverage consumer v8 <- lean-wasm-semantic: receipts 69/69, product references 138, unique products 138, opened 138/138 unique products with strace (<N> trace paths)
+coverage results: 216/216 successful, 216/216 present, findings 0 (0 unassigned)
+coverage pair native -> v8: compared 72/72, equal 72, findings 0
+coverage consumer v8 <- lean-wasm-semantic: receipts 72/72, product references 144, unique products 144, opened 144/144 unique products with strace (<N> trace paths)
 ```
 
 This is evidence-derived coverage, not a trusted counter channel. Offline
@@ -929,7 +929,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 69 cases.  Beyond literals,
+The compiler-generated corpus currently has 72 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -956,7 +956,10 @@ one another.  Controlled `Nat.add` cases execute a real imported runtime
 primitive with tagged inputs, a tagged-to-heap result transition, and a
 heap-natural input/result.  Runner-supplied `ByteArray` identity, size,
 indexing, and mutation fixtures validate the packed scalar-array heap ABI,
-including scalar reads of zero, high-bit, and maximum byte values.  Mutation
+including scalar reads of zero, high-bit, and maximum byte values.
+Out-of-bounds `ByteArray.get!` independently covers an empty array, the exact
+end boundary, and a heap-natural index; native Lean, LCNF, and V8 must all
+return the inhabited `UInt8` default zero.  Mutation
 separately covers a unique in-place update and a shared copy-on-write update
 that preserves the original alias.  The first controlled-effect case calls a
 validation-owned `implemented_by` primitive: native Lean records the event it
@@ -982,9 +985,9 @@ Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
 signed-integer heap object.  Externally supplied packed constructors,
 boxed-object arrays, and more effect shapes remain vertical slices with matching
 native cases.  Tagged-natural and mutable ByteArray effect arguments/results,
-packed byte-array identity, size, in-bounds indexing, and unique/shared mutation
-are supported; out-of-bounds behavior remains a controlled external-primitive
-follow-up.  The LCNF adapter retains immutable runtime snapshots immediately
+packed byte-array identity, size, in-bounds and defaulting out-of-bounds
+indexing, and unique/shared mutation are supported.  The LCNF adapter retains
+immutable runtime snapshots immediately
 before and after each successful external call, so heap effects are decoded at
 event time rather than through potentially mutated or dead final-heap
 references. The V8 adapter materializes the same schema-directed datums at the
@@ -1061,7 +1064,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 69 corpus cases, including a natural
+The default native-to-V8 matrix covers all 72 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
 five mixed-layout projections. `make validate-v8` delegates whole-corpus
