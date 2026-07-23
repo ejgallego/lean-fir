@@ -4,6 +4,11 @@ import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-r
 import { ConcreteFault, ConcreteHost } from "./concrete-host.mjs";
 
 const concreteDeclarations = [
+  "Int.add",
+  "Int.decLt",
+  "Int.natAbs",
+  "Int.ofNat",
+  "Int.sub",
   "Nat.add",
   "Nat.decEq",
   "Nat.decLe",
@@ -24,13 +29,6 @@ for (const declaration of concreteDeclarations) {
   assert.ok(Object.hasOwn(concreteArtifactExternalRegistry, declaration),
     `concrete Format registry is missing ${declaration}`);
 }
-const pendingIntegerDeclarations = [
-  "Int.add", "Int.decLt", "Int.natAbs", "Int.ofNat", "Int.sub",
-];
-for (const declaration of pendingIntegerDeclarations) {
-  assert.ok(!Object.hasOwn(concreteArtifactExternalRegistry, declaration),
-    `concrete Format registry admitted W6-dependent ${declaration}`);
-}
 
 function natural(host, value) {
   return host.decode("tobject", host.allocateNatural(value));
@@ -40,6 +38,16 @@ function readNatural(host, value) {
   if (value.kind === "tagged") return value.payload;
   assert.equal(value.kind, "heap");
   return host.readNatural(host.addressOf(value.location));
+}
+
+function integer(host, value) {
+  return host.decode("tobject", host.allocateInteger(value));
+}
+
+function readInteger(host, value) {
+  if (value.kind === "tagged") return BigInt.asIntN(32, value.payload);
+  assert.equal(value.kind, "heap");
+  return host.readInteger(host.addressOf(value.location));
 }
 
 function string(host, value) {
@@ -68,6 +76,20 @@ function invoke(host, declaration, params, result, args) {
 
 const host = new ConcreteHost([], undefined, concreteArtifactExternalRegistry);
 const huge = 0x8000000000000000n;
+
+assert.equal(readInteger(host, invoke(host, "Int.ofNat",
+  ["tobject"], "tobject", [natural(host, 0x80000000n)])), 0x80000000n);
+assert.equal(readInteger(host, invoke(host, "Int.add",
+  ["tobject", "tobject"], "tobject", [integer(host, 0x7fffffffn), integer(host, 1n)])),
+  0x80000000n);
+assert.equal(readInteger(host, invoke(host, "Int.sub",
+  ["tobject", "tobject"], "tobject", [integer(host, -0x80000000n), integer(host, 1n)])),
+  -0x80000001n);
+assert.deepStrictEqual(invoke(host, "Int.decLt",
+  ["tobject", "tobject"], "uint8", [integer(host, -0x80000001n), integer(host, 0x80000000n)]),
+  scalar("uint8", 1n));
+assert.equal(readNatural(host, invoke(host, "Int.natAbs",
+  ["tobject"], "tobject", [integer(host, -0x8000000000000001n)])), 0x8000000000000001n);
 
 assert.equal(readNatural(host, invoke(host, "Nat.add",
   ["tobject", "tobject"], "tobject", [natural(host, huge), natural(host, 9n)])), huge + 9n);
@@ -104,6 +126,11 @@ assert.equal(readNatural(host, invoke(host, "String.Internal.next",
 
 assert.equal(host.world, 0);
 assert.deepStrictEqual(host.trace.map((event) => event.name), [
+  "Int.ofNat",
+  "Int.add",
+  "Int.sub",
+  "Int.decLt",
+  "Int.natAbs",
   "Nat.add",
   "Nat.sub",
   "Nat.decEq",
@@ -121,6 +148,8 @@ assert.deepStrictEqual(host.trace.map((event) => event.name), [
 
 assert.throws(() => invoke(host, "Nat.add", ["tobject", "tobject"], "tobject",
   [string(host, "wrong kind"), natural(host, 1n)]), /expected a concrete natural object/);
+assert.throws(() => invoke(host, "Int.add", ["tobject", "tobject"], "tobject",
+  [string(host, "wrong kind"), integer(host, 1n)]), /expected a concrete integer object/);
 
 const deletedAddress = host.allocateString("deleted");
 const deletedValue = host.decode("object", deletedAddress);
@@ -128,6 +157,13 @@ host.deleteObject([deletedAddress]);
 assert.throws(() => invoke(host, "String.Internal.length", ["object"], "tobject",
   [deletedValue]), (error) => error instanceof ConcreteFault &&
     error.fault.kind === "deadObject" && error.fault.location === deletedValue.location);
+
+const deletedIntegerAddress = host.allocateInteger(-0x80000001n);
+const deletedInteger = host.decode("tobject", deletedIntegerAddress);
+host.deleteObject([deletedIntegerAddress]);
+assert.throws(() => invoke(host, "Int.natAbs", ["tobject"], "tobject",
+  [deletedInteger]), (error) => error instanceof ConcreteFault &&
+    error.fault.kind === "deadObject" && error.fault.location === deletedInteger.location);
 
 for (const [declaration, params, result, args] of [
   ["panicCore", ["erased", "tobject", "object"], "tobject",
@@ -141,5 +177,5 @@ for (const [declaration, params, result, args] of [
       error.fault.message === "unreachable Lean pretty-printing panic helper executed");
 }
 
-assert.equal(host.trace.length, 13, "failed concrete Format externals polluted the trace");
-console.log("PASS concrete Format Nat/String external families");
+assert.equal(host.trace.length, 18, "failed concrete Format externals polluted the trace");
+console.log("PASS concrete Format Int/Nat/String external families");

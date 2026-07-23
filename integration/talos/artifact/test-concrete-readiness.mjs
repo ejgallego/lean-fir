@@ -15,8 +15,8 @@ assert.equal(report.summary.artifactRejectedFixtures, 0);
 assert.equal(report.summary.readyArtifactFixtures, 44);
 assert.equal(report.summary.artifactSwitchReady, true);
 assert.equal(report.summary.sourceProbes, 13);
-assert.equal(report.summary.readySourceProbes, 10);
-assert.equal(report.summary.blockedSourceProbes, 3);
+assert.equal(report.summary.readySourceProbes, 12);
+assert.equal(report.summary.blockedSourceProbes, 1);
 assert.equal(report.summary.sourceProbeSwitchReady, false);
 assert.equal(report.summary.proofCoverageComplete, false);
 for (const id of ["delete-fault", "reference-counting"]) {
@@ -27,32 +27,12 @@ for (const id of ["delete-fault", "reference-counting"]) {
 
 const blocked = report.sourceProbes.filter((probe) => !probe.ready);
 assert.deepStrictEqual(blocked.map((probe) => probe.id), [
-  "source-pretty-format",
   "source-pretty-format-coverage",
-  "source-pretty-format-module",
 ]);
-const expectedMissingExternals = [
-  "Int.add",
-  "Int.decLt",
-  "Int.natAbs",
-  "Int.ofNat",
-  "Int.sub",
-];
-for (const probe of blocked) {
-  const externalBlocker = probe.blockers.find((item) =>
-    item.kind === "external-implementations");
-  assert.deepStrictEqual(externalBlocker?.declarations, expectedMissingExternals,
-    `${probe.id} concrete external blocker drifted`);
-}
 assert.deepStrictEqual(
-  blocked.find((probe) => probe.id === "source-pretty-format-coverage")
-    .blockers.map((item) => item.kind),
-  ["initial-runtime", "external-implementations"],
+  blocked[0].blockers.map((item) => item.kind),
+  ["initial-runtime"],
 );
-for (const probe of blocked.filter((item) => item.id !== "source-pretty-format-coverage")) {
-  assert.deepStrictEqual(probe.blockers.map((item) => item.kind),
-    ["external-implementations"]);
-}
 
 assert.ok(report.imports.length > 0);
 assert.equal(report.summary.importIdentities, report.imports.length);

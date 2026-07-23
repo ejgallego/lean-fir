@@ -84,18 +84,19 @@ retains its one exact expected concrete-layout fault. Two previously omitted
 but already executable fixtures, `reference-counting` and `delete-fault`, are
 part of that oracle-matched corpus.
 
-The same report preflights all 13 compiler-produced source artifacts. Ten are
-concrete-resolvable. The concrete registry now executes all five natural,
-eight UTF-8/string, and two unreachable-fallback declarations retained by
-`prettyM`; focused tests cover large heap naturals, Unicode byte/code-point
-navigation, fresh string results, stale inputs, and exact fallback traps. The
-three `prettyM` forms now remain blocked only by their five integer declarations;
-the coverage invocation also requires packed initial-constructor loading.
-Every module-local import site is
+The same report preflights all 13 compiler-produced source artifacts. Twelve
+are concrete-resolvable. The concrete registry executes all five integer, five
+natural, eight UTF-8/string, and two unreachable-fallback declarations retained
+by `prettyM`; focused tests cover immediate/heap integer boundaries, large heap
+naturals, Unicode byte/code-point navigation, fresh results, stale inputs, and
+exact fallback traps. Only the coverage invocation remains blocked, because
+its manifest requires packed initial-constructor loading. Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
 artifact/readiness audit: it deliberately does not claim W6 proof completion,
-concrete execution of merely preflight-ready source, or concrete execution of
-the shared 64-case validation product.
+concrete execution of every merely preflight-ready source, or concrete
+execution of the shared 64-case validation product. The invocation-free
+`prettyM` module is executed concretely by the low-level client described
+below.
 
 A standalone report can be generated after the source and artifact manifests
 exist with:
@@ -200,6 +201,17 @@ with:
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
+`call-concrete-pretty-format.mjs` keeps that boundary equally low-level while
+using the W6 concrete linear-memory representation. JavaScript writes the same
+ordinary `Format` constructor layouts and packed bytes through `ConcreteHost`,
+passes their physical `tobject` values directly to Wasm, and reads the returned
+concrete Lean string. There is no format conversion layer or function-specific
+adapter:
+
+```text
+node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
+```
+
 `module-client.mjs` is the transport-neutral loading boundary. Its core entry
 accepts Wasm bytes, the parsed invocation-free descriptor, and a caller-owned
 semantic ABI host; `fetchModuleArtifact` obtains the first two inputs through
@@ -252,7 +264,8 @@ the complete shared-product Worker. It also materializes the live-oracle
 artifact corpus under `_build`, then runs the same 43 concrete artifacts, one
 default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
-`List Nat` and Unicode string sources.
+`List Nat` and Unicode string sources, plus the invocation-free `prettyM`
+module through the same concrete raw-layout checker used by Node.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

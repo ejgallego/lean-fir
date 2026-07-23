@@ -7,6 +7,7 @@ const SLOT_BYTES = 8;
 const MAX_IMMEDIATE_PAYLOAD = 0x7fffffffn;
 const MAX_TAGGED_PAYLOAD = 0x7fffffffffffffffn;
 const STRING_UTF8_MARKER = 1;
+const INTEGER_SIGN_MAGNITUDE_MARKER = 1;
 
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
@@ -199,6 +200,23 @@ export class ConcreteHost {
           limbs,
         };
       }
+      case "integer": {
+        const value = BigInt(object.value);
+        const negative = value < 0n;
+        const limbs = this.initialNaturalLimbs(negative ? -value : value);
+        return {
+          kind: KIND.integer,
+          payloadBytes: SLOT_BYTES * limbs.length,
+          auxiliaries: {
+            aux0: INTEGER_SIGN_MAGNITUDE_MARKER,
+            aux1: limbs.length,
+            aux2: negative ? 1 : 0,
+            aux3: 0,
+          },
+          descriptor: { kind: "integer" },
+          limbs,
+        };
+      }
       case "string": {
         assert.equal(typeof object.value, "string", "initial string value must be text");
         const bytes = new TextEncoder().encode(object.value);
@@ -281,7 +299,7 @@ export class ConcreteHost {
         cell.object.usizeFields.forEach((value, index) =>
           this.writeU64(address + HEADER_BYTES +
             SLOT_BYTES * (cell.object.objectFields.length + index), BigInt(value)));
-      } else if (cell.object.kind === "natural") {
+      } else if (cell.object.kind === "natural" || cell.object.kind === "integer") {
         layout.limbs.forEach((limb, index) =>
           this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
       } else if (cell.object.kind === "string") {
@@ -474,6 +492,46 @@ export class ConcreteHost {
       value = (value << 64n) + this.readU64(address + HEADER_BYTES + SLOT_BYTES * index);
     }
     return value;
+  }
+
+  allocateInteger(value) {
+    const integer = BigInt(value);
+    if (integer >= -0x80000000n && integer <= 0x7fffffffn) {
+      return this.encodeTagged(BigInt.asUintN(32, integer));
+    }
+    const negative = integer < 0n;
+    const magnitude = negative ? -integer : integer;
+    const limbs = this.initialNaturalLimbs(magnitude);
+    const address = this.allocate(KIND.integer, SLOT_BYTES * limbs.length, {
+      aux0: INTEGER_SIGN_MAGNITUDE_MARKER,
+      aux1: limbs.length,
+      aux2: negative ? 1 : 0,
+      aux3: 0,
+    });
+    limbs.forEach((limb, index) =>
+      this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
+    this.descriptors.set(address, { kind: "integer" });
+    return address;
+  }
+
+  readInteger(address, header = this.readHeader(address)) {
+    assert.equal(header.kind, KIND.integer, "expected a concrete integer object");
+    assert.equal(header.aux0, INTEGER_SIGN_MAGNITUDE_MARKER,
+      "unknown concrete integer representation");
+    assert.ok(header.aux2 === 0 || header.aux2 === 1,
+      "concrete integer sign must be zero or one");
+    assert.equal(header.aux3, 0, "concrete integer reserved header lane must be zero");
+    assert.ok(header.aux1 > 0, "concrete integer must contain a magnitude limb");
+    assert.equal(header.bytes, align8(HEADER_BYTES + SLOT_BYTES * header.aux1),
+      "concrete integer allocation extent is noncanonical");
+    let magnitude = 0n;
+    for (let index = header.aux1 - 1; index >= 0; --index) {
+      magnitude = (magnitude << 64n) +
+        this.readU64(address + HEADER_BYTES + SLOT_BYTES * index);
+    }
+    assert.ok(header.aux2 === 0 || magnitude !== 0n,
+      "concrete integer cannot encode negative zero");
+    return header.aux2 === 1 ? -magnitude : magnitude;
   }
 
   allocateString(value) {
@@ -1328,6 +1386,9 @@ export class ConcreteHost {
     }
     if (header.kind === KIND.natural) {
       return { kind: "natural", value: this.readNatural(address, header).toString() };
+    }
+    if (header.kind === KIND.integer) {
+      return { kind: "integer", value: this.readInteger(address, header).toString() };
     }
     if (header.kind === KIND.string) {
       return { kind: "string", value: this.readString(address, header) };

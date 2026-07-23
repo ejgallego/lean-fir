@@ -25,6 +25,21 @@ function naturalResult(host, value) {
   return host.decode("tobject", host.allocateNatural(natural));
 }
 
+function integerValue(host, value, context) {
+  if (value.kind === "tagged") {
+    assert.ok(value.payload >= 0n && value.payload <= 0xffffffffn,
+      `${context} immediate integer payload is out of range`);
+    return BigInt.asIntN(32, value.payload);
+  }
+  assert.equal(value.kind, "heap", `${context} must be a tagged or heap integer`);
+  const address = host.addressOf(value.location);
+  return host.readInteger(address);
+}
+
+function integerResult(host, value) {
+  return host.decode("tobject", host.allocateInteger(value));
+}
+
 function stringValue(host, value, context) {
   assert.equal(value.kind, "heap", `${context} must be a heap string`);
   const address = host.addressOf(value.location);
@@ -54,6 +69,34 @@ function unreachablePanicHelper({ declaration }) {
 }
 
 export const concreteFormatExternalRegistry = Object.freeze({
+  "Int.ofNat": ({ args, host, world }) => {
+    assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
+    const value = naturalValue(host, args[0], "Int.ofNat operand");
+    return { value: integerResult(host, value), world };
+  },
+  "Int.decLt": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Int.decLt external arity mismatch");
+    const left = integerValue(host, args[0], "Int.decLt left operand");
+    const right = integerValue(host, args[1], "Int.decLt right operand");
+    return { value: boolResult(left < right), world };
+  },
+  "Int.natAbs": ({ args, host, world }) => {
+    assert.equal(args.length, 1, "Int.natAbs external arity mismatch");
+    const value = integerValue(host, args[0], "Int.natAbs operand");
+    return { value: naturalResult(host, value < 0n ? -value : value), world };
+  },
+  "Int.sub": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Int.sub external arity mismatch");
+    const left = integerValue(host, args[0], "Int.sub left operand");
+    const right = integerValue(host, args[1], "Int.sub right operand");
+    return { value: integerResult(host, left - right), world };
+  },
+  "Int.add": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Int.add external arity mismatch");
+    const left = integerValue(host, args[0], "Int.add left operand");
+    const right = integerValue(host, args[1], "Int.add right operand");
+    return { value: integerResult(host, left + right), world };
+  },
   "Nat.add": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Nat.add external arity mismatch");
     const left = naturalValue(host, args[0], "Nat.add left operand");
