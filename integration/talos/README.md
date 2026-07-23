@@ -119,8 +119,9 @@ steps, the compiler/adapter cache shape, zero-argument declaration-body
 packages, hit/miss WP composition, miss-publication-to-hit facts, recursive
 `CodeWP`, and the checked-export boundary. The first concrete body family
 composes witness-growing natural and UTF-8 string literals with the generated
-return suffix across `.tobject` and `.object` result lanes. Internal direct and
-recursive calls now use ordinary Wasm calls.
+return suffix across `.tobject` and `.object` result lanes; constructor
+allocation bodies retain either tagged or heap-backed refinement through that
+same suffix. Internal direct and recursive calls now use ordinary Wasm calls.
 Statically tracked closures use a generated metadata trampoline with typed
 capture projection, semantic underapplication, and saturated direct dispatch;
 the supported gate rejects oversaturation and unknown closure provenance.

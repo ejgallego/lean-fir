@@ -327,6 +327,95 @@ theorem cachedDeclarationBodyWP_stringLiteral
       (literal sourceRuntime (.str value)).2)
     nextState (localUpdate_of_set? targetSet).1 resultEq
 
+/-- Cached-declaration body family for generated constructor allocation and
+return. The operation premises deliberately retain either tagged or
+heap-backed constructor refinement, so the cache boundary does not choose a
+physical representation. -/
+theorem cachedDeclarationBodyWP_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceValue : Value}
+    {initial nextStore : Wasm.Store Host}
+    {targetFunction : Wasm.Function} {updated : Wasm.Locals}
+    {fvarIds : List Lean.FVarId} {indices : List Nat}
+    {physicalArgs : List Wasm.Value} {semanticArgs : Array Value}
+    {resultIndex : Nat} {word : Word32}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .ctor info args)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok (fvarIds.map Fir.Wasm.Instruction.localGet ++
+        [.call (.runtime (.allocCtor info fieldKinds resultKind))]))
+    (argumentsFound : List.Forall₂
+      (fun fvarId index =>
+        findFVar? (functionBindings sourceFunction) fvarId = some index)
+      fvarIds indices)
+    (callFound : callIndex? sourceModule
+      (.runtime (.allocCtor info fieldKinds resultKind)) = some id)
+    (evaluated : evalArgs [] args = .ok semanticArgs)
+    (semanticStep : allocCtor sourceRuntime info semanticArgs =
+      .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime []
+      initial (targetFunction.toLocals []) witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (hGets : List.Forall₂
+      (fun index physical =>
+        (targetFunction.toLocals []).get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation :
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (targetSet :
+      (targetFunction.toLocals []).set? resultIndex
+          (.i32 (UInt32.ofNat word.value)) =
+        some updated)
+    (paramsEq : targetFunction.numParams = 0)
+    (resultEq : targetFunction.results.length = 1)
+    (bodyEq : targetFunction.body =
+      indices.map Wasm.Instruction.localGet ++ [
+        .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+    CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
+      sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
+      nextStore witness (.i32 (UInt32.ofNat word.value)) := by
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
+  rw [bodyEq]
+  apply codeWP_constructor_let valueEq valueCompiled argumentsFound callFound
+    evaluated semanticStep initialRelated resultFound resultKindAt hGets hImp
+    hSat hi hContract hParams hResults operation extension nextRuntimeRelated
+    failureClear valueRelated targetSet
+  have nextState := initialRelated.bindAfter extension nextRuntimeRelated
+    failureClear resultFound resultKindAt valueRelated targetSet
+  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+    (lookup_bind_self [] decl.fvarId sourceValue)
+    nextState (localUpdate_of_set? targetSet).1 resultEq
+
 /-- A per-declaration body package supplies the store-specific, fuel-free
 termination theorem expected by generated direct calls. -/
 theorem CachedDeclarationBodyWP.terminatesWith

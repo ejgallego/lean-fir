@@ -2782,6 +2782,17 @@ showing that the cache handoff is representation-polymorphic across the
 natural `.tobject` and string `.object` lanes. No shared semantic contract or
 executable ABI changed.
 
+W6.6ce packages generated constructor allocation followed by return.
+`cachedDeclarationBodyWP_constructor` composes compiler-adapted argument
+loads, the concrete `allocCtor` call, source allocation, target local write,
+representation-witness transport, and the exact return suffix into the same
+cached-body interface. The theorem is representation-polymorphic: its existing
+operation/value-refinement premises admit both tagged empty constructors and
+fresh heap-backed constructors without teaching the cache layer either
+layout. This aligns the proof boundary with the twice-called cached
+constructor-graph execution already covered by the concrete artifact lane. No
+shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
