@@ -2747,6 +2747,20 @@ callee/body proof as the interprocedural premise supplied by the existing
 fuel-free termination bridge. Existing tagged-result and structured-failure
 gaps are unchanged; no shared semantic contract or executable ABI changed.
 
+W6.6cb makes lazy caching's per-declaration proof boundary explicit.
+`compileCachedLetValue_adapted` anchors the concrete proof to the lowerer's
+exact flag test, miss body, and cached-value reload after Talos adaptation.
+`CachedDeclarationBodyWP` requires the generated zero-argument,
+singleton-result signature and a concrete `CodeWP` for the declaration body;
+an empty-caller-tail proof now lifts to every caller remainder structurally
+through Wasm's function postcondition, then supplies the fuel-free direct-call
+premise consumed by the existing miss proof. The two physical publication
+facts are factored out and feed the existing hit theorem on the next
+invocation, with the host state unchanged by that hit. This closes the generic
+compiler/body/miss/publication/hit chain; declaration-specific body-package
+instances remain incremental composition work. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
