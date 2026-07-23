@@ -145,8 +145,10 @@ node test-concrete-initial-runtime.mjs
 node run-concrete-source-artifacts.mjs _build
 node call-concrete-pretty-format-invocation.mjs \
   _build/source-pretty-format-coverage.wasm
+make -C "$here/../../.." validate-v8
+node check-concrete-validation-products.mjs \
+  "$here/../../../_build/validation-v8"
 if [[ -n "${FIR_BROWSER:-}" ]]; then
-  make -C "$here/../../.." validate-v8
   ./browser-check.sh "$FIR_BROWSER"
   ./browser-validation-check.sh "$FIR_BROWSER"
 fi

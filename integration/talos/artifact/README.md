@@ -98,8 +98,13 @@ packed extent, and writes all four integer widths little-endian. The
 all-constructor `prettyM` manifest now round-trips its 23-cell initial heap and
 executes concretely in Node and the browser. Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
-artifact/readiness audit: it deliberately does not claim W6 proof completion,
-or concrete execution of the shared validation product bundle.
+artifact/readiness audit: it deliberately does not claim W6 proof completion.
+The shared validation product gate now executes 65 of 95 compiler-produced
+cases through concrete wasm32 memory in both Node and the browser, comparing
+each result and projected Nat effect with the canonical V8 observation. The
+remaining 30 cases fail closed against an explicit inventory because they all
+contain initial `ByteArray` objects; some additionally require the matching
+concrete `ByteArray` external family.
 
 A standalone report can be generated after the source and artifact manifests
 exist with:
@@ -277,7 +282,9 @@ default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
 complete 13-probe compiler source inventory—including both initial-runtime
 `prettyM` invocations and the invocation-free raw-layout module—through the
-same concrete checkers used by Node.
+same concrete checkers used by Node. The shared-product Worker independently
+executes the 65 non-`ByteArray` products through the concrete host after their
+semantic executions and verifies the exact 30-case blocker inventory.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

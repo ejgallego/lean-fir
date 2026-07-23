@@ -20,6 +20,8 @@ assert.equal(report.summary.blockedSourceProbes, 0);
 assert.equal(report.summary.sourceProbeSwitchReady, true);
 assert.equal(report.summary.proofCoverageComplete, false);
 assert.ok(!report.notClaimed.some((claim) => claim.includes("source probe")));
+assert.ok(report.notClaimed.includes(
+  "concrete execution of 30 ByteArray-backed shared validation products"));
 for (const id of ["delete-fault", "reference-counting"]) {
   const fixture = report.artifactFixtures.find((item) => item.id === id);
   assert.equal(fixture?.status, "success");

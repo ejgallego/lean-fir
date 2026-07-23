@@ -6,6 +6,11 @@ import {
   SEMANTIC_WASM_CONTRACT,
   VALIDATION_PROTOCOL_VERSION,
 } from "../../../scripts/wasm_validation_case.mjs";
+import {
+  CONCRETE_VALIDATION_BLOCKED_CASES,
+  concreteValidationBlockers,
+  executeConcreteValidationCase,
+} from "./concrete-validation-case.mjs";
 
 const validationPath = new URLSearchParams(globalThis.location.search)
   .get("validation") ?? "_build/validation-v8";
@@ -134,6 +139,8 @@ async function runValidationCorpus() {
   assert.equal(descriptorById.size, corpus.cases.length,
     "validation corpus contains duplicate descriptors");
 
+  const concreteExecuted = [];
+  const concreteBlocked = [];
   for (const caseId of matrix.selectedCases) {
     const descriptor = descriptorById.get(caseId);
     assert.ok(descriptor, `validation corpus is missing ${caseId}`);
@@ -157,10 +164,39 @@ async function runValidationCorpus() {
     assert.equal(expected.backend, ENGINE, `${caseId} canonical result backend mismatch`);
     assert.deepStrictEqual(expected.outcome, { success: { observation } },
       `${caseId} browser observation disagrees with canonical ${ENGINE}`);
+
+    const blockers = concreteValidationBlockers(compilerManifest);
+    if (blockers.length > 0) {
+      concreteBlocked.push({ caseId, blockers });
+    } else {
+      const concreteObservation = await executeConcreteValidationCase({
+        caseId,
+        descriptor,
+        compilerManifest,
+        bytes: moduleBytes,
+      });
+      assert.deepStrictEqual(expected.outcome,
+        { success: { observation: concreteObservation } },
+        `${caseId} browser concrete observation disagrees with canonical ${ENGINE}`);
+      concreteExecuted.push(caseId);
+    }
   }
 
+  assert.deepStrictEqual(
+    concreteBlocked.map((item) => item.caseId).sort(),
+    [...CONCRETE_VALIDATION_BLOCKED_CASES].sort(),
+    "browser concrete validation blocker inventory drifted",
+  );
+  assert.ok(concreteBlocked.every((item) =>
+    item.blockers.some((blocker) =>
+      blocker.kind === "initial-runtime-object" &&
+      blocker.objectKind === "byteArray")),
+  "every browser-blocked validation case must expose the ByteArray layout boundary");
   return `PASS browser Worker Fetch shared semantic Wasm corpus ` +
-    `(${matrix.selectedCases.length} cases, ${bundle.bundleSha256.slice(0, 12)})`;
+    `(${matrix.selectedCases.length} semantic, ` +
+    `${concreteExecuted.length} concrete, ` +
+    `${concreteBlocked.length} ByteArray-blocked, ` +
+    `${bundle.bundleSha256.slice(0, 12)})`;
 }
 
 try {

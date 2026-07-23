@@ -323,7 +323,7 @@ export async function buildConcreteReadinessReport(
     imports,
     notClaimed: [
       "proof completeness while W6 coverage rows remain partial or pending",
-      "concrete execution of the shared validation product bundle",
+      "concrete execution of 30 ByteArray-backed shared validation products",
     ],
   });
 }
