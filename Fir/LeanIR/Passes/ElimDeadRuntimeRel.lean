@@ -2814,6 +2814,168 @@ theorem ShadowRuntimeRel.setUSizeSlotLeftUnreachable
   rw [if_pos lower, dif_pos bounded]
   simpa [index, replacement] using effect
 
+/-- A retained packed-scalar write updates the same `(width, offset)` entry
+inside one mapped constructor pair. Scalar fields contain no ownership edges,
+so the existing paired-cell replacement theorem applies directly. -/
+theorem ShadowRuntimeRel.setScalarFieldBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (leftLive : leftCell.live = true)
+    (leftObjectEq : leftCell.object = .ctor leftObject)
+    (width offset : Nat) (field : ScalarValue) :
+    ∃ leftResult rightResult,
+      setScalarField left (.object (.heap leftLocation)) width offset
+          (.scalar field) = .ok leftResult ∧
+      setScalarField right (.object (.heap rightLocation)) width offset
+          (.scalar field) = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have mappedSame : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have leftCellSame : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  have rightLive : rightCell.live = true := by
+    rw [← cells.2.2.1]
+    exact leftLive
+  have objects := cells.2.2.2
+  generalize rightObjectEq : rightCell.object = targetObject at objects
+  rw [leftObjectEq] at objects
+  cases objects with
+  | ctor tag objectFields usizes scalars =>
+      rename_i rightObject
+      let entry : ScalarField := { width, offset, value := field }
+      let leftFields := entry :: leftObject.scalarFields.filter fun old =>
+        old.width != width || old.offset != offset
+      let rightFields := entry :: rightObject.scalarFields.filter fun old =>
+        old.width != width || old.offset != offset
+      have fieldsEq : leftFields = rightFields := by
+        simp [leftFields, rightFields, scalars]
+      let leftReplacement : HeapCell :=
+        { leftCell with object := .ctor {
+            leftObject with scalarFields := leftFields } }
+      let rightReplacement : HeapCell :=
+        { rightCell with object := .ctor {
+            rightObject with scalarFields := rightFields } }
+      have replacement :
+          HeapCellRel rho leftReplacement rightReplacement := by
+        refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+        dsimp only [leftReplacement, rightReplacement]
+        exact @HeapObjectRel.ctor rho
+          { leftObject with scalarFields := leftFields }
+          { rightObject with scalarFields := rightFields }
+          tag objectFields usizes fieldsEq
+      have leftOwned :
+          leftReplacement.object.ownedValues =
+            leftCell.object.ownedValues := by
+        simp [leftReplacement, leftObjectEq, HeapObject.ownedValues]
+      have rightOwned :
+          rightReplacement.object.ownedValues =
+            rightCell.object.ownedValues := by
+        simp [rightReplacement, rightObjectEq, HeapObject.ownedValues]
+      rcases related.setCellBoth mapping leftFound rightFound
+          leftOwned rightOwned replacement with
+        ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+      refine ⟨leftResult, rightResult, ?_, ?_, next⟩
+      · have constructor :
+            getConstructor left (.object (.heap leftLocation)) =
+              .ok (leftLocation, leftCell, leftObject) := by
+          simp [getConstructor, getLiveCell, leftFound, leftLive,
+            leftObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setScalarField modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        simpa [entry, leftFields, leftReplacement] using leftEffect
+      · have constructor :
+            getConstructor right (.object (.heap rightLocation)) =
+              .ok (rightLocation, rightCell, rightObject) := by
+          simp [getConstructor, getLiveCell, rightFound, rightLive,
+            rightObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setScalarField modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        simpa [entry, rightFields, rightReplacement] using rightEffect
+
+/-- Interpreter-facing retained scalar write: related operands and one
+successful source mutation determine the identical packed-scalar update on
+the related target constructor. -/
+theorem ShadowRuntimeRel.setScalarFieldBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (fields : ValueRel rho leftField rightField)
+    (sourceEffect :
+      setScalarField left leftObject width offset leftField = .ok leftResult) :
+    ∃ rightResult,
+      setScalarField right rightObject width offset rightField =
+          .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases fields with
+  | tagged payload => simp [setScalarField] at sourceEffect
+  | heap fieldMapping => simp [setScalarField] at sourceEffect
+  | usize field => simp [setScalarField] at sourceEffect
+  | erased => simp [setScalarField] at sourceEffect
+  | reuseNone => simp [setScalarField] at sourceEffect
+  | reuseSome fieldMapping => simp [setScalarField] at sourceEffect
+  | scalar field =>
+      cases objects with
+      | tagged payload =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | usize value =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | scalar value =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | erased =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | reuseNone =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | reuseSome mapping =>
+          simp [setScalarField, modifyConstructor, getConstructor,
+            Bind.bind, Except.bind] at sourceEffect
+      | heap mapping =>
+          rename_i leftLocation rightLocation
+          have originalSourceEffect := sourceEffect
+          unfold setScalarField modifyConstructor at sourceEffect
+          simp only [Bind.bind, Except.bind] at sourceEffect
+          generalize constructorEq :
+            getConstructor left (.object (.heap leftLocation)) =
+              constructorResult at sourceEffect
+          cases constructorResult with
+          | error fault =>
+              simp at sourceEffect
+          | ok result =>
+              obtain ⟨resultLocation, leftCell, leftConstructor⟩ := result
+              simp only at sourceEffect
+              rcases getConstructor_heap_spec constructorEq with
+                ⟨resultLocationEq, leftFound, leftLive, leftObjectEq⟩
+              subst resultLocation
+              have reachable :
+                  Reachable left.heap (runtimeRoots left leftExtra)
+                    leftLocation := by
+                exact .root (extra_subset_runtimeRoots left leftExtra
+                  (.object (.heap leftLocation)) objectRoot)
+              rcases related.setScalarFieldBoth mapping reachable leftFound
+                  leftLive leftObjectEq width offset field with
+                ⟨computedLeft, rightResult, leftEffect, rightEffect, next⟩
+              rw [originalSourceEffect] at leftEffect
+              cases leftEffect
+              exact ⟨rightResult, rightEffect, next⟩
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable
