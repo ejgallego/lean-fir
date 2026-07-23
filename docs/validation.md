@@ -288,12 +288,14 @@ participating adapter gets one `prepare_manifest` pass.  The LCNF adapter alone
 requires and canonicalizes `requiredLcnfForms`, `requiredExecutedLcnfForms`,
 `requiredExecutedLcnfFormCounts`, `requiredExternals`, and
 `requiredExecutedExternals`, plus `requiredExecutedExternalCounts`. Count
-requirements are positive, unique by form or external name, and may only
-strengthen an already-required executed form or external. Each requirement has
-an optional inclusive maximum no smaller than its minimum; equal bounds express
-an exact count, while `null` remains minimum-only. Effect projections retain
-the independent invariant that every projected external is both present and
-executed. Thus a
+requirements are nonnegative, unique by form or external name, and may only
+strengthen a corresponding static or executed requirement. Each requirement
+has an optional inclusive maximum no smaller than its minimum; equal bounds
+express an exact count, while `null` remains minimum-only. A zero minimum is
+permitted only with a zero maximum: that name must be statically required and
+must not be required executed, preventing a misspelled or contradictory
+path-exclusion claim. Effect projections retain the independent invariant that
+every projected external is both present and executed. Thus a
 `native`–`v8` or `v8`–`talos` run does not acquire LCNF obligations merely
 because the current native corpus happens to emit them.
 
@@ -901,7 +903,9 @@ obligations. The harness requires count telemetry for every LCNF result,
 validates it independently, checks that its keys exactly match
 `executed-lcnf-forms`, and reports counts below or above their inclusive
 bounds. Corpus-wide summaries retain summed observations, required minima, and
-bounded maxima.
+bounded maxima. Per-case `requiredObservations` materializes every obligation's
+observed count, including zero even though the positive-only runtime telemetry
+correctly omits absent forms.
 
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
@@ -918,6 +922,8 @@ that must exactly match `executed-externals`.
 `requiredExecutedExternalCounts` supplies per-symbol
 `{external, minimum, maximum}` obligations, and the coverage report retains
 both per-case bound violations and corpus-wide required and observed totals.
+The same exact-zero convention asserts that a statically retained external was
+not dispatched on the selected path.
 
 The LCNF backend also emits `missing-externals` and
 `missing-executed-externals`.  The harness computes both missing sets itself,

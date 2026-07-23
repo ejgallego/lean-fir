@@ -61,7 +61,10 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
             return sorted(values)
 
         def checked_count_requirements(
-            field_name: str, name_key: str, required_names: list[str]
+            field_name: str,
+            name_key: str,
+            static_required_names: list[str],
+            executed_required_names: list[str],
         ) -> list[dict]:
             requirements = descriptor[field_name]
             if not isinstance(requirements, list):
@@ -78,7 +81,7 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                     or not requirement[name_key]
                     or not isinstance(requirement["minimum"], int)
                     or isinstance(requirement["minimum"], bool)
-                    or requirement["minimum"] <= 0
+                    or requirement["minimum"] < 0
                     or (
                         requirement["maximum"] is not None
                         and (
@@ -86,6 +89,10 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                             or isinstance(requirement["maximum"], bool)
                             or requirement["maximum"] < requirement["minimum"]
                         )
+                    )
+                    or (
+                        requirement["minimum"] == 0
+                        and requirement["maximum"] != 0
                     )
                 ):
                     raise ValidationError(
@@ -104,11 +111,28 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                         "maximum": requirement["maximum"],
                     }
                 )
-            if not counted_names <= set(required_names):
+            positive_names = {
+                requirement[name_key]
+                for requirement in prepared_requirements
+                if requirement["minimum"] > 0
+            }
+            zero_names = counted_names - positive_names
+            kind = "LCNF forms" if name_key == "form" else "externals"
+            if not positive_names <= set(executed_required_names):
                 raise ValidationError(
                     f"native corpus manifest/{case_id}: counted executed "
-                    f"{'LCNF forms' if name_key == 'form' else 'externals'} "
+                    f"{kind} "
                     "must also be required"
+                )
+            if not zero_names <= set(static_required_names):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: zero-counted {kind} "
+                    "must also be statically required"
+                )
+            if zero_names & set(executed_required_names):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: zero-counted {kind} "
+                    "cannot also be required executed"
                 )
             return sorted(
                 prepared_requirements,
@@ -118,7 +142,10 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
         required_forms = checked_names("requiredLcnfForms")
         required_executed_forms = checked_names("requiredExecutedLcnfForms")
         prepared_count_requirements = checked_count_requirements(
-            "requiredExecutedLcnfFormCounts", "form", required_executed_forms
+            "requiredExecutedLcnfFormCounts",
+            "form",
+            required_forms,
+            required_executed_forms,
         )
 
         required_externals = checked_names("requiredExternals")
@@ -126,6 +153,7 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
         prepared_external_count_requirements = checked_count_requirements(
             "requiredExecutedExternalCounts",
             "external",
+            required_externals,
             required_executed_externals,
         )
 
@@ -233,6 +261,19 @@ def named_count_items(
     ]
 
 
+def required_count_observations(
+    requirements: list[dict], observed: dict[str, int], name_key: str
+) -> list[dict]:
+    """Project every required name to an explicit observed count, including zero."""
+    return [
+        {
+            name_key: requirement[name_key],
+            "count": observed.get(requirement[name_key], 0),
+        }
+        for requirement in requirements
+    ]
+
+
 def unsatisfied_count_requirements(
     requirements: list[dict], observed: dict[str, int], name_key: str
 ) -> list[dict]:
@@ -296,6 +337,8 @@ def coverage_report(
     executed_count_valid_diagnostic_count = 0
     executed_count_requirement_count = 0
     executed_count_upper_bound_case_count = 0
+    executed_count_zero_case_count = 0
+    executed_count_zero_requirement_count = 0
     executed_count_missing_count = 0
     executed_count_required_totals: dict[str, int] = {}
     executed_count_bounded_maximum_totals: dict[str, int] = {}
@@ -316,6 +359,8 @@ def coverage_report(
     executed_external_count_valid_diagnostic_count = 0
     executed_external_count_requirement_count = 0
     executed_external_count_upper_bound_case_count = 0
+    executed_external_count_zero_case_count = 0
+    executed_external_count_zero_requirement_count = 0
     executed_external_count_missing_count = 0
     executed_external_count_required_totals: dict[str, int] = {}
     executed_external_count_bounded_maximum_totals: dict[str, int] = {}
@@ -363,6 +408,10 @@ def coverage_report(
             requirement["maximum"] is not None
             for requirement in required_executed_counts
         )
+        executed_count_zero_counts_active = any(
+            requirement["minimum"] == 0
+            for requirement in required_executed_counts
+        )
         static_external_obligations_active = bool(required_static_externals)
         executed_external_obligations_active = bool(required_executed_externals)
         executed_external_count_obligations_active = bool(
@@ -370,6 +419,10 @@ def coverage_report(
         )
         executed_external_count_upper_bounds_active = any(
             requirement["maximum"] is not None
+            for requirement in required_executed_external_counts
+        )
+        executed_external_count_zero_counts_active = any(
+            requirement["minimum"] == 0
             for requirement in required_executed_external_counts
         )
         missing_static = sorted(set(required_static) - set(observed_static))
@@ -406,6 +459,11 @@ def coverage_report(
         executed_count_requirement_count += int(executed_count_obligations_active)
         executed_count_upper_bound_case_count += int(
             executed_count_upper_bounds_active
+        )
+        executed_count_zero_case_count += int(executed_count_zero_counts_active)
+        executed_count_zero_requirement_count += sum(
+            requirement["minimum"] == 0
+            for requirement in required_executed_counts
         )
         executed_count_missing_count += len(unsatisfied_executed_counts)
         for requirement in required_executed_counts:
@@ -454,6 +512,13 @@ def coverage_report(
         )
         executed_external_count_upper_bound_case_count += int(
             executed_external_count_upper_bounds_active
+        )
+        executed_external_count_zero_case_count += int(
+            executed_external_count_zero_counts_active
+        )
+        executed_external_count_zero_requirement_count += sum(
+            requirement["minimum"] == 0
+            for requirement in required_executed_external_counts
         )
         executed_external_count_missing_count += len(
             unsatisfied_executed_external_counts
@@ -596,7 +661,11 @@ def coverage_report(
                         ),
                         "obligationsActive": executed_count_obligations_active,
                         "upperBoundsActive": executed_count_upper_bounds_active,
+                        "zeroCountsActive": executed_count_zero_counts_active,
                         "required": required_executed_counts,
+                        "requiredObservations": required_count_observations(
+                            required_executed_counts, observed_count_map, "form"
+                        ),
                         "observed": named_count_items(
                             observed_count_map, "form", "count"
                         ),
@@ -634,7 +703,15 @@ def coverage_report(
                             "upperBoundsActive": (
                                 executed_external_count_upper_bounds_active
                             ),
+                            "zeroCountsActive": (
+                                executed_external_count_zero_counts_active
+                            ),
                             "required": required_executed_external_counts,
+                            "requiredObservations": required_count_observations(
+                                required_executed_external_counts,
+                                observed_external_count_map,
+                                "external",
+                            ),
                             "observed": named_count_items(
                                 observed_external_count_map, "external", "count"
                             ),
@@ -664,6 +741,8 @@ def coverage_report(
                 "formCounts": {
                     "casesWithRequirements": executed_count_requirement_count,
                     "casesWithUpperBounds": executed_count_upper_bound_case_count,
+                    "casesWithZeroRequirements": executed_count_zero_case_count,
+                    "zeroRequirementCount": executed_count_zero_requirement_count,
                     "casesWithDiagnostics": executed_count_diagnostic_count,
                     "casesWithValidDiagnostics": (
                         executed_count_valid_diagnostic_count
@@ -711,6 +790,12 @@ def coverage_report(
                         ),
                         "casesWithUpperBounds": (
                             executed_external_count_upper_bound_case_count
+                        ),
+                        "casesWithZeroRequirements": (
+                            executed_external_count_zero_case_count
+                        ),
+                        "zeroRequirementCount": (
+                            executed_external_count_zero_requirement_count
                         ),
                         "casesWithDiagnostics": (
                             executed_external_count_diagnostic_count

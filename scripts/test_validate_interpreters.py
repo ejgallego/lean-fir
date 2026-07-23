@@ -500,6 +500,8 @@ class HarnessTests(unittest.TestCase):
             "oset=2",
             [{"form": "oset", "minimum": 2}],
             [{"form": "oset", "minimum": 0, "maximum": None}],
+            [{"form": "oset", "minimum": 0, "maximum": 1}],
+            [{"form": "oset", "minimum": -1, "maximum": 0}],
             [{"form": "oset", "minimum": True, "maximum": None}],
             [{"form": "", "minimum": 2, "maximum": None}],
             [{"form": "oset", "minimum": 2, "maximum": 1}],
@@ -545,6 +547,53 @@ class HarnessTests(unittest.TestCase):
         ):
             harness.manifest_from_output(
                 json.dumps(unrequired_count), ["native", "--manifest"]
+            )
+
+        zero_count = descriptor(
+            "case",
+            forms=["oset", "return"],
+            executed_forms=["return"],
+            executed_form_counts=[
+                {"form": "oset", "minimum": 0, "maximum": 0}
+            ],
+        )
+        prepared = harness.manifest_from_output(
+            json.dumps(zero_count), ["native", "--manifest"]
+        )
+        self.assertEqual(
+            prepared[0]["requiredExecutedLcnfFormCounts"],
+            [{"form": "oset", "minimum": 0, "maximum": 0}],
+        )
+
+        zero_not_static = descriptor(
+            "case",
+            executed_forms=["return"],
+            executed_form_counts=[
+                {"form": "oset", "minimum": 0, "maximum": 0}
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "zero-counted LCNF forms must also be statically required",
+        ):
+            harness.manifest_from_output(
+                json.dumps(zero_not_static), ["native", "--manifest"]
+            )
+
+        zero_required_executed = descriptor(
+            "case",
+            forms=["oset", "return"],
+            executed_forms=["oset", "return"],
+            executed_form_counts=[
+                {"form": "oset", "minimum": 0, "maximum": 0}
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "zero-counted LCNF forms cannot also be required executed",
+        ):
+            harness.manifest_from_output(
+                json.dumps(zero_required_executed), ["native", "--manifest"]
             )
 
     def test_duplicate_manifest_id_rejected(self) -> None:
@@ -595,6 +644,8 @@ class HarnessTests(unittest.TestCase):
             "Nat.add=2",
             [{"external": "Nat.add", "minimum": 2}],
             [{"external": "Nat.add", "minimum": 0, "maximum": None}],
+            [{"external": "Nat.add", "minimum": 0, "maximum": 1}],
+            [{"external": "Nat.add", "minimum": -1, "maximum": 0}],
             [{"external": "Nat.add", "minimum": True, "maximum": None}],
             [{"external": "", "minimum": 2, "maximum": None}],
             [{"external": "Nat.add", "minimum": 2, "maximum": 1}],
@@ -647,6 +698,51 @@ class HarnessTests(unittest.TestCase):
         ):
             harness.manifest_from_output(
                 json.dumps(unrequired_count), ["native", "--manifest"]
+            )
+
+        zero_count = descriptor(
+            "case",
+            externals=["Nat.add"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 0, "maximum": 0}
+            ],
+        )
+        prepared = harness.manifest_from_output(
+            json.dumps(zero_count), ["native", "--manifest"]
+        )
+        self.assertEqual(
+            prepared[0]["requiredExecutedExternalCounts"],
+            [{"external": "Nat.add", "minimum": 0, "maximum": 0}],
+        )
+
+        zero_not_static = descriptor(
+            "case",
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 0, "maximum": 0}
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "zero-counted externals must also be statically required",
+        ):
+            harness.manifest_from_output(
+                json.dumps(zero_not_static), ["native", "--manifest"]
+            )
+
+        zero_required_executed = descriptor(
+            "case",
+            externals=["Nat.add"],
+            executed_externals=["Nat.add"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 0, "maximum": 0}
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "zero-counted externals cannot also be required executed",
+        ):
+            harness.manifest_from_output(
+                json.dumps(zero_required_executed), ["native", "--manifest"]
             )
 
     def test_effect_projections_are_required_and_validated(self) -> None:
@@ -6103,6 +6199,8 @@ class HarnessTests(unittest.TestCase):
                 "formCounts": {
                     "casesWithRequirements": 0,
                     "casesWithUpperBounds": 0,
+                    "casesWithZeroRequirements": 0,
+                    "zeroRequirementCount": 0,
                     "casesWithDiagnostics": 2,
                     "casesWithValidDiagnostics": 2,
                     "requiredMinimums": [],
@@ -6250,6 +6348,7 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(counts["diagnosticValid"])
         self.assertTrue(counts["obligationsActive"])
         self.assertTrue(counts["upperBoundsActive"])
+        self.assertFalse(counts["zeroCountsActive"])
         self.assertEqual(
             counts["required"],
             [{"form": "oset", "minimum": 2, "maximum": 2}],
@@ -6262,6 +6361,10 @@ class HarnessTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
+            counts["requiredObservations"],
+            [{"form": "oset", "count": 1}],
+        )
+        self.assertEqual(
             counts["unsatisfied"],
             [{"form": "oset", "minimum": 2, "maximum": 2, "observed": 1}],
         )
@@ -6270,6 +6373,8 @@ class HarnessTests(unittest.TestCase):
             {
                 "casesWithRequirements": 1,
                 "casesWithUpperBounds": 1,
+                "casesWithZeroRequirements": 0,
+                "zeroRequirementCount": 0,
                 "casesWithDiagnostics": 1,
                 "casesWithValidDiagnostics": 1,
                 "requiredMinimums": [{"form": "oset", "minimum": 2}],
@@ -6304,6 +6409,62 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(
             report["cases"][0]["executed"]["formCounts"]["unsatisfied"],
             [{"form": "oset", "minimum": 2, "maximum": 2, "observed": 3}],
+        )
+
+    def test_zero_form_count_obligation_enforces_path_exclusion(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                forms=["oset", "return"],
+                executed_forms=["return"],
+                executed_form_counts=[
+                    {"form": "oset", "minimum": 0, "maximum": 0}
+                ],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="oset,return",
+                executed="return",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(failures, [])
+        counts = report["cases"][0]["executed"]["formCounts"]
+        self.assertTrue(counts["zeroCountsActive"])
+        self.assertEqual(
+            counts["requiredObservations"],
+            [{"form": "oset", "count": 0}],
+        )
+        self.assertEqual(counts["unsatisfied"], [])
+        summary = report["summary"]["executed"]["formCounts"]
+        self.assertEqual(summary["casesWithZeroRequirements"], 1)
+        self.assertEqual(summary["zeroRequirementCount"], 1)
+        self.assertEqual(
+            summary["boundedMaximums"],
+            [{"form": "oset", "maximum": 0}],
+        )
+
+        results["case"] = with_form_diagnostics(
+            success("case", "lcnf"),
+            static="oset,return",
+            executed="oset,return",
+            executed_counts=(
+                '[{"form":"oset","count":1},{"form":"return","count":1}]'
+            ),
+        )
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed LCNF form counts outside required bounds: "
+                "oset=1>0"
+            ],
+        )
+        self.assertEqual(
+            report["cases"][0]["executed"]["formCounts"]["unsatisfied"],
+            [{"form": "oset", "minimum": 0, "maximum": 0, "observed": 1}],
         )
 
     def test_executed_form_count_diagnostic_is_required_and_consistent(self) -> None:
@@ -6427,6 +6588,8 @@ class HarnessTests(unittest.TestCase):
                     "counts": {
                         "casesWithRequirements": 0,
                         "casesWithUpperBounds": 0,
+                        "casesWithZeroRequirements": 0,
+                        "zeroRequirementCount": 0,
                         "casesWithDiagnostics": 2,
                         "casesWithValidDiagnostics": 2,
                         "requiredMinimums": [],
@@ -6531,8 +6694,12 @@ class HarnessTests(unittest.TestCase):
                 "diagnosticValid": True,
                 "obligationsActive": True,
                 "upperBoundsActive": True,
+                "zeroCountsActive": False,
                 "required": [
                     {"external": "Nat.add", "minimum": 2, "maximum": 2}
+                ],
+                "requiredObservations": [
+                    {"external": "Nat.add", "count": 1}
                 ],
                 "observed": [{"external": "Nat.add", "count": 1}],
                 "unsatisfied": [
@@ -6550,6 +6717,8 @@ class HarnessTests(unittest.TestCase):
             {
                 "casesWithRequirements": 1,
                 "casesWithUpperBounds": 1,
+                "casesWithZeroRequirements": 0,
+                "zeroRequirementCount": 0,
                 "casesWithDiagnostics": 1,
                 "casesWithValidDiagnostics": 1,
                 "requiredMinimums": [{"external": "Nat.add", "minimum": 2}],
@@ -6585,6 +6754,71 @@ class HarnessTests(unittest.TestCase):
                     "minimum": 2,
                     "maximum": 2,
                     "observed": 3,
+                }
+            ],
+        )
+
+    def test_zero_external_count_obligation_enforces_path_exclusion(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                externals=["Nat.add"],
+                executed_external_counts=[
+                    {"external": "Nat.add", "minimum": 0, "maximum": 0}
+                ],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                static_externals="Nat.add",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(failures, [])
+        counts = report["cases"][0]["externals"]["executed"]["counts"]
+        self.assertTrue(counts["zeroCountsActive"])
+        self.assertEqual(
+            counts["requiredObservations"],
+            [{"external": "Nat.add", "count": 0}],
+        )
+        self.assertEqual(counts["unsatisfied"], [])
+        summary = report["summary"]["externals"]["executed"]["counts"]
+        self.assertEqual(summary["casesWithZeroRequirements"], 1)
+        self.assertEqual(summary["zeroRequirementCount"], 1)
+        self.assertEqual(
+            summary["boundedMaximums"],
+            [{"external": "Nat.add", "maximum": 0}],
+        )
+
+        results["case"] = with_form_diagnostics(
+            success("case", "lcnf"),
+            static="return",
+            executed="return",
+            static_externals="Nat.add",
+            executed_externals="Nat.add",
+            executed_external_counts=(
+                '[{"external":"Nat.add","count":1}]'
+            ),
+        )
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed external counts outside required bounds: "
+                "Nat.add=1>0"
+            ],
+        )
+        self.assertEqual(
+            report["cases"][0]["externals"]["executed"]["counts"]["unsatisfied"],
+            [
+                {
+                    "external": "Nat.add",
+                    "minimum": 0,
+                    "maximum": 0,
+                    "observed": 1,
                 }
             ],
         )
