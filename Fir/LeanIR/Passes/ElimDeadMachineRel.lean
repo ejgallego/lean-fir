@@ -4995,6 +4995,183 @@ theorem match_objectProjectionLetCodeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- A retained absolute-slot `USize` projection reads related covered
+constructors, transports the successful lookup, and binds the identical
+unboxed word on both machines. -/
+theorem match_retainedUSizeProjectionLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .uproj slot object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .uproj slot object
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .uproj slot object
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .uproj slot object
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .uproj slot object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .uproj slot object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceObjectRead :
+    lookupValue sourceState.env object = sourceObjectResult
+  cases sourceObjectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceObjectRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceObject =>
+      have sourceObjectLookup :=
+        lookupValue_eq_ok_iff.mp sourceObjectRead
+      have objects := env object objectMember
+      rw [sourceObjectLookup] at objects
+      generalize targetObjectLookup :
+        lookup targetState.env object = targetObjectOption at objects
+      cases objects with
+      | some values =>
+          rename_i targetObject
+          have targetObjectRead :
+              lookupValue targetState.env object = .ok targetObject :=
+            lookupValue_eq_ok_iff.mpr targetObjectLookup
+          generalize sourceFieldEq :
+            getUSizeSlot sourceState.runtime sourceObject slot =
+              sourceFieldResult
+          cases sourceFieldResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceObjectRead, sourceFieldEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceField =>
+              have sourceObjectRoot :
+                  sourceObject ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+              rcases runtime.getUSizeSlotBoth_of_related sourceObjectRoot
+                  values sourceFieldEq with
+                ⟨targetField, targetFieldEq, fields, publishedRuntime⟩
+              let sourceExpected := {
+                sourceState with
+                env := bind sourceState.env fvarId sourceField
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                env := bind targetState.env fvarId targetField
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceObjectRead, sourceFieldEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetObjectRead, targetFieldEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have afterRelated :
+                  ReachableMachineRelated fuel rho
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_reachableRelated
+                  sourceState targetState
+                  sourceState.runtime targetState.runtime
+                  programs frames continuation joins env fields
+                  publishedRuntime
+              exact ⟨targetExpected,
+                match_internalCoreSteps sourceTransition targetTransition
+                  afterRelated (by simpa [sourceCurrent] using step)⟩
+
+/-- Complete graph-level matcher for absolute-slot `USize` projection lets. -/
+theorem match_uSizeProjectionLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type, value := .uproj slot object
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type, value := .uproj slot object
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .uproj slot object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered =>
+      rcases match_retainedUSizeProjectionLetStep
+          sourceState targetState programs frames continuation joins env
+          covered runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent ready =>
+      rcases match_deletedLetStep_of_ready sourceState targetState programs
+          frames continuation joins env absent runtime ready step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- A retained full application evaluates related covered arguments, saves
 the related bind continuations, and enters related named-invocation controls.
 This includes the nullary case: unlike a deleted full application, it must

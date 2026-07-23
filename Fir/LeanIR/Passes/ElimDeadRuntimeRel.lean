@@ -2468,6 +2468,144 @@ theorem ShadowRuntimeRel.getObjectFieldBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
 
+/-- Every successful absolute fixed-slot `USize` read returns an unboxed
+word value. -/
+theorem getUSizeSlot_ok_eq_usize
+    (read : getUSizeSlot runtime object slot = .ok result) :
+    ∃ word, result = .usize word := by
+  unfold getUSizeSlot at read
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at read
+  cases constructorResult with
+  | error fault =>
+      simp [constructorEq, Bind.bind, Except.bind] at read
+  | ok constructor =>
+      obtain ⟨location, cell, value⟩ := constructor
+      simp only [constructorEq, Bind.bind, Except.bind] at read
+      by_cases bounded : value.objectFields.size ≤ slot
+      · rw [if_pos bounded] at read
+        generalize fieldEq :
+          value.usizeFields[slot - value.objectFields.size]? = fieldResult
+            at read
+        cases fieldResult with
+        | none =>
+            simp [fieldEq] at read
+        | some word =>
+            simp [fieldEq, Pure.pure, Except.pure] at read
+            cases read
+            exact ⟨word, rfl⟩
+      · rw [if_neg bounded] at read
+        simp at read
+
+/-- An absolute fixed-slot `USize` projection from a related published
+constructor succeeds with the same immediate word on the target. -/
+theorem ShadowRuntimeRel.getUSizeSlotBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceRead : getUSizeSlot left leftObject slot = .ok leftField) :
+    ∃ rightField,
+      getUSizeSlot right rightObject slot = .ok rightField ∧
+      ValueRel rho leftField rightField ∧
+      ShadowRuntimeRel rho left right
+        (leftField :: leftExtra) (rightField :: rightExtra) := by
+  cases objects with
+  | tagged payload =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | usize value =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | scalar value =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | erased =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseNone =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | reuseSome mapped =>
+      simp [getUSizeSlot, getConstructor, Bind.bind, Except.bind]
+        at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have heapObjects := cells.2.2.2
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            rw [liveEq]
+            exact rightLiveEq
+          simp [getUSizeSlot, getConstructor, getLiveCell, leftFound,
+            leftLiveEq, Bind.bind, Except.bind] at sourceRead
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            rw [liveEq]
+            exact rightLiveEq
+          generalize leftObjectEq :
+            leftCell.object = leftHeapObject at heapObjects
+          generalize rightObjectEq :
+            rightCell.object = rightHeapObject at heapObjects
+          cases heapObjects with
+          | @ctor leftConstructor rightConstructor tag fields usizes scalars =>
+              have objectSizeEq :
+                  leftConstructor.objectFields.size =
+                    rightConstructor.objectFields.size :=
+                arrayRel_size_eq fields
+              have targetRead :
+                  getUSizeSlot right
+                    (.object (.heap rightLocation)) slot =
+                      .ok leftField := by
+                simpa [getUSizeSlot, getConstructor, getLiveCell,
+                  leftFound, rightFound, leftLiveEq, rightLiveEq,
+                  leftObjectEq, rightObjectEq, objectSizeEq, usizes,
+                  Bind.bind, Except.bind, Pure.pure, Except.pure]
+                  using sourceRead
+              rcases getUSizeSlot_ok_eq_usize sourceRead with
+                ⟨word, resultEq⟩
+              subst leftField
+              exact ⟨.usize word, targetRead, .usize word,
+                related.prependNonHeap (.usize word)
+                  (by intro location; simp) (by intro location; simp)⟩
+          | closure fixed =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | boxed value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | string value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | natural value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | integer value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | byteArray value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+          | «opaque» value =>
+              simp [getUSizeSlot, getConstructor, getLiveCell,
+                leftFound, leftLiveEq, leftObjectEq,
+                Bind.bind, Except.bind] at sourceRead
+
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
 theorem ShadowRuntimeRel.readMappedCell
