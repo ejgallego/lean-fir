@@ -285,6 +285,71 @@ theorem arrayRel_extract (related : ArrayRel relation left right)
   simp only [Array.toList_extract]
   exact listRel_extract start stop related
 
+/-- Replacing a common index prefix by related values preserves a pointwise
+list relation. The offset form supports the shifted indices in `mapIdx`'s
+recursive tail. -/
+theorem listRel_mapIdx_replacePrefixFrom
+    (related : ListRel relation left right)
+    (replacement : relation leftReplacement rightReplacement)
+    (offset count : Nat) :
+    ListRel relation
+      (left.mapIdx fun index value =>
+        if offset + index < count then leftReplacement else value)
+      (right.mapIdx fun index value =>
+        if offset + index < count then rightReplacement else value) := by
+  induction related generalizing offset with
+  | nil => exact .nil
+  | cons head tail recurse =>
+      have headRelated : relation
+          (if offset < count then leftReplacement else ‹_›)
+          (if offset < count then rightReplacement else ‹_›) := by
+        by_cases replaced : offset < count
+        · simpa [replaced] using replacement
+        · simpa [replaced] using head
+      have tailRelated := recurse (offset + 1)
+      simpa only [List.mapIdx_cons, Nat.add_zero, Nat.add_assoc,
+        Nat.add_left_comm, Nat.add_comm] using
+        ListRel.cons headRelated tailRelated
+
+/-- Array form of `listRel_mapIdx_replacePrefixFrom` at offset zero. -/
+theorem arrayRel_mapIdx_replacePrefix
+    (related : ArrayRel relation left right)
+    (replacement : relation leftReplacement rightReplacement)
+    (count : Nat) :
+    ArrayRel relation
+      (left.mapIdx fun index value =>
+        if index < count then leftReplacement else value)
+      (right.mapIdx fun index value =>
+        if index < count then rightReplacement else value) := by
+  unfold ArrayRel at related ⊢
+  simp only [Array.toList_mapIdx]
+  simpa using
+    listRel_mapIdx_replacePrefixFrom related replacement 0 count
+
+/-- Values selected by an array extract remain members of the source array. -/
+theorem array_mem_of_mem_extract
+    (values : Array α)
+    (member : value ∈ (values.extract start stop).toList) :
+    value ∈ values.toList := by
+  simp only [Array.toList_extract, List.extract_eq_take_drop] at member
+  exact List.mem_of_mem_drop (List.mem_of_mem_take member)
+
+/-- Clearing an array prefix to the tagged-zero sentinel cannot introduce a
+new heap reference. -/
+theorem heap_mem_of_mem_clearPrefix
+    (values : Array Value)
+    (member : Value.object (.heap child) ∈
+      (values.mapIdx fun index value =>
+        if index < count then .object (.tagged 0) else value).toList) :
+    Value.object (.heap child) ∈ values.toList := by
+  simp only [Array.toList_mapIdx, List.mem_mapIdx] at member
+  rcases member with ⟨index, bounded, selected⟩
+  by_cases cleared : index < count
+  · simp [cleared] at selected
+  · rw [List.mem_iff_getElem]
+    refine ⟨index, bounded, ?_⟩
+    simpa [cleared] using selected
+
 theorem arrayRel_append
     (first : ArrayRel relation leftFirst rightFirst)
     (second : ArrayRel relation leftSecond rightSecond) :
@@ -4926,6 +4991,430 @@ theorem ShadowRuntimeRel.decValueBoth_of_related
             ⟨middleRight, targetFirst, middleRelated⟩
           rw [targetFirst]
           exact recurse middleRelated sourceEffect
+
+/-- Retained reset follows the same ownership branch on related published
+objects. Shared objects perform the paired public decrement; unique
+constructors clear related prefixes and release the removed fields
+left-to-right before returning mapped reuse tokens. -/
+theorem ShadowRuntimeRel.resetBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      reset left count leftObject = .ok (leftResult, leftToken)) :
+    ∃ rightResult rightToken,
+      reset right count rightObject = .ok (rightResult, rightToken) ∧
+      ValueRel rho leftToken rightToken ∧
+      ShadowRuntimeRel rho leftResult rightResult
+        (leftToken :: leftExtra) (rightToken :: rightExtra) := by
+  cases objects with
+  | tagged payload =>
+      have pairEq := Except.ok.inj sourceEffect
+      have runtimeEq := congrArg Prod.fst pairEq
+      have tokenEq := congrArg Prod.snd pairEq
+      simp [reset] at runtimeEq tokenEq
+      subst leftResult
+      subst leftToken
+      exact ⟨right, .reuseToken none, by simp [reset], .reuseNone,
+        related.prependNonHeap .reuseNone
+          (by intro location; simp) (by intro location; simp)⟩
+  | usize value => simp [reset] at sourceEffect
+  | scalar value => simp [reset] at sourceEffect
+  | erased => simp [reset] at sourceEffect
+  | reuseNone => simp [reset] at sourceEffect
+  | reuseSome mapping => simp [reset] at sourceEffect
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable :
+          Reachable left.heap (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      have rightReachable :
+          Reachable right.heap (runtimeRoots right rightExtra) rightLocation := by
+        rcases reachable_forward related.roots related.heap
+            leftReachable with
+          ⟨mappedLocation, mappedEq, reachable⟩
+        have locationEq : mappedLocation = rightLocation := by
+          rw [mapping] at mappedEq
+          exact (Option.some.inj mappedEq).symm
+        simpa [locationEq] using reachable
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      cases leftLiveEq : leftCell.live with
+      | false =>
+          simp [reset, getLiveCell, leftFound, leftLiveEq,
+            Bind.bind, Except.bind] at sourceEffect
+      | true =>
+          have rightLiveEq : rightCell.live = true := by
+            rw [← cells.2.2.1]
+            exact leftLiveEq
+          have leftGet :
+              getLiveCell left leftLocation = .ok leftCell := by
+            simp [getLiveCell, leftFound, leftLiveEq]
+          have rightGet :
+              getLiveCell right rightLocation = .ok rightCell := by
+            simp [getLiveCell, rightFound, rightLiveEq]
+          have persistentEq :
+              leftCell.persistent = rightCell.persistent := cells.2.1
+          have rcEq : leftCell.rc = rightCell.rc := cells.1
+          cases leftSharedEq :
+              (leftCell.persistent || leftCell.rc != 1) with
+          | true =>
+              have rightSharedEq :
+                  (rightCell.persistent || rightCell.rc != 1) = true := by
+                simpa [← persistentEq, ← rcEq] using leftSharedEq
+              have source := sourceEffect
+              simp only [reset, leftGet, Bind.bind, Except.bind] at source
+              rw [if_pos (by simpa using leftSharedEq)] at source
+              generalize leftDecEq :
+                  decLocation left leftLocation = leftDecResult at source
+              cases leftDecResult with
+              | error fault =>
+                  contradiction
+              | ok computedLeft =>
+                  have pairEq := Except.ok.inj source
+                  have runtimeEq := congrArg Prod.fst pairEq
+                  have tokenEq := congrArg Prod.snd pairEq
+                  simp at runtimeEq tokenEq
+                  subst leftResult
+                  subst leftToken
+                  rcases related.decLocationBoth mapping leftReachable
+                      leftDecEq with
+                    ⟨rightResult, rightDecEq, next⟩
+                  have targetEffect :
+                      reset right count (.object (.heap rightLocation)) =
+                        .ok (rightResult, .reuseToken none) := by
+                    simp only [reset, rightGet, Bind.bind, Except.bind]
+                    rw [if_pos (by simpa using rightSharedEq)]
+                    rw [rightDecEq]
+                    rfl
+                  exact ⟨rightResult, .reuseToken none, targetEffect,
+                    .reuseNone,
+                    next.prependNonHeap .reuseNone
+                      (by intro location; simp)
+                      (by intro location; simp)⟩
+          | false =>
+              have rightSharedEq :
+                  (rightCell.persistent || rightCell.rc != 1) = false := by
+                simpa [← persistentEq, ← rcEq] using leftSharedEq
+              have heapObjects := cells.2.2.2
+              generalize leftObjectEq :
+                leftCell.object = leftHeapObject at heapObjects
+              generalize rightObjectEq :
+                rightCell.object = rightHeapObject at heapObjects
+              cases heapObjects with
+              | @ctor leftConstructor rightConstructor tag fields usizes
+                  scalars =>
+                  by_cases tooMany :
+                      count > leftConstructor.objectFields.size
+                  · have source := sourceEffect
+                    simp only [reset, leftGet, Bind.bind, Except.bind]
+                      at source
+                    rw [if_neg (by simpa using leftSharedEq)] at source
+                    rw [leftObjectEq] at source
+                    simp only at source
+                    rw [if_pos tooMany] at source
+                    simp at source
+                  · have sizeEq :
+                        leftConstructor.objectFields.size =
+                          rightConstructor.objectFields.size :=
+                      arrayRel_size_eq fields
+                    have rightTooMany :
+                        ¬count > rightConstructor.objectFields.size := by
+                      rw [← sizeEq]
+                      exact tooMany
+                    let leftReleased :=
+                      leftConstructor.objectFields.extract 0 count
+                    let rightReleased :=
+                      rightConstructor.objectFields.extract 0 count
+                    let leftCleared :=
+                      leftConstructor.objectFields.mapIdx fun index field =>
+                        if index < count then .object (.tagged 0) else field
+                    let rightCleared :=
+                      rightConstructor.objectFields.mapIdx fun index field =>
+                        if index < count then .object (.tagged 0) else field
+                    have releasedFields :
+                        ArrayRel (ValueRel rho)
+                          leftReleased rightReleased := by
+                      exact arrayRel_extract fields 0 count
+                    have clearedFields :
+                        ArrayRel (ValueRel rho)
+                          leftCleared rightCleared := by
+                      exact arrayRel_mapIdx_replacePrefix fields (.tagged 0)
+                        count
+                    let leftReplacement : HeapCell :=
+                      { leftCell with object := .ctor {
+                          leftConstructor with
+                          objectFields := leftCleared } }
+                    let rightReplacement : HeapCell :=
+                      { rightCell with object := .ctor {
+                          rightConstructor with
+                          objectFields := rightCleared } }
+                    have replacement :
+                        HeapCellRel rho leftReplacement rightReplacement := by
+                      refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+                      dsimp only [leftReplacement, rightReplacement]
+                      exact @HeapObjectRel.ctor rho
+                        { leftConstructor with objectFields := leftCleared }
+                        { rightConstructor with objectFields := rightCleared }
+                        tag clearedFields usizes scalars
+                    have published := related.publishOwnedValues
+                      leftReachable rightReachable leftFound rightFound cells
+                    have leftOwned : ∀ {child},
+                        Value.object (.heap child) ∈
+                            leftReplacement.object.ownedValues.toList →
+                          Value.object (.heap child) ∈
+                              leftCell.object.ownedValues.toList ∨
+                            Reachable left.heap
+                              (runtimeRoots left
+                                (leftCell.object.ownedValues.toList ++
+                                  leftExtra)) child := by
+                      intro child member
+                      left
+                      have clearedMember :
+                          Value.object (.heap child) ∈ leftCleared.toList := by
+                        simpa [leftReplacement, HeapObject.ownedValues] using
+                          member
+                      have oldMember :=
+                        heap_mem_of_mem_clearPrefix
+                          leftConstructor.objectFields clearedMember
+                      simpa [leftObjectEq, HeapObject.ownedValues] using
+                        oldMember
+                    have rightOwned : ∀ {child},
+                        Value.object (.heap child) ∈
+                            rightReplacement.object.ownedValues.toList →
+                          Value.object (.heap child) ∈
+                              rightCell.object.ownedValues.toList ∨
+                            Reachable right.heap
+                              (runtimeRoots right
+                                (rightCell.object.ownedValues.toList ++
+                                  rightExtra)) child := by
+                      intro child member
+                      left
+                      have clearedMember :
+                          Value.object (.heap child) ∈ rightCleared.toList := by
+                        simpa [rightReplacement, HeapObject.ownedValues] using
+                          member
+                      have oldMember :=
+                        heap_mem_of_mem_clearPrefix
+                          rightConstructor.objectFields clearedMember
+                      simpa [rightObjectEq, HeapObject.ownedValues] using
+                        oldMember
+                    rcases published.setCellBothRooted mapping leftFound
+                        rightFound leftOwned rightOwned replacement with
+                      ⟨leftParent, rightParent, leftSet, rightSet,
+                        parentRelated⟩
+                    let release (runtime : RuntimeState) (field : Value) :=
+                      decValueOnce runtime field true
+                    have source := sourceEffect
+                    simp only [reset, leftGet, Bind.bind, Except.bind]
+                      at source
+                    rw [if_neg (by simpa using leftSharedEq)] at source
+                    rw [leftObjectEq] at source
+                    simp only at source
+                    rw [if_neg tooMany] at source
+                    have leftSetRaw :
+                        setCell left leftLocation
+                            { leftCell with object := .ctor {
+                                leftConstructor with objectFields :=
+                                  (Array.mapIdx
+                                    (fun index field =>
+                                      if index < count then
+                                        .object (.tagged 0)
+                                      else field)
+                                    leftConstructor.objectFields) } } =
+                          .ok leftParent := by
+                      simpa [leftReplacement, leftCleared] using leftSet
+                    rw [leftSetRaw] at source
+                    simp only at source
+                    generalize leftFoldEq :
+                        Array.foldlM
+                            (fun runtime field =>
+                              decValueOnce runtime field true)
+                            leftParent
+                            (leftConstructor.objectFields.extract 0 count) =
+                          leftFoldResult at source
+                    cases leftFoldResult with
+                    | error fault =>
+                        contradiction
+                    | ok computedLeft =>
+                        have pairEq := Except.ok.inj source
+                        have runtimeEq := congrArg Prod.fst pairEq
+                        have tokenEq := congrArg Prod.snd pairEq
+                        simp at runtimeEq tokenEq
+                        subst leftResult
+                        subst leftToken
+                        have foldBoth : ∀
+                            {leftValues rightValues : List Value}
+                            {beforeLeft beforeRight afterLeft : RuntimeState},
+                            ListRel (ValueRel rho) leftValues rightValues →
+                            RootSubset leftValues
+                              leftCell.object.ownedValues.toList →
+                            RootSubset rightValues
+                              rightCell.object.ownedValues.toList →
+                            ShadowRuntimeRel rho beforeLeft beforeRight
+                              (leftCell.object.ownedValues.toList ++ leftExtra)
+                              (rightCell.object.ownedValues.toList ++
+                                rightExtra) →
+                            leftValues.foldlM
+                                (init := beforeLeft) release =
+                              .ok afterLeft →
+                            ∃ afterRight,
+                              rightValues.foldlM
+                                  (init := beforeRight) release =
+                                .ok afterRight ∧
+                              ShadowRuntimeRel rho afterLeft afterRight
+                                (leftCell.object.ownedValues.toList ++
+                                  leftExtra)
+                                (rightCell.object.ownedValues.toList ++
+                                  rightExtra) := by
+                          intro leftValues rightValues beforeLeft beforeRight
+                            afterLeft values leftSubset rightSubset states
+                            operation
+                          induction values generalizing beforeLeft beforeRight
+                              afterLeft with
+                          | nil =>
+                              simp only [List.foldlM_nil] at operation ⊢
+                              have stateEq := Except.ok.inj operation
+                              subst afterLeft
+                              exact ⟨beforeRight, rfl, states⟩
+                          | @cons leftHead rightHead leftTail rightTail heads
+                              tails recurse =>
+                              have leftTailSubset : RootSubset leftTail
+                                  leftCell.object.ownedValues.toList := by
+                                intro value member
+                                exact leftSubset value
+                                  (List.mem_cons_of_mem leftHead member)
+                              have rightTailSubset : RootSubset rightTail
+                                  rightCell.object.ownedValues.toList := by
+                                intro value member
+                                exact rightSubset value
+                                  (List.mem_cons_of_mem rightHead member)
+                              simp only [List.foldlM_cons, Bind.bind,
+                                Except.bind] at operation ⊢
+                              simp only [release] at operation ⊢
+                              cases headEffect :
+                                  decValueOnce beforeLeft leftHead true with
+                              | error fault =>
+                                  rw [headEffect] at operation
+                                  contradiction
+                              | ok middleLeft =>
+                                  rw [headEffect] at operation
+                                  have headRoot :
+                                      leftHead ∈
+                                        leftCell.object.ownedValues.toList ++
+                                          leftExtra :=
+                                    List.mem_append_left _
+                                      (leftSubset _ List.mem_cons_self)
+                                  rcases states
+                                      |>.decValueOnceBoth_of_related
+                                        headRoot heads headEffect with
+                                    ⟨middleRight, targetHead, middleStates⟩
+                                  rw [targetHead]
+                                  exact recurse leftTailSubset
+                                    rightTailSubset middleStates operation
+                        have leftSubset : RootSubset leftReleased.toList
+                            leftCell.object.ownedValues.toList := by
+                          intro value member
+                          have oldMember :=
+                            array_mem_of_mem_extract
+                              leftConstructor.objectFields member
+                          simpa [leftObjectEq, HeapObject.ownedValues] using
+                            oldMember
+                        have rightSubset : RootSubset rightReleased.toList
+                            rightCell.object.ownedValues.toList := by
+                          intro value member
+                          have oldMember :=
+                            array_mem_of_mem_extract
+                              rightConstructor.objectFields member
+                          simpa [rightObjectEq, HeapObject.ownedValues] using
+                            oldMember
+                        have sourceFoldList :
+                            leftReleased.toList.foldlM
+                                (init := leftParent) release =
+                              .ok computedLeft := by
+                          simpa only [leftReleased, release,
+                            Array.foldlM_toList] using leftFoldEq
+                        rcases foldBoth releasedFields leftSubset rightSubset
+                            parentRelated sourceFoldList with
+                          ⟨rightResult, rightFoldList, finalPublished⟩
+                        have rightFold :
+                            Array.foldlM release rightParent rightReleased =
+                              .ok rightResult := by
+                          simpa only [Array.foldlM_toList] using rightFoldList
+                        have rightSetRaw :
+                            setCell right rightLocation
+                                { rightCell with object := .ctor {
+                                    rightConstructor with objectFields :=
+                                      (Array.mapIdx
+                                        (fun index field =>
+                                          if index < count then
+                                            .object (.tagged 0)
+                                          else field)
+                                        rightConstructor.objectFields) } } =
+                              .ok rightParent := by
+                          simpa [rightReplacement, rightCleared] using rightSet
+                        have rightFoldRaw :
+                            Array.foldlM
+                                (fun runtime field =>
+                                  decValueOnce runtime field true)
+                                rightParent
+                                (rightConstructor.objectFields.extract
+                                  0 count) =
+                              .ok rightResult := by
+                          simpa only [rightReleased, release] using rightFold
+                        have targetEffect :
+                            reset right count
+                                (.object (.heap rightLocation)) =
+                              .ok (rightResult,
+                                .reuseToken (some rightLocation)) := by
+                          simp only [reset, rightGet, Bind.bind, Except.bind]
+                          rw [if_neg (by simpa using rightSharedEq)]
+                          rw [rightObjectEq]
+                          simp only
+                          rw [if_neg rightTooMany]
+                          rw [rightSetRaw]
+                          simp only
+                          rw [rightFoldRaw]
+                          rfl
+                        have restricted :=
+                          finalPublished.restrictExtra related.extra
+                            (by
+                              intro value member
+                              exact List.mem_append_right _ member)
+                            (by
+                              intro value member
+                              exact List.mem_append_right _ member)
+                        exact ⟨rightResult,
+                          .reuseToken (some rightLocation), targetEffect,
+                          .reuseSome mapping,
+                          restricted.prependNonHeap (.reuseSome mapping)
+                            (by intro location; simp)
+                            (by intro location; simp)⟩
+              | closure fixed =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | boxed value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | string value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | natural value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | integer value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | byteArray value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
+              | «opaque» value =>
+                  simp [reset, leftGet, leftSharedEq, leftObjectEq,
+                    Bind.bind, Except.bind] at sourceEffect
 
 /-- Interpreter-facing retained delete. Erased failed-reset tokens are
 synchronized no-ops; a related live heap operand marks the mapped cells dead
