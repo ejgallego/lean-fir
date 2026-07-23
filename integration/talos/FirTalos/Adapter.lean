@@ -86,6 +86,11 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
       let some index := callIndex? module target | throw .unknownCallTarget
       return .call index
   | .i32Eq => return .eq
+  | .i32And => return .and
+  | .i32ShrU => return .shrU
+  | .i32Load _ offset => return .load32 offset
+  | .i64Load _ offset => return .load64 offset
+  | .i32WrapI64 _ => return .wrapI64
   | .block label body => do
       return .block 0 0 (← instructions module function (label :: labels) body)
   | .ifElse thenBody elseBody => do
@@ -147,6 +152,10 @@ def adapt (source : Fir.Wasm.Module) : Except AdapterError AdaptedModule := do
     funcs := functions
     imports := source.imports.toList.map importDecl
     exports
+    memory := source.memory.map fun memory =>
+      { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
+    memoryExports := source.memory.toList.filterMap fun memory =>
+      memory.exportName.map fun name => (name, 0)
     globals := source.cacheGlobalKinds.toList.map fun kind =>
       { init := zeroValue kind } }
   match wasmModule.validate with

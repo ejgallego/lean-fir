@@ -274,6 +274,55 @@ standard Wasm module for the lazy-cache path. -/
 #guard (encodeProgram Fir.Wasm.abiClosureUnderApplyProgram).isOk
 #guard (encodeProgram Fir.Wasm.abiRecursiveCallProgram).isOk
 
+def residentAddress : Lean.FVarId := ⟨`residentAddress⟩
+
+def residentBitsFunction : Function := {
+  name := `residentBits
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .i32Const .uint32 7,
+    .i32Const .uint32 1,
+    .i32And,
+    .i32Const .uint32 1,
+    .i32ShrU,
+    .ret] }
+
+def residentLoadFunction : Function := {
+  name := `residentLoad
+  params := #[(residentAddress, .tobject)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .i64Load .uint64 32,
+    .i32WrapI64 .uint32,
+    .ret] }
+
+/-- W7 shared-surface guard. Existing modules omit memory; a resident-runtime
+module may define/export it and use checked physical memory instructions. -/
+def residentMemorySurfaceModule : Module := {
+  imports := #[]
+  functions := #[residentBitsFunction, residentLoadFunction]
+  exports := #[`residentBits, `residentLoad]
+  initializers := #[]
+  runtimeOperations := #[]
+  memory := some { pagesMin := 1, exportName := some "memory" } }
+
+#guard validateModule residentMemorySurfaceModule |>.isOk
+#guard encode residentMemorySurfaceModule |>.isOk
+
+#guard match validateModule { residentMemorySurfaceModule with memory := none } with
+  | .error (.memoryInstructionWithoutMemory `residentLoad) => true
+  | _ => false
+
+#guard match validateModule {
+    residentMemorySurfaceModule with
+    memory := some { pagesMin := 65537 } } with
+  | .error .invalidMemoryLimits => true
+  | _ => false
+
 def w5ManifestOperations : Array RuntimeOp := #[
   .usizeProj 0,
   .scalarProj 4 0 .uint32,

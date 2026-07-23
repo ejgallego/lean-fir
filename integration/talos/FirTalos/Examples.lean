@@ -1,4 +1,5 @@
 import FirTalos.Runtime
+import Fir.Wasm.Emit.Examples
 import Fir.Wasm.Examples
 import Interpreter.Wasm.Examples.Harness
 
@@ -124,6 +125,26 @@ def adaptProgram? (program : Fir.LeanIR.ImpureProgram) : Option AdaptedModule :=
 #guard Fir.Wasm.literalModule?.any fun source =>
   match module { source with initializers := #[`main] } with
   | .ok target => target.globals.length == 2
+  | .error _ => false
+
+def residentBitsBody? : List Wasm.Instruction → Bool
+  | [.const 7, .const 1, .and, .const 1, .shrU, .ret] => true
+  | _ => false
+
+def residentLoadBody? : List Wasm.Instruction → Bool
+  | [.localGet 0, .load64 32, .wrapI64, .ret] => true
+  | _ => false
+
+#guard match adapt Fir.Wasm.Emit.Examples.residentMemorySurfaceModule with
+  | .ok adapted =>
+      adapted.wasmModule.imports.isEmpty &&
+      adapted.wasmModule.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.pagesMax.isNone &&
+        adapted.wasmModule.memoryExports == [("memory", 0)] &&
+        adapted.wasmModule.funcs[0]?.any fun function =>
+          residentBitsBody? function.body &&
+        adapted.wasmModule.funcs[1]?.any fun function =>
+          residentLoadBody? function.body
   | .error _ => false
 
 end FirTalos

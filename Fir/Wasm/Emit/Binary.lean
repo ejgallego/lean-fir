@@ -127,6 +127,11 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
         throw (.unknownCallTarget context.function.name)
       return #[0x10] ++ encodeU32 index
   | .i32Eq => return #[0x46]
+  | .i32And => return #[0x71]
+  | .i32ShrU => return #[0x76]
+  | .i32Load _ offset => return #[0x28, 0x02] ++ encodeU32 offset.toNat
+  | .i64Load _ offset => return #[0x29, 0x03] ++ encodeU32 offset.toNat
+  | .i32WrapI64 _ => return #[0xa7]
   | .block label body => do
       let body ← encodeInstructions { context with labels := some label :: context.labels } body
       return #[0x02, 0x40] ++ body ++ #[0x0b]
@@ -182,6 +187,15 @@ private def encodeExport (module : Module) (name : Name) : Except EncodeError By
   let some index := findFunctionTarget? module name | throw (.unknownExport name)
   return encodeName name.toString ++ #[0x00] ++ encodeU32 index
 
+private def encodeMemoryExport (name : String) : Bytes :=
+  encodeName name ++ #[0x02] ++ encodeU32 0
+
+private def encodeMemory (memory : MemoryDecl) : Bytes :=
+  match memory.pagesMax with
+  | none => #[0x00] ++ encodeU32 memory.pagesMin.toNat
+  | some pagesMax =>
+      #[0x01] ++ encodeU32 memory.pagesMin.toNat ++ encodeU32 pagesMax.toNat
+
 private def encodeGlobal (kind : AbiKind) : Bytes :=
   let initializer :=
     match kind.valueType with
@@ -216,7 +230,12 @@ def encode (module : Module) : Except EncodeError ByteArray := do
     module.functions.toList.zipIdx.map fun (_, index) =>
       encodeU32 (module.imports.size + index)
   let globalPayload := encodeVector <| module.cacheGlobalKinds.toList.map encodeGlobal
-  let exportPayload ← encodeVector <$> module.exports.toList.mapM (encodeExport module)
+  let functionExports ← module.exports.toList.mapM (encodeExport module)
+  let memoryExports :=
+    match module.memory.bind (·.exportName) with
+    | none => []
+    | some name => [encodeMemoryExport name]
+  let exportPayload := encodeVector (functionExports ++ memoryExports)
   let codePayload ← encodeVector <$> module.functions.toList.mapM (encodeFunctionBody module)
 
   let mut bytes := header
@@ -226,9 +245,11 @@ def encode (module : Module) : Except EncodeError ByteArray := do
     bytes := bytes ++ encodeSection 0x02 importPayload
   unless module.functions.isEmpty do
     bytes := bytes ++ encodeSection 0x03 functionPayload
+  if let some memory := module.memory then
+    bytes := bytes ++ encodeSection 0x05 (encodeVector [encodeMemory memory])
   unless module.initializers.isEmpty do
     bytes := bytes ++ encodeSection 0x06 globalPayload
-  unless module.exports.isEmpty do
+  unless functionExports.isEmpty && memoryExports.isEmpty do
     bytes := bytes ++ encodeSection 0x07 exportPayload
   unless module.functions.isEmpty do
     bytes := bytes ++ encodeSection 0x0a codePayload

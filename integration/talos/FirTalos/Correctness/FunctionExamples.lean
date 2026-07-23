@@ -102,6 +102,10 @@ theorem abiLiteralAdaptedModule_layout :
         abiLiteralAdaptedModule.wasmModule = {
           funcs := functions
           imports := abiLiteralSourceModule.imports.toList.map importDecl
+          memory := abiLiteralSourceModule.memory.map fun memory =>
+            { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
+          memoryExports := abiLiteralSourceModule.memory.toList.filterMap fun memory =>
+            memory.exportName.map fun name => (name, 0)
           globals := abiLiteralSourceModule.cacheGlobalKinds.toList.map fun kind =>
             { init := zeroValue kind }
           exports := abiLiteralSourceModule.exports.toList.filterMap fun name =>

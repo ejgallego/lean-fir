@@ -35,6 +35,8 @@ inductive SymbolicError where
   | invalidInitializer (name : Name)
   | invalidConstant (function : Name) (kind : AbiKind) (physical : ValueType)
   | invalidLocalRefinement (function : Name) (fvarId : FVarId) (kind : AbiKind)
+  | invalidMemoryLimits
+  | memoryInstructionWithoutMemory (function : Name)
   | stackUnderflow (function : Name) (expected : List AbiKind)
   | stackMismatch (function : Name) (expected actual : List AbiKind)
   | branchStackMismatch (function : Name) (label : FVarId)
@@ -138,6 +140,16 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
   for name in module.exports do
     unless module.functions.any (·.name == name) do
       throw (.unknownExport name)
+  if let some memory := module.memory then
+    unless memory.pagesMin.toNat ≤ 65536 do
+      throw .invalidMemoryLimits
+    if let some pagesMax := memory.pagesMax then
+      unless memory.pagesMin.toNat ≤ pagesMax.toNat &&
+          pagesMax.toNat ≤ 65536 do
+        throw .invalidMemoryLimits
+    if let some exportName := memory.exportName then
+      if module.exports.any (·.toString == exportName) then
+        throw (.duplicateExport (Name.mkSimple exportName))
   unless listAllUnique module.initializers.toList do
     throw (.invalidInitializer module.initializers[0]!)
   for initializer in module.initializers do
@@ -266,6 +278,59 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
             left.refines right && right.refines left do
           throw (.stackMismatch context.function.name [right, right] operands)
         return remaining ++ [.uint32]
+      return { fallthrough := stack? }
+  | .i32And | .i32ShrU => do
+      let stack? ← stack?.mapM fun stack => do
+        if stack.length < 2 then
+          throw (.stackUnderflow context.function.name [.uint32, .uint32])
+        let remaining := stack.take (stack.length - 2)
+        let operands := stack.drop (stack.length - 2)
+        unless operands.all (·.valueType == .i32) do
+          throw (.stackMismatch context.function.name [.uint32, .uint32] operands)
+        return remaining ++ [.uint32]
+      return { fallthrough := stack? }
+  | .i32Load result _ => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint32])
+        let remaining := stack.take (stack.length - 1)
+        let some address := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint32])
+        unless address.valueType == .i32 do
+          throw (.stackMismatch context.function.name [.uint32] [address])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .i64Load result _ => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint32])
+        let remaining := stack.take (stack.length - 1)
+        let some address := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint32])
+        unless address.valueType == .i32 do
+          throw (.stackMismatch context.function.name [.uint32] [address])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .i32WrapI64 result => do
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint64])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint64])
+        unless operand.valueType == .i64 do
+          throw (.stackMismatch context.function.name [.uint64] [operand])
+        return remaining ++ [result]
       return { fallthrough := stack? }
   | .block label body => do
       let nested := { context with labels := { fvarId := label, stack? } :: context.labels }

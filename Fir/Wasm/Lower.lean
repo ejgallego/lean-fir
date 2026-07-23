@@ -21,6 +21,14 @@ inductive Instruction where
   | globalSet (index : Nat) (kind : AbiKind)
   | call (target : CallTarget)
   | i32Eq
+  /-- Physical wasm32 bit operations used inside Wasm-resident runtime helpers. -/
+  | i32And
+  | i32ShrU
+  /-- Load from the module-owned memory at `address + offset`. -/
+  | i32Load (result : AbiKind) (offset : UInt32)
+  | i64Load (result : AbiKind) (offset : UInt32)
+  /-- Retag the low 32 bits of an i64 physical lane. -/
+  | i32WrapI64 (result : AbiKind)
   | block (label : FVarId) (body : List Instruction)
   | ifElse (thenBody elseBody : List Instruction)
   | br (label : FVarId)
@@ -36,12 +44,20 @@ structure Function where
   body : List Instruction
   deriving Inhabited, BEq
 
+structure MemoryDecl where
+  pagesMin : UInt32
+  pagesMax : Option UInt32 := none
+  exportName : Option String := none
+  deriving Inhabited, BEq
+
 structure Module where
   imports : Array Import
   functions : Array Function
   exports : Array Name
   initializers : Array Name
   runtimeOperations : Array RuntimeOp
+  /-- Optional module-owned wasm32 memory. Existing semantic-host modules omit it. -/
+  memory : Option MemoryDecl := none
   deriving Inhabited, BEq
 
 inductive CompileError where

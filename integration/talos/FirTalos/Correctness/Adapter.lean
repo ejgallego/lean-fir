@@ -106,6 +106,10 @@ theorem adapt_preserves_module_layout
         target.wasmModule = {
           funcs := functions
           imports := source.imports.toList.map importDecl
+          memory := source.memory.map fun memory =>
+            { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
+          memoryExports := source.memory.toList.filterMap fun memory =>
+            memory.exportName.map fun name => (name, 0)
           globals := source.cacheGlobalKinds.toList.map fun kind =>
             { init := zeroValue kind }
           exports := source.exports.toList.filterMap fun name =>
@@ -132,6 +136,10 @@ theorem adapt_preserves_module_layout
           let targetModule : Wasm.Module := {
             funcs := functions
             imports := source.imports.toList.map importDecl
+            memory := source.memory.map fun memory =>
+              { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
+            memoryExports := source.memory.toList.filterMap fun memory =>
+              memory.exportName.map fun name => (name, 0)
             globals := source.cacheGlobalKinds.toList.map fun kind =>
               { init := zeroValue kind }
             exports }
