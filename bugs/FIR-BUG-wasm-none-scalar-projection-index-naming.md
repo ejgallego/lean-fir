@@ -80,6 +80,9 @@ none
 
 ## Resolution and regression
 
-The shared naming issue remains unresolved. The Format coverage fixture and
-artifact check permanently exercise both affected scalar constructor fields
-using their compiler-derived slot coordinate.
+The shared naming issue remains unresolved. The Format coverage fixture reads
+back both affected scalar constructor fields at the compiler-derived
+coordinates `(1, 0)` for `Format.group` and `(0, 0)` for `Format.align` before
+emission. These checks document the current workable boundary; they are not a
+stable ABI promise and should move if the compiler or FIR constructor API
+changes.

@@ -71,6 +71,17 @@ def allocFormatAppend (runtime : Fir.LeanIR.Impure.RuntimeState)
       (Fir.LeanIR.Impure.RuntimeState × Fir.LeanIR.Impure.Value) :=
   Fir.LeanIR.Impure.allocCtor runtime formatAppendInfo #[left, right]
 
+/-- Check one currently compiler-derived packed `UInt8` coordinate. This is a
+source-fixture assertion, not a stable ABI promise: the fixture should move
+with Lean whenever a cleaner constructor-layout surface becomes available. -/
+def expectFormatUInt8Coordinate (runtime : Fir.LeanIR.Impure.RuntimeState)
+    (format : Fir.LeanIR.Impure.Value) (slot offset : Nat) (expected : UInt8) :
+    Except Fir.LeanIR.Impure.RuntimeFault Unit := do
+  let actual ← Fir.LeanIR.Impure.getScalarField runtime format slot offset
+  unless actual == .scalar (.uint8 expected) do
+    throw (.malformed
+      s!"unexpected packed Format UInt8 at compiler coordinate ({slot}, {offset})")
+
 def allocFormatAlign (runtime : Fir.LeanIR.Impure.RuntimeState) (force : Bool) :
     Except Fir.LeanIR.Impure.RuntimeFault
       (Fir.LeanIR.Impure.RuntimeState × Fir.LeanIR.Impure.Value) := do
@@ -114,12 +125,14 @@ def prettyFormatCoverageInvocation : Except Fir.LeanIR.Impure.RuntimeFault
   let (runtime, alphaLine) ← allocFormatAppend runtime alpha line
   let (runtime, alphaLineBeta) ← allocFormatAppend runtime alphaLine beta
   let (runtime, grouped) ← allocFormatGroup runtime alphaLineBeta .allOrNone
+  let _ ← expectFormatUInt8Coordinate runtime grouped 1 0 0
   let (runtime, taggedFormat) ← Fir.LeanIR.Impure.allocCtor runtime formatTagInfo
     #[.object (.tagged 7), grouped]
   let (runtime, emptyTagged) ← allocFormatAppend runtime nil taggedFormat
   let (runtime, formatPrefix) ← allocFormatAppend runtime emptyTagged line
   let (runtime, dot) ← allocFormatText runtime "."
   let (runtime, align) ← allocFormatAlign runtime false
+  let _ ← expectFormatUInt8Coordinate runtime align 0 0 0
   let (runtime, gamma) ← allocFormatText runtime "γ"
   let (runtime, deltaEpsilon) ← allocFormatText runtime "δ\nε"
   let (runtime, dotAlign) ← allocFormatAppend runtime dot align

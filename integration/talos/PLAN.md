@@ -2683,6 +2683,39 @@ write, and the executable guard confirms complete memory preservation. This
 does not weaken the distinct physical-zero erased-sentinel no-op. No shared
 contract or runtime behavior changes.
 
+W6.6bv consumes the shared absolute-`USize` slot contract throughout the
+concrete runtime and Talos proof stack. Concrete readers and writers validate
+the absolute slot against the constructor's object-plus-`USize` range, then
+translate to the local payload offset; live success, exact bounds faults, and
+dead-object precedence are proved for both projection and mutation. Forced
+source recompilation also repaired allocation proofs that had been hidden by
+stale proof artifacts, and the compiler-shaped mixed-layout fixture now writes
+slot one after its single object field. The shared contract itself came from
+`main`; this slice only updates Wasm consumers.
+
+W6.6bw establishes an experimental arbitrary-precision heap-`Int` boundary.
+The current implementation stores a sign and a little-endian magnitude behind
+a checked integer header; allocation proves frontier validity, old-prefix
+framing, exact header facts, and `readInteger` round-trip for positive and
+negative multi-limb values. `IntegerObjectRel` is intentionally local and
+replaceable: clients may experiment against it, but neither its header lanes
+nor its eventual integration into `LiveHeapRel` is a compatibility promise.
+
+W6.6bx makes the pure external-result consequence explicit.
+`ConcretePureExternalPost` and `invoke_pure_result_refines` allow the response
+heap and refinement witness to grow while proving unchanged concrete/source
+worlds and the exact one-event trace appended on each side. The theorem is
+result-polymorphic, so heap-backed `Nat`, `Int`, and `String` results use the
+same composition boundary; only their allocation-specific
+`ConcreteExternalResponseRel` proof changes as layouts evolve.
+
+W6.6by records the current Lean 4.32 packed coordinates used to construct the
+`source-pretty-format-coverage` initial heap. The fixture reads back
+`Format.group`'s `UInt8` at `(1, 0)` and `Format.align`'s at `(0, 0)` before
+artifact emission. These are compiler-derived assertions for the current
+experiment, not a stable ABI: the fixture is expected to change when FIR gains
+a clearer layout-aware constructor initializer or Lean changes the lowering.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

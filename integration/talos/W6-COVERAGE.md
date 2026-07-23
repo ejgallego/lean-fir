@@ -33,7 +33,7 @@ failure correspondence. The matrix is intentionally conservative.
 
 Cross-cutting W6.5 state:
 
-- the frozen UTF-8 string writer has exact byte readback and spatial-frame
+- the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness
   well-formedness and prior lookups; and fresh string allocation extends
@@ -50,6 +50,20 @@ Cross-cutting W6.5 state:
   Node/browser concrete host executes the matching external artifact with the same
   return/world/trace, executes a twice-called cached external with exactly one
   effect, and separately verifies reject-by-default behavior;
+- pure external responses now expose `ConcretePureExternalPost`: result
+  allocation may extend the heap witness, while both worlds remain unchanged
+  and each side's trace is exactly its previous trace plus the related call
+  event. The theorem is independent of whether the result is a heap-backed
+  `Nat`, `Int`, or `String`;
+- arbitrary-precision heap integers have an experimental sign/magnitude
+  allocation and checked-read boundary with exact positive/negative
+  multi-limb round trips, frontier preservation, and old-prefix framing.
+  `IntegerObjectRel` is deliberately not advertised as a stable layout or yet
+  as a complete `LiveHeapRel` extension;
+- the current `source-pretty-format-coverage` initial heap checks the
+  compiler-derived packed `UInt8` coordinates `(1, 0)` for `Format.group` and
+  `(0, 0)` for `Format.align` before emission; these checks are expected to
+  move with compiler/layout improvements;
 - `ConcreteError.toTrap` preserves source-vs-target classification and maps
   address-bearing dead-object and underflow faults back to semantic locations;
 - mapped live-constructor object and `USize` projections preserve an exact

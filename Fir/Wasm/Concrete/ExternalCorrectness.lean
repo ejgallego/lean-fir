@@ -218,4 +218,92 @@ theorem ConcreteExternalImpl.invoke_refines
     rfl
   · exact runtimeRelated.applyExternalResponse requestRelated responseRelated
 
+/-- Postcondition for a pure external result whose representation may allocate.
+The heap and witness may grow (as they do for heap-backed `Nat`, `Int`, and
+`String` values), while the world is unchanged and each side records exactly
+its own request/result event. The runtime relation additionally proves that
+those two exact events are related under the extended witness.
+
+This boundary is deliberately result-polymorphic: adding or changing a heap
+layout only affects the proof of `ConcreteExternalResponseRel`, not external
+call composition. -/
+structure ConcretePureExternalPost
+    (concreteBefore : ConcreteRuntimeState)
+    (beforeWitness afterWitness : RefinementWitness)
+    (semanticBefore : RuntimeState)
+    (concreteRequest : ConcreteExternalRequest)
+    (semanticRequest : ExternalRequest)
+    (concreteResponse : ConcreteExternalResponse)
+    (semanticResponse : ExternalResponse) : Prop where
+  witnessExtension : beforeWitness.Extends afterWitness
+  runtime : ConcreteRuntimeRel
+    (concreteBefore.applyExternalResponse concreteRequest concreteResponse)
+    afterWitness
+    (semanticExternalRuntimeAfter semanticRequest semanticBefore semanticResponse)
+  value : ValueRel afterWitness concreteRequest.resultKind concreteResponse.value
+    semanticResponse.value
+  concreteWorld :
+    (concreteBefore.applyExternalResponse concreteRequest concreteResponse).world =
+      concreteBefore.world
+  semanticWorld :
+    (semanticExternalRuntimeAfter semanticRequest semanticBefore semanticResponse).world =
+      semanticBefore.world
+  concreteTrace :
+    (concreteBefore.applyExternalResponse concreteRequest concreteResponse).trace =
+      concreteBefore.trace.push (concreteRequest.event concreteResponse.value)
+  semanticTrace :
+    (semanticExternalRuntimeAfter semanticRequest semanticBefore semanticResponse).trace =
+      semanticBefore.trace.push
+        (semanticExternalEvent semanticRequest semanticResponse.value)
+
+/-- The generic concrete external theorem specialized only by purity of the
+source world. In particular, witness-extending `Nat`, `Int`, and `String`
+result allocations require no result-specific composition theorem. -/
+theorem ConcreteExternalImpl.invoke_pure_result_refines
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {concreteResponse : ConcreteExternalResponse}
+    {semanticResponse : ExternalResponse}
+    (runtimeRelated : ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel beforeWitness
+      concreteRequest semanticRequest)
+    (concreteCalled : concreteImplementation.call concreteRequest concreteBefore =
+      .ok concreteResponse)
+    (semanticCalled : semanticImplementation.call semanticRequest semanticBefore =
+      .ok semanticResponse)
+    (responseRelated : ConcreteExternalResponseRel beforeWitness afterWitness
+      semanticRequest semanticBefore concreteRequest.resultKind
+      concreteResponse semanticResponse)
+    (worldUnchanged : semanticResponse.world = semanticBefore.world) :
+    concreteImplementation.invoke concreteRequest concreteBefore =
+        .ok (concreteBefore.applyExternalResponse concreteRequest concreteResponse,
+          concreteResponse.value) ∧
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok semanticResponse ∧
+      ConcretePureExternalPost concreteBefore beforeWitness afterWitness
+        semanticBefore concreteRequest semanticRequest concreteResponse
+        semanticResponse := by
+  obtain ⟨concreteInvoke, semanticInvoke, runtimeAfter, valueAfter⟩ :=
+    concreteImplementation.invoke_refines runtimeRelated requestRelated
+      concreteCalled semanticCalled responseRelated
+  refine ⟨concreteInvoke, semanticInvoke, {
+    witnessExtension := responseRelated.witnessExtension
+    runtime := runtimeAfter
+    value := valueAfter
+    concreteWorld := ?_
+    semanticWorld := ?_
+    concreteTrace := rfl
+    semanticTrace := rfl }⟩
+  · simp only [ConcreteRuntimeState.applyExternalResponse]
+    calc
+      concreteResponse.world = semanticResponse.world := responseRelated.world
+      _ = semanticBefore.world := worldUnchanged
+      _ = concreteBefore.world := runtimeRelated.world.symm
+  · simpa [semanticExternalRuntimeAfter] using worldUnchanged
+
 end Fir.Wasm.Concrete
