@@ -1024,10 +1024,10 @@ external/call forms. The recursive and local-tail three-element traversals
 require four case/call steps and six object projections; reassociation requires
 two decrements and sharedness checks plus four object writes; tuple rotation
 requires two reuse decisions and four projections/writes; and the
-distinct-child swap requires its two writes. Current observations meet every
-minimum exactly, so losing one intended repetition fails coverage even when
-the same instruction form—or a different external call—remains present and
-executable elsewhere in the case.
+distinct-child swap requires its two writes. Every one of these source-stable
+counts now has equal minimum and maximum bounds, so losing or adding one
+intended repetition fails coverage even when the same instruction form—or a
+different external call—remains present and executable elsewhere in the case.
 
 Stress fixtures additionally execute compiler-lowered ownership/reuse during
 recursive reassociation, change the

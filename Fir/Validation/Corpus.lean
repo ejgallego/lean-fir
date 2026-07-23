@@ -1064,8 +1064,9 @@ def cases : Array Case := #[
     requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
     requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "cases", minimum := 4 }, { form := "fap", minimum := 4 },
-        { form := "oproj", minimum := 6 }] },
+      #[{ form := "cases", minimum := 4, maximum := some 4 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 6, maximum := some 6 }] },
   { id := "recursive-empty"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -1087,8 +1088,9 @@ def cases : Array Case := #[
     requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
     requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "cases", minimum := 4 }, { form := "fap", minimum := 4 },
-        { form := "oproj", minimum := 6 }] },
+      #[{ form := "cases", minimum := 4, maximum := some 4 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 6, maximum := some 6 }] },
   { id := "large-nat"
     entry := ``Source.largeNat
     resultSchema := .nat
@@ -1706,7 +1708,8 @@ def cases : Array Case := #[
         "bytearray", "heap", "multiplicity", "boundary"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := objectUpdateForms
-    requiredExecutedLcnfFormCounts := #[{ form := "oset", minimum := 2 }]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 2, maximum := some 2 }]
     provenance := firProvenance
       "Swap two distinct heap children on the unique path and require both object writes" },
   { id := "byte-array-object-swap-shared"
@@ -1738,8 +1741,9 @@ def cases : Array Case := #[
     requiredLcnfForms := #["oproj", "ctor", "return"]
     requiredExecutedLcnfForms := #["oproj", "isShared", "cases", "oset", "jump", "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "isShared", minimum := 2 }, { form := "oproj", minimum := 4 },
-        { form := "oset", minimum := 4 }]
+      #[{ form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 4, maximum := some 4 }]
     provenance := leanCompileProvenance "tests/compile/tuple.lean"
       "Tuple projection/allocation without IO" },
   { id := "usize-roundtrip"
@@ -1768,8 +1772,9 @@ def cases : Array Case := #[
       #["cases", "oproj", "inc", "join", "isShared", "dec", "jump", "oset", "fap",
         "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "dec", minimum := 2 }, { form := "isShared", minimum := 2 },
-        { form := "oset", minimum := 4 }]
+      #[{ form := "dec", minimum := 2, maximum := some 2 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "oset", minimum := 4, maximum := some 4 }]
     provenance := leanCompileProvenance "tests/compile/reusebug.lean"
       "Pure terminating reassociation adapted to execute the ownership/reuse path" },
   { id := "reuse-change-tag"
@@ -2076,11 +2081,12 @@ def cases : Array Case := #[
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
     requiredExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternalCounts :=
-      #[{ external := ``NativeEffects.recordImpl, minimum := 2 }]
+      #[{ external := ``NativeEffects.recordImpl, minimum := 2, maximum := some 2 }]
     effectProjections := #[{
       external := ``NativeEffects.recordImpl
       operation := "validation.record"
@@ -2103,11 +2109,13 @@ def cases : Array Case := #[
     requiredLcnfForms := #["lit", "fap", "extern", "return"]
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
     requiredExecutedLcnfFormCounts :=
-      #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
     requiredExternals := #[``NativeEffects.recordByteArrayImpl]
     requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
     requiredExecutedExternalCounts :=
-      #[{ external := ``NativeEffects.recordByteArrayImpl, minimum := 2 }]
+      #[{ external := ``NativeEffects.recordByteArrayImpl, minimum := 2,
+          maximum := some 2 }]
     effectProjections := #[{
       external := ``NativeEffects.recordByteArrayImpl
       operation := "validation.recordByteArray"
