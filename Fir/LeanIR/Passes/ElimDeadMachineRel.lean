@@ -3019,6 +3019,84 @@ theorem coreStep_retainedScalarSet_reachableRelated
               sourceFrameRoots, targetFrameRoots,
               programs, .code continuation joins env, frames, nextRuntime⟩
 
+/-- A retained constructor-tag update succeeds on both related machines and
+preserves the reachable machine relation. -/
+theorem coreStep_setTag_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : setTag sourceState.runtime objectValue tag =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      setTag targetState.runtime targetObjectValue tag =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.setTag object tag sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.setTag object tag targetContinuation)) =
+          .next targetAfter ∧
+        ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.setTagBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold ReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- Deleted unboxed-word write under the same unreachable-target premise. -/
 theorem coreStep_deletedUSizeSet_reachableRelated
     (sourceState targetState : MachineState)
@@ -4817,6 +4895,79 @@ theorem match_scalarSetCodeStep
           programs frames continuation joins env runtime deletedReady step with
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
+/-- Complete graph-level matcher for an unconditionally retained constructor
+tag update. Source faults are terminal; success takes one target step. -/
+theorem match_setTagCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.setTag object tag sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.setTag object tag sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases graph.setTagResidual with
+    ⟨targetContinuation, targetEq, continuation, objectMember⟩
+  subst targetCode
+  let sourceCurrent := withCodeControl sourceState
+    (.setTag object tag sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize effect :
+        setTag sourceState.runtime objectValue tag = effectResult
+      cases effectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              effect, fail]
+          exact (noStep done).elim
+      | ok sourceNextRuntime =>
+          rcases coreStep_setTag_reachableRelated sourceState targetState
+              programs frames continuation joins env objectMember objectRead
+              effect runtime with
+            ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+              targetEffect, sourceTransition, targetTransition,
+              afterRelated⟩
+          rcases match_internalCoreSteps sourceTransition targetTransition
+              afterRelated step with
+            ⟨targetPath, finalRelated⟩
+          exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
 
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/

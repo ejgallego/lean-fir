@@ -2976,6 +2976,143 @@ theorem ShadowRuntimeRel.setScalarFieldBoth_of_related
               cases leftEffect
               exact ⟨rightResult, rightEffect, next⟩
 
+/-- Updating the constructor tag of one mapped live pair preserves the
+reachable runtime relation. Tags carry no ownership edges. -/
+theorem ShadowRuntimeRel.setTagBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (leftLive : leftCell.live = true)
+    (leftObjectEq : leftCell.object = .ctor leftObject)
+    (tag : Nat) :
+    ∃ leftResult rightResult,
+      setTag left (.object (.heap leftLocation)) tag = .ok leftResult ∧
+      setTag right (.object (.heap rightLocation)) tag = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have mappedSame : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have leftCellSame : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  have rightLive : rightCell.live = true := by
+    rw [← cells.2.2.1]
+    exact leftLive
+  have objects := cells.2.2.2
+  generalize rightObjectEq : rightCell.object = targetObject at objects
+  rw [leftObjectEq] at objects
+  cases objects with
+  | ctor oldTag objectFields usizes scalars =>
+      rename_i rightObject
+      let leftReplacement : HeapCell :=
+        { leftCell with object := .ctor { leftObject with tag } }
+      let rightReplacement : HeapCell :=
+        { rightCell with object := .ctor { rightObject with tag } }
+      have replacement :
+          HeapCellRel rho leftReplacement rightReplacement := by
+        refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+        dsimp only [leftReplacement, rightReplacement]
+        exact @HeapObjectRel.ctor rho
+          { leftObject with tag }
+          { rightObject with tag }
+          rfl objectFields usizes scalars
+      have leftOwned :
+          leftReplacement.object.ownedValues =
+            leftCell.object.ownedValues := by
+        simp [leftReplacement, leftObjectEq, HeapObject.ownedValues]
+      have rightOwned :
+          rightReplacement.object.ownedValues =
+            rightCell.object.ownedValues := by
+        simp [rightReplacement, rightObjectEq, HeapObject.ownedValues]
+      rcases related.setCellBoth mapping leftFound rightFound
+          leftOwned rightOwned replacement with
+        ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+      refine ⟨leftResult, rightResult, ?_, ?_, next⟩
+      · have constructor :
+            getConstructor left (.object (.heap leftLocation)) =
+              .ok (leftLocation, leftCell, leftObject) := by
+          simp [getConstructor, getLiveCell, leftFound, leftLive,
+            leftObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setTag modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        simpa [leftReplacement] using leftEffect
+      · have constructor :
+            getConstructor right (.object (.heap rightLocation)) =
+              .ok (rightLocation, rightCell, rightObject) := by
+          simp [getConstructor, getLiveCell, rightFound, rightLive,
+            rightObjectEq, Bind.bind, Except.bind]
+          rfl
+        unfold setTag modifyConstructor
+        rw [constructor]
+        simp only [Bind.bind, Except.bind]
+        simpa [rightReplacement] using rightEffect
+
+/-- Interpreter-facing retained tag write. -/
+theorem ShadowRuntimeRel.setTagBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect : setTag left leftObject tag = .ok leftResult) :
+    ∃ rightResult,
+      setTag right rightObject tag = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases objects with
+  | tagged payload =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | usize value =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | scalar value =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | erased =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | reuseNone =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | reuseSome mapping =>
+      simp [setTag, modifyConstructor, getConstructor,
+        Bind.bind, Except.bind] at sourceEffect
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      have originalSourceEffect := sourceEffect
+      unfold setTag modifyConstructor at sourceEffect
+      simp only [Bind.bind, Except.bind] at sourceEffect
+      generalize constructorEq :
+        getConstructor left (.object (.heap leftLocation)) =
+          constructorResult at sourceEffect
+      cases constructorResult with
+      | error fault =>
+          simp at sourceEffect
+      | ok result =>
+          obtain ⟨resultLocation, leftCell, leftConstructor⟩ := result
+          simp only at sourceEffect
+          rcases getConstructor_heap_spec constructorEq with
+            ⟨resultLocationEq, leftFound, leftLive, leftObjectEq⟩
+          subst resultLocation
+          have reachable :
+              Reachable left.heap (runtimeRoots left leftExtra)
+                leftLocation := by
+            exact .root (extra_subset_runtimeRoots left leftExtra
+              (.object (.heap leftLocation)) objectRoot)
+          rcases related.setTagBoth mapping reachable leftFound leftLive
+              leftObjectEq tag with
+            ⟨computedLeft, rightResult, leftEffect, rightEffect, next⟩
+          rw [originalSourceEffect] at leftEffect
+          cases leftEffect
+          exact ⟨rightResult, rightEffect, next⟩
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable
