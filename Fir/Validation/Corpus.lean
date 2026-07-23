@@ -1032,9 +1032,12 @@ def cases : Array Case := #[
     argSchemas := #[.seq .nat]
     resultSchema := .nat
     native := fun _ => .nat (Source.recursiveTraversal [10, 20, 12])
-    tags := #["quick", "constructor", "recursion"]
+    tags := #["quick", "constructor", "recursion", "multiplicity"]
     requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
-    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
+    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 4 }, { form := "fap", minimum := 4 },
+        { form := "oproj", minimum := 6 }] },
   { id := "recursive-empty"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -1052,9 +1055,12 @@ def cases : Array Case := #[
     argSchemas := #[.seq .nat]
     resultSchema := .nat
     native := fun _ => .nat (Source.localTailControl [10, 20, 42])
-    tags := #["quick", "tail-control"]
+    tags := #["quick", "tail-control", "multiplicity"]
     requiredLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
-    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"] },
+    requiredExecutedLcnfForms := #["cases", "oproj", "inc", "fap", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 4 }, { form := "fap", minimum := 4 },
+        { form := "oproj", minimum := 6 }] },
   { id := "large-nat"
     entry := ``Source.largeNat
     resultSchema := .nat
@@ -1700,9 +1706,12 @@ def cases : Array Case := #[
     native := fun _ =>
       let result := Source.tupleRotate (1, 2, 3)
       .ctor "Prod.mk" 0 #[.nat result.1, .ctor "Prod.mk" 0 #[.nat result.2.1, .nat result.2.2]]
-    tags := #["quick", "constructor", "projection", "allocation"]
+    tags := #["quick", "constructor", "projection", "allocation", "multiplicity"]
     requiredLcnfForms := #["oproj", "ctor", "return"]
     requiredExecutedLcnfForms := #["oproj", "isShared", "cases", "oset", "jump", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "isShared", minimum := 2 }, { form := "oproj", minimum := 4 },
+        { form := "oset", minimum := 4 }]
     provenance := leanCompileProvenance "tests/compile/tuple.lean"
       "Tuple projection/allocation without IO" },
   { id := "usize-roundtrip"
@@ -1721,7 +1730,8 @@ def cases : Array Case := #[
     argSchemas := #[assocSchema assocInput]
     resultSchema := assocSchema assocExpected
     native := fun _ => assocDatum (Source.Assoc.reassoc assocInput)
-    tags := #["stress", "ownership", "reuse", "recursion", "constructor"]
+    tags :=
+      #["stress", "ownership", "reuse", "recursion", "constructor", "multiplicity"]
     fuel := 100000
     requiredLcnfForms :=
       #["cases", "oproj", "inc", "join", "fap", "oset", "jump", "ctor", "isShared",
@@ -1729,6 +1739,9 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms :=
       #["cases", "oproj", "inc", "join", "isShared", "dec", "jump", "oset", "fap",
         "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "dec", minimum := 2 }, { form := "isShared", minimum := 2 },
+        { form := "oset", minimum := 4 }]
     provenance := leanCompileProvenance "tests/compile/reusebug.lean"
       "Pure terminating reassociation adapted to execute the ownership/reuse path" },
   { id := "reuse-change-tag"
@@ -2031,9 +2044,11 @@ def cases : Array Case := #[
     native := fun _ => .nat (Source.recordTwice 7)
     nativeBefore := NativeEffects.reset
     nativeEffects := fun _ => NativeEffects.take
-    tags := #["quick", "effect", "external", "nat", "sequence"]
+    tags := #["quick", "effect", "external", "nat", "sequence", "multiplicity"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
     requiredExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
     effectProjections := #[{
@@ -2053,9 +2068,12 @@ def cases : Array Case := #[
     nativeBefore := NativeEffects.reset
     nativeEffects := fun _ => NativeEffects.take
     tags :=
-      #["stress", "effect", "external", "bytes", "heap", "mutation", "snapshot", "sequence"]
+      #["stress", "effect", "external", "bytes", "heap", "mutation", "snapshot",
+        "sequence", "multiplicity"]
     requiredLcnfForms := #["lit", "fap", "extern", "return"]
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
     requiredExternals := #[``NativeEffects.recordByteArrayImpl]
     requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
     effectProjections := #[{
