@@ -3264,6 +3264,391 @@ theorem ShadowRuntimeRel.incValueBoth_of_related
           cases leftEffect
           exact ⟨rightResult, by simpa [incValue] using rightEffect, next⟩
 
+/-- Publish a related pair of cells' owned values as temporary direct roots.
+This is the ownership-release frame: after the parent is marked dead, every
+child remains available to the recursive left-to-right decrement fold even
+when an earlier sibling release changes the heap. -/
+theorem ShadowRuntimeRel.publishOwnedValues
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (rightReachable :
+      Reachable right.heap (runtimeRoots right rightExtra) rightLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (rightFound : findCell? right.heap rightLocation = some rightCell)
+    (cells : HeapCellRel rho leftCell rightCell) :
+    ShadowRuntimeRel rho left right
+      (leftCell.object.ownedValues.toList ++ leftExtra)
+      (rightCell.object.ownedValues.toList ++ rightExtra) := by
+  apply related.reindexExtra
+    (listRel_append (heapCellRel_ownedValues cells) related.extra)
+  · intro location reachable
+    apply reachable_monoRootReachability (larger :=
+      runtimeRoots left leftExtra) ?_ reachable
+    intro child member
+    simp only [runtimeRoots, List.mem_append] at member
+    rcases member with ((owned | extra) | global) | trace
+    · exact .child leftReachable leftFound owned rfl
+    · exact .root (by simp [runtimeRoots, extra])
+    · exact .root (by simp [runtimeRoots, global])
+    · exact .root (by simp [runtimeRoots, trace])
+  · intro location reachable
+    apply reachable_monoRootReachability (larger :=
+      runtimeRoots right rightExtra) ?_ reachable
+    intro child member
+    simp only [runtimeRoots, List.mem_append] at member
+    rcases member with ((owned | extra) | global) | trace
+    · exact .child rightReachable rightFound owned rfl
+    · exact .root (by simp [runtimeRoots, extra])
+    · exact .root (by simp [runtimeRoots, global])
+    · exact .root (by simp [runtimeRoots, trace])
+
+/-- Successful semantic recursive release is monotone in fuel. Enlarging the
+depth budget cannot change the selected branch or final runtime. -/
+theorem decLocationFuel_ok_mono
+    {fuel more : Nat} {runtime result : RuntimeState} {location : Location}
+    (fuelLe : fuel ≤ more)
+    (operation : decLocationFuel fuel runtime location = .ok result) :
+    decLocationFuel more runtime location = .ok result := by
+  induction fuel generalizing more runtime result location with
+  | zero =>
+      simp [decLocationFuel] at operation
+  | succ fuel recurse =>
+      cases more with
+      | zero => omega
+      | succ more =>
+          have smaller : fuel ≤ more := by omega
+          generalize cellEq : getLiveCell runtime location = cellResult
+          cases cellResult with
+          | error fault =>
+              simp [decLocationFuel, cellEq, Bind.bind, Except.bind] at operation
+          | ok cell =>
+              by_cases persistent : cell.persistent = true
+              · simpa [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                  persistent] using operation
+              · by_cases zero : cell.rc = 0
+                · simp [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                    persistent, zero] at operation
+                · by_cases above : 1 < cell.rc
+                  · simpa [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                      persistent, zero, above] using operation
+                  · cases releasedEq :
+                      setCell runtime location { cell with rc := 0, live := false } with
+                    | error fault =>
+                        simp only [decLocationFuel, cellEq, Bind.bind,
+                          Except.bind] at operation
+                        rw [if_neg persistent, if_neg zero, if_neg above]
+                          at operation
+                        rw [releasedEq] at operation
+                        contradiction
+                    | ok released =>
+                        simp only [decLocationFuel, cellEq, Bind.bind,
+                          Except.bind] at operation ⊢
+                        rw [if_neg persistent, if_neg zero, if_neg above]
+                          at operation ⊢
+                        rw [releasedEq] at operation ⊢
+                        have foldMono : ∀ (values : List Value)
+                            (before after : RuntimeState),
+                            values.foldlM (init := before) (fun next value =>
+                              match value with
+                              | .object (.heap child) =>
+                                  decLocationFuel fuel next child
+                              | _ => .ok next) = .ok after →
+                            values.foldlM (init := before) (fun next value =>
+                              match value with
+                              | .object (.heap child) =>
+                                  decLocationFuel more next child
+                              | _ => .ok next) = .ok after := by
+                          intro values
+                          induction values with
+                          | nil =>
+                              intro before after folded
+                              simpa using folded
+                          | cons value values tailIH =>
+                              intro before after folded
+                              simp only [List.foldlM_cons, Bind.bind,
+                                Except.bind] at folded ⊢
+                              cases value with
+                              | object reference =>
+                                  cases reference with
+                                  | tagged payload =>
+                                      exact tailIH before after folded
+                                  | heap child =>
+                                      dsimp only at folded ⊢
+                                      cases childEq :
+                                          decLocationFuel fuel before child with
+                                      | error fault =>
+                                          rw [childEq] at folded
+                                          contradiction
+                                      | ok middle =>
+                                          rw [childEq] at folded
+                                          rw [recurse smaller childEq]
+                                          exact tailIH middle after folded
+                              | usize | scalar | erased | reuseToken =>
+                                  exact tailIH before after folded
+                        dsimp only at operation ⊢
+                        rw [← Array.foldlM_toList] at operation ⊢
+                        exact foldMono cell.object.ownedValues.toList
+                          released result operation
+
+/-- One common positive fuel budget drives corresponding recursive releases
+through the same ownership graph. The source's successful execution fixes the
+branch and result; the target follows under the reachable-heap relation. -/
+theorem ShadowRuntimeRel.decLocationFuelBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (sourceEffect :
+      decLocationFuel fuel left leftLocation = .ok leftResult) :
+    ∃ rightResult,
+      decLocationFuel fuel right rightLocation = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  induction fuel generalizing left right leftExtra rightExtra leftLocation
+      rightLocation leftResult with
+  | zero =>
+      simp [decLocationFuel] at sourceEffect
+  | succ fuel recurse =>
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mapped, leftCell, rightCell, mappedEq, leftFound, rightFound, cells⟩
+      have mappedSame : mapped = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mapped
+      rcases reachable_forward related.roots related.heap leftReachable with
+        ⟨mappedReachable, reachableMapping, rightReachable⟩
+      have reachableSame : mappedReachable = rightLocation := by
+        rw [mapping] at reachableMapping
+        exact (Option.some.inj reachableMapping).symm
+      subst mappedReachable
+      cases leftLive : leftCell.live with
+      | false =>
+          simp [decLocationFuel, getLiveCell, leftFound, leftLive,
+            Bind.bind, Except.bind] at sourceEffect
+      | true =>
+          have rightLive : rightCell.live = true := by
+            rw [← cells.2.2.1]
+            exact leftLive
+          have leftGet : getLiveCell left leftLocation = .ok leftCell := by
+            simp [getLiveCell, leftFound, leftLive]
+          have rightGet : getLiveCell right rightLocation = .ok rightCell := by
+            simp [getLiveCell, rightFound, rightLive]
+          cases leftPersistent : leftCell.persistent with
+          | true =>
+              have rightPersistent : rightCell.persistent = true := by
+                rw [← cells.2.1]
+                exact leftPersistent
+              have leftNoop :
+                  decLocationFuel (fuel + 1) left leftLocation = .ok left := by
+                simp only [decLocationFuel, leftGet, Bind.bind, Except.bind]
+                rw [if_pos (by simp [leftPersistent])]
+                rfl
+              have rightNoop :
+                  decLocationFuel (fuel + 1) right rightLocation = .ok right := by
+                simp only [decLocationFuel, rightGet, Bind.bind, Except.bind]
+                rw [if_pos (by simp [rightPersistent])]
+                rfl
+              rw [leftNoop] at sourceEffect
+              have resultEq := Except.ok.inj sourceEffect
+              subst leftResult
+              exact ⟨right, rightNoop, related⟩
+          | false =>
+              have rightPersistent : rightCell.persistent = false := by
+                rw [← cells.2.1]
+                exact leftPersistent
+              by_cases leftZero : leftCell.rc = 0
+              · simp only [decLocationFuel, leftGet, Bind.bind,
+                  Except.bind] at sourceEffect
+                rw [if_neg (by simp [leftPersistent])] at sourceEffect
+                rw [if_pos leftZero] at sourceEffect
+                simp at sourceEffect
+              · have rightNonzero : rightCell.rc ≠ 0 := by
+                  rw [← cells.1]
+                  exact leftZero
+                by_cases leftAbove : 1 < leftCell.rc
+                · have rightAbove : 1 < rightCell.rc := by
+                    rw [← cells.1]
+                    exact leftAbove
+                  let leftReplacement : HeapCell :=
+                    { leftCell with rc := leftCell.rc - 1 }
+                  let rightReplacement : HeapCell :=
+                    { rightCell with rc := rightCell.rc - 1 }
+                  have replacement :
+                      HeapCellRel rho leftReplacement rightReplacement := by
+                    refine ⟨?_, cells.2.1, cells.2.2.1, cells.2.2.2⟩
+                    simp [leftReplacement, rightReplacement, cells.1]
+                  have leftOwned :
+                      leftReplacement.object.ownedValues =
+                        leftCell.object.ownedValues := by
+                    simp [leftReplacement]
+                  have rightOwned :
+                      rightReplacement.object.ownedValues =
+                        rightCell.object.ownedValues := by
+                    simp [rightReplacement]
+                  rcases related.setCellBoth mapping leftFound rightFound
+                      leftOwned rightOwned replacement with
+                    ⟨computedLeft, rightResult, leftEffect, rightEffect, next⟩
+                  have leftBranch :
+                      decLocationFuel (fuel + 1) left leftLocation =
+                        setCell left leftLocation leftReplacement := by
+                    simp only [decLocationFuel, leftGet, Bind.bind, Except.bind]
+                    rw [if_neg (by simp [leftPersistent])]
+                    rw [if_neg leftZero, if_pos leftAbove]
+                  have rightBranch :
+                      decLocationFuel (fuel + 1) right rightLocation =
+                        setCell right rightLocation rightReplacement := by
+                    simp only [decLocationFuel, rightGet, Bind.bind, Except.bind]
+                    rw [if_neg (by simp [rightPersistent])]
+                    rw [if_neg rightNonzero, if_pos rightAbove]
+                  rw [leftBranch, leftEffect] at sourceEffect
+                  have resultEq := Except.ok.inj sourceEffect
+                  subst leftResult
+                  exact ⟨rightResult, rightBranch.trans rightEffect, next⟩
+                · have leftOne : leftCell.rc = 1 := by omega
+                  have rightNotAbove : ¬1 < rightCell.rc := by
+                    rw [← cells.1]
+                    exact leftAbove
+                  let leftReplacement : HeapCell :=
+                    { leftCell with rc := 0, live := false }
+                  let rightReplacement : HeapCell :=
+                    { rightCell with rc := 0, live := false }
+                  have replacement :
+                      HeapCellRel rho leftReplacement rightReplacement := by
+                    refine ⟨by simp [leftReplacement, rightReplacement],
+                      cells.2.1, by simp [leftReplacement, rightReplacement],
+                      cells.2.2.2⟩
+                  have leftOwned :
+                      leftReplacement.object.ownedValues =
+                        leftCell.object.ownedValues := by
+                    simp [leftReplacement]
+                  have rightOwned :
+                      rightReplacement.object.ownedValues =
+                        rightCell.object.ownedValues := by
+                    simp [rightReplacement]
+                  have published := related.publishOwnedValues leftReachable
+                    rightReachable leftFound rightFound cells
+                  rcases published.setCellBoth mapping leftFound rightFound
+                      leftOwned rightOwned replacement with
+                    ⟨parentLeft, parentRight, parentLeftEffect,
+                      parentRightEffect, parentRelated⟩
+                  let releaseChild (runtime : RuntimeState) (value : Value) :
+                      Except RuntimeFault RuntimeState :=
+                    match value with
+                    | .object (.heap child) =>
+                        decLocationFuel fuel runtime child
+                    | _ => .ok runtime
+                  have sourceFoldArray :
+                      Array.foldlM releaseChild parentLeft
+                          leftCell.object.ownedValues = .ok leftResult := by
+                    simp only [decLocationFuel, leftGet, Bind.bind,
+                      Except.bind] at sourceEffect
+                    rw [if_neg (by simp [leftPersistent])] at sourceEffect
+                    rw [if_neg leftZero, if_neg leftAbove] at sourceEffect
+                    rw [parentLeftEffect] at sourceEffect
+                    change Array.foldlM releaseChild parentLeft
+                      leftCell.object.ownedValues = .ok leftResult at sourceEffect
+                    exact sourceEffect
+                  have sourceFoldList :
+                      leftCell.object.ownedValues.toList.foldlM
+                          (init := parentLeft) releaseChild = .ok leftResult := by
+                    simpa only [Array.foldlM_toList] using sourceFoldArray
+                  have foldBoth : ∀
+                      {leftValues rightValues : List Value}
+                      {beforeLeft beforeRight afterLeft : RuntimeState},
+                      ListRel (ValueRel rho) leftValues rightValues →
+                      RootSubset leftValues leftCell.object.ownedValues.toList →
+                      RootSubset rightValues rightCell.object.ownedValues.toList →
+                      ShadowRuntimeRel rho beforeLeft beforeRight
+                        (leftCell.object.ownedValues.toList ++ leftExtra)
+                        (rightCell.object.ownedValues.toList ++ rightExtra) →
+                      leftValues.foldlM (init := beforeLeft) releaseChild =
+                        .ok afterLeft →
+                      ∃ afterRight,
+                        rightValues.foldlM (init := beforeRight) releaseChild =
+                            .ok afterRight ∧
+                        ShadowRuntimeRel rho afterLeft afterRight
+                          (leftCell.object.ownedValues.toList ++ leftExtra)
+                          (rightCell.object.ownedValues.toList ++ rightExtra) := by
+                    intro leftValues rightValues beforeLeft beforeRight afterLeft
+                      values leftSubset rightSubset states operation
+                    induction values generalizing beforeLeft beforeRight afterLeft with
+                    | nil =>
+                        simp only [List.foldlM_nil] at operation ⊢
+                        have stateEq := Except.ok.inj operation
+                        subst afterLeft
+                        exact ⟨beforeRight, rfl, states⟩
+                    | @cons leftHead rightHead leftTail rightTail heads tails tailIH =>
+                        have leftTailSubset :
+                            RootSubset leftTail
+                              leftCell.object.ownedValues.toList := by
+                          intro value member
+                          exact leftSubset value
+                            (List.mem_cons_of_mem leftHead member)
+                        have rightTailSubset :
+                            RootSubset rightTail
+                              rightCell.object.ownedValues.toList := by
+                          intro value member
+                          exact rightSubset value
+                            (List.mem_cons_of_mem rightHead member)
+                        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                          at operation ⊢
+                        cases heads with
+                        | heap childMapping =>
+                            rename_i leftChild rightChild
+                            simp only [releaseChild] at operation ⊢
+                            cases childEffect :
+                                decLocationFuel fuel beforeLeft leftChild with
+                            | error fault =>
+                                rw [childEffect] at operation
+                                contradiction
+                            | ok nextLeft =>
+                                rw [childEffect] at operation
+                                have childMember :
+                                    Value.object (.heap leftChild) ∈
+                                      leftCell.object.ownedValues.toList :=
+                                  leftSubset _ List.mem_cons_self
+                                have childReachable :
+                                    Reachable beforeLeft.heap
+                                      (runtimeRoots beforeLeft
+                                        (leftCell.object.ownedValues.toList ++
+                                          leftExtra)) leftChild := by
+                                  exact .root (extra_subset_runtimeRoots beforeLeft
+                                    (leftCell.object.ownedValues.toList ++ leftExtra)
+                                    _ (List.mem_append_left _ childMember))
+                                rcases recurse states childMapping childReachable
+                                    childEffect with
+                                  ⟨nextRight, rightChildEffect, nextStates⟩
+                                rw [rightChildEffect]
+                                exact tailIH leftTailSubset rightTailSubset
+                                  nextStates operation
+                        | tagged | usize | scalar | erased | reuseNone | reuseSome =>
+                            exact tailIH leftTailSubset rightTailSubset
+                              states operation
+                  rcases foldBoth (heapCellRel_ownedValues cells)
+                      (RootSubset.refl _) (RootSubset.refl _) parentRelated
+                      sourceFoldList with
+                    ⟨rightResult, targetFoldList, finalPublished⟩
+                  have targetFoldArray :
+                      Array.foldlM releaseChild parentRight
+                          rightCell.object.ownedValues = .ok rightResult := by
+                    simpa only [Array.foldlM_toList] using targetFoldList
+                  have targetEffect :
+                      decLocationFuel (fuel + 1) right rightLocation =
+                        .ok rightResult := by
+                    simp only [decLocationFuel, rightGet, Bind.bind, Except.bind]
+                    rw [if_neg (by simp [rightPersistent])]
+                    rw [if_neg rightNonzero, if_neg rightNotAbove]
+                    rw [parentRightEffect]
+                    exact targetFoldArray
+                  have finalRelated := finalPublished.restrictExtra related.extra
+                    (by
+                      intro value member
+                      exact List.mem_append_right _ member)
+                    (by
+                      intro value member
+                      exact List.mem_append_right _ member)
+                  exact ⟨rightResult, targetEffect, finalRelated⟩
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable
