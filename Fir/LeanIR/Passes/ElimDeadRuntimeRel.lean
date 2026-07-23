@@ -5489,6 +5489,80 @@ theorem ShadowRuntimeRel.boxBoth_of_related
             Pure.pure, Except.pure],
           resultValues, nextRuntime⟩
 
+/-- Related fixed arguments allocate matching retained closures. The freshly
+allocated references replace their captured arguments as direct roots because
+the arguments are thereafter reachable through the closure ownership edge. -/
+theorem ShadowRuntimeRel.allocClosureBoth
+    (related : ShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (arityEq : leftArity = rightArity) :
+    let leftObject : HeapObject :=
+      .closure name leftArity leftArguments
+    let rightObject : HeapObject :=
+      .closure name rightArity rightArguments
+    let leftValue : Value := .object (alloc left leftObject).2
+    let rightValue : Value := .object (alloc right rightObject).2
+    ∃ larger,
+      RenamingExtends rho larger ∧
+      ValueRel larger leftValue rightValue ∧
+      ShadowRuntimeRel larger
+        (alloc left leftObject).1 (alloc right rightObject).1
+        (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+  dsimp only
+  let leftObject : HeapObject :=
+    .closure name leftArity leftArguments
+  let rightObject : HeapObject :=
+    .closure name rightArity rightArguments
+  have objects : HeapObjectRel rho leftObject rightObject := by
+    rw [show leftObject = .closure name leftArity leftArguments from rfl]
+    rw [show rightObject = .closure name rightArity rightArguments from rfl]
+    rw [← arityEq]
+    exact .closure arguments
+  have leftOwned : RootSubset leftObject.ownedValues.toList
+      (runtimeRoots left (leftArguments.toList ++ leftExtra)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [leftObject, HeapObject.ownedValues] using member
+  have rightOwned : RootSubset rightObject.ownedValues.toList
+      (runtimeRoots right (rightArguments.toList ++ rightExtra)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [rightObject, HeapObject.ownedValues] using member
+  rcases related.allocBoth objects leftOwned rightOwned false with
+    ⟨larger, extension, values, allocated⟩
+  let leftValue : Value := .object (alloc left leftObject).2
+  let rightValue : Value := .object (alloc right rightObject).2
+  have leftSubset : RootSubset
+      (leftValue :: leftExtra)
+      (leftValue :: (leftArguments.toList ++ leftExtra)) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | member
+    · exact Or.inl same
+    · exact Or.inr (List.mem_append_right _ member)
+  have rightSubset : RootSubset
+      (rightValue :: rightExtra)
+      (rightValue :: (rightArguments.toList ++ rightExtra)) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | member
+    · exact Or.inl same
+    · exact Or.inr (List.mem_append_right _ member)
+  have nextRuntime : ShadowRuntimeRel larger
+      (alloc left leftObject).1 (alloc right rightObject).1
+      (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+    apply allocated.restrictExtra
+    · exact .cons values
+        (listRel_mono (valueRel_mono extension) tail)
+    · exact leftSubset
+    · exact rightSubset
+  exact ⟨larger, extension, values, nextRuntime⟩
+
 /-- Related constructor arguments produce related retained constructor
 values.  Nullary constructors are the same immediate tag; every other shape
 allocates a fresh related object, then removes the now-owned arguments from

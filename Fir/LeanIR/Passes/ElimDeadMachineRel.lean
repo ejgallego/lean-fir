@@ -5715,6 +5715,305 @@ theorem match_boxLetCodeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- A retained partial application evaluates related covered fixed arguments,
+aligns the target declaration arity, and allocates related closure objects at
+fresh mapped locations. -/
+theorem match_retainedPapLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .pap name arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .pap name arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceArgumentsEq :
+    evalArgs sourceState.env arguments = sourceEvaluation
+  cases sourceEvaluation with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceArgumentsEq, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceArguments =>
+      have evaluated := evalArgs_relOn env covered
+      rw [sourceArgumentsEq] at evaluated
+      generalize targetArgumentsEq :
+        evalArgs targetState.env arguments = targetEvaluation at evaluated
+      cases evaluated with
+      | ok argumentsRelated =>
+          rename_i targetArguments
+          generalize sourceFound :
+            sourceState.program.findDecl? name = sourceDeclarationOption
+          cases sourceDeclarationOption with
+          | none =>
+              have sourceEvaluated :
+                  evalLetValue sourceState {
+                    fvarId, binderName, type,
+                    value := .pap name arguments
+                  } = .error (.unknownDecl name) := by
+                simp only [evalLetValue, sourceArgumentsEq,
+                  Bind.bind, Except.bind]
+                rw [sourceFound]
+                rfl
+              have currentEvaluated :
+                  evalLetValue sourceCurrent {
+                    fvarId, binderName, type,
+                    value := .pap name arguments
+                  } = .error (.unknownDecl name) := by
+                simpa [sourceCurrent, evalLetValue] using sourceEvaluated
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent
+                    (.fault (.unknownDecl name))) := by
+                simp [sourceCurrent, coreStep, currentEvaluated, fail]
+              exact (noStep done).elim
+          | some sourceDeclaration =>
+              have found := programs.findDecl? name
+              rw [sourceFound] at found
+              generalize targetFound :
+                targetState.program.findDecl? name = targetDeclarationOption
+                  at found
+              cases found with
+              | some declarations =>
+                  rename_i targetDeclaration
+                  by_cases underapplied :
+                      sourceArguments.size <
+                        sourceDeclaration.params.size
+                  · have targetUnderapplied :
+                        targetArguments.size <
+                          targetDeclaration.params.size := by
+                      rw [← declarations.params_eq,
+                        ← arrayRel_size_eq argumentsRelated]
+                      exact underapplied
+                    have publishedArguments :=
+                      runtime.publishEvalArgs covered sourceArgumentsEq
+                        targetArgumentsEq argumentsRelated
+                    have tail : ListRel (ValueRel rho)
+                        (envRootsOn used sourceState.env ++ sourceFrameRoots)
+                        (envRootsOn used targetState.env ++ targetFrameRoots) :=
+                      listRel_append (envRootsOn_related env) frames.roots
+                    rcases publishedArguments.allocClosureBoth
+                        (name := name)
+                        (leftArity := sourceDeclaration.params.size)
+                        (rightArity := targetDeclaration.params.size)
+                        argumentsRelated tail
+                        (congrArg (fun params => params.size)
+                          declarations.params_eq) with
+                      ⟨larger, extension, resultValues, allocatedRuntime⟩
+                    let sourceObject : HeapObject := .closure name
+                      sourceDeclaration.params.size sourceArguments
+                    let targetObject : HeapObject := .closure name
+                      targetDeclaration.params.size targetArguments
+                    let sourceRuntime := (alloc sourceState.runtime
+                      sourceObject).1
+                    let targetRuntime := (alloc targetState.runtime
+                      targetObject).1
+                    let sourceValue : Value := .object
+                      (alloc sourceState.runtime sourceObject).2
+                    let targetValue : Value := .object
+                      (alloc targetState.runtime targetObject).2
+                    have values :
+                        ValueRel larger sourceValue targetValue := by
+                      simpa [sourceObject, targetObject, sourceValue,
+                        targetValue] using resultValues
+                    have nextRuntime : ShadowRuntimeRel larger
+                        sourceRuntime targetRuntime
+                        (sourceValue ::
+                          envRootsOn used sourceState.env ++ sourceFrameRoots)
+                        (targetValue ::
+                          envRootsOn used targetState.env ++
+                            targetFrameRoots) := by
+                      simpa [sourceObject, targetObject, sourceRuntime,
+                        targetRuntime, sourceValue, targetValue] using
+                        allocatedRuntime
+                    have sourceEvaluated :
+                        evalLetValue sourceState {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .ok (sourceRuntime, .value sourceValue) := by
+                      simp only [evalLetValue, sourceArgumentsEq,
+                        Bind.bind, Except.bind]
+                      rw [sourceFound]
+                      simp only
+                      rw [if_neg (Nat.not_le_of_lt underapplied)]
+                      rfl
+                    have targetEvaluated :
+                        evalLetValue targetState {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .ok (targetRuntime, .value targetValue) := by
+                      simp only [evalLetValue, targetArgumentsEq,
+                        Bind.bind, Except.bind]
+                      rw [targetFound]
+                      simp only
+                      rw [if_neg (Nat.not_le_of_lt targetUnderapplied)]
+                      rfl
+                    let sourceExpected := {
+                      sourceState with
+                      runtime := sourceRuntime
+                      env := bind sourceState.env fvarId sourceValue
+                      control := .code sourceContinuation }
+                    let targetExpected := {
+                      targetState with
+                      runtime := targetRuntime
+                      env := bind targetState.env fvarId targetValue
+                      control := .code targetContinuation }
+                    have sourceTransition :
+                        coreStep sourceCurrent = .next sourceExpected := by
+                      have currentEvaluated :
+                          evalLetValue sourceCurrent {
+                            fvarId, binderName, type,
+                            value := .pap name arguments
+                          } = .ok
+                            (sourceRuntime, .value sourceValue) := by
+                        simpa [sourceCurrent, evalLetValue] using
+                          sourceEvaluated
+                      simp [sourceCurrent, sourceExpected, coreStep,
+                        currentEvaluated]
+                    have targetTransition :
+                        coreStep targetCurrent = .next targetExpected := by
+                      have currentEvaluated :
+                          evalLetValue targetCurrent {
+                            fvarId, binderName, type,
+                            value := .pap name arguments
+                          } = .ok
+                            (targetRuntime, .value targetValue) := by
+                        simpa [targetCurrent, evalLetValue] using
+                          targetEvaluated
+                      simp [targetCurrent, targetExpected, coreStep,
+                        currentEvaluated]
+                    have afterRelated :
+                        ReachableMachineRelated fuel larger
+                          sourceExpected targetExpected := by
+                      exact retainedLetValue_reachableRelated
+                        sourceState targetState sourceRuntime targetRuntime
+                        programs (frames.monoRenaming extension)
+                        continuation joins
+                        (envRelOn_monoRenaming extension env) values
+                        nextRuntime
+                    exact ⟨larger, targetExpected, extension,
+                      match_internalCoreSteps sourceTransition
+                        targetTransition afterRelated
+                        (by simpa [sourceCurrent] using step)⟩
+                  · have applied :
+                        sourceDeclaration.params.size ≤
+                          sourceArguments.size :=
+                      Nat.le_of_not_gt underapplied
+                    let fault : RuntimeFault := .malformed
+                      s!"partial application {name} fixes \
+                        {sourceArguments.size} of \
+                        {sourceDeclaration.params.size} parameters"
+                    have evaluatedFault :
+                        evalLetValue sourceCurrent {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .error fault := by
+                      simp only [sourceCurrent, evalLetValue,
+                        sourceArgumentsEq, Bind.bind, Except.bind]
+                      rw [sourceFound]
+                      simp only
+                      rw [if_pos applied]
+                      rfl
+                    have done : coreStep sourceCurrent =
+                        .done (observe sourceCurrent (.fault fault)) := by
+                      simp [sourceCurrent, coreStep, evaluatedFault, fail]
+                    exact (noStep done).elim
+
+/-- Complete graph-level matcher for partial-application lets. -/
+theorem match_papLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type, value := .pap name arguments
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type, value := .pap name arguments
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered =>
+      rcases match_retainedPapLetStep
+          sourceState targetState programs frames continuation joins env
+          covered runtime step with
+        ⟨larger, targetAfter, extension, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨larger, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent ready =>
+      rcases match_deletedLetStep_of_ready sourceState targetState programs
+          frames continuation joins env absent runtime ready step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- A retained full application evaluates related covered arguments, saves
 the related bind continuations, and enters related named-invocation controls.
 This includes the nullary case: unlike a deleted full application, it must
