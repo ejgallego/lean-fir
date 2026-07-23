@@ -33,6 +33,7 @@ inductive AllocationDescriptor where
   | boxed (kind : BoxedScalarKind)
   | promotedTag (payload : UInt64)
   | natural (value : Nat)
+  | integer (value : Int)
   | string (value : String)
   deriving Inhabited, BEq, Repr
 
@@ -138,6 +139,12 @@ def RefinementWitness.bindNatural (witness : RefinementWitness)
   { witness with
       locations := (location, address) :: witness.locations
       descriptors := (address, .natural value) :: witness.descriptors }
+
+def RefinementWitness.bindInteger (witness : RefinementWitness)
+    (location : Location) (address : Word32) (value : Int) : RefinementWitness :=
+  { witness with
+      locations := (location, address) :: witness.locations
+      descriptors := (address, .integer value) :: witness.descriptors }
 
 def RefinementWitness.bindString (witness : RefinementWitness)
     (location : Location) (address : Word32) (value : String) : RefinementWitness :=
@@ -286,6 +293,34 @@ theorem RefinementWitness.lookup_bindNatural_descriptor_other
     (witness.bindNatural location address value).descriptors.lookup? other =
       witness.descriptors.lookup? other := by
   simp [RefinementWitness.bindNatural, DescriptorMap.lookup?, different]
+
+@[simp] theorem RefinementWitness.lookup_bindInteger_location
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Int) :
+    (witness.bindInteger location address value).locations.lookup? location =
+      some address := by
+  simp [RefinementWitness.bindInteger, LocationMap.lookup?]
+
+@[simp] theorem RefinementWitness.lookup_bindInteger_descriptor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Int) :
+    (witness.bindInteger location address value).descriptors.lookup? address =
+      some (.integer value) := by
+  simp [RefinementWitness.bindInteger, DescriptorMap.lookup?]
+
+theorem RefinementWitness.lookup_bindInteger_location_other
+    (witness : RefinementWitness) (location other : Location) (address : Word32)
+    (value : Int) (different : other ≠ location) :
+    (witness.bindInteger location address value).locations.lookup? other =
+      witness.locations.lookup? other := by
+  simp [RefinementWitness.bindInteger, LocationMap.lookup?, Ne.symm different]
+
+theorem RefinementWitness.lookup_bindInteger_descriptor_other
+    (witness : RefinementWitness) (location : Location) (address other : Word32)
+    (value : Int) (different : address.value ≠ other.value) :
+    (witness.bindInteger location address value).descriptors.lookup? other =
+      witness.descriptors.lookup? other := by
+  simp [RefinementWitness.bindInteger, DescriptorMap.lookup?, different]
 
 @[simp] theorem RefinementWitness.lookup_bindString_location
     (witness : RefinementWitness) (location : Location) (address : Word32)
@@ -496,6 +531,38 @@ theorem RefinementWitness.bindNatural_extends
     exact found
   · intro old descriptor found
     rw [witness.lookup_bindNatural_descriptor_other location address old value
+      (descriptorFresh old descriptor found)]
+    exact found
+
+/-- Binding one fresh heap integer extends all previously visible proof
+metadata. The descriptor records the mathematical value, not a stable choice
+of concrete header lanes. -/
+theorem RefinementWitness.bindInteger_extends
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Int)
+    (locationFresh : witness.locations.lookup? location = none)
+    (descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value) :
+    witness.Extends (witness.bindInteger location address value) := by
+  refine {
+    locations := ?_
+    promotedTags := ?_
+    descriptors := ?_
+    closureDispatch := rfl
+    closureDescriptors := rfl }
+  · intro old oldAddress found
+    have different : old ≠ location := by
+      intro equal
+      subst old
+      simp [locationFresh] at found
+    rw [witness.lookup_bindInteger_location_other location old address value
+      different]
+    exact found
+  · intro payload oldAddress found
+    exact found
+  · intro old descriptor found
+    rw [witness.lookup_bindInteger_descriptor_other location address old value
       (descriptorFresh old descriptor found)]
     exact found
 
@@ -822,6 +889,32 @@ theorem RefinementWitness.WellFormed.bindNatural
         isNew] at locationFound
       exact valid.locationPromotionDisjoint old payload left right locationFound
         promotedFound
+
+/-- Integer binding has the same reference-identity shape as natural binding;
+only its proof-only allocation descriptor differs. -/
+theorem RefinementWitness.WellFormed.bindInteger
+    {witness : RefinementWitness} (valid : witness.WellFormed)
+    (location : Location) (address : Word32) (value : Int)
+    (addressHeap : address.classify = .heap)
+    (locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address)
+    (promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress) :
+    (witness.bindInteger location address value).WellFormed := by
+  have naturalValid := valid.bindNatural location address 0 addressHeap
+    locationAddressFresh promotedAddressFresh
+  exact {
+    locationHeap := by
+      simpa [RefinementWitness.bindInteger, RefinementWitness.bindNatural] using
+        naturalValid.locationHeap
+    locationInjective := by
+      simpa [RefinementWitness.bindInteger, RefinementWitness.bindNatural] using
+        naturalValid.locationInjective
+    promotedHeap := naturalValid.promotedHeap
+    promotedInjective := naturalValid.promotedInjective
+    locationPromotionDisjoint := by
+      simpa [RefinementWitness.bindInteger, RefinementWitness.bindNatural] using
+        naturalValid.locationPromotionDisjoint }
 
 /-- A fresh string allocation preserves witness injectivity and the
 location/promoted-tag address partition. -/

@@ -2719,6 +2719,17 @@ artifact emission. These are compiler-derived assertions for the current
 experiment, not a stable ABI: the fixture is expected to change when FIR gains
 a clearer layout-aware constructor initializer or Lean changes the lowering.
 
+W6.6bz lifts the experimental heap-`Int` decoder into the complete runtime
+relation. Exact-value integer descriptors extend well-formed witnesses and
+fresh allocation now establishes `LiveHeapRel` plus the related `.tobject`
+result. Common-header ownership and persistence rewrites preserve the checked
+sign/magnitude decoder; allocation frames, sharing, constructor-only
+mutations, and reset/reuse transport cover the new live-cell alternative.
+`integerExternalResponse` then instantiates the result-polymorphic pure
+external theorem with an unchanged world and exact related trace event. This
+is a workable generation boundary, not a frozen layout: the header lanes and
+proof surface may change whenever a cleaner implementation warrants it.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

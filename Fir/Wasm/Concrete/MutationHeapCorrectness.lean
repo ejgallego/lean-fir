@@ -535,6 +535,9 @@ theorem LiveHeapRel.writeTag_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -611,6 +614,9 @@ theorem LiveHeapRel.writeUSizeField_refines
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -699,6 +705,9 @@ theorem LiveHeapRel.writeUSizeSlot_refines
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -797,6 +806,9 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -889,6 +901,9 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -985,6 +1000,9 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1077,6 +1095,9 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>

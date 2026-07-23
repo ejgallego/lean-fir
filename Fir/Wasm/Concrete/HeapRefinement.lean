@@ -374,6 +374,35 @@ structure BoxedObjectRel (state : MemoryState) (address : Word32)
   extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
   decoded : readBoxedScalar state kind address = .ok scalar
 
+/-- Decoded relation for the current experimental arbitrary-precision heap
+integer layout. Clients depend on the checked value boundary; the auxiliary
+header lanes remain free to evolve with the backend. -/
+structure IntegerObjectRel (state : MemoryState) (address : Word32)
+    (value : Int) (header : Header) : Prop where
+  headerRead : state.readLiveHeader address = .ok header
+  headerKind : header.kind = .integer
+  marker : header.aux0 = integerSignMagnitudeMarker
+  limbCount : header.aux1.toNat =
+    (naturalLimbs (integerMagnitude value)).length
+  sign : header.aux2 = integerSign value
+  reserved : header.aux3 = 0
+  allocationBytes : header.allocationBytes.toNat =
+    align8 (headerBytes + target.semanticSlotBytes *
+      (naturalLimbs (integerMagnitude value)).length)
+  extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
+  decoded : readInteger state address = .ok value
+
+theorem IntegerObjectRel.headerOwned
+    {state : MemoryState} {address : Word32} {value : Int} {header : Header}
+    (related : IntegerObjectRel state address value header) :
+    address.value + headerBytes ≤ state.heapCursor := by
+  have extent := related.extent
+  rw [related.allocationBytes] at extent
+  have minimum := align8_ge
+    (headerBytes + target.semanticSlotBytes *
+      (naturalLimbs (integerMagnitude value)).length)
+  omega
+
 /-- Relation for live semantic cells implemented by the current W6 runtime.
 Dead cells and future heap objects receive cases in their own implementation
 slices rather than being hidden behind a permissive catch-all. -/
@@ -410,6 +439,15 @@ inductive LiveCellRel (state : MemoryState) (witness : RefinementWitness)
         target.semanticSlotBytes * header.aux1.toNat ≤
           header.allocationBytes.toNat)
       (decoded : readNatural state address = .ok value)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent)
+      (live : cell.live = true) :
+      LiveCellRel state witness address cell
+
+  | integer {value header cell}
+      (descriptor : witness.descriptors.lookup? address = some (.integer value))
+      (objectEq : cell.object = .integer value)
+      (related : IntegerObjectRel state address value header)
       (refCount : header.refCount.toNat = cell.rc)
       (persistent : header.persistent = cell.persistent)
       (live : cell.live = true) :
@@ -529,6 +567,53 @@ theorem BoxedObjectRel.prefixExtension
     extent := Nat.le_trans related.extent extension.cursor
     decoded := by rw [decoderEq]; exact related.decoded }
 
+/-- Checked heap-integer decoding is stable through an allocation that only
+extends the old concrete prefix. -/
+theorem IntegerObjectRel.prefixExtension
+    {before after : MemoryState} {address : Word32} {value : Int}
+    {header : Header}
+    (related : IntegerObjectRel before address value header)
+    (extension : before.PrefixExtension after) :
+    IntegerObjectRel after address value header := by
+  have headerAfter := extension.readLiveHeader_eq_ok address header
+    (by
+      have extent := related.extent
+      rw [related.allocationBytes] at extent
+      have minimum := align8_ge
+        (headerBytes + target.semanticSlotBytes *
+          (naturalLimbs (integerMagnitude value)).length)
+      omega)
+    related.headerRead
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts before address header
+      related.headerRead).1
+  have payloadOwned : address.value + headerBytes +
+      target.semanticSlotBytes * header.aux1.toNat ≤ before.heapCursor := by
+    rw [related.limbCount]
+    have extent := related.extent
+    rw [related.allocationBytes] at extent
+    have minimum := align8_ge
+      (headerBytes + target.semanticSlotBytes *
+        (naturalLimbs (integerMagnitude value)).length)
+    omega
+  have decoderEq : readInteger after address = readInteger before address := by
+    unfold readInteger
+    simp [heap]
+    rw [headerAfter, related.headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [extension.readNaturalLimbs address.value 0 header.aux1.toNat (by
+      simpa using payloadOwned)]
+  exact {
+    headerRead := headerAfter
+    headerKind := related.headerKind
+    marker := related.marker
+    limbCount := related.limbCount
+    sign := related.sign
+    reserved := related.reserved
+    allocationBytes := related.allocationBytes
+    extent := Nat.le_trans related.extent extension.cursor
+    decoded := by rw [decoderEq]; exact related.decoded }
+
 /-- Every currently implemented live-cell relation is stable through fresh
 allocation when the relation records its complete read extent. -/
 theorem LiveCellRel.prefixExtension
@@ -571,6 +656,9 @@ theorem LiveCellRel.prefixExtension
       · exact refCount
       · exact persistent
       · exact live
+  | integer descriptor objectEq objectRelated refCount persistent live =>
+      exact .integer descriptor objectEq
+        (objectRelated.prefixExtension extension) refCount persistent live
   | string descriptor objectEq objectRelated refCount persistent live =>
       exact .string descriptor objectEq (objectRelated.prefixExtension extension)
         refCount persistent live
@@ -597,6 +685,9 @@ theorem LiveCellRel.witnessExtension
         decoded refCount persistent live =>
       exact .natural (extension.descriptors _ _ descriptor) objectEq headerRead
         headerKind marker extent limbsFit decoded refCount persistent live
+  | integer descriptor objectEq objectRelated refCount persistent live =>
+      exact .integer (extension.descriptors _ _ descriptor) objectEq objectRelated
+        refCount persistent live
   | string descriptor objectEq objectRelated refCount persistent live =>
       exact .string (extension.descriptors _ _ descriptor) objectEq objectRelated
         refCount persistent live
@@ -633,6 +724,13 @@ theorem LiveCellRel.headerOwned
       have minimum :=
         (MemoryState.PrefixExtension.readLiveHeader_facts state address _ headerRead).2.2.2.1
       omega
+  | @integer value _ _ _ _ objectRelated _ _ _ =>
+      have extent := objectRelated.extent
+      rw [objectRelated.allocationBytes] at extent
+      have minimum := align8_ge
+        (headerBytes + target.semanticSlotBytes *
+          (naturalLimbs (integerMagnitude value)).length)
+      omega
   | string _ _ objectRelated _ _ _ => exact objectRelated.headerOwned
   | closure closureRelated => exact closureRelated.headerOwned
 
@@ -667,6 +765,7 @@ theorem LiveCellRel.descriptor
   | constructor descriptor _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
   | boxed descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | natural descriptor _ _ _ _ _ _ _ _ _ _ => exact ⟨_, descriptor⟩
+  | integer descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | string descriptor _ _ _ _ _ => exact ⟨_, descriptor⟩
   | closure closureRelated =>
       cases closureRelated with
@@ -849,6 +948,7 @@ theorem LiveHeapRel.deadCellRel
           | constructor _ _ _ _ _ _ _ live => simp_all
           | boxed _ _ _ _ _ live => simp_all
           | natural _ _ _ _ _ _ _ _ _ _ live => simp_all
+          | integer _ _ _ _ _ live => simp_all
           | string _ _ _ _ _ live => simp_all
           | closure closureRelated =>
               cases closureRelated with
@@ -1166,6 +1266,13 @@ theorem ValueRel.new_natural_result (witness : RefinementWitness)
       .tobject (.word32 address) (.object (.heap location)) :=
   .tobject (.heap (.mapped
     (RefinementWitness.lookup_bindNatural_location witness location address value)))
+
+theorem ValueRel.new_integer_result (witness : RefinementWitness)
+    (location : Location) (address : Word32) (value : Int) :
+    ValueRel (witness.bindInteger location address value)
+      .tobject (.word32 address) (.object (.heap location)) :=
+  .tobject (.heap (.mapped
+    (RefinementWitness.lookup_bindInteger_location witness location address value)))
 
 theorem ValueRel.new_string_result (witness : RefinementWitness)
     (location : Location) (address : Word32) (value : String) :

@@ -771,6 +771,13 @@ theorem LiveCellRel.rebindConstructor_other
           exact descriptor)
         objectEq headerRead headerKind marker extent limbsFit decoded refCount
           persistent live
+  | integer descriptor objectEq objectRelated refCount persistent live =>
+      exact .integer
+        (by
+          rw [witness.lookup_rebindConstructor_descriptor_other reboundAddress
+            address reboundInfo reboundFieldKinds different]
+          exact descriptor)
+        objectEq objectRelated refCount persistent live
   | string descriptor objectEq objectRelated refCount persistent live =>
       exact .string
         (by
@@ -1846,6 +1853,9 @@ theorem LiveHeapRel.resetObject_refines_unique
       contradiction
   | natural descriptor objectEq headerRead headerKind marker extent
       limbsFit decoded refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | integer descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction
   | string descriptor objectEq objectRelated refCount persistent cellLive =>

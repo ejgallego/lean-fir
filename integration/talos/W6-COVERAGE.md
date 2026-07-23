@@ -58,8 +58,10 @@ Cross-cutting W6.5 state:
 - arbitrary-precision heap integers have an experimental sign/magnitude
   allocation and checked-read boundary with exact positive/negative
   multi-limb round trips, frontier preservation, and old-prefix framing.
-  `IntegerObjectRel` is deliberately not advertised as a stable layout or yet
-  as a complete `LiveHeapRel` extension;
+  Exact-value descriptors now extend `LiveHeapRel`; ownership, persistence,
+  allocation framing, sharing, mutation exclusion, reset/reuse framing, and
+  pure external `Int` responses preserve that relation. The layout remains an
+  intentionally unstable experiment rather than a compatibility surface;
 - the current `source-pretty-format-coverage` initial heap checks the
   compiler-derived packed `UInt8` coordinates `(1, 0)` for `Format.group` and
   `(0, 0)` for `Format.align` before emission; these checks are expected to

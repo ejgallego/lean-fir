@@ -445,6 +445,9 @@ theorem LiveHeapRel.writeObjectField_refines
       limbsFit decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction

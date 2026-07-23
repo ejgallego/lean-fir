@@ -201,6 +201,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_dead
       | constructor _ _ _ _ _ _ _ cellLive => simp_all
       | boxed _ _ _ _ _ cellLive => simp_all
       | natural _ _ _ _ _ _ _ _ _ _ cellLive => simp_all
+      | integer _ _ _ _ _ cellLive => simp_all
       | string _ _ _ _ _ cellLive => simp_all
       | closure closureRelated =>
           cases closureRelated with
@@ -307,6 +308,19 @@ theorem LiveCellRel.writePersistentMetadata
       · simpa using limbsFit
       · rw [decoderEq]
         exact decoded
+      · simp
+      · simp
+      · simpa [replacement] using live
+  | @integer value header _ descriptor objectEq objectRelated refCount persistent live =>
+      obtain ⟨result, updatedHeader, memory, operation, updatedEq, resultEq,
+          headerWrite, finalValid, objectAfter⟩ :=
+        objectRelated.writeOwnershipMetadata valid 0 true
+      subst updatedHeader
+      let replacement : HeapCell := { cell with rc := 0, persistent := true }
+      refine ⟨result, header, memory, objectRelated.headerRead, operation,
+        resultEq, headerWrite, finalValid, ?_⟩
+      apply LiveCellRel.integer descriptor
+        (by simpa [replacement] using objectEq) objectAfter
       · simp
       · simp
       · simpa [replacement] using live
@@ -432,7 +446,7 @@ theorem markPersistentLocationFuel_leaf_eq
   simp only [markPersistentLocationFuel, found]
   rw [if_neg (by simp [live, ordinary])]
   rw [replaced]
-  rcases leafCell with (boxedCell | naturalCell) | stringCell
+  rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
   · obtain ⟨kind, scalar, objectEq⟩ := boxedCell
     rw [objectEq]
     cases scalar <;> rfl
@@ -440,6 +454,9 @@ theorem markPersistentLocationFuel_leaf_eq
     rw [objectEq]
     rfl
   · obtain ⟨value, objectEq⟩ := stringCell
+    rw [objectEq]
+    rfl
+  · obtain ⟨value, objectEq⟩ := integerCell
     rw [objectEq]
     rfl
 
@@ -488,7 +505,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
         cases targetRelated with
         | constructor descriptor objectEq objectRelated targetHeaderRead headerKind
             refCount persistent cellLive =>
-            rcases leafCell with (boxedCell | naturalCell) | stringCell
+            rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
             · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
               rw [objectEq] at boxedEq
               contradiction
@@ -497,6 +514,9 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
               contradiction
             · obtain ⟨value, stringEq⟩ := stringCell
               rw [objectEq] at stringEq
+              contradiction
+            · obtain ⟨value, integerEq⟩ := integerCell
+              rw [objectEq] at integerEq
               contradiction
         | @boxed kind scalar targetHeader _ descriptor objectEq objectRelated refCount
             persistent cellLive =>
@@ -538,6 +558,26 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
             rw [owned]
             rw [operation]
             rfl
+        | @integer value targetHeader _ descriptor objectEq objectRelated refCount
+            persistent cellLive =>
+            rw [objectRelated.headerRead] at headerRead
+            have headerEq := Except.ok.inj headerRead
+            subst header
+            have headerOrdinary : targetHeader.persistent = false :=
+              persistent.trans ordinary
+            obtain ⟨heap, _, _, _, _, _⟩ :=
+              MemoryState.PrefixExtension.readLiveHeader_facts state address _
+                objectRelated.headerRead
+            have owned : readOwnedReferences state address targetHeader descriptors =
+                .ok [] := by
+              simp [readOwnedReferences, objectRelated.headerKind]
+            simp only [markPersistentFuel]
+            rw [heap, objectRelated.headerRead]
+            simp only [Bind.bind, Except.bind]
+            rw [if_neg (by simp [headerOrdinary])]
+            rw [owned]
+            rw [operation]
+            rfl
         | @string value targetHeader _ descriptor objectEq objectRelated refCount
             persistent cellLive =>
             rw [objectRelated.headerRead] at headerRead
@@ -560,7 +600,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
             rfl
         | closure closureRelated =>
             obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
-            rcases leafCell with (boxedCell | naturalCell) | stringCell
+            rcases leafCell with ((boxedCell | naturalCell) | stringCell) | integerCell
             · obtain ⟨kind, scalar, boxedEq⟩ := boxedCell
               rw [closureEq] at boxedEq
               contradiction
@@ -569,6 +609,9 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
               contradiction
             · obtain ⟨value, stringEq⟩ := stringCell
               rw [closureEq] at stringEq
+              contradiction
+            · obtain ⟨value, integerEq⟩ := integerCell
+              rw [closureEq] at integerEq
               contradiction
       refine ⟨result, concreteOperation, ?_⟩
       rw [semanticHeapEq]
@@ -998,6 +1041,9 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
         decoded refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1132,6 +1178,9 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
       contradiction
   | natural descriptor storedObjectEq headerRead headerKind marker extent limbsFit
         decoded refCount persistent cellLive =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string descriptor storedObjectEq objectRelated refCount persistent cellLive =>
@@ -1316,18 +1365,24 @@ theorem LiveHeapRel.markPersistentFuel_refines
             | @boxed kind scalar header _ descriptor objectEq objectRelated refCount
                   persistent cellLive =>
                 let leafCell : NonrecursiveCell cell :=
-                  .inl (.inl ⟨kind, scalar, objectEq⟩)
+                  .inl (.inl (.inl ⟨kind, scalar, objectEq⟩))
                 exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
                   leafCell fuel
             | @natural value header _ descriptor objectEq headerRead headerKind marker
                   extent limbsFit decoded refCount persistent cellLive =>
                 let leafCell : NonrecursiveCell cell :=
-                  .inl (.inr ⟨value, objectEq⟩)
+                  .inl (.inl (.inr ⟨value, objectEq⟩))
+                exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
+                  leafCell fuel
+            | @integer value header _ descriptor objectEq objectRelated refCount
+                  persistent cellLive =>
+                let leafCell : NonrecursiveCell cell := .inr ⟨value, objectEq⟩
                 exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
                   leafCell fuel
             | @string value header _ descriptor objectEq objectRelated refCount
                   persistent cellLive =>
-                let leafCell : NonrecursiveCell cell := .inr ⟨value, objectEq⟩
+                let leafCell : NonrecursiveCell cell :=
+                  .inl (.inr ⟨value, objectEq⟩)
                 exact related.markPersistentFuel_refines_leaf mapped found liveEq ordinary
                   leafCell fuel
             | closure closureRelated =>

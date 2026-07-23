@@ -122,25 +122,6 @@ theorem allocateInteger_prefixExtension
         omega))
     _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
 
-/-- Local decoded relation for the current experimental heap-Int layout. It is
-the intended client boundary; individual header lanes remain replaceable. -/
-structure IntegerObjectRel (state : MemoryState) (address : Word32)
-    (value : Int) (header : Header) : Prop where
-  headerRead : state.readLiveHeader address = .ok header
-  headerKind : header.kind = .integer
-  ordinary : header.persistent = false
-  marker : header.aux0 = integerSignMagnitudeMarker
-  limbCount : header.aux1.toNat =
-    (naturalLimbs (integerMagnitude value)).length
-  sign : header.aux2 = integerSign value
-  reserved : header.aux3 = 0
-  allocationBytes : header.allocationBytes.toNat =
-    align8 (headerBytes + target.semanticSlotBytes *
-      (naturalLimbs (integerMagnitude value)).length)
-  extent : address.value + header.allocationBytes.toNat ≤ state.heapCursor
-  decoded : readInteger state address = .ok value
-  refCountOne : header.refCount.toNat = 1
-
 /-- Allocation establishes the checked read boundary, a valid frontier, and
 old-prefix framing. No compatibility promise is attached to the header lanes. -/
 theorem allocateInteger_objectRel
@@ -148,7 +129,8 @@ theorem allocateInteger_objectRel
     (valid : state.FrontierInvariant)
     (allocated : allocateInteger state value = .ok (result, address)) :
     result.FrontierInvariant ∧ state.PrefixExtension result ∧
-      ∃ header, IntegerObjectRel result address value header := by
+      ∃ header, IntegerObjectRel result address value header ∧
+        header.refCount.toNat = 1 ∧ header.persistent = false := by
   obtain ⟨limbCount, middle, countEncoded, objectAllocation, limbWrite,
       cursorEq⟩ := allocateInteger_decompose state result value address allocated
   obtain ⟨countFits, countEq⟩ := uint32Field_success
@@ -289,7 +271,6 @@ theorem allocateInteger_objectRel
     valid allocated, header, {
       headerRead
       headerKind := rfl
-      ordinary := rfl
       marker := rfl
       limbCount := countToNat
       sign := rfl
@@ -298,7 +279,176 @@ theorem allocateInteger_objectRel
         simp [header, Header.forAllocation, allocationToNat, allocationBytes]
       extent := by
         simpa [header, Header.forAllocation, allocationToNat] using resultExtent
-      decoded
-      refCountOne := rfl }⟩
+      decoded },
+    by simp [header, Header.forAllocation],
+    by simp [header, Header.forAllocation]⟩
+
+/-- The semantic heap cell introduced for one arbitrary-precision integer
+result. -/
+def semanticIntegerCell (value : Int) : HeapCell := {
+  object := .integer value }
+
+/-- Source runtime after allocating one heap-backed integer result. -/
+def semanticIntegerResult (runtime : RuntimeState) (value : Int) : RuntimeState := {
+  runtime with
+  heap := (runtime.nextLocation, semanticIntegerCell value) :: runtime.heap
+  nextLocation := runtime.nextLocation + 1 }
+
+/-- Fresh concrete heap-integer allocation extends the complete live-heap
+relation and relates its address to the new semantic integer location. -/
+theorem allocateInteger_liveHeapRel
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (value : Int) (address : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (allocated : allocateInteger state value = .ok (result, address)) :
+    let nextWitness := witness.bindInteger runtime.nextLocation address value
+    witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness (semanticIntegerResult runtime value) ∧
+      ValueRel nextWitness .tobject (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+  dsimp only
+  obtain ⟨_, _, _, objectAllocation, _, _⟩ :=
+    allocateInteger_decompose state result value address allocated
+  have freshAddress := related.frontier.allocateObject_address objectAllocation
+  have extension := allocateInteger_prefixExtension state result value address
+    related.frontier allocated
+  obtain ⟨finalFrontier, _, header, objectRelated, refCountOne, ordinary⟩ :=
+    allocateInteger_objectRel state result value address related.frontier allocated
+  have locationFresh : witness.locations.lookup? runtime.nextLocation = none := by
+    cases found : witness.locations.lookup? runtime.nextLocation with
+    | none => rfl
+    | some oldAddress =>
+        exfalso
+        obtain ⟨cell, semanticFound, _⟩ :=
+          related.concreteToSemantic runtime.nextLocation oldAddress found
+        have beforeNext :=
+          related.locationsBeforeNext runtime.nextLocation cell semanticFound
+        exact (Nat.lt_irrefl runtime.nextLocation) beforeNext
+  have descriptorFresh : ∀ old descriptor,
+      witness.descriptors.lookup? old = some descriptor →
+      address.value ≠ old.value := by
+    intro old descriptor found equal
+    have owned := related.descriptorsOwned old descriptor found
+    simp [headerBytes] at owned
+    omega
+  have witnessExtension := witness.bindInteger_extends runtime.nextLocation
+    address value locationFresh descriptorFresh
+  have locationAddressFresh : ∀ old oldAddress,
+      witness.locations.lookup? old = some oldAddress → oldAddress ≠ address := by
+    intro old oldAddress found equal
+    obtain ⟨cell, _, cellRelated⟩ :=
+      related.concreteToSemantic old oldAddress found
+    have owned := cellRelated.headerOwned
+    subst oldAddress
+    simp [headerBytes] at owned
+    omega
+  have promotedAddressFresh : ∀ payload oldAddress,
+      witness.promotedTags.Contains payload oldAddress → address ≠ oldAddress := by
+    intro payload oldAddress found equal
+    have promoted := related.promoted payload oldAddress found
+    obtain ⟨oldHeader, _, _, _, _, _, extent, payloadFits⟩ := promoted.header
+    subst oldAddress
+    simp [headerBytes] at payloadFits extent
+    omega
+  obtain ⟨addressHeap, rawHeaderRead, _, headerMinimum, headerAligned, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts result address header
+      objectRelated.headerRead
+  have headerOwned : address.value + headerBytes ≤ result.heapCursor :=
+    Nat.le_trans (Nat.add_le_add_left headerMinimum address.value)
+      objectRelated.extent
+  have witnessWellFormed := related.witnessWellFormed.bindInteger
+    runtime.nextLocation address value addressHeap locationAddressFresh
+      promotedAddressFresh
+  have newRegion : ∃ newHeader,
+      Header.read result.memory address = .ok newHeader ∧
+      headerBytes ≤ newHeader.allocationBytes.toNat ∧
+      newHeader.allocationBytes.toNat % target.heapAlignment = 0 ∧
+      address.value + newHeader.allocationBytes.toNat ≤ result.heapCursor :=
+    ⟨header, rawHeaderRead, headerMinimum, headerAligned, objectRelated.extent⟩
+  obtain ⟨descriptorRegion, descriptorDisjoint⟩ :=
+    related.extendDescriptorSpatial extension address freshAddress
+      (fun other different =>
+        witness.lookup_bindInteger_descriptor_other runtime.nextLocation address
+          other value different)
+      newRegion
+  have newCellRelated : LiveCellRel result
+      (witness.bindInteger runtime.nextLocation address value) address
+      (semanticIntegerCell value) := by
+    apply LiveCellRel.integer
+      (RefinementWitness.lookup_bindInteger_descriptor witness runtime.nextLocation
+        address value)
+      (by rfl) objectRelated
+    · simpa [semanticIntegerCell] using refCountOne
+    · simpa [semanticIntegerCell] using ordinary
+    · rfl
+  refine ⟨witnessExtension, ?_,
+    ValueRel.new_integer_result witness runtime.nextLocation address value⟩
+  refine {
+    frontier := finalFrontier
+    witnessWellFormed
+    locationsBeforeNext := ?_
+    releaseFuelBound := ?_
+    descriptorsOwned := ?_
+    descriptorRegion
+    descriptorDisjoint
+    semanticToConcrete := ?_
+    concreteToSemantic := ?_
+    promoted := ?_ }
+  · intro location cell found
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      change runtime.nextLocation < runtime.nextLocation + 1
+      exact Nat.lt_succ_self runtime.nextLocation
+    · have oldFound : findCell? runtime.heap location = some cell := by
+        simpa [semanticIntegerResult, findCell?, isNew, Ne.symm isNew] using found
+      have oldBefore := related.locationsBeforeNext location cell oldFound
+      exact Nat.lt_trans oldBefore (Nat.lt_succ_self runtime.nextLocation)
+  · have cursorGrowth : state.heapCursor + headerBytes ≤ result.heapCursor := by
+      rw [← freshAddress]
+      exact headerOwned
+    have oldFuel := related.releaseFuelBound
+    simp [semanticIntegerResult, headerBytes] at oldFuel cursorGrowth ⊢
+    omega
+  · intro other descriptor found
+    by_cases isNew : address.value = other.value
+    · rw [← isNew]
+      exact headerOwned
+    · rw [witness.lookup_bindInteger_descriptor_other runtime.nextLocation
+        address other value isNew] at found
+      exact Nat.le_trans (related.descriptorsOwned other descriptor found)
+        extension.cursor
+  · intro location cell found
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      have cellEq : cell = semanticIntegerCell value := by
+        simpa [semanticIntegerResult, findCell?] using found.symm
+      subst cell
+      exact ⟨address,
+        RefinementWitness.lookup_bindInteger_location witness runtime.nextLocation
+          address value,
+        .live newCellRelated⟩
+    · have oldFound : findCell? runtime.heap location = some cell := by
+        simpa [semanticIntegerResult, findCell?, isNew, Ne.symm isNew] using found
+      obtain ⟨oldAddress, mapped, cellRelated⟩ :=
+        related.semanticToConcrete location cell oldFound
+      exact ⟨oldAddress, witnessExtension.locations _ _ mapped,
+        (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
+  · intro location concreteAddress mapped
+    by_cases isNew : location = runtime.nextLocation
+    · subst location
+      simp [RefinementWitness.bindInteger, LocationMap.lookup?] at mapped
+      subst concreteAddress
+      exact ⟨semanticIntegerCell value,
+        by simp [semanticIntegerResult, findCell?], .live newCellRelated⟩
+    · rw [witness.lookup_bindInteger_location_other runtime.nextLocation location
+        address value isNew] at mapped
+      obtain ⟨cell, oldFound, cellRelated⟩ :=
+        related.concreteToSemantic location concreteAddress mapped
+      exact ⟨cell, by
+          simpa [semanticIntegerResult, findCell?, isNew, Ne.symm isNew],
+        (cellRelated.prefixExtension extension).witnessExtension witnessExtension⟩
+  · intro payload concreteAddress mapped
+    exact ((related.promoted payload concreteAddress mapped).prefixExtension extension)
+      |>.witnessExtension witnessExtension
 
 end Fir.Wasm.Concrete

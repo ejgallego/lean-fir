@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.GlobalCorrectness
+import Fir.Wasm.Concrete.IntegerAllocationCorrectness
 import Fir.LeanIR.Interpreter
 
 namespace Fir.Wasm.Concrete
@@ -305,5 +306,101 @@ theorem ConcreteExternalImpl.invoke_pure_result_refines
       _ = semanticBefore.world := worldUnchanged
       _ = concreteBefore.world := runtimeRelated.world.symm
   · simpa [semanticExternalRuntimeAfter] using worldUnchanged
+
+/-- Canonical concrete response for a pure external that materializes one
+heap-backed arbitrary-precision integer. -/
+def concreteIntegerExternalResponse
+    (before : ConcreteRuntimeState) (result : MemoryState) (address : Word32) :
+    ConcreteExternalResponse := {
+  value := .word32 address
+  heap := result
+  world := before.world }
+
+/-- Matching semantic response. Heap allocation advances the source location
+cursor, while the world remains unchanged; event insertion is performed by
+`semanticExternalRuntimeAfter`. -/
+def semanticIntegerExternalResponse
+    (before : RuntimeState) (value : Int) : ExternalResponse := {
+  value := .object (.heap before.nextLocation)
+  heap := (semanticIntegerResult before value).heap
+  nextLocation := (semanticIntegerResult before value).nextLocation
+  world := before.world }
+
+/-- Integer allocation establishes the complete response contract expected by
+the result-polymorphic external-call theorem: the witness grows, the heap and
+result lane refine, and the pure world token is unchanged. -/
+theorem ConcreteRuntimeRel.integerExternalResponse
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (semanticRequest : ExternalRequest)
+    (result : MemoryState) (address : Word32) (value : Int)
+    (allocated :
+      allocateInteger concreteBefore.heap value = .ok (result, address)) :
+    ConcreteExternalResponseRel beforeWitness
+      (beforeWitness.bindInteger semanticBefore.nextLocation address value)
+      semanticRequest semanticBefore .tobject
+      (concreteIntegerExternalResponse concreteBefore result address)
+      (semanticIntegerExternalResponse semanticBefore value) := by
+  obtain ⟨extension, heapRelated, valueRelated⟩ :=
+    allocateInteger_liveHeapRel concreteBefore.heap result beforeWitness
+      semanticBefore value address runtimeRelated.heap allocated
+  exact {
+    witnessExtension := extension
+    heap := heapRelated.auxiliary (by rfl) (by rfl)
+    value := valueRelated
+    world := runtimeRelated.world }
+
+/-- End-to-end specialization of `invoke_pure_result_refines` for an
+arbitrary-precision `Int` returned by a pure external. This is the executable
+proof boundary used by generated handlers: they need only expose their call
+equation and the successful `allocateInteger` equation. -/
+theorem ConcreteExternalImpl.invoke_pure_integer_result_refines
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {result : MemoryState} {address : Word32} {value : Int}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel beforeWitness
+      concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (allocated :
+      allocateInteger concreteBefore.heap value = .ok (result, address))
+    (concreteCalled :
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteIntegerExternalResponse concreteBefore result address))
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticIntegerExternalResponse semanticBefore value)) :
+    concreteImplementation.invoke concreteRequest concreteBefore =
+        .ok (concreteBefore.applyExternalResponse concreteRequest
+            (concreteIntegerExternalResponse concreteBefore result address),
+          (concreteIntegerExternalResponse concreteBefore result address).value) ∧
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticIntegerExternalResponse semanticBefore value) ∧
+      ConcretePureExternalPost concreteBefore beforeWitness
+        (beforeWitness.bindInteger semanticBefore.nextLocation address value)
+        semanticBefore concreteRequest semanticRequest
+        (concreteIntegerExternalResponse concreteBefore result address)
+        (semanticIntegerExternalResponse semanticBefore value) := by
+  have responseRelated : ConcreteExternalResponseRel beforeWitness
+      (beforeWitness.bindInteger semanticBefore.nextLocation address value)
+      semanticRequest semanticBefore concreteRequest.resultKind
+      (concreteIntegerExternalResponse concreteBefore result address)
+      (semanticIntegerExternalResponse semanticBefore value) := by
+    rw [resultKind]
+    exact runtimeRelated.integerExternalResponse semanticRequest result address
+      value allocated
+  exact concreteImplementation.invoke_pure_result_refines runtimeRelated
+    requestRelated concreteCalled semanticCalled
+    responseRelated
+    (by rfl)
 
 end Fir.Wasm.Concrete

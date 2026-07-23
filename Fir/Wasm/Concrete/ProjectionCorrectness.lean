@@ -230,6 +230,11 @@ theorem LiveHeapRel.scalarField_of_projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | integer descriptor objectEq objectRelated refCount persistent cellLive =>
+      simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | string descriptor objectEq objectRelated refCount persistent cellLive =>
       simp [getScalarField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
@@ -567,6 +572,11 @@ theorem LiveHeapRel.readObjectField_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | integer _ objectEq _ _ _ _ =>
+      simp [getObjectField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | string storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
@@ -615,6 +625,11 @@ theorem LiveHeapRel.readUSizeField_refines
       rw [objectEq] at projected
       simp at projected
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
+  | integer _ objectEq _ _ _ _ =>
       simp [getUSizeField, getConstructor, getLiveCell, found, live] at projected
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
@@ -694,6 +709,11 @@ theorem LiveHeapRel.readUSizeSlot_refines
       simp only [Bind.bind, Except.bind] at projected
       rw [objectEq] at projected
       simp at projected
+  | integer _ objectEq _ _ _ _ =>
+      simp [getUSizeSlot, getConstructor, getLiveCell, found, live] at projected
+      simp only [Bind.bind, Except.bind] at projected
+      rw [objectEq] at projected
+      simp at projected
   | string storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
@@ -748,6 +768,10 @@ theorem LiveHeapRel.readObjectField_outOfBounds_refines
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
+  | integer storedDescriptor _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
   | string storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
@@ -799,6 +823,10 @@ theorem LiveHeapRel.readUSizeField_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
   | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | integer storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -875,6 +903,10 @@ theorem LiveHeapRel.readUSizeSlot_outOfBounds_refines
       have impossible := Option.some.inj descriptor
       cases impossible
   | natural storedDescriptor _ _ _ _ _ _ _ _ _ _ =>
+      rw [storedDescriptor] at descriptor
+      have impossible := Option.some.inj descriptor
+      cases impossible
+  | integer storedDescriptor _ _ _ _ _ =>
       rw [storedDescriptor] at descriptor
       have impossible := Option.some.inj descriptor
       cases impossible
@@ -1005,6 +1037,9 @@ theorem LiveHeapRel.writeObjectField_outOfBounds_refines
   | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1051,6 +1086,9 @@ theorem LiveHeapRel.writeUSizeField_outOfBounds_refines
       rw [objectEq] at storedObjectEq
       contradiction
   | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
+  | integer _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
   | string _ storedObjectEq _ _ _ _ =>
@@ -1116,6 +1154,9 @@ theorem LiveHeapRel.writeUSizeSlot_outOfBounds_refines
   | natural _ storedObjectEq _ _ _ _ _ _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
+  | integer _ storedObjectEq _ _ _ _ =>
+      rw [objectEq] at storedObjectEq
+      contradiction
   | string _ storedObjectEq _ _ _ _ =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1157,6 +1198,11 @@ theorem LiveHeapRel.readTag_refines
       rw [objectEq] at semanticTag
       simp at semanticTag
   | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+      simp [getTag, getLiveCell, found, live] at semanticTag
+      simp only [Bind.bind, Except.bind] at semanticTag
+      rw [objectEq] at semanticTag
+      simp at semanticTag
+  | integer _ objectEq _ _ _ _ =>
       simp [getTag, getLiveCell, found, live] at semanticTag
       simp only [Bind.bind, Except.bind] at semanticTag
       rw [objectEq] at semanticTag
