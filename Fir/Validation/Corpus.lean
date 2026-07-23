@@ -685,6 +685,12 @@ def EffectProjection.descriptor (projection : EffectProjection) : EffectProjecti
   argSchemas := projection.argSchemas
   resultSchema := projection.resultSchema }
 
+/-- Minimum dynamic multiplicity required for one final-impure instruction form. -/
+structure ExecutedFormCountRequirement where
+  form : String
+  minimum : Nat
+  deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
+
 /-- A source case and the backend-neutral metadata needed to run it. -/
 structure Case where
   id : String
@@ -704,6 +710,8 @@ structure Case where
   requiredLcnfForms : Array String := #[]
   /-- Forms that this fixture must actually step through, not merely retain in the artifact. -/
   requiredExecutedLcnfForms : Array String
+  /-- Minimum dynamic counts for forms whose multiplicity is semantically significant. -/
+  requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement := #[]
   /-- Imported declarations that must remain in the compiled dependency closure. -/
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
@@ -725,6 +733,7 @@ structure CaseDescriptor where
   fuel : Nat
   requiredLcnfForms : Array String
   requiredExecutedLcnfForms : Array String
+  requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement
   requiredExternals : Array String
   requiredExecutedExternals : Array String
   effectProjections : Array EffectProjectionDescriptor
@@ -742,6 +751,7 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   fuel := validationCase.fuel
   requiredLcnfForms := validationCase.requiredLcnfForms
   requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
+  requiredExecutedLcnfFormCounts := validationCase.requiredExecutedLcnfFormCounts
   requiredExternals := validationCase.requiredExternals.map toString
   requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
   effectProjections := validationCase.effectProjections.map EffectProjection.descriptor

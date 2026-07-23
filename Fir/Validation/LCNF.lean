@@ -109,24 +109,43 @@ private structure ExternalSnapshot where
   before : RuntimeState
   after : RuntimeState
 
+private structure ExecutedFormCount where
+  form : String
+  count : Nat
+  deriving Lean.ToJson
+
+private def incrementFormCount (counts : Array ExecutedFormCount)
+    (form : String) : Array ExecutedFormCount :=
+  if counts.any (·.form == form) then
+    counts.map fun entry =>
+      if entry.form == form then { entry with count := entry.count + 1 } else entry
+  else
+    counts.push { form, count := 1 }
+
 private structure InstrumentedRun where
   result : RunResult
   executedForms : Array String
+  executedFormCounts : Array ExecutedFormCount
   executedExternals : Array Name
   externalSnapshots : Array ExternalSnapshot
   steps : Nat
 
 /-- Validation-only telemetry layered over the canonical interpreter transition function. -/
 private def runInstrumentedGo (externals : ExternalImpl) :
-    Nat → MachineState → Array String → Array Name →
+    Nat → MachineState → Array String → Array ExecutedFormCount → Array Name →
       Array ExternalSnapshot → Nat → InstrumentedRun
-  | 0, state, forms, externalNames, externalSnapshots, steps =>
+  | 0, state, forms, formCounts, externalNames, externalSnapshots, steps =>
       { result := .outOfFuel state, executedForms := forms,
+        executedFormCounts := formCounts,
         executedExternals := externalNames, externalSnapshots, steps }
-  | fuel + 1, state, forms, externalNames, externalSnapshots, steps =>
-      let forms := match executedForm? state with
+  | fuel + 1, state, forms, formCounts, externalNames, externalSnapshots, steps =>
+      let executedForm := executedForm? state
+      let forms := match executedForm with
         | some form => pushUnique forms form
         | none => forms
+      let formCounts := match executedForm with
+        | some form => incrementFormCount formCounts form
+        | none => formCounts
       let request? := externalRequest? state
       let externalNames := match request? with
         | some request => pushUniqueName externalNames request.name
@@ -134,6 +153,7 @@ private def runInstrumentedGo (externals : ExternalImpl) :
       match executeStep externals state with
       | .done observation =>
           { result := .done observation, executedForms := forms,
+            executedFormCounts := formCounts,
             executedExternals := externalNames, externalSnapshots, steps := steps + 1 }
       | .next nextState =>
           let externalSnapshots := match request?, nextState.runtime.trace.back? with
@@ -145,30 +165,30 @@ private def runInstrumentedGo (externals : ExternalImpl) :
                     after := nextState.runtime }
                 else externalSnapshots
             | _, _ => externalSnapshots
-          runInstrumentedGo externals fuel nextState forms externalNames externalSnapshots
-            (steps + 1)
+          runInstrumentedGo externals fuel nextState forms formCounts externalNames
+            externalSnapshots (steps + 1)
 
 private def runInstrumented (fuel : Nat) (externals : ExternalImpl) (state : MachineState) :
     InstrumentedRun :=
-  runInstrumentedGo externals fuel state #[] #[] #[] 0
+  runInstrumentedGo externals fuel state #[] #[] #[] #[] 0
 
 private theorem runInstrumentedGo_result (externals : ExternalImpl) :
-    ∀ fuel state forms externalNames externalSnapshots steps,
-      (runInstrumentedGo externals fuel state forms externalNames externalSnapshots steps).result =
-        run fuel externals state
-  | 0, state, forms, externalNames, externalSnapshots, steps => by
+    ∀ fuel state forms formCounts externalNames externalSnapshots steps,
+      (runInstrumentedGo externals fuel state forms formCounts externalNames
+        externalSnapshots steps).result = run fuel externals state
+  | 0, state, forms, formCounts, externalNames, externalSnapshots, steps => by
       simp [runInstrumentedGo, run]
-  | fuel + 1, state, forms, externalNames, externalSnapshots, steps => by
+  | fuel + 1, state, forms, formCounts, externalNames, externalSnapshots, steps => by
       simp only [runInstrumentedGo, run]
       split <;> rename_i transition
       · simp [transition]
       · simpa [transition] using
-          runInstrumentedGo_result externals fuel _ _ _ _ (steps + 1)
+          runInstrumentedGo_result externals fuel _ _ _ _ _ (steps + 1)
 
 private theorem runInstrumented_result (fuel : Nat) (externals : ExternalImpl)
     (state : MachineState) :
     (runInstrumented fuel externals state).result = run fuel externals state := by
-  exact runInstrumentedGo_result externals fuel state #[] #[] #[] 0
+  exact runInstrumentedGo_result externals fuel state #[] #[] #[] #[] 0
 
 private def runProgramInstrumented (fuel : Nat) (externals : ExternalImpl)
     (program : ImpureProgram) (entry : Name) (args : Array Value)
@@ -656,6 +676,8 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
       let diagnostics := staticDiagnostics ++ #[
         { key := "executed-lcnf-forms",
           value := String.intercalate "," execution.executedForms.toList },
+        { key := "executed-lcnf-form-counts",
+          value := (toJson execution.executedFormCounts).compress },
         { key := "missing-executed-lcnf-forms",
           value := String.intercalate "," missingExecuted.toList },
         { key := "executed-externals",

@@ -114,6 +114,7 @@ def descriptor(
     tags: list[str] | None = None,
     forms: list[str] | None = None,
     executed_forms: list[str] | None = None,
+    executed_form_counts: list[dict] | None = None,
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
     effect_projections: list[dict] | None = None,
@@ -136,6 +137,7 @@ def descriptor(
         },
         "requiredLcnfForms": forms or ["return"],
         "requiredExecutedLcnfForms": executed_forms or [],
+        "requiredExecutedLcnfFormCounts": executed_form_counts or [],
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
         "effectProjections": effect_projections or [],
@@ -148,6 +150,7 @@ def with_form_diagnostics(
     *,
     static: str | None = None,
     executed: str | None = None,
+    executed_counts: str | None = "__auto__",
     steps: str | None = "1",
     static_externals: str | None = "",
     missing_static_externals: str | None = "",
@@ -159,6 +162,28 @@ def with_form_diagnostics(
         diagnostics.append({"key": "lcnf-forms", "value": static})
     if executed is not None:
         diagnostics.append({"key": "executed-lcnf-forms", "value": executed})
+    if executed_counts == "__auto__":
+        if executed is not None:
+            forms = sorted(
+                {
+                    form.strip()
+                    for form in executed.split(",")
+                    if form.strip()
+                }
+            )
+            diagnostics.append(
+                {
+                    "key": "executed-lcnf-form-counts",
+                    "value": json.dumps(
+                        [{"form": form, "count": 1} for form in forms],
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+    elif executed_counts is not None:
+        diagnostics.append(
+            {"key": "executed-lcnf-form-counts", "value": executed_counts}
+        )
     if steps is not None:
         diagnostics.append({"key": "interpreter-steps", "value": steps})
     if static_externals is not None:
@@ -351,6 +376,10 @@ class HarnessTests(unittest.TestCase):
             tags=["slow", "quick"],
             forms=["return", "inc"],
             executed_forms=["return", "fap"],
+            executed_form_counts=[
+                {"form": "return", "minimum": 2},
+                {"form": "fap", "minimum": 1},
+            ],
             externals=["Nat.add", "ByteArray.size"],
             executed_externals=["Nat.add", "ByteArray.size"],
             effect_projections=[
@@ -376,6 +405,13 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(manifest[1]["requiredLcnfForms"], ["inc", "return"])
         self.assertEqual(
             manifest[1]["requiredExecutedLcnfForms"], ["fap", "return"]
+        )
+        self.assertEqual(
+            manifest[1]["requiredExecutedLcnfFormCounts"],
+            [
+                {"form": "fap", "minimum": 1},
+                {"form": "return", "minimum": 2},
+            ],
         )
         self.assertEqual(
             manifest[1]["requiredExternals"], ["ByteArray.size", "Nat.add"]
@@ -408,6 +444,60 @@ class HarnessTests(unittest.TestCase):
             harness.ValidationError, "missing requiredExecutedLcnfForms"
         ):
             harness.manifest_from_output(json.dumps(missing), ["native", "--manifest"])
+
+        missing_counts = descriptor("case")
+        del missing_counts["requiredExecutedLcnfFormCounts"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredExecutedLcnfFormCounts"
+        ):
+            harness.manifest_from_output(
+                json.dumps(missing_counts), ["native", "--manifest"]
+            )
+
+        for malformed_counts in (
+            "oset=2",
+            [{"form": "oset", "minimum": 0}],
+            [{"form": "oset", "minimum": True}],
+            [{"form": "", "minimum": 2}],
+            [{"form": "oset", "minimum": 2, "extra": 1}],
+        ):
+            malformed = descriptor("case", executed_forms=["oset"])
+            malformed["requiredExecutedLcnfFormCounts"] = malformed_counts
+            with self.subTest(malformed_counts=malformed_counts):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "malformed requiredExecutedLcnfFormCounts",
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(malformed), ["native", "--manifest"]
+                    )
+
+        duplicate_counts = descriptor(
+            "case",
+            executed_forms=["oset"],
+            executed_form_counts=[
+                {"form": "oset", "minimum": 1},
+                {"form": "oset", "minimum": 2},
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "duplicate requiredExecutedLcnfFormCounts"
+        ):
+            harness.manifest_from_output(
+                json.dumps(duplicate_counts), ["native", "--manifest"]
+            )
+
+        unrequired_count = descriptor(
+            "case",
+            executed_forms=["return"],
+            executed_form_counts=[{"form": "oset", "minimum": 2}],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "counted executed LCNF forms must also be required"
+        ):
+            harness.manifest_from_output(
+                json.dumps(unrequired_count), ["native", "--manifest"]
+            )
 
     def test_duplicate_manifest_id_rejected(self) -> None:
         line = json.dumps(descriptor("case"))
@@ -5895,6 +5985,17 @@ class HarnessTests(unittest.TestCase):
                 "requiredForms": ["lit"],
                 "observedForms": ["inc", "lit"],
                 "missingObligationCount": 0,
+                "formCounts": {
+                    "casesWithRequirements": 0,
+                    "casesWithDiagnostics": 2,
+                    "casesWithValidDiagnostics": 2,
+                    "requiredMinimums": [],
+                    "observed": [
+                        {"form": "inc", "count": 1},
+                        {"form": "lit", "count": 1},
+                    ],
+                    "unsatisfiedObligationCount": 0,
+                },
                 "totalInterpreterSteps": 2,
                 "minimumInterpreterSteps": 1,
                 "maximumInterpreterSteps": 1,
@@ -5936,7 +6037,10 @@ class HarnessTests(unittest.TestCase):
         report, failures = harness.coverage_report(manifest, results, ["case"])
         self.assertEqual(
             finding_messages(failures),
-            ["case: missing executed-lcnf-forms diagnostic"],
+            [
+                "case: missing executed-lcnf-forms diagnostic",
+                "case: missing executed-lcnf-form-counts diagnostic",
+            ],
         )
         executed = report["cases"][0]["executed"]
         self.assertFalse(executed["diagnosticPresent"])
@@ -5990,6 +6094,118 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             report["cases"][0]["executed"]["missingRequiredForms"], ["cases"]
+        )
+
+    def test_executed_form_count_obligations_are_enforced(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                forms=["oset", "return"],
+                executed_forms=["oset", "return"],
+                executed_form_counts=[{"form": "oset", "minimum": 2}],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="oset,return",
+                executed="oset,return",
+                executed_counts=json.dumps(
+                    [
+                        {"form": "return", "count": 3},
+                        {"form": "oset", "count": 1},
+                    ]
+                ),
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed LCNF form counts below required minima: "
+                "oset=1<2"
+            ],
+        )
+        counts = report["cases"][0]["executed"]["formCounts"]
+        self.assertTrue(counts["diagnosticPresent"])
+        self.assertTrue(counts["diagnosticValid"])
+        self.assertTrue(counts["obligationsActive"])
+        self.assertEqual(counts["required"], [{"form": "oset", "minimum": 2}])
+        self.assertEqual(
+            counts["observed"],
+            [
+                {"form": "oset", "count": 1},
+                {"form": "return", "count": 3},
+            ],
+        )
+        self.assertEqual(
+            counts["unsatisfied"],
+            [{"form": "oset", "minimum": 2, "observed": 1}],
+        )
+        self.assertEqual(
+            report["summary"]["executed"]["formCounts"],
+            {
+                "casesWithRequirements": 1,
+                "casesWithDiagnostics": 1,
+                "casesWithValidDiagnostics": 1,
+                "requiredMinimums": [{"form": "oset", "minimum": 2}],
+                "observed": [
+                    {"form": "oset", "count": 1},
+                    {"form": "return", "count": 3},
+                ],
+                "unsatisfiedObligationCount": 1,
+            },
+        )
+
+    def test_executed_form_count_diagnostic_is_required_and_consistent(self) -> None:
+        manifest = [descriptor("case")]
+
+        missing = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_counts=None,
+            )
+        }
+        _, failures = harness.coverage_report(manifest, missing, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing executed-lcnf-form-counts diagnostic"],
+        )
+
+        malformed = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_counts='[{"form":"return","count":0}]',
+            )
+        }
+        _, failures = harness.coverage_report(manifest, malformed, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-lcnf-form-counts must be a unique JSON array "
+                "of positive form counts"
+            ],
+        )
+
+        inconsistent = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="oset,return",
+                executed="oset,return",
+                executed_counts='[{"form":"oset","count":2}]',
+            )
+        }
+        _, failures = harness.coverage_report(manifest, inconsistent, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-lcnf-form-counts diagnostic disagrees with "
+                "executed-lcnf-forms"
+            ],
         )
 
     def test_coverage_artifact_is_deterministic(self) -> None:
