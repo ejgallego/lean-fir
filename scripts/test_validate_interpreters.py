@@ -117,6 +117,7 @@ def descriptor(
     executed_form_counts: list[dict] | None = None,
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
+    executed_external_counts: list[dict] | None = None,
     effect_projections: list[dict] | None = None,
 ) -> dict:
     item = {
@@ -140,6 +141,7 @@ def descriptor(
         "requiredExecutedLcnfFormCounts": executed_form_counts or [],
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
+        "requiredExecutedExternalCounts": executed_external_counts or [],
         "effectProjections": effect_projections or [],
     }
     return item
@@ -155,6 +157,7 @@ def with_form_diagnostics(
     static_externals: str | None = "",
     missing_static_externals: str | None = "",
     executed_externals: str | None = "",
+    executed_external_counts: str | None = "__auto__",
     missing_executed_externals: str | None = "",
 ) -> dict:
     diagnostics = []
@@ -194,6 +197,34 @@ def with_form_diagnostics(
         )
     if executed_externals is not None:
         diagnostics.append({"key": "executed-externals", "value": executed_externals})
+    if executed_external_counts == "__auto__":
+        if executed_externals is not None:
+            externals = sorted(
+                {
+                    external.strip()
+                    for external in executed_externals.split(",")
+                    if external.strip()
+                }
+            )
+            diagnostics.append(
+                {
+                    "key": "executed-external-counts",
+                    "value": json.dumps(
+                        [
+                            {"external": external, "count": 1}
+                            for external in externals
+                        ],
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+    elif executed_external_counts is not None:
+        diagnostics.append(
+            {
+                "key": "executed-external-counts",
+                "value": executed_external_counts,
+            }
+        )
     if missing_executed_externals is not None:
         diagnostics.append(
             {
@@ -235,7 +266,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(parsed[0]["futureBackendPolicy"], {"engine": "v8"})
         self.assertEqual(parsed[0]["effectProjections"], item["effectProjections"])
         with self.assertRaisesRegex(
-            harness.ValidationError, "missing requiredExecutedExternals"
+            harness.ValidationError, "missing requiredExecutedExternalCounts"
         ):
             lcnf.prepare_manifest(parsed)
 
@@ -382,6 +413,10 @@ class HarnessTests(unittest.TestCase):
             ],
             externals=["Nat.add", "ByteArray.size"],
             executed_externals=["Nat.add", "ByteArray.size"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 2},
+                {"external": "ByteArray.size", "minimum": 1},
+            ],
             effect_projections=[
                 {
                     "external": "Nat.add",
@@ -418,6 +453,13 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest[1]["requiredExecutedExternals"], ["ByteArray.size", "Nat.add"]
+        )
+        self.assertEqual(
+            manifest[1]["requiredExecutedExternalCounts"],
+            [
+                {"external": "ByteArray.size", "minimum": 1},
+                {"external": "Nat.add", "minimum": 2},
+            ],
         )
         self.assertEqual(
             [projection["external"] for projection in manifest[1]["effectProjections"]],
@@ -533,6 +575,60 @@ class HarnessTests(unittest.TestCase):
                     harness.manifest_from_output(
                         json.dumps(item), ["native", "--manifest"]
                     )
+
+        missing_counts = descriptor("case")
+        del missing_counts["requiredExecutedExternalCounts"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredExecutedExternalCounts"
+        ):
+            harness.manifest_from_output(
+                json.dumps(missing_counts), ["native", "--manifest"]
+            )
+
+        for malformed_counts in (
+            "Nat.add=2",
+            [{"external": "Nat.add", "minimum": 0}],
+            [{"external": "Nat.add", "minimum": True}],
+            [{"external": "", "minimum": 2}],
+            [{"external": "Nat.add", "minimum": 2, "extra": 1}],
+        ):
+            malformed = descriptor("case", executed_externals=["Nat.add"])
+            malformed["requiredExecutedExternalCounts"] = malformed_counts
+            with self.subTest(malformed_counts=malformed_counts):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "malformed requiredExecutedExternalCounts",
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(malformed), ["native", "--manifest"]
+                    )
+
+        duplicate_counts = descriptor(
+            "case",
+            executed_externals=["Nat.add"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 1},
+                {"external": "Nat.add", "minimum": 2},
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "duplicate requiredExecutedExternalCounts"
+        ):
+            harness.manifest_from_output(
+                json.dumps(duplicate_counts), ["native", "--manifest"]
+            )
+
+        unrequired_count = descriptor(
+            "case",
+            executed_externals=["Nat.add"],
+            executed_external_counts=[{"external": "ByteArray.size", "minimum": 2}],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "counted executed externals must also be required"
+        ):
+            harness.manifest_from_output(
+                json.dumps(unrequired_count), ["native", "--manifest"]
+            )
 
     def test_effect_projections_are_required_and_validated(self) -> None:
         missing = descriptor("case")
@@ -6275,6 +6371,14 @@ class HarnessTests(unittest.TestCase):
                     "requiredNames": ["Nat.add"],
                     "observedNames": ["Nat.add"],
                     "missingObligationCount": 0,
+                    "counts": {
+                        "casesWithRequirements": 0,
+                        "casesWithDiagnostics": 2,
+                        "casesWithValidDiagnostics": 2,
+                        "requiredMinimums": [],
+                        "observed": [{"external": "Nat.add", "count": 1}],
+                        "unsatisfiedObligationCount": 0,
+                    },
                 },
             },
         )
@@ -6333,6 +6437,117 @@ class HarnessTests(unittest.TestCase):
             ],
         )
 
+    def test_executed_external_count_obligations_are_enforced(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                externals=["Nat.add"],
+                executed_externals=["Nat.add"],
+                executed_external_counts=[
+                    {"external": "Nat.add", "minimum": 2}
+                ],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                static_externals="Nat.add",
+                executed_externals="Nat.add",
+                executed_external_counts=json.dumps(
+                    [{"external": "Nat.add", "count": 1}]
+                ),
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: executed external counts below required minima: Nat.add=1<2"],
+        )
+        counts = report["cases"][0]["externals"]["executed"]["counts"]
+        self.assertEqual(
+            counts,
+            {
+                "diagnosticPresent": True,
+                "diagnosticValid": True,
+                "obligationsActive": True,
+                "required": [{"external": "Nat.add", "minimum": 2}],
+                "observed": [{"external": "Nat.add", "count": 1}],
+                "unsatisfied": [
+                    {"external": "Nat.add", "minimum": 2, "observed": 1}
+                ],
+            },
+        )
+        self.assertEqual(
+            report["summary"]["externals"]["executed"]["counts"],
+            {
+                "casesWithRequirements": 1,
+                "casesWithDiagnostics": 1,
+                "casesWithValidDiagnostics": 1,
+                "requiredMinimums": [{"external": "Nat.add", "minimum": 2}],
+                "observed": [{"external": "Nat.add", "count": 1}],
+                "unsatisfiedObligationCount": 1,
+            },
+        )
+
+    def test_executed_external_count_diagnostic_is_required_and_consistent(self) -> None:
+        manifest = [descriptor("case")]
+
+        missing = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_external_counts=None,
+            )
+        }
+        _, failures = harness.coverage_report(manifest, missing, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing executed-external-counts diagnostic"],
+        )
+
+        malformed = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                executed_externals="Nat.add",
+                executed_external_counts=(
+                    '[{"external":"Nat.add","count":0}]'
+                ),
+            )
+        }
+        _, failures = harness.coverage_report(manifest, malformed, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-external-counts must be a unique JSON array "
+                "of positive external counts"
+            ],
+        )
+
+        inconsistent = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                executed_externals="ByteArray.size,Nat.add",
+                executed_external_counts=(
+                    '[{"external":"Nat.add","count":2}]'
+                ),
+            )
+        }
+        _, failures = harness.coverage_report(manifest, inconsistent, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-external-counts diagnostic disagrees with "
+                "executed-externals"
+            ],
+        )
+
     def test_external_telemetry_is_required_without_obligations(self) -> None:
         manifest = [descriptor("case")]
         results = {
@@ -6353,6 +6568,7 @@ class HarnessTests(unittest.TestCase):
                 "case: missing externals diagnostic",
                 "case: missing missing-externals diagnostic",
                 "case: missing executed-externals diagnostic",
+                "case: missing executed-external-counts diagnostic",
                 "case: missing missing-executed-externals diagnostic",
             ],
         )

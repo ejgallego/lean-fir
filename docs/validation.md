@@ -287,10 +287,11 @@ preserves unknown extension keys.  Before selection and artifact writing, each
 participating adapter gets one `prepare_manifest` pass.  The LCNF adapter alone
 requires and canonicalizes `requiredLcnfForms`, `requiredExecutedLcnfForms`,
 `requiredExecutedLcnfFormCounts`, `requiredExternals`, and
-`requiredExecutedExternals`. Count requirements are positive, unique by form,
-and may only strengthen a form already listed as required execution. Effect
-projections retain the independent invariant that every projected external is
-both present and executed. Thus a
+`requiredExecutedExternals`, plus `requiredExecutedExternalCounts`. Count
+requirements are positive, unique by form or external name, and may only
+strengthen an already-required executed form or external. Effect projections
+retain the independent invariant that every projected external is both present
+and executed. Thus a
 `native`–`v8` or `v8`–`talos` run does not acquire LCNF obligations merely
 because the current native corpus happens to emit them.
 
@@ -907,6 +908,14 @@ the generic `extern` instruction form:
 - `executed-externals` is the set of external names actually dispatched,
   checked against `requiredExecutedExternals`.
 
+Set membership cannot distinguish repeated calls to one primitive from calls
+to several different primitives. The runner therefore also emits
+`executed-external-counts` as positive `{external, count}` records, with keys
+that must exactly match `executed-externals`.
+`requiredExecutedExternalCounts` supplies per-symbol `{external, minimum}`
+obligations, and the coverage report retains both per-case shortfalls and
+corpus-wide required and observed totals.
+
 The LCNF backend also emits `missing-externals` and
 `missing-executed-externals`.  The harness computes both missing sets itself,
 requires all four diagnostics for every result, and rejects disagreement with
@@ -923,7 +932,8 @@ projected semantic effect.
 The report records per-case required, observed, and missing form and external
 sets, dynamic form counts, their corpus-wide summaries, and interpreter step
 counts. Every LCNF result must emit `executed-lcnf-forms`,
-`executed-lcnf-form-counts`, and a positive `interpreter-steps` value, including
+`executed-lcnf-form-counts`, `executed-externals`,
+`executed-external-counts`, and a positive `interpreter-steps` value, including
 cases whose executed requirement lists are empty. An empty list means “collect
 telemetry without a path-specific obligation”; it does not make the telemetry
 optional. Once a case lists an executed form, count, or external, failing to

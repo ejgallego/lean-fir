@@ -714,6 +714,24 @@ structure ExecutedFormCountRequirement where
   minimum : Nat
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
+/-- Minimum dynamic dispatch count required for one imported external. -/
+structure ExecutedExternalCountRequirement where
+  external : Lean.Name
+  minimum : Nat
+  deriving Inhabited, BEq, Repr
+
+/-- Closure-free external-count obligation retained in the corpus manifest. -/
+structure ExecutedExternalCountRequirementDescriptor where
+  external : String
+  minimum : Nat
+  deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
+
+def ExecutedExternalCountRequirement.descriptor
+    (requirement : ExecutedExternalCountRequirement) :
+    ExecutedExternalCountRequirementDescriptor := {
+  external := toString requirement.external
+  minimum := requirement.minimum }
+
 /-- A source case and the backend-neutral metadata needed to run it. -/
 structure Case where
   id : String
@@ -739,6 +757,8 @@ structure Case where
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
   requiredExecutedExternals : Array Lean.Name := #[]
+  /-- Minimum dynamic dispatch counts for externals whose multiplicity is significant. -/
+  requiredExecutedExternalCounts : Array ExecutedExternalCountRequirement := #[]
   /-- External events promoted from backend telemetry into the semantic observation. -/
   effectProjections : Array EffectProjection := #[]
   provenance : Provenance := firProvenance "FIR validation fixture"
@@ -759,6 +779,7 @@ structure CaseDescriptor where
   requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement
   requiredExternals : Array String
   requiredExecutedExternals : Array String
+  requiredExecutedExternalCounts : Array ExecutedExternalCountRequirementDescriptor
   effectProjections : Array EffectProjectionDescriptor
   provenance : Provenance
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
@@ -777,6 +798,9 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   requiredExecutedLcnfFormCounts := validationCase.requiredExecutedLcnfFormCounts
   requiredExternals := validationCase.requiredExternals.map toString
   requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
+  requiredExecutedExternalCounts :=
+    validationCase.requiredExecutedExternalCounts.map
+      ExecutedExternalCountRequirement.descriptor
   effectProjections := validationCase.effectProjections.map EffectProjection.descriptor
   provenance := validationCase.provenance }
 
