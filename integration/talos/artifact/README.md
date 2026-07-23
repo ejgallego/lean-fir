@@ -220,6 +220,21 @@ adapter:
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
 
+For a reproducible handoff to another agent, `package-pretty-format.sh`
+rebuilds that module and prepares a self-contained copy of the current
+JavaScript-hosted runtime, raw-layout smoke client, descriptor, final LCNF,
+checksums, and build metadata under `_build/prettyM-current`:
+
+```text
+./package-pretty-format.sh
+cd _build/prettyM-current
+node smoke.mjs
+```
+
+This package deliberately freezes the working pre-W7 runtime boundary. It is
+not a claim that the current module owns its memory or has zero function
+imports.
+
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:
 

@@ -135,6 +135,7 @@ node --input-type=module -e '
   _build/source-pretty-format-coverage.wasm
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
+./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
   _build/source-usize-id.wasm
