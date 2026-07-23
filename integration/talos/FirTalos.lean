@@ -21,5 +21,6 @@ import FirTalos.Correctness.FunctionCtorProjectionExample
 import FirTalos.Correctness.FunctionCaseExample
 import FirTalos.Correctness.FunctionDefaultCaseExample
 import FirTalos.ConcreteRuntime
+import FirTalos.ConcreteClosureDispatch
 import FirTalos.ConcreteResolver
 import FirTalos.ConcreteRuntimeExamples

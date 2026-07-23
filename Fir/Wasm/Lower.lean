@@ -368,15 +368,22 @@ def compileClosureCandidatesForTarget (declId closureId : FVarId)
         compileClosureCandidateAt declId closureId resultKind argumentCode argumentKinds
           target paramKinds fixed
 
+/-- Build the nested matcher/branch chain used by generated closure dispatch.
+Naming this compiler boundary lets correctness proofs follow the exact fold
+without duplicating its executable definition. -/
+def compileClosureCandidateChain
+    (candidates : List (List Instruction × List Instruction)) :
+    List Instruction :=
+  candidates.foldr (init := [.unreachable]) fun candidate rest =>
+    candidate.fst ++ [.ifElse candidate.snd rest]
+
 def compileClosureDispatch (context : Context) (declId closureId : FVarId)
     (resultKind : AbiKind) (argumentCode : List Instruction)
     (argumentKinds : Array AbiKind) : List Instruction :=
   let candidates := context.program.decls.toList.flatMap fun target =>
     compileClosureCandidatesForTarget declId closureId resultKind argumentCode
       argumentKinds target
-  let dispatch := candidates.foldr (init := [.unreachable]) fun candidate rest =>
-    candidate.fst ++ [.ifElse candidate.snd rest]
-  dispatch ++ [.localGet declId]
+  compileClosureCandidateChain candidates ++ [.localGet declId]
 
 def getLocal (context : Context) (fvarId : FVarId) :
     Except CompileError (Instruction × AbiKind) :=

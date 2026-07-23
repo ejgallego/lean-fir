@@ -2730,6 +2730,21 @@ external theorem with an unchanged world and exact related trace event. This
 is a workable generation boundary, not a frozen layout: the header lanes and
 proof surface may change whenever a cleaner implementation warrants it.
 
+W6.6ca closes the compiler-generated closure candidate fold. The lowerer now
+names its existing nested candidate-chain function without changing emitted
+instructions. `ClosureCandidateCase` pairs every candidate from the exact
+compiler enumeration with its adapted numeric matcher/body and concrete
+matcher contract. The complete fold adapts through the unreachable fallback;
+execution skips an arbitrary nonmatching prefix, selects the first matching
+candidate, leaves the suffix unreachable, reloads the dispatch result local,
+and resumes an arbitrary surrounding program. A suffix-polymorphic argument
+assembly composes ordinary locals and any number of typed capture projections,
+then feeds either the concrete `partialApply`/local-write body or the saturated
+ordinary-Wasm direct-call/local-write body. The theorem retains the selected
+callee/body proof as the interprocedural premise supplied by the existing
+fuel-free termination bridge. Existing tagged-result and structured-failure
+gaps are unchanged; no shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
