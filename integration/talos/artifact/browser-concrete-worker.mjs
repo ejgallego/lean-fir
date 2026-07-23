@@ -7,16 +7,15 @@ import {
 } from "./concrete-host.mjs";
 import {
   CONCRETE_FIXTURES,
+  CONCRETE_SOURCE_PROBES,
   DEFAULT_EXTERNAL_FAULTS,
   EXPECTED_CONCRETE_FAULTS,
   REJECTED_FRAGMENT_FIXTURES,
 } from "./concrete-corpus.mjs";
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
 import {
-  checkConcretePrettyFormatInvocation,
-} from "./check-concrete-pretty-format-invocation.mjs";
-import { checkConcretePrettyFormatModule } from "./check-concrete-pretty-format-module.mjs";
-import { instantiateModuleArtifact } from "./module-client.mjs";
+  checkConcreteSourceInventory,
+} from "./check-concrete-source-probes.mjs";
 
 const corpusPath = new URLSearchParams(globalThis.location.search)
   .get("corpus") ?? "_build/concrete-corpus";
@@ -110,93 +109,12 @@ async function checkDefaultExternalFault(fixture, expectedFault) {
     `${fixture} did not reject its missing concrete external implementation`);
 }
 
-async function runInitialRuntimeSource() {
+async function runConcreteSourceInventory() {
   const sourceBase = new URL("./_build/", import.meta.url);
-  const name = "source-nat-list-case.wasm";
-  const manifest = await fetchJson(`${name}.json`, "nat-list source manifest", sourceBase);
-  const bytes = await fetchBytes(name, "nat-list source module", sourceBase);
-  assert.equal(manifest.fixture, "Fir.Wasm.Emit.SourceFixture.classifyNatList");
-  assert.deepStrictEqual(manifest.params, ["tobject"]);
-  assert.equal(manifest.result, "uint64");
-  assert.ok(WebAssembly.validate(bytes), "nat-list source failed WebAssembly validation");
-
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry);
-  for (const cell of manifest.initialRuntime.heap) {
-    const address = host.locationAddresses.get(cell.location);
-    assert.notEqual(address, undefined, `initial location ${cell.location} was not loaded`);
-    const header = host.readHeader(address);
-    assert.equal(header.rc, cell.rc, `initial location ${cell.location} rc mismatch`);
-    assert.equal(header.persistent, cell.persistent,
-      `initial location ${cell.location} persistence mismatch`);
-    assert.equal(header.live, cell.live, `initial location ${cell.location} liveness mismatch`);
-    assert.deepStrictEqual(host.objectJson(address, header), cell.object,
-      `initial location ${cell.location} object mismatch`);
-  }
-  const semanticArgument = concreteManifestValue(manifest.arguments[0]);
-  const physicalArgument = host.encode(manifest.params[0], semanticArgument);
-  assert.deepStrictEqual(host.decode(manifest.params[0], physicalArgument), semanticArgument,
-    "initial heap argument did not round-trip through its concrete address");
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-  const result = host.decode(manifest.result,
-    instance.exports[manifest.entry](physicalArgument));
-  assert.deepStrictEqual(result,
-    { kind: "scalar", scalarKind: "uint64", value: 1n });
-}
-
-async function runInitialRuntimeStringSource() {
-  const sourceBase = new URL("./_build/", import.meta.url);
-  const name = "source-string-input.wasm";
-  const manifest = await fetchJson("source-string-input.wasm.json",
-    "string source manifest", sourceBase);
-  const bytes = await fetchBytes(name, "string source module", sourceBase);
-  assert.equal(manifest.fixture, "Fir.Wasm.Emit.SourceFixture.acceptString");
-  assert.deepStrictEqual(manifest.params, ["object"]);
-  assert.equal(manifest.result, "uint64");
-  assert.ok(WebAssembly.validate(bytes), "string source failed WebAssembly validation");
-
-  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry);
-  for (const cell of manifest.initialRuntime.heap) {
-    const address = host.locationAddresses.get(cell.location);
-    assert.notEqual(address, undefined, `initial location ${cell.location} was not loaded`);
-    const header = host.readHeader(address);
-    assert.equal(header.rc, cell.rc, `initial location ${cell.location} rc mismatch`);
-    assert.equal(header.persistent, cell.persistent,
-      `initial location ${cell.location} persistence mismatch`);
-    assert.equal(header.live, cell.live, `initial location ${cell.location} liveness mismatch`);
-    assert.deepStrictEqual(host.objectJson(address, header), cell.object,
-      `initial location ${cell.location} object mismatch`);
-  }
-  const semanticArgument = concreteManifestValue(manifest.arguments[0]);
-  const physicalArgument = host.encode(manifest.params[0], semanticArgument);
-  assert.deepStrictEqual(host.decode(manifest.params[0], physicalArgument), semanticArgument,
-    "initial string argument did not round-trip through its concrete address");
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-  const result = host.decode(manifest.result,
-    instance.exports[manifest.entry](physicalArgument));
-  assert.deepStrictEqual(result,
-    { kind: "scalar", scalarKind: "uint64", value: 18446744073709551615n });
-}
-
-async function runConcretePrettyFormatModule() {
-  const sourceBase = new URL("./_build/", import.meta.url);
-  const name = "source-pretty-format-module.wasm";
-  const manifest = await fetchJson(`${name}.json`, "prettyM module manifest", sourceBase);
-  const bytes = await fetchBytes(name, "prettyM module", sourceBase);
-  const host = new ConcreteHost(manifest.imports, undefined,
-    concreteArtifactExternalRegistry);
-  const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
-  return checkConcretePrettyFormatModule(artifact);
-}
-
-async function runConcretePrettyFormatInvocation() {
-  const sourceBase = new URL("./_build/", import.meta.url);
-  const name = "source-pretty-format-coverage.wasm";
-  const manifest = await fetchJson(`${name}.json`,
-    "prettyM coverage invocation manifest", sourceBase);
-  const bytes = await fetchBytes(name, "prettyM coverage invocation", sourceBase);
-  return checkConcretePrettyFormatInvocation({ bytes, manifest });
+  return checkConcreteSourceInventory(async (id) => ({
+    manifest: await fetchJson(`${id}.wasm.json`, `${id} manifest`, sourceBase),
+    bytes: await fetchBytes(`${id}.wasm`, `${id} module`, sourceBase),
+  }));
 }
 
 async function runConcreteBrowserCorpus() {
@@ -212,17 +130,15 @@ async function runConcreteBrowserCorpus() {
   for (const [fixture, expectedFault] of EXPECTED_CONCRETE_FAULTS) {
     await checkExpectedFault(fixture, expectedFault);
   }
-  await runInitialRuntimeSource();
-  await runInitialRuntimeStringSource();
-  await runConcretePrettyFormatInvocation();
-  await runConcretePrettyFormatModule();
+  const sourceInventory = await runConcreteSourceInventory();
+  assert.equal(sourceInventory.results.length, CONCRETE_SOURCE_PROBES.length);
   const fragmentCount = REJECTED_FRAGMENT_FIXTURES.length;
   return `PASS browser Worker concrete Wasm corpus ` +
     `(${CONCRETE_FIXTURES.length} artifacts, ` +
     `${fragmentCount} fragment gate${fragmentCount === 1 ? "" : "s"}, ` +
     `${DEFAULT_EXTERNAL_FAULTS.length} default external fault, ` +
     `${EXPECTED_CONCRETE_FAULTS.length} expected failure, ` +
-    `3 initial-runtime sources, 1 raw-layout prettyM module)`;
+    `${sourceInventory.results.length} compiler source probes)`;
 }
 
 try {

@@ -323,7 +323,6 @@ export async function buildConcreteReadinessReport(
     imports,
     notClaimed: [
       "proof completeness while W6 coverage rows remain partial or pending",
-      "concrete execution of a source probe classified as preflight-ready",
       "concrete execution of the shared validation product bundle",
     ],
   });

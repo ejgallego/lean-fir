@@ -85,7 +85,10 @@ but already executable fixtures, `reference-counting` and `delete-fault`, are
 part of that oracle-matched corpus.
 
 The same report preflights all 13 compiler-produced source artifacts, and all
-13 are concrete-resolvable. The concrete registry executes all five integer, five
+13 are concrete-resolvable. A shared Node/browser inventory gate also executes
+all 11 invocation manifests and both invocation-free modules through the
+concrete memory ABI, checking frozen results and exact initial-heap round trips.
+The concrete registry executes all five integer, five
 natural, eight UTF-8/string, and two unreachable-fallback declarations retained
 by `prettyM`; focused tests cover immediate/heap integer boundaries, large heap
 naturals, Unicode byte/code-point navigation, fresh results, stale inputs, and
@@ -96,8 +99,7 @@ all-constructor `prettyM` manifest now round-trips its 23-cell initial heap and
 executes concretely in Node and the browser. Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
 artifact/readiness audit: it deliberately does not claim W6 proof completion,
-concrete execution of every merely preflight-ready source, or concrete
-execution of the shared validation product bundle.
+or concrete execution of the shared validation product bundle.
 
 A standalone report can be generated after the source and artifact manifests
 exist with:
@@ -273,9 +275,9 @@ the complete shared-product Worker. It also materializes the live-oracle
 artifact corpus under `_build`, then runs the same 43 concrete artifacts, one
 default external rejection, and one expected failure used by Node through a
 third Worker. That Worker also executes the concrete initial-runtime
-`List Nat`, Unicode string, and all-constructor `prettyM` sources, plus the
-invocation-free `prettyM` module through the same concrete raw-layout checkers
-used by Node.
+complete 13-probe compiler source inventory—including both initial-runtime
+`prettyM` invocations and the invocation-free raw-layout module—through the
+same concrete checkers used by Node.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

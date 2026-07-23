@@ -142,8 +142,7 @@ node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
 node test-concrete-format-externals.mjs
 node test-concrete-initial-runtime.mjs
-node run-concrete-source-artifacts.mjs \
-  _build/source-nat-list-case.wasm _build/source-string-input.wasm
+node run-concrete-source-artifacts.mjs _build
 node call-concrete-pretty-format-invocation.mjs \
   _build/source-pretty-format-coverage.wasm
 if [[ -n "${FIR_BROWSER:-}" ]]; then
