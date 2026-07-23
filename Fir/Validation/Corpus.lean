@@ -2075,6 +2075,8 @@ def cases : Array Case := #[
       #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
     requiredExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``NativeEffects.recordImpl, minimum := 2 }]
     effectProjections := #[{
       external := ``NativeEffects.recordImpl
       operation := "validation.record"
@@ -2100,6 +2102,8 @@ def cases : Array Case := #[
       #[{ form := "extern", minimum := 2 }, { form := "fap", minimum := 2 }]
     requiredExternals := #[``NativeEffects.recordByteArrayImpl]
     requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``NativeEffects.recordByteArrayImpl, minimum := 2 }]
     effectProjections := #[{
       external := ``NativeEffects.recordByteArrayImpl
       operation := "validation.recordByteArray"

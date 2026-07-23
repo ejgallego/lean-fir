@@ -1015,14 +1015,16 @@ returns both the swapped copy and original pair and executes no `oset`, instead
 taking the allocation/copy branch.
 
 The `multiplicity` tag groups seven fixtures with source-stable dynamic counts.
-The two sequenced-effect cases require two external dispatches and calls; the
-recursive and local-tail three-element traversals require four case/call steps
-and six object projections; reassociation requires two decrements and
-sharedness checks plus four object writes; tuple rotation requires two reuse
-decisions and four projections/writes; and the distinct-child swap requires its
-two writes. Current observations meet every minimum exactly, so losing one
-intended repetition fails coverage even when the same instruction form remains
-present and executable elsewhere in the case.
+The two sequenced-effect cases require two dispatches of their specific
+`recordImpl` or `recordByteArrayImpl` external, in addition to two generic
+external/call forms. The recursive and local-tail three-element traversals
+require four case/call steps and six object projections; reassociation requires
+two decrements and sharedness checks plus four object writes; tuple rotation
+requires two reuse decisions and four projections/writes; and the
+distinct-child swap requires its two writes. Current observations meet every
+minimum exactly, so losing one intended repetition fails coverage even when
+the same instruction form—or a different external call—remains present and
+executable elsewhere in the case.
 
 Stress fixtures additionally execute compiler-lowered ownership/reuse during
 recursive reassociation, change the
