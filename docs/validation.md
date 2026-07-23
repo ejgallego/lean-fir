@@ -907,6 +907,13 @@ bounded maxima. Per-case `requiredObservations` materializes every obligation's
 observed count, including zero even though the positive-only runtime telemetry
 correctly omits absent forms.
 
+The `path-exclusion` tag groups five shared copy-on-write fixtures. Each
+statically retains `oset` because the compiled update machinery contains the
+unique-object branch, but requires an exact executed count of zero. The two
+multi-object projections, aliased-child replacement, shared self-replacement,
+and distinct-child swap must therefore take the allocation/copy path without
+silently performing an in-place object write.
+
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
 

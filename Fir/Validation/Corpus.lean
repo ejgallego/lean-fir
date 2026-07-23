@@ -1549,9 +1549,11 @@ def cases : Array Case := #[
         Source.maxUSize Source.maxUInt32 multiObjectReplacementNat true)
     tags :=
       #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "nat",
-        "heap", "boundary", "updated"]
+        "heap", "boundary", "updated", "path-exclusion"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Force shared replacement of heap-natural object slot 0 and observe the updated copy" },
   { id := "multi-object-shared-first-original"
@@ -1566,9 +1568,11 @@ def cases : Array Case := #[
         Source.maxUSize Source.maxUInt32 multiObjectReplacementNat false)
     tags :=
       #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "nat",
-        "heap", "boundary", "original"]
+        "heap", "boundary", "original", "path-exclusion"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Force shared replacement of heap-natural object slot 0 while retaining the original" },
   { id := "aliased-byte-array-update-first"
@@ -1617,9 +1621,11 @@ def cases : Array Case := #[
         Source.maxUInt32 multiObjectReplacementBytes)
     tags :=
       #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "alias",
-        "refcount", "bytearray", "heap", "boundary"]
+        "refcount", "bytearray", "heap", "boundary", "path-exclusion"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Return both updated and original field pairs after replacing slot 0 of a shared aggregate" },
   { id := "aliased-byte-array-child-copy-on-write"
@@ -1669,9 +1675,11 @@ def cases : Array Case := #[
         mixedLayoutBytes Source.maxUSize Source.maxUInt32)
     tags :=
       #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "alias",
-        "self-replace", "refcount", "bytearray", "heap", "boundary"]
+        "self-replace", "refcount", "bytearray", "heap", "boundary", "path-exclusion"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Self-replace slot 0 on a shared aggregate and return updated and original field pairs" },
   { id := "aliased-byte-array-self-replace-child-copy-on-write"
@@ -1724,9 +1732,11 @@ def cases : Array Case := #[
         Source.maxUSize Source.maxUInt32)
     tags :=
       #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "swap",
-        "refcount", "bytearray", "heap", "boundary"]
+        "refcount", "bytearray", "heap", "boundary", "path-exclusion"]
     requiredLcnfForms := objectUpdateForms
     requiredExecutedLcnfForms := mixedUpdateForms
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "oset", minimum := 0, maximum := some 0 }]
     provenance := firProvenance
       "Swap two distinct heap children on a copied aggregate while retaining the original pair" },
   { id := "tuple-rotate"
