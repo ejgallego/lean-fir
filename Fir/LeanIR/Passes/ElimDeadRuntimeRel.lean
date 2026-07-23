@@ -1945,6 +1945,49 @@ theorem ShadowRuntimeRel.prependErased
     apply reachable_without_erased_root
     simpa [runtimeRoots] using reachable
 
+/-- Publishing the results of a covered argument evaluation preserves the
+runtime relation.  Every evaluated argument is either the synthetic erased
+value or an already-published live environment root. -/
+theorem ShadowRuntimeRel.publishEvalArgs
+    (related : ShadowRuntimeRel rho left right
+      (envRootsOn used leftEnv ++ leftTail)
+      (envRootsOn used rightEnv ++ rightTail))
+    (covered : ArgsCovered used arguments)
+    (leftEvaluated : evalArgs leftEnv arguments = .ok leftValues)
+    (rightEvaluated : evalArgs rightEnv arguments = .ok rightValues)
+    (values : ArrayRel (ValueRel rho) leftValues rightValues) :
+    ShadowRuntimeRel rho left right
+      (leftValues.toList ++ (envRootsOn used leftEnv ++ leftTail))
+      (rightValues.toList ++ (envRootsOn used rightEnv ++ rightTail)) := by
+  have leftSubsetValues :=
+    evalArgs_values_subset covered leftEvaluated
+  have rightSubsetValues :=
+    evalArgs_values_subset covered rightEvaluated
+  have leftSubset : RootSubset
+      (leftValues.toList ++ (envRootsOn used leftEnv ++ leftTail))
+      (.erased :: (envRootsOn used leftEnv ++ leftTail)) := by
+    intro value member
+    rcases List.mem_append.mp member with evaluated | old
+    · have rooted := leftSubsetValues value evaluated
+      simp only [List.mem_cons] at rooted ⊢
+      rcases rooted with erased | environment
+      · exact Or.inl erased
+      · exact Or.inr (List.mem_append_left _ environment)
+    · exact List.mem_cons_of_mem _ old
+  have rightSubset : RootSubset
+      (rightValues.toList ++ (envRootsOn used rightEnv ++ rightTail))
+      (.erased :: (envRootsOn used rightEnv ++ rightTail)) := by
+    intro value member
+    rcases List.mem_append.mp member with evaluated | old
+    · have rooted := rightSubsetValues value evaluated
+      simp only [List.mem_cons] at rooted ⊢
+      rcases rooted with erased | environment
+      · exact Or.inl erased
+      · exact Or.inr (List.mem_append_left _ environment)
+    · exact List.mem_cons_of_mem _ old
+  exact related.prependErased.restrictExtra
+    (listRel_append values related.extra) leftSubset rightSubset
+
 theorem closureCallRoots_reachable
     (found : findCell? runtime.heap closureLocation = some cell)
     (objectEq : cell.object = .closure name arity fixed) :

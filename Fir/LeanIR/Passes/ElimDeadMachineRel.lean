@@ -3986,6 +3986,24 @@ theorem DeletedLetReadyAt.not_nullaryFap
         Except.ok (state.runtime, LetAction.value value) at evaluated
       cases evaluated
 
+/-- No full application is locally deletable: after evaluating its arguments
+it always produces an invocation action, never the value action required by
+the generic runtime-neutral deletion certificate. -/
+theorem DeletedLetReadyAt.not_fap
+    (ready : DeletedLetReadyAt state roots {
+      fvarId, binderName, type, value := .fap name arguments }) : False := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      simp only [evalLetValue] at evaluated
+      generalize argumentsEq :
+        evalArgs state.env arguments = result at evaluated
+      cases result with
+      | error fault =>
+          simp [argumentsEq, Bind.bind, Except.bind] at evaluated
+      | ok values =>
+          simp [argumentsEq, Bind.bind, Except.bind,
+            Pure.pure, Except.pure] at evaluated
+
 /-- General deleted-let stuttering rule.  Once the transparent graph supplies
 the related continuation and binder absence, `DeletedLetReadyAt` dispatches
 all locally value-producing safe-elimination shapes to one source step and
@@ -4125,6 +4143,163 @@ theorem match_internalCoreSteps
   | external actual externalProof =>
       rw [sourceTransition] at actual
       contradiction
+
+/-- A retained full application evaluates related covered arguments, saves
+the related bind continuations, and enters related named-invocation controls.
+This includes the nullary case: unlike a deleted full application, it must
+remain observable as a call. -/
+theorem match_retainedFapLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .fap name arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .fap name arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceArgumentsEq :
+    evalArgs sourceState.env arguments = sourceEvaluation
+  cases sourceEvaluation with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceArgumentsEq, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceArguments =>
+      have evaluated := evalArgs_relOn env covered
+      rw [sourceArgumentsEq] at evaluated
+      generalize targetArgumentsEq :
+        evalArgs targetState.env arguments = targetEvaluation at evaluated
+      cases evaluated with
+      | ok argumentsRelated =>
+          rename_i targetArguments
+          have published := runtime.publishEvalArgs covered sourceArgumentsEq
+            targetArgumentsEq argumentsRelated
+          let sourceExpected := {
+            sourceState with
+            frames := .bind fvarId sourceContinuation sourceState.env
+              sourceState.joins :: sourceState.frames
+            control := .invokeName name sourceArguments }
+          let targetExpected := {
+            targetState with
+            frames := .bind fvarId targetContinuation targetState.env
+              targetState.joins :: targetState.frames
+            control := .invokeName name targetArguments }
+          have sourceTransition :
+              coreStep sourceCurrent = .next sourceExpected := by
+            simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+              sourceArgumentsEq, pushBindFrame, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          have targetTransition :
+              coreStep targetCurrent = .next targetExpected := by
+            simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+              targetArgumentsEq, pushBindFrame, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          have afterRelated :
+              ReachableMachineRelated fuel rho sourceExpected
+                targetExpected := by
+            unfold ReachableMachineRelated
+            exact ⟨sourceArguments.toList, targetArguments.toList,
+              envRootsOn used sourceState.env ++ sourceFrameRoots,
+              envRootsOn used targetState.env ++ targetFrameRoots,
+              programs, .invokeName name argumentsRelated,
+              .cons (.bind continuation joins env) frames,
+              by simpa only [List.append_assoc] using published⟩
+          exact ⟨targetExpected,
+            match_internalCoreSteps sourceTransition targetTransition
+              afterRelated (by simpa [sourceCurrent] using step)⟩
+
+/-- Complete graph-level matcher for full-application lets.  The transparent
+pass always retains this effectful shape: `DeletedLetReadyAt` has no full-
+application constructor, so the deleted residual is uninhabited. -/
+theorem match_fapLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type, value := .fap name arguments
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type, value := .fap name arguments
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered =>
+      rcases match_retainedFapLetStep sourceState targetState programs frames
+          continuation joins env covered runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent impossible =>
+      exact impossible.not_fap.elim
 
 /-- Restoring related bind frames installs the yielded values in the saved
 environments and narrows the runtime extras to the resumed code and remaining
