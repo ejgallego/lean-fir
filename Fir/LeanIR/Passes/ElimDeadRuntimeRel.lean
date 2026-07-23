@@ -3649,6 +3649,94 @@ theorem ShadowRuntimeRel.decLocationFuelBoth
                       exact List.mem_append_right _ member)
                   exact ⟨rightResult, targetEffect, finalRelated⟩
 
+/-- Interpreter-facing retained delete. Erased failed-reset tokens are
+synchronized no-ops; a related live heap operand marks the mapped cells dead
+without recursively changing their owned values. -/
+theorem ShadowRuntimeRel.deleteValueBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect : deleteValue left leftObject = .ok leftResult) :
+    ∃ rightResult,
+      deleteValue right rightObject = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases objects with
+  | tagged payload => simp [deleteValue] at sourceEffect
+  | usize value => simp [deleteValue] at sourceEffect
+  | scalar value => simp [deleteValue] at sourceEffect
+  | reuseNone => simp [deleteValue] at sourceEffect
+  | reuseSome mapping => simp [deleteValue] at sourceEffect
+  | erased =>
+      simp [deleteValue] at sourceEffect
+      subst leftResult
+      exact ⟨right, by simp [deleteValue], related⟩
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      unfold deleteValue at sourceEffect
+      simp only [Bind.bind, Except.bind] at sourceEffect
+      generalize liveEq :
+        getLiveCell left leftLocation = liveResult at sourceEffect
+      cases liveResult with
+      | error fault =>
+          simp at sourceEffect
+      | ok leftCell =>
+          rcases getLiveCell_spec liveEq with ⟨leftFound, leftLive⟩
+          have reachable :
+              Reachable left.heap (runtimeRoots left leftExtra)
+                leftLocation := by
+            exact .root (extra_subset_runtimeRoots left leftExtra
+              (.object (.heap leftLocation)) objectRoot)
+          rcases related.heap.1 leftLocation reachable with
+            ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft,
+              rightFound, cells⟩
+          have mappedSame : mapped = rightLocation := by
+            rw [mapping] at mappedEq
+            exact (Option.some.inj mappedEq).symm
+          subst mapped
+          have leftCellSame : foundLeftCell = leftCell := by
+            rw [leftFound] at foundLeft
+            exact (Option.some.inj foundLeft).symm
+          subst foundLeftCell
+          have rightLive : rightCell.live = true := by
+            rw [← cells.2.2.1]
+            exact leftLive
+          let leftReplacement : HeapCell :=
+            { leftCell with rc := 0, live := false }
+          let rightReplacement : HeapCell :=
+            { rightCell with rc := 0, live := false }
+          have replacement :
+              HeapCellRel rho leftReplacement rightReplacement := by
+            refine ⟨by simp [leftReplacement, rightReplacement],
+              cells.2.1, by simp [leftReplacement, rightReplacement],
+              cells.2.2.2⟩
+          have leftOwned :
+              leftReplacement.object.ownedValues =
+                leftCell.object.ownedValues := by
+            simp [leftReplacement]
+          have rightOwned :
+              rightReplacement.object.ownedValues =
+                rightCell.object.ownedValues := by
+            simp [rightReplacement]
+          rcases related.setCellBoth mapping leftFound rightFound
+              leftOwned rightOwned replacement with
+            ⟨computedLeft, rightResult, leftSet, rightSet, next⟩
+          change setCell left leftLocation leftReplacement =
+            .ok leftResult at sourceEffect
+          rw [sourceEffect] at leftSet
+          have resultEq := Except.ok.inj leftSet
+          subst computedLeft
+          have targetEffect :
+              deleteValue right (.object (.heap rightLocation)) =
+                .ok rightResult := by
+            unfold deleteValue
+            simp only [Bind.bind, Except.bind]
+            have rightGet :
+                getLiveCell right rightLocation = .ok rightCell := by
+              simp [getLiveCell, rightFound, rightLive]
+            rw [rightGet]
+            exact rightSet
+          exact ⟨rightResult, targetEffect, next⟩
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable
