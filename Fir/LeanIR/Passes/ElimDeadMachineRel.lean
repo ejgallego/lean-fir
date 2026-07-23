@@ -4216,6 +4216,119 @@ theorem retainedLetValue_reachableRelated
     sourceFrameRoots, targetFrameRoots,
     programs, .code continuation joins nextEnv, frames, nextRuntime⟩
 
+/-- A retained erased let takes the same administrative value-producing step
+on both machines.  Publishing `.erased` is sufficient for the newly bound
+continuations because it introduces no heap reachability. -/
+theorem match_retainedErasedLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .erased
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .erased
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .erased
+    } targetContinuation) }
+  let sourceExpected := {
+    sourceState with
+    env := bind sourceState.env fvarId .erased
+    control := .code sourceContinuation }
+  let targetExpected := {
+    targetState with
+    env := bind targetState.env fvarId .erased
+    control := .code targetContinuation }
+  have sourceTransition :
+      coreStep sourceCurrent = .next sourceExpected := by
+    simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+      Pure.pure, Except.pure]
+  have targetTransition :
+      coreStep targetCurrent = .next targetExpected := by
+    simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+      Pure.pure, Except.pure]
+  have afterRelated :
+      ReachableMachineRelated fuel rho sourceExpected targetExpected := by
+    exact retainedLetValue_reachableRelated sourceState targetState
+      sourceState.runtime targetState.runtime programs frames continuation
+      joins env .erased runtime.prependErased
+  exact ⟨targetExpected,
+    match_internalCoreSteps sourceTransition targetTransition afterRelated
+      (by simpa [sourceCurrent] using step)⟩
+
+/-- Complete graph-level matcher for erased lets.  A retained node executes
+on both machines; a certified deleted node is one source step matched by
+target stuttering. -/
+theorem match_erasedLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type, value := .erased
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type, value := .erased
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered =>
+      rcases match_retainedErasedLetStep sourceState targetState programs
+          frames continuation joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent ready =>
+      rcases match_deletedLetStep_of_ready sourceState targetState programs
+          frames continuation joins env absent runtime ready step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- A retained full application evaluates related covered arguments, saves
 the related bind continuations, and enters related named-invocation controls.
 This includes the nullary case: unlike a deleted full application, it must
