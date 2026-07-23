@@ -2355,6 +2355,23 @@ theorem ShadowRuntimeRel.setUSizeFieldLeftUnreachable
   rw [dif_pos bounded]
   simpa [replacement] using effect
 
+/-- A successful live-cell lookup exposes the exact semantic heap cell and
+its liveness bit. -/
+theorem getLiveCell_spec
+    (effect : getLiveCell runtime location = .ok cell) :
+    findCell? runtime.heap location = some cell ∧ cell.live = true := by
+  unfold getLiveCell at effect
+  generalize foundEq : findCell? runtime.heap location = found at effect
+  cases found with
+  | none => simp at effect
+  | some foundCell =>
+      cases liveEq : foundCell.live with
+      | false => simp [liveEq] at effect
+      | true =>
+          simp [liveEq] at effect
+          subst cell
+          exact ⟨rfl, liveEq⟩
+
 /-- A successful constructor lookup through a heap reference exposes the
 exact live semantic cell used by the mutation operations below. -/
 theorem getConstructor_heap_spec
@@ -3112,6 +3129,140 @@ theorem ShadowRuntimeRel.setTagBoth_of_related
           rw [originalSourceEffect] at leftEffect
           cases leftEffect
           exact ⟨rightResult, rightEffect, next⟩
+
+/-- Incrementing one reachable mapped heap reference updates equal reference
+counts on both sides. Persistent cells are synchronized no-ops. -/
+theorem ShadowRuntimeRel.incLocationBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable :
+      Reachable left.heap (runtimeRoots left leftExtra) leftLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (leftLive : leftCell.live = true)
+    (amount : Nat) :
+    ∃ leftResult rightResult,
+      incLocation left leftLocation amount = .ok leftResult ∧
+      incLocation right rightLocation amount = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, foundLeftCell, rightCell, mappedEq, foundLeft, rightFound,
+      cells⟩
+  have mappedSame : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  have leftCellSame : foundLeftCell = leftCell := by
+    rw [leftFound] at foundLeft
+    exact (Option.some.inj foundLeft).symm
+  subst foundLeftCell
+  have rightLive : rightCell.live = true := by
+    rw [← cells.2.2.1]
+    exact leftLive
+  have leftGet : getLiveCell left leftLocation = .ok leftCell := by
+    simp [getLiveCell, leftFound, leftLive]
+  have rightGet : getLiveCell right rightLocation = .ok rightCell := by
+    simp [getLiveCell, rightFound, rightLive]
+  cases persistentEq : leftCell.persistent with
+  | true =>
+      have rightPersistent : rightCell.persistent = true := by
+        rw [← cells.2.1]
+        exact persistentEq
+      refine ⟨left, right, ?_, ?_, related⟩
+      · unfold incLocation
+        rw [leftGet]
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos (by simp [persistentEq])]
+        rfl
+      · unfold incLocation
+        rw [rightGet]
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos (by simp [rightPersistent])]
+        rfl
+  | false =>
+      have rightPersistent : rightCell.persistent = false := by
+        rw [← cells.2.1]
+        exact persistentEq
+      let leftReplacement : HeapCell :=
+        { leftCell with rc := leftCell.rc + amount }
+      let rightReplacement : HeapCell :=
+        { rightCell with rc := rightCell.rc + amount }
+      have replacement :
+          HeapCellRel rho leftReplacement rightReplacement := by
+        refine ⟨?_, cells.2.1, cells.2.2.1, cells.2.2.2⟩
+        simp [leftReplacement, rightReplacement, cells.1]
+      have leftOwned :
+          leftReplacement.object.ownedValues =
+            leftCell.object.ownedValues := by
+        simp [leftReplacement]
+      have rightOwned :
+          rightReplacement.object.ownedValues =
+            rightCell.object.ownedValues := by
+        simp [rightReplacement]
+      rcases related.setCellBoth mapping leftFound rightFound
+          leftOwned rightOwned replacement with
+        ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+      refine ⟨leftResult, rightResult, ?_, ?_, next⟩
+      · unfold incLocation
+        rw [leftGet]
+        simp only [Bind.bind, Except.bind]
+        rw [if_neg (by simp [persistentEq])]
+        simpa [leftReplacement] using leftEffect
+      · unfold incLocation
+        rw [rightGet]
+        simp only [Bind.bind, Except.bind]
+        rw [if_neg (by simp [rightPersistent])]
+        simpa [rightReplacement] using rightEffect
+
+/-- Interpreter-facing retained increment. A successful source effect fixes
+the same successful target effect for related live operands. -/
+theorem ShadowRuntimeRel.incValueBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      incValue left leftObject amount check = .ok leftResult) :
+    ∃ rightResult,
+      incValue right rightObject amount check = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases objects with
+  | tagged payload =>
+      cases check with
+      | false => simp [incValue] at sourceEffect
+      | true =>
+          simp [incValue] at sourceEffect
+          subst leftResult
+          exact ⟨right, by simp [incValue], related⟩
+  | usize value => simp [incValue] at sourceEffect
+  | scalar value => simp [incValue] at sourceEffect
+  | erased => simp [incValue] at sourceEffect
+  | reuseNone => simp [incValue] at sourceEffect
+  | reuseSome mapping => simp [incValue] at sourceEffect
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      have originalSourceEffect := sourceEffect
+      have sourceLocationEffect :
+          incLocation left leftLocation amount = .ok leftResult := by
+        simpa [incValue] using originalSourceEffect
+      unfold incValue incLocation at sourceEffect
+      simp only [Bind.bind, Except.bind] at sourceEffect
+      generalize liveEq :
+        getLiveCell left leftLocation = liveResult at sourceEffect
+      cases liveResult with
+      | error fault =>
+          simp at sourceEffect
+      | ok leftCell =>
+          rcases getLiveCell_spec liveEq with ⟨leftFound, leftLive⟩
+          have reachable :
+              Reachable left.heap (runtimeRoots left leftExtra)
+                leftLocation := by
+            exact .root (extra_subset_runtimeRoots left leftExtra
+              (.object (.heap leftLocation)) objectRoot)
+          rcases related.incLocationBoth mapping reachable leftFound leftLive
+              amount with
+            ⟨computedLeft, rightResult, leftEffect, rightEffect, next⟩
+          rw [sourceLocationEffect] at leftEffect
+          cases leftEffect
+          exact ⟨rightResult, by simpa [incValue] using rightEffect, next⟩
 
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
