@@ -4617,6 +4617,108 @@ theorem ShadowRuntimeRel.literalBoth
           (ValueRel.usize (rho := rho) value)
           (by intro location; simp) (by intro location; simp)
 
+/-- Related constructor arguments produce related retained constructor
+values.  Nullary constructors are the same immediate tag; every other shape
+allocates a fresh related object, then removes the now-owned arguments from
+the direct-root suffix. -/
+theorem ShadowRuntimeRel.allocCtorBoth
+    (related : ShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (info : LCNF.CtorInfo)
+    (arity : leftArguments.size = info.size) :
+    ∃ larger leftRuntime leftValue rightRuntime rightValue,
+      RenamingExtends rho larger ∧
+      allocCtor left info leftArguments = .ok (leftRuntime, leftValue) ∧
+      allocCtor right info rightArguments = .ok (rightRuntime, rightValue) ∧
+      ValueRel larger leftValue rightValue ∧
+      ShadowRuntimeRel larger leftRuntime rightRuntime
+        (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+  have rightArity : rightArguments.size = info.size := by
+    rw [← arity, arrayRel_size_eq arguments]
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · have leftEmpty : leftArguments = #[] :=
+      Array.size_eq_zero_iff.mp (arity.trans empty.1.1)
+    have rightEmpty : rightArguments = #[] :=
+      Array.size_eq_zero_iff.mp (rightArity.trans empty.1.1)
+    have base : ShadowRuntimeRel rho left right leftExtra rightExtra := by
+      simpa [leftEmpty, rightEmpty] using related
+    let value : Value := .object (.tagged (UInt64.ofNat info.cidx))
+    refine ⟨rho, left, value, right, value,
+      RenamingExtends.refl rho, ?_, ?_, .tagged _, ?_⟩
+    · simp [allocCtor, arity, empty.1.1, empty.1.2, empty.2, value,
+        Pure.pure, Except.pure]
+    · simp [allocCtor, rightArity, empty.1.1, empty.1.2, empty.2, value,
+        Pure.pure, Except.pure]
+    · exact base.prependNonHeap (.tagged _)
+        (by intro location; simp [value])
+        (by intro location; simp [value])
+  · let leftObject : ConstructorObject := {
+      tag := info.cidx
+      objectFields := leftArguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    let rightObject : ConstructorObject := {
+      tag := info.cidx
+      objectFields := rightArguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    have objects : HeapObjectRel rho (.ctor leftObject) (.ctor rightObject) := by
+      exact .ctor rfl arguments rfl rfl
+    have leftOwned : RootSubset
+        (HeapObject.ownedValues (.ctor leftObject)).toList
+        (runtimeRoots left (leftArguments.toList ++ leftExtra)) := by
+      intro value member
+      apply extra_subset_runtimeRoots
+      apply List.mem_append_left
+      simpa [leftObject, HeapObject.ownedValues] using member
+    have rightOwned : RootSubset
+        (HeapObject.ownedValues (.ctor rightObject)).toList
+        (runtimeRoots right (rightArguments.toList ++ rightExtra)) := by
+      intro value member
+      apply extra_subset_runtimeRoots
+      apply List.mem_append_left
+      simpa [rightObject, HeapObject.ownedValues] using member
+    rcases related.allocBoth objects leftOwned rightOwned false with
+      ⟨larger, extension, values, allocated⟩
+    let leftRuntime := (alloc left (.ctor leftObject)).1
+    let rightRuntime := (alloc right (.ctor rightObject)).1
+    let leftValue : Value := .object (alloc left (.ctor leftObject)).2
+    let rightValue : Value := .object (alloc right (.ctor rightObject)).2
+    have leftSubset : RootSubset
+        (leftValue :: leftExtra)
+        (leftValue :: (leftArguments.toList ++ leftExtra)) := by
+      intro value member
+      simp only [List.mem_cons] at member ⊢
+      rcases member with same | member
+      · exact Or.inl same
+      · exact Or.inr (List.mem_append_right _ member)
+    have rightSubset : RootSubset
+        (rightValue :: rightExtra)
+        (rightValue :: (rightArguments.toList ++ rightExtra)) := by
+      intro value member
+      simp only [List.mem_cons] at member ⊢
+      rcases member with same | member
+      · exact Or.inl same
+      · exact Or.inr (List.mem_append_right _ member)
+    have nextRuntime : ShadowRuntimeRel larger leftRuntime rightRuntime
+        (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+      apply allocated.restrictExtra
+      · exact .cons values (listRel_mono (valueRel_mono extension) tail)
+      · exact leftSubset
+      · exact rightSubset
+    refine ⟨larger, leftRuntime, leftValue, rightRuntime, rightValue,
+      extension, ?_, ?_, values, nextRuntime⟩
+    · simp [allocCtor, arity, empty, leftRuntime, leftValue, leftObject]
+      rfl
+    · simp [allocCtor, rightArity, empty, rightRuntime, rightValue,
+        rightObject]
+      rfl
+
 /-- A well-formed dead constructor evaluation either produces an immediate
 tag without changing the runtime, or allocates source-only unreachable
 garbage covered by `allocLeftGarbage`. -/
