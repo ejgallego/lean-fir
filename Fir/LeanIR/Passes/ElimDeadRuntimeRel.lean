@@ -2148,6 +2148,78 @@ theorem ShadowRuntimeRel.getTagBoth_of_related
             simp_all [getTag, getLiveCell, leftFound, rightFound,
               Bind.bind, Except.bind]
 
+/-- A successful sharedness query on a related published object succeeds on
+the target with a related scalar result.  Heap references use equality of
+the related cells' liveness, persistence, and reference count; tagged objects
+return the common immediate `true` result. -/
+theorem ShadowRuntimeRel.isSharedBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue)
+    (sourceRead : isShared left leftValue = .ok leftResult) :
+    ∃ rightResult,
+      isShared right rightValue = .ok rightResult ∧
+      ValueRel rho leftResult rightResult ∧
+      ShadowRuntimeRel rho left right
+        (leftResult :: leftExtra) (rightResult :: rightExtra) := by
+  cases values with
+  | tagged payload =>
+      have resultEq :
+          leftResult = .scalar (.uint8 1) := by
+        have normalized := sourceRead
+        simp [isShared] at normalized
+        exact normalized.symm
+      subst leftResult
+      refine ⟨.scalar (.uint8 1), by simp [isShared], .scalar _, ?_⟩
+      exact related.prependNonHeap (.scalar _)
+        (by intro location; simp) (by intro location; simp)
+  | usize value => simp [isShared] at sourceRead
+  | scalar value => simp [isShared] at sourceRead
+  | erased => simp [isShared] at sourceRead
+  | reuseNone => simp [isShared] at sourceRead
+  | reuseSome mapped => simp [isShared] at sourceRead
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      cases leftLiveEq : leftCell.live with
+      | false =>
+          simp [isShared, getLiveCell, leftFound, leftLiveEq,
+            Functor.map, Except.map] at sourceRead
+      | true =>
+          have rightLiveEq : rightCell.live = true := by
+            rw [← cells.2.2.1]
+            exact leftLiveEq
+          have persistentEq : leftCell.persistent = rightCell.persistent :=
+            cells.2.1
+          have rcEq : leftCell.rc = rightCell.rc := cells.1
+          have resultEq : leftResult =
+              .scalar (.uint8
+                (if leftCell.persistent || leftCell.rc != 1 then 1 else 0)) := by
+            have normalized := sourceRead
+            simp [isShared, getLiveCell, leftFound, leftLiveEq,
+              Functor.map, Except.map] at normalized
+            simpa using normalized.symm
+          subst leftResult
+          let result : Value := .scalar (.uint8
+            (if rightCell.persistent || rightCell.rc != 1 then 1 else 0))
+          have sameResult : result = .scalar (.uint8
+              (if leftCell.persistent || leftCell.rc != 1 then 1 else 0)) := by
+            simp [result, ← persistentEq, ← rcEq]
+          subst result
+          refine ⟨_, ?_, .scalar _, ?_⟩
+          · simp [isShared, getLiveCell, rightFound, rightLiveEq,
+              ← persistentEq, ← rcEq, Functor.map, Except.map]
+          · exact related.prependNonHeap (.scalar _)
+              (by intro location; simp) (by intro location; simp)
+
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
 theorem ShadowRuntimeRel.readMappedCell
