@@ -748,6 +748,11 @@ engine or serializer.
 
 Once the semantic backend is stable, introduce a separate concrete target:
 
+The exact program-level proof obligations and the W7 linking boundary are
+tracked in [`W6-THEOREM-ROADMAP.md`](W6-THEOREM-ROADMAP.md). The operation
+inventory below is necessary evidence for those theorems, but operation
+coverage alone is not the W6 completion criterion.
+
 - choose wasm32 or wasm64 and fix pointer-width semantics;
 - specify tagged values and heap layout in linear memory;
 - implement allocation, fields, closures, and reference counts;
