@@ -298,6 +298,63 @@ def multiScalarSharedWordUpdate (natural : Nat) (usize : USize)
   let updated := MultiScalarLayout.setWord original replacement
   chooseUInt32 selectUpdated updated.word original.word
 
+/-- Three heap fields before `USize` and scalar neighbors. -/
+structure MultiObjectLayout where
+  first : Nat
+  middle : String
+  last : ByteArray
+  usize : USize
+  scalar : UInt32
+
+@[noinline]
+def mkMultiObjectLayout (first : Nat) (middle : String) (last : ByteArray)
+    (usize : USize) (scalar : UInt32) : MultiObjectLayout :=
+  { first, middle, last, usize, scalar }
+
+@[noinline]
+def MultiObjectLayout.setFirst (value : MultiObjectLayout)
+    (replacement : Nat) : MultiObjectLayout :=
+  { value with first := replacement }
+
+@[noinline]
+def MultiObjectLayout.setMiddle (value : MultiObjectLayout)
+    (replacement : String) : MultiObjectLayout :=
+  { value with middle := replacement }
+
+@[noinline]
+def MultiObjectLayout.setLast (value : MultiObjectLayout)
+    (replacement : ByteArray) : MultiObjectLayout :=
+  { value with last := replacement }
+
+def multiObjectUpdateFirstPreservesLast (first : Nat) (middle : String)
+    (last : ByteArray) (usize : USize) (scalar : UInt32)
+    (replacement : Nat) : ByteArray :=
+  (MultiObjectLayout.setFirst
+    (mkMultiObjectLayout first middle last usize scalar) replacement).last
+
+def multiObjectUpdateMiddlePreservesFirst (first : Nat) (middle : String)
+    (last : ByteArray) (usize : USize) (scalar : UInt32)
+    (replacement : String) : Nat :=
+  (MultiObjectLayout.setMiddle
+    (mkMultiObjectLayout first middle last usize scalar) replacement).first
+
+def multiObjectUpdateLastPreservesMiddle (first : Nat) (middle : String)
+    (last : ByteArray) (usize : USize) (scalar : UInt32)
+    (replacement : ByteArray) : String :=
+  (MultiObjectLayout.setLast
+    (mkMultiObjectLayout first middle last usize scalar) replacement).middle
+
+@[noinline]
+def chooseNat (selectUpdated : Bool) (updated original : Nat) : Nat :=
+  if selectUpdated then updated else original
+
+def multiObjectSharedFirstUpdate (first : Nat) (middle : String)
+    (last : ByteArray) (usize : USize) (scalar : UInt32)
+    (replacement : Nat) (selectUpdated : Bool) : Nat :=
+  let original := mkMultiObjectLayout first middle last usize scalar
+  let updated := MultiObjectLayout.setFirst original replacement
+  chooseNat selectUpdated updated.first original.first
+
 def tupleRotate (value : Nat × Nat × Nat) : Nat × Nat × Nat :=
   (value.2.2, value.1, value.2.1)
 
@@ -696,6 +753,51 @@ private def multiScalarSharedArgs (selectUpdated : Bool) : Array ValidationDatum
 
 private def multiScalarSharedArgSchemas : Array ValidationSchema :=
   multiScalarBaseArgSchemas |>.push (.bits 32) |>.push .bool
+
+private def multiObjectReplacementNat : Nat :=
+  18446744073709551617
+
+private def multiObjectReplacementText : String :=
+  "replacement\nβ🚀"
+
+private def multiObjectReplacementBytes : ByteArray :=
+  ⟨#[255, 128, 1, 0, 127]⟩
+
+private def multiObjectBaseArgs : Array ValidationDatum :=
+  mixedLayoutArgs
+
+private def multiObjectBaseArgSchemas : Array ValidationSchema :=
+  mixedLayoutArgSchemas
+
+private def multiObjectFirstArgs : Array ValidationDatum :=
+  multiObjectBaseArgs.push (.nat multiObjectReplacementNat)
+
+private def multiObjectFirstArgSchemas : Array ValidationSchema :=
+  multiObjectBaseArgSchemas.push .nat
+
+private def multiObjectMiddleArgs : Array ValidationDatum :=
+  multiObjectBaseArgs.push (.string multiObjectReplacementText)
+
+private def multiObjectMiddleArgSchemas : Array ValidationSchema :=
+  multiObjectBaseArgSchemas.push .string
+
+private def multiObjectLastArgs : Array ValidationDatum :=
+  multiObjectBaseArgs.push (byteArrayDatum multiObjectReplacementBytes)
+
+private def multiObjectLastArgSchemas : Array ValidationSchema :=
+  multiObjectBaseArgSchemas.push .bytes
+
+private def multiObjectSharedArgs (selectUpdated : Bool) : Array ValidationDatum :=
+  multiObjectFirstArgs.push (.bool selectUpdated)
+
+private def multiObjectSharedArgSchemas : Array ValidationSchema :=
+  multiObjectFirstArgSchemas.push .bool
+
+private def objectUpdateForms : Array String :=
+  mixedUpdateForms.push "oset"
+
+private def objectUniqueUpdateExecutedForms : Array String :=
+  mixedUniqueUpdateExecutedForms.push "oset"
 
 private partial def assocDatum : Source.Assoc → ValidationDatum
   | .atom value => .ctor "Assoc.atom" 0 #[.nat value]
@@ -1212,6 +1314,88 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := mixedUpdateForms
     provenance := firProvenance
       "Force a shared UInt32 update at scalar offset 8 while observing the retained original" },
+  { id := "multi-object-update-first-preserves-last"
+    entry := ``Source.multiObjectUpdateFirstPreservesLast
+    dependencies := #[``Source.mkMultiObjectLayout, ``Source.MultiObjectLayout.setFirst]
+    args := multiObjectFirstArgs
+    argSchemas := multiObjectFirstArgSchemas
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum
+      (Source.multiObjectUpdateFirstPreservesLast Source.largeNat mixedLayoutText
+        mixedLayoutBytes Source.maxUSize Source.maxUInt32 multiObjectReplacementNat)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "neighbor", "nat",
+        "bytearray", "heap", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update object slot 0 with a heap natural while preserving ByteArray slot 2" },
+  { id := "multi-object-update-middle-preserves-first"
+    entry := ``Source.multiObjectUpdateMiddlePreservesFirst
+    dependencies := #[``Source.mkMultiObjectLayout, ``Source.MultiObjectLayout.setMiddle]
+    args := multiObjectMiddleArgs
+    argSchemas := multiObjectMiddleArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.multiObjectUpdateMiddlePreservesFirst Source.largeNat mixedLayoutText
+        mixedLayoutBytes Source.maxUSize Source.maxUInt32 multiObjectReplacementText)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "neighbor", "string",
+        "nat", "heap", "unicode", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update object slot 1 with a Unicode string while preserving heap-natural slot 0" },
+  { id := "multi-object-update-last-preserves-middle"
+    entry := ``Source.multiObjectUpdateLastPreservesMiddle
+    dependencies := #[``Source.mkMultiObjectLayout, ``Source.MultiObjectLayout.setLast]
+    args := multiObjectLastArgs
+    argSchemas := multiObjectLastArgSchemas
+    resultSchema := .string
+    native := fun _ => .string
+      (Source.multiObjectUpdateLastPreservesMiddle Source.largeNat mixedLayoutText
+        mixedLayoutBytes Source.maxUSize Source.maxUInt32 multiObjectReplacementBytes)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "unique", "neighbor", "bytearray",
+        "string", "heap", "unicode", "boundary"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := objectUniqueUpdateExecutedForms
+    provenance := firProvenance
+      "Update object slot 2 with a ByteArray while preserving Unicode string slot 1" },
+  { id := "multi-object-shared-first-updated"
+    entry := ``Source.multiObjectSharedFirstUpdate
+    dependencies :=
+      #[``Source.mkMultiObjectLayout, ``Source.MultiObjectLayout.setFirst, ``Source.chooseNat]
+    args := multiObjectSharedArgs true
+    argSchemas := multiObjectSharedArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.multiObjectSharedFirstUpdate Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32 multiObjectReplacementNat true)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "nat",
+        "heap", "boundary", "updated"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Force shared replacement of heap-natural object slot 0 and observe the updated copy" },
+  { id := "multi-object-shared-first-original"
+    entry := ``Source.multiObjectSharedFirstUpdate
+    dependencies :=
+      #[``Source.mkMultiObjectLayout, ``Source.MultiObjectLayout.setFirst, ``Source.chooseNat]
+    args := multiObjectSharedArgs false
+    argSchemas := multiObjectSharedArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.multiObjectSharedFirstUpdate Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize Source.maxUInt32 multiObjectReplacementNat false)
+    tags :=
+      #["stress", "mixed-layout", "object", "mutation", "shared", "copy-on-write", "nat",
+        "heap", "boundary", "original"]
+    requiredLcnfForms := objectUpdateForms
+    requiredExecutedLcnfForms := mixedUpdateForms
+    provenance := firProvenance
+      "Force shared replacement of heap-natural object slot 0 while retaining the original" },
   { id := "tuple-rotate"
     entry := ``Source.tupleRotate
     args := #[.ctor "Prod.mk" 0 #[.nat 1, .ctor "Prod.mk" 0 #[.nat 2, .nat 3]]]
