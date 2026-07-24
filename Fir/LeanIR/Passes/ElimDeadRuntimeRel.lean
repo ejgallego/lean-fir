@@ -4959,6 +4959,95 @@ theorem ShadowRuntimeRel.setTagBoth
         simp only [Bind.bind, Except.bind]
         simpa [rightReplacement] using rightEffect
 
+/-- Constructor-tag writes to related published values either preserve the
+reachable runtime relation or fail with related faults. -/
+theorem ShadowRuntimeRel.setTagBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (setTag left leftObject tag) (setTag right rightObject tag) := by
+  cases objects with
+  | tagged payload => exact .error (.same _)
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapping => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have objectRelation := cells.2.2.2
+      generalize leftObjectEq : leftCell.object = leftHeapObject
+        at objectRelation
+      generalize rightObjectEq : rightCell.object = rightHeapObject
+        at objectRelation
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+            leftFound, rightFound, leftLiveEq, rightLiveEq,
+            Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          cases objectRelation with
+          | ctor objectTag objectFields usizes scalars =>
+              rename_i leftConstructor rightConstructor
+              rcases related.setTagBoth mapping leftReachable leftFound
+                  leftLiveEq leftObjectEq tag with
+                ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+              rw [leftEffect, rightEffect]
+              exact .ok next
+          | closure fixed =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | boxed value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | string value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | natural value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | integer value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | byteArray value =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | «opaque» typeName =>
+              simp [setTag, modifyConstructor, getConstructor, getLiveCell,
+                leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+
 /-- Interpreter-facing retained tag write. -/
 theorem ShadowRuntimeRel.setTagBoth_of_related
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
