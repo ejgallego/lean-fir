@@ -9698,6 +9698,170 @@ theorem SomeReachableMachineRelated.jump_terminal
             (by simpa only [sourceSame] using done)
           simpa only [targetSame] using terminal
 
+/-- Terminal retained case tables transport unknown-variable, tag-read, and
+missing-alternative faults.  Successful tag reads use the full relational
+runtime result, so dead-object diagnostics may mention renamed locations. -/
+theorem SomeReachableMachineRelated.cases_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .code (.cases (.mk typeName resultType discr sourceAlternatives)))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          rename_i used
+          rcases graph.casesResidual with
+            ⟨targetAlternatives, targetEq, alternatives, discrMember⟩
+          subst targetCode
+          let sourceCurrent := {
+            source with control := .code (.cases
+              (.mk typeName resultType discr sourceAlternatives)) }
+          let targetCurrent := {
+            target with control := .code (.cases
+              (.mk typeName resultType discr targetAlternatives)) }
+          have sourceSame : sourceCurrent = source := by
+            cases source
+            simp_all [sourceCurrent]
+          have targetSame : targetCurrent = target := by
+            cases target
+            simp_all [targetCurrent]
+          have done' : coreStep sourceCurrent =
+              .done sourceObservation := by
+            simpa only [sourceSame] using done
+          cases sourceLookup :
+              lookup source.env discr with
+          | none =>
+              have looked := env discr discrMember
+              rw [sourceLookup] at looked
+              generalize targetLookup :
+                lookup target.env discr = targetOption at looked
+              cases targetOption with
+              | some targetValue => cases looked
+              | none =>
+                  have sourceFault : coreStep sourceCurrent =
+                      .done (observe sourceCurrent
+                        (.fault (.unknownVar discr))) := by
+                    simp [sourceCurrent, coreStep, lookupValue,
+                      LCNF.Cases.discr, LCNF.Cases.alts, sourceLookup, fail]
+                  have targetFault : coreStep targetCurrent =
+                      .done (observe targetCurrent
+                        (.fault (.unknownVar discr))) := by
+                    simp [targetCurrent, coreStep, lookupValue,
+                      LCNF.Cases.discr, LCNF.Cases.alts, targetLookup, fail]
+                  have terminal := relatedFault_terminal
+                    (externals := externals) runtime
+                    (by simpa only [sourceSame] using sourceFault)
+                    (by simpa only [targetSame] using targetFault)
+                    done
+                  exact terminal
+          | some sourceValue =>
+              have looked := env discr discrMember
+              rw [sourceLookup] at looked
+              generalize targetLookup :
+                lookup target.env discr = targetOption at looked
+              cases targetOption with
+              | none => cases looked
+              | some targetValue =>
+                  cases looked with
+                  | some values =>
+                      have sourceRoot :
+                          sourceValue ∈
+                            envRootsOn used source.env ++
+                              sourceFrameRoots := by
+                        exact List.mem_append_left _
+                          (lookup_mem_envRootsOn discrMember sourceLookup)
+                      have tagResults :=
+                        runtime.getTagBoth_related sourceRoot values
+                      generalize sourceTagEq :
+                        getTag source.runtime sourceValue =
+                          sourceTagResult at tagResults
+                      generalize targetTagEq :
+                        getTag target.runtime targetValue =
+                          targetTagResult at tagResults
+                      cases tagResults with
+                      | error faults =>
+                          rename_i sourceFaultValue targetFaultValue
+                          have sourceFault : coreStep sourceCurrent =
+                              .done (observe sourceCurrent
+                                (.fault sourceFaultValue)) := by
+                            simp [sourceCurrent, coreStep, lookupValue,
+                              LCNF.Cases.discr, LCNF.Cases.alts,
+                              sourceLookup, sourceTagEq, fail]
+                          have targetFault : coreStep targetCurrent =
+                              .done (observe targetCurrent
+                                (.fault targetFaultValue)) := by
+                            simp [targetCurrent, coreStep, lookupValue,
+                              LCNF.Cases.discr, LCNF.Cases.alts,
+                              targetLookup, targetTagEq, fail]
+                          have terminal := relatedFaultRel_terminal
+                            (externals := externals) runtime faults
+                            (by simpa only [sourceSame] using sourceFault)
+                            (by simpa only [targetSame] using targetFault)
+                            done
+                          exact terminal
+                      | ok tags =>
+                          rename_i sourceTag targetTag
+                          subst targetTag
+                          have choices :=
+                            alternatives.choose
+                              (tag := sourceTag)
+                          generalize sourceChoiceEq :
+                            chooseAlt sourceTag
+                              sourceAlternatives.toList =
+                                sourceChoice at choices
+                          generalize targetChoiceEq :
+                            chooseAlt sourceTag
+                              targetAlternatives.toList =
+                                targetChoice at choices
+                          cases choices with
+                          | none =>
+                              have sourceFault : coreStep sourceCurrent =
+                                  .done (observe sourceCurrent
+                                    (.fault .invalidCases)) := by
+                                simp [sourceCurrent, coreStep, lookupValue,
+                                  LCNF.Cases.discr, LCNF.Cases.alts,
+                                  sourceLookup, sourceTagEq,
+                                  sourceChoiceEq, fail]
+                              have targetFault : coreStep targetCurrent =
+                                  .done (observe targetCurrent
+                                    (.fault .invalidCases)) := by
+                                simp [targetCurrent, coreStep, lookupValue,
+                                  LCNF.Cases.discr, LCNF.Cases.alts,
+                                  targetLookup, targetTagEq,
+                                  targetChoiceEq, fail]
+                              have terminal := relatedFault_terminal
+                                (externals := externals) runtime
+                                (by simpa only [sourceSame] using sourceFault)
+                                (by simpa only [targetSame] using targetFault)
+                                done
+                              exact terminal
+                          | some bodies =>
+                              rename_i sourceBody targetBody
+                              have sourceStep : coreStep sourceCurrent =
+                                  .next { sourceCurrent with
+                                    control := .code sourceBody } := by
+                                simp [sourceCurrent, coreStep, lookupValue,
+                                  LCNF.Cases.discr, LCNF.Cases.alts,
+                                  sourceLookup, sourceTagEq, sourceChoiceEq]
+                              rw [sourceStep] at done'
+                              contradiction
+
 /-- Explicit unreachable nodes are retained and terminate with the common
 address-free `unreachable` fault. -/
 theorem SomeReachableMachineRelated.unreach_terminal

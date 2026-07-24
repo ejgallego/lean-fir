@@ -23,6 +23,16 @@ notion.
 def RootSubset (smaller larger : List Value) : Prop :=
   ∀ value, value ∈ smaller → value ∈ larger
 
+/-- Pointwise relation for computations that may fail with differently
+represented but semantically related errors. -/
+inductive ExceptRel (errorRel : ε₁ → ε₂ → Prop)
+    (valueRel : α₁ → α₂ → Prop) :
+    Except ε₁ α₁ → Except ε₂ α₂ → Prop where
+  | error (related : errorRel left right) :
+      ExceptRel errorRel valueRel (.error left) (.error right)
+  | ok (related : valueRel left right) :
+      ExceptRel errorRel valueRel (.ok left) (.ok right)
+
 namespace RootSubset
 
 theorem refl (roots : List Value) : RootSubset roots roots := by
@@ -3142,14 +3152,56 @@ theorem ShadowRuntimeRel.reindexClosureCall
     exact reachable_monoRootReachability
       (closureCallRoots_reachable rightFound rightObject) reachable
 
-/-- A successful constructor-tag read of a related published value succeeds
-with the same tag on the target.  The heap-reference case uses reachability of
-the source root to recover the mapped target cell; immediate, scalar, and
-`USize` tags are representation-identical by `ValueRel`.
+/-- Constructor-tag reads of related published values either return the same
+tag or fail with related runtime faults.  In particular, a dead heap reference
+reports the concrete source and target locations related by `rho`. -/
+theorem ShadowRuntimeRel.getTagBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ExceptRel (RuntimeFaultRel rho) Eq
+      (getTag left leftValue) (getTag right rightValue) := by
+  cases values with
+  | tagged payload => exact .ok rfl
+  | usize value => exact .ok rfl
+  | scalar value => exact .ok rfl
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapped => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have objects := cells.2.2.2
+      generalize leftObjectEq : leftCell.object = leftObject at objects
+      generalize rightObjectEq : rightCell.object = rightObject at objects
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [getTag, getLiveCell, leftFound, rightFound, leftLiveEq,
+            rightLiveEq, Bind.bind, Except.bind]
+          exact .error (RuntimeFaultRel.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          cases objects <;>
+            simp_all [getTag, getLiveCell, leftFound, rightFound,
+              Bind.bind, Except.bind] <;>
+            first
+            | exact .ok rfl
+            | exact .error (.same _)
 
-This is intentionally a success-transport theorem rather than unconditional
-result equality: faults on dead heap references contain concrete locations,
-which may differ across the address renaming. -/
+/-- A successful constructor-tag read of a related published value succeeds
+with the same tag on the target. -/
 theorem ShadowRuntimeRel.getTagBoth_of_related
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
     (leftMember : leftValue ∈ leftExtra)
