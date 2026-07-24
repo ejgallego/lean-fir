@@ -310,12 +310,116 @@ def residentLoad8Function : Function := {
     .i32Load8U .uint8 32,
     .ret] }
 
+def residentValue32 : Lean.FVarId := ⟨`residentValue32⟩
+def residentValue64 : Lean.FVarId := ⟨`residentValue64⟩
+
+def residentArithmeticFunction : Function := {
+  name := `residentArithmetic
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .i32Const .uint32 7,
+    .i32Const .uint32 5,
+    .i32Add,
+    .i32Const .uint32 3,
+    .i32Sub,
+    .i32Const .uint32 10,
+    .i32LtU,
+    .ret] }
+
+def residentStore8Function : Function := {
+  name := `residentStore8
+  params := #[(residentAddress, .uint32), (residentValue32, .uint8)]
+  results := #[.uint8]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .localGet residentValue32,
+    .i32Store8 .uint8 0,
+    .localGet residentAddress,
+    .i32Load8U .uint8 0,
+    .ret] }
+
+def residentStore16Function : Function := {
+  name := `residentStore16
+  params := #[(residentAddress, .uint32), (residentValue32, .uint16)]
+  results := #[.uint16]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .localGet residentValue32,
+    .i32Store16 .uint16 0,
+    .localGet residentAddress,
+    .i32Load16U .uint16 0,
+    .ret] }
+
+def residentStore32Function : Function := {
+  name := `residentStore32
+  params := #[(residentAddress, .uint32), (residentValue32, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .localGet residentValue32,
+    .i32Store .uint32 0,
+    .localGet residentAddress,
+    .i32Load .uint32 0,
+    .ret] }
+
+def residentStore64Function : Function := {
+  name := `residentStore64
+  params := #[(residentAddress, .uint32), (residentValue64, .uint64)]
+  results := #[.uint64]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .localGet residentValue64,
+    .i64Store .uint64 0,
+    .localGet residentAddress,
+    .i64Load .uint64 0,
+    .ret] }
+
+def residentMemorySizeFunction : Function := {
+  name := `residentMemorySize
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [.memorySize, .ret] }
+
+def residentMemoryGrowFunction : Function := {
+  name := `residentMemoryGrow
+  params := #[(residentValue32, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [.localGet residentValue32, .memoryGrow, .ret] }
+
 /-- W7 shared-surface guard. Existing modules omit memory; a resident-runtime
 module may define/export it and use checked physical memory instructions. -/
 def residentMemorySurfaceModule : Module := {
   imports := #[]
-  functions := #[residentBitsFunction, residentLoadFunction, residentLoad8Function]
-  exports := #[`residentBits, `residentLoad, `residentLoad8]
+  functions := #[
+    residentBitsFunction,
+    residentLoadFunction,
+    residentLoad8Function,
+    residentArithmeticFunction,
+    residentStore8Function,
+    residentStore16Function,
+    residentStore32Function,
+    residentStore64Function,
+    residentMemorySizeFunction,
+    residentMemoryGrowFunction]
+  exports := #[
+    `residentBits,
+    `residentLoad,
+    `residentLoad8,
+    `residentArithmetic,
+    `residentStore8,
+    `residentStore16,
+    `residentStore32,
+    `residentStore64,
+    `residentMemorySize,
+    `residentMemoryGrow]
   initializers := #[]
   runtimeOperations := #[]
   memory := some { pagesMin := 1, exportName := some "memory" } }

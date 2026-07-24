@@ -57,6 +57,15 @@ def emitResidentGlobal (path : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile path bytes
   IO.println s!"resident-global: wrote {bytes.size} bytes to {path}"
 
+def emitResidentMemorySurface (path : System.FilePath) : IO Unit := do
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
+    Fir.Wasm.Emit.Examples.residentMemorySurfaceModule).mapError fun error =>
+      s!"resident memory-surface encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  IO.println s!"resident-memory-surface: wrote {bytes.size} bytes to {path}"
+
 def emitResidentIsShared (path : System.FilePath) : IO Unit := do
   let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
     Fir.Wasm.Emit.ResidentRuntime.isSharedModule).mapError fun error =>
@@ -116,6 +125,7 @@ def usage : String :=
   s!"usage: fir-wasm-artifact <{names}> <output.wasm>\n" ++
     "       fir-wasm-artifact resident-get-tag <output.wasm>\n" ++
     "       fir-wasm-artifact resident-global <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
     "       fir-wasm-artifact resident-read-projections <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-projections <output.wasm>\n" ++
@@ -135,6 +145,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-global", output] =>
         emitResidentGlobal output
+        return 0
+    | ["resident-memory-surface", output] =>
+        emitResidentMemorySurface output
         return 0
     | ["resident-is-shared", output] =>
         emitResidentIsShared output

@@ -299,7 +299,7 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [right, right] operands)
         return remaining ++ [.uint32]
       return { fallthrough := stack? }
-  | .i32And | .i32ShrU => do
+  | .i32And | .i32ShrU | .i32Add | .i32Sub | .i32LtU => do
       let stack? ← stack?.mapM fun stack => do
         if stack.length < 2 then
           throw (.stackUnderflow context.function.name [.uint32, .uint32])
@@ -308,6 +308,35 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         unless operands.all (·.valueType == .i32) do
           throw (.stackMismatch context.function.name [.uint32, .uint32] operands)
         return remaining ++ [.uint32]
+      return { fallthrough := stack? }
+  | .i32Store8 value _
+  | .i32Store16 value _
+  | .i32Store value _ => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      unless value.valueType == .i32 do
+        throw (.invalidConstant context.function.name value .i32)
+      let stack? ← stack?.mapM fun stack =>
+        popKinds context.function.name stack [.uint32, value]
+      return { fallthrough := stack? }
+  | .i64Store value _ => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      unless value.valueType == .i64 do
+        throw (.invalidConstant context.function.name value .i64)
+      let stack? ← stack?.mapM fun stack =>
+        popKinds context.function.name stack [.uint32, value]
+      return { fallthrough := stack? }
+  | .memorySize => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      return { fallthrough := stack?.map (· ++ [.uint32]) }
+  | .memoryGrow => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.uint32]
+        return stack ++ [.uint32]
       return { fallthrough := stack? }
   | .i32Load result _ => do
       unless context.module.memory.isSome do
@@ -324,7 +353,8 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [.uint32] [address])
         return remaining ++ [result]
       return { fallthrough := stack? }
-  | .i32Load8U result _ => do
+  | .i32Load8U result _
+  | .i32Load16U result _ => do
       unless context.module.memory.isSome do
         throw (.memoryInstructionWithoutMemory context.function.name)
       unless result.valueType == .i32 do

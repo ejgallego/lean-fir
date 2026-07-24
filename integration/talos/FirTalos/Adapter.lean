@@ -88,9 +88,19 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .i32Eq => return .eq
   | .i32And => return .and
   | .i32ShrU => return .shrU
+  | .i32Add => return .add
+  | .i32Sub => return .sub
+  | .i32LtU => return .ltU
   | .i32Load _ offset => return .load32 offset
   | .i32Load8U _ offset => return .load8U offset
+  | .i32Load16U _ offset => return .load16U offset
   | .i64Load _ offset => return .load64 offset
+  | .i32Store8 _ offset => return .store8 offset
+  | .i32Store16 _ offset => return .store16 offset
+  | .i32Store _ offset => return .store32 offset
+  | .i64Store _ offset => return .store64 offset
+  | .memorySize => return .memorySize
+  | .memoryGrow => return .memoryGrow
   | .i32WrapI64 _ => return .wrapI64
   | .block label body => do
       return .block 0 0 (← instructions module function (label :: labels) body)

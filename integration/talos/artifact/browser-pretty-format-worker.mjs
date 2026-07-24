@@ -1,5 +1,8 @@
 import { checkFetchedPrettyFormat } from "./fetch-pretty-format.mjs";
 import { checkFetchedResidentGlobal } from "./resident-global-client.mjs";
+import {
+  checkFetchedResidentMemorySurface,
+} from "./resident-memory-surface-client.mjs";
 import { checkFetchedConcretePrettyFormat } from "./fetch-concrete-pretty-format.mjs";
 import { checkFetchedResidentGetTag } from "./resident-get-tag-client.mjs";
 import { checkFetchedResidentIsShared } from "./resident-is-shared-client.mjs";
@@ -16,6 +19,7 @@ import {
 try {
   const results = await Promise.all([
     checkFetchedResidentGlobal("./_build/resident-global.wasm"),
+    checkFetchedResidentMemorySurface("./_build/resident-memory-surface.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-get-tag.wasm",

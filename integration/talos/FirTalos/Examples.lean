@@ -148,6 +148,38 @@ def residentLoad8Body? : List Wasm.Instruction → Bool
   | [.localGet 0, .load8U 32, .ret] => true
   | _ => false
 
+def residentArithmeticBody? : List Wasm.Instruction → Bool
+  | [.const 7, .const 5, .add, .const 3, .sub, .const 10, .ltU, .ret] => true
+  | _ => false
+
+def residentStore8Body? : List Wasm.Instruction → Bool
+  | [.localGet 0, .localGet 1, .store8 0,
+      .localGet 0, .load8U 0, .ret] => true
+  | _ => false
+
+def residentStore16Body? : List Wasm.Instruction → Bool
+  | [.localGet 0, .localGet 1, .store16 0,
+      .localGet 0, .load16U 0, .ret] => true
+  | _ => false
+
+def residentStore32Body? : List Wasm.Instruction → Bool
+  | [.localGet 0, .localGet 1, .store32 0,
+      .localGet 0, .load32 0, .ret] => true
+  | _ => false
+
+def residentStore64Body? : List Wasm.Instruction → Bool
+  | [.localGet 0, .localGet 1, .store64 0,
+      .localGet 0, .load64 0, .ret] => true
+  | _ => false
+
+def residentMemorySizeBody? : List Wasm.Instruction → Bool
+  | [.memorySize, .ret] => true
+  | _ => false
+
+def residentMemoryGrowBody? : List Wasm.Instruction → Bool
+  | [.localGet 0, .memoryGrow, .ret] => true
+  | _ => false
+
 #guard match adapt Fir.Wasm.Emit.Examples.residentMemorySurfaceModule with
   | .ok adapted =>
       adapted.wasmModule.imports.isEmpty &&
@@ -159,7 +191,21 @@ def residentLoad8Body? : List Wasm.Instruction → Bool
         adapted.wasmModule.funcs[1]?.any fun function =>
           residentLoadBody? function.body &&
         adapted.wasmModule.funcs[2]?.any fun function =>
-          residentLoad8Body? function.body
+          residentLoad8Body? function.body &&
+        adapted.wasmModule.funcs[3]?.any fun function =>
+          residentArithmeticBody? function.body &&
+        adapted.wasmModule.funcs[4]?.any fun function =>
+          residentStore8Body? function.body &&
+        adapted.wasmModule.funcs[5]?.any fun function =>
+          residentStore16Body? function.body &&
+        adapted.wasmModule.funcs[6]?.any fun function =>
+          residentStore32Body? function.body &&
+        adapted.wasmModule.funcs[7]?.any fun function =>
+          residentStore64Body? function.body &&
+        adapted.wasmModule.funcs[8]?.any fun function =>
+          residentMemorySizeBody? function.body &&
+        adapted.wasmModule.funcs[9]?.any fun function =>
+          residentMemoryGrowBody? function.body
   | .error _ => false
 
 #guard match adapt Fir.Wasm.Emit.ResidentRuntime.getTagModule with

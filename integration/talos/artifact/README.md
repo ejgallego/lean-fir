@@ -77,6 +77,9 @@ mutable:
 ```text
 lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
 node run-resident-global.mjs _build/resident-global.wasm
+lake exe fir-wasm-artifact resident-memory-surface \
+  _build/resident-memory-surface.wasm
+node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module

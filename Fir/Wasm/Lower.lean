@@ -24,11 +24,25 @@ inductive Instruction where
   /-- Physical wasm32 bit operations used inside Wasm-resident runtime helpers. -/
   | i32And
   | i32ShrU
+  /-- Physical wasm32 arithmetic/comparison used by resident allocation helpers. -/
+  | i32Add
+  | i32Sub
+  | i32LtU
   /-- Load from the module-owned memory at `address + offset`. -/
   | i32Load (result : AbiKind) (offset : UInt32)
   /-- Zero-extend one byte from module-owned memory at `address + offset`. -/
   | i32Load8U (result : AbiKind) (offset : UInt32)
+  /-- Zero-extend two bytes from module-owned memory at `address + offset`. -/
+  | i32Load16U (result : AbiKind) (offset : UInt32)
   | i64Load (result : AbiKind) (offset : UInt32)
+  /-- Store a typed physical lane into module-owned memory. -/
+  | i32Store8 (value : AbiKind) (offset : UInt32)
+  | i32Store16 (value : AbiKind) (offset : UInt32)
+  | i32Store (value : AbiKind) (offset : UInt32)
+  | i64Store (value : AbiKind) (offset : UInt32)
+  /-- Query or grow the module-owned wasm32 memory in 64-KiB pages. -/
+  | memorySize
+  | memoryGrow
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)
   | block (label : FVarId) (body : List Instruction)
