@@ -62,9 +62,9 @@ the premise that derives its operation equation remains to be packaged.
 |---|---|---|
 | literals | none | T4 not applicable; allocation resource failures are T4S |
 | constructor allocation | malformed field arity | statically excluded by `WasmSupported`; concrete classification mismatch is `FIR-BUG-wasm-none-constructor-arity-fault-classification` |
-| object projection | `expectedConstructor`, `deadObject`, `objectFieldOutOfBounds` | dead and bounds leaves complete; expected-constructor is exact runtime, leaf packaging pending |
-| `USize` projection | `expectedConstructor`, `deadObject`, `usizeFieldOutOfBounds` | dead and bounds leaves complete; expected-constructor packaging pending |
-| packed-scalar projection | `expectedConstructor`, `deadObject`, `scalarFieldMissing` | dead leaf complete; missing-coordinate mismatch is `FIR-BUG-wasm-none-uninitialized-scalar-projection`; expected-constructor packaging pending |
+| object projection | `expectedConstructor`, `deadObject`, `objectFieldOutOfBounds` | all three exact terminal leaves complete |
+| `USize` projection | `expectedConstructor`, `deadObject`, `usizeFieldOutOfBounds` | all three exact terminal leaves complete |
+| packed-scalar projection | `expectedConstructor`, `deadObject`, `scalarFieldMissing` | constructor/dead leaves complete; missing-coordinate mismatch is `FIR-BUG-wasm-none-uninitialized-scalar-projection` |
 | constructor cases / `getTag` | `expectedConstructor`, `deadObject`, `invalidCases` | dead leaf complete; expected-constructor is exact runtime; missing-alt fallback is blocked by `FIR-BUG-wasm-none-unreachable-fault-classification` |
 | object and `USize` mutation | `expectedConstructor`, `deadObject`, bounds | dead and bounds leaves complete; expected-constructor packaging pending |
 | packed-scalar mutation and tag mutation | `expectedConstructor`, `deadObject` | dead leaves complete; expected-constructor packaging pending |
@@ -100,8 +100,8 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package exact-source leaves for constructor-kind errors and boxed/reset
-   readers using the arbitrary host-call boundary.
+1. Package the remaining exact-source constructor-kind leaves for case tags,
+   mutation, and boxed/reset readers using the common checked-header theorem.
 2. Add the address-related underflow leaf and prove its precedence over
    recursive release.
 3. Resolve the structured `unreachable` transport as an isolated semantic
@@ -110,4 +110,3 @@ traps for malformed source code.
    validator or semantic contract establish it.
 5. State and prove T4S per operation, including explicit wasm32 allocation
    capacity, then compose it syntax-directly alongside T2/T4.
-

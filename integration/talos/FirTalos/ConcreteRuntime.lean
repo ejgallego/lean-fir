@@ -2014,6 +2014,135 @@ theorem scalarProjStep_deadObject_of_refines
             simp [scalarProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
               read8, read16, read32, read64, ConcreteError.toTrap]
 
+/-- A representation-polymorphic operand rejected by the semantic
+constructor gateway is rejected by object projection with the same structured
+source fault before index or payload decoding. -/
+theorem objectProjStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (constructorFailed :
+      getConstructor runtime sourceObject = .error .expectedConstructor) :
+    objectProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      getObjectField runtime sourceObject index =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated constructorFailed
+  have readFailed :
+      readObjectField initial.host.runtime.heap objectWord index =
+        .error (.source .expectedConstructor) := by
+    unfold readObjectField
+    rw [headerFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · simp [objectProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      readFailed, ConcreteError.toTrap]
+  · unfold getObjectField
+    rw [constructorFailed]
+    rfl
+
+/-- Absolute-slot `USize` projection crosses the same constructor gateway,
+so a kind mismatch precedes slot arithmetic and retains the exact source
+fault. -/
+theorem usizeProjStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (constructorFailed :
+      getConstructor runtime sourceObject = .error .expectedConstructor) :
+    usizeProjStep index initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      getUSizeSlot runtime sourceObject index =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated constructorFailed
+  have readFailed :
+      readUSizeSlot initial.host.runtime.heap objectWord index =
+        .error (.source .expectedConstructor) := by
+    unfold readUSizeSlot
+    rw [headerFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · simp [usizeProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      readFailed, ConcreteError.toTrap]
+  · unfold getUSizeSlot
+    rw [constructorFailed]
+    rfl
+
+/-- Every supported packed-integer reader rejects a nonconstructor at the
+shared header gate, before width-specific payload decoding. -/
+theorem scalarProjStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    (width offset : Nat) (kind : AbiKind)
+    (supported : kind = .uint8 ∨ kind = .uint16 ∨
+      kind = .uint32 ∨ kind = .uint64)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (constructorFailed :
+      getConstructor runtime sourceObject = .error .expectedConstructor) :
+    scalarProjStep width offset kind initial
+        [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      getScalarField runtime sourceObject width offset =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated constructorFailed
+  have read8 :
+      readScalarUInt8Field initial.host.runtime.heap objectWord width offset =
+        .error (.source .expectedConstructor) := by
+    unfold readScalarUInt8Field
+    rw [headerFailed]
+    rfl
+  have read16 :
+      readScalarUInt16Field initial.host.runtime.heap objectWord width offset =
+        .error (.source .expectedConstructor) := by
+    unfold readScalarUInt16Field
+    rw [headerFailed]
+    rfl
+  have read32 :
+      readScalarUInt32Field initial.host.runtime.heap objectWord width offset =
+        .error (.source .expectedConstructor) := by
+    unfold readScalarUInt32Field
+    rw [headerFailed]
+    rfl
+  have read64 :
+      readScalarUInt64Field initial.host.runtime.heap objectWord width offset =
+        .error (.source .expectedConstructor) := by
+    unfold readScalarUInt64Field
+    rw [headerFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · rcases supported with rfl | rfl | rfl | rfl <;>
+      simp [scalarProjStep, clearFailure, Word32.ofUInt32_ofNat_value,
+        read8, read16, read32, read64, ConcreteError.toTrap]
+  · unfold getScalarField
+    rw [constructorFailed]
+    rfl
+
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}

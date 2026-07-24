@@ -2974,6 +2974,20 @@ trips concrete retained-capacity checking
 records the exact per-family matrix and next proof order. No shared semantic
 contract or executable ABI changed.
 
+W6.6cr closes the direct-projection constructor-kind leaves.
+`LiveHeapRel.readConstructorHeader_expectedConstructor_refines` proves the
+common checked gateway once across immediate and promoted tags plus every
+represented live heap-cell shape; its source premise eliminates the genuine
+constructor case without assuming a descriptor. Object, absolute-slot
+`USize`, and all four supported packed-scalar host operations derive exact
+source-classified `expectedConstructor` traps before any index, coordinate, or
+payload check. Their compiler/adaptor terminal leaves feed those equations
+into `ConcreteFaultSimulation`, retaining the unchanged source runtime and
+making the generated result-local write and continuation unreachable. Case
+tags, mutation, unbox, and reset/reuse constructor-kind leaves remain separate
+because their semantic gateways accept different object subsets. No shared
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

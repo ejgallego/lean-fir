@@ -1488,4 +1488,89 @@ theorem LiveHeapRel.readTag_tobject_refines
           rw [← tagEq]
           simpa using related.readTaggedReferenceTag_refines taggedRelated
 
+/-- The common checked constructor-header gate preserves
+`expectedConstructor` for every representation-polymorphic object. The source
+failure excludes a genuine live constructor; tagged values and every other
+related live heap shape are rejected by the concrete header decoder with the
+same source-classified fault. -/
+theorem LiveHeapRel.readConstructorHeader_expectedConstructor_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (constructorFailed :
+      getConstructor runtime value = .error .expectedConstructor) :
+    readConstructorHeader state word =
+      .error (.source .expectedConstructor) := by
+  have failOfHeader (header : Header)
+      (headerRead : state.readLiveHeader word = .ok header)
+      (headerKind : header.kind ≠ .constructor) :
+      readConstructorHeader state word =
+        .error (.source .expectedConstructor) := by
+    have heap :=
+      (MemoryState.PrefixExtension.readLiveHeader_facts state word header
+        headerRead).1
+    unfold readConstructorHeader
+    rw [heap]
+    simp only
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    cases kindEq : header.kind <;> simp_all <;> rfl
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          cases taggedRelated with
+          | immediate payload fits =>
+              unfold readConstructorHeader
+              rw [Word32.classify_encodeImmediate]
+              rfl
+          | promoted found =>
+              have promoted := related.promoted _ _ found
+              obtain ⟨header, headerRead, headerKind, _, _, _, _, _⟩ :=
+                promoted.header
+              exact failOfHeader header headerRead (by simp [headerKind])
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨cell, found, cellRelation⟩ :=
+                related.concreteToSemantic _ _ mapped
+              have live : cell.live = true := by
+                cases liveEq : cell.live with
+                | false =>
+                    simp [getConstructor, getLiveCell, found, liveEq] at constructorFailed
+                    simp only [Bind.bind, Except.bind] at constructorFailed
+                    have faultEq := Except.error.inj constructorFailed
+                    cases faultEq
+                | true => rfl
+              have liveRelated := cellRelation.live_of_eq_true live
+              cases liveRelated with
+              | constructor descriptor objectEq objectRelated headerRead
+                  headerKind refCount persistent cellLive =>
+                  simp [getConstructor, getLiveCell, found, live] at constructorFailed
+                  simp only [Bind.bind, Except.bind] at constructorFailed
+                  rw [objectEq] at constructorFailed
+                  contradiction
+              | boxed descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+              | natural descriptor objectEq headerRead headerKind marker extent
+                  limbsFit decoded refCount persistent cellLive =>
+                  exact failOfHeader _ headerRead (by simp [headerKind])
+              | integer descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+              | string descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+              | closure closureRelated =>
+                  cases closureRelated with
+                  | closure objectEq objectRelated headerRead headerKind
+                      descriptorLookup fixedCount extent refCount persistent
+                      cellLive =>
+                      exact failOfHeader _ headerRead (by simp [headerKind])
+
 end Fir.Wasm.Concrete

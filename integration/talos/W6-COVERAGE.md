@@ -87,6 +87,11 @@ Cross-cutting W6.5 state:
   semantic bounds fault through the checked reader, complete runtime relation,
   and Talos source-classified trap, including the original index and declared
   size;
+- a common constructor-header refinement theorem exhausts immediate/promoted
+  tags and every represented live heap shape; object, absolute-slot `USize`,
+  and all four supported packed-scalar projections use it to preserve exact
+  `expectedConstructor` faults through their generated terminal T4 leaves,
+  before index, coordinate, or payload decoding;
 - the matching object and `USize` setters preserve those exact source faults
   before either concrete or semantic state changes, and executable Talos guards
   reread the original payload after each trap;
