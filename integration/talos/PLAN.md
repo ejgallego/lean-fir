@@ -2937,6 +2937,21 @@ and are directly consumable by `ConcreteFaultSimulation`. Unary ownership and
 tag effects remain in the terminal-leaf matrix. No shared semantic contract or
 executable ABI changed.
 
+W6.6cp closes T4's admitted stale-object ownership and tag families.
+`concreteFaultLeaf_unaryHostEffect` specializes the exact trap boundary for
+generated one-operand effects. Constructor-tag mutation, nonpersistent
+increment, positive nonpersistent decrement, and explicit deletion now retain
+the witness-related wasm32 address/source location fault and prove that no
+continuation or recursive ownership update begins. The matching object-mode
+case leaf treats the compiler-adapted alternative chain abstractly after its
+`local.get; getTag` prefix, proving that a stale discriminator traps before any
+constructor comparison or branch selection. Persistent ownership operations
+remain compiler-elided and therefore have no concrete host-fault leaf. All
+five new leaves are directly consumable by `ConcreteFaultSimulation`. The
+remaining T4 work is a supported-fragment fault audit covering allocation,
+reset/reuse, calls, externals, and source-only malformed states. No shared
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

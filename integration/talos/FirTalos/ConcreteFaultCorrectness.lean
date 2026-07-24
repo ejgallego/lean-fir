@@ -730,6 +730,65 @@ theorem concreteFaultLeaf_binaryHostEffect
     (operation.trans trapped)
     (by simpa [ConcreteFunctionFaultPost] using post)
 
+/-- Unary specialization of the no-result fault boundary used by tag mutation,
+reference counting, and explicit deletion. -/
+theorem concreteFaultLeaf_unaryHostEffect
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {operandIndex : Nat}
+    {physical : Wasm.Value}
+    {targetRest : Wasm.Program}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    {failure : ConcreteError}
+    {fault : RuntimeFault}
+    (sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv code)
+        (FaultObservation sourceRuntime fault))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code
+        ([.localGet operandIndex, .call id] ++ targetRest))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hOperand : locals.get operandIndex = some physical)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = 1)
+    (operation :
+      step initial [physical] =
+        trap (clearFailure initial) (.runtime failure.toTrap))
+    (failureRelated : ConcreteErrorSourceRel witness failure fault) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv code
+      ([.localGet operandIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime fault := by
+  obtain ⟨final, message, trapped, post⟩ :=
+    refinedFaultPost_of_runtimeFailure initialRelated.1 failureRelated
+  refine ⟨sourceFault, adapted, initialRelated, ?_⟩
+  simpa using wp_effect_localGets_of_trap
+    (indices := [operandIndex]) (physicalArgs := [physical]) (tail := [])
+    (.cons hOperand .nil) hImp hSat hi hContract hParams
+    (operation.trans trapped)
+    (by simpa [ConcreteFunctionFaultPost] using post)
+
 /-- First terminal T4 leaf: a stale object passed to generated `isShared`.
 The source fault names its semantic heap location, while the concrete host
 records the related wasm32 address. -/
@@ -1823,6 +1882,358 @@ theorem concreteFaultLeaf_scalarSet_deadObject
             hContract hParams operation failureRelated
   | float32Bits fieldRelated => cases fieldRelated
   | float64Bits fieldRelated => cases fieldRelated
+
+/-- Stale constructor-tag mutation faults before updating the header or
+entering its continuation. -/
+theorem concreteFaultLeaf_setTag_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.setTag objectId tag continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (setTagContract tag))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.setTag objectId tag continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    setTagStep_deadObject_of_refines tag initialRelated.1 objectRelated found
+      dead
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.setTag objectId tag continuation))
+        (FaultObservation sourceRuntime (.deadObject location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := setTagStep tag)
+    (failure := .sourceAddress (.deadObject objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
+/-- Stale nonpersistent reference-count increment faults before count
+arithmetic or a concrete header write. -/
+theorem concreteFaultLeaf_increment_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.inc objectId amount check false continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (incrementContract amount check))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.inc objectId amount check false continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    incrementStep_deadObject_of_refines
+      (amount := amount) (check := check)
+      initialRelated.1 objectRelated found dead
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.inc objectId amount check false continuation))
+        (FaultObservation sourceRuntime (.deadObject location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := incrementStep amount check)
+    (failure := .sourceAddress (.deadObject objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
+/-- A positive stale nonpersistent decrement faults on its first header read,
+before recursive ownership release can begin. -/
+theorem concreteFaultLeaf_decrement_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.dec objectId (amount + 1) check false objectFields? continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (decrementContract (amount + 1) check objectFields?))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.dec objectId (amount + 1) check false objectFields? continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    decrementStep_deadObject_of_refines
+      (amount := amount) (check := check) (objectFields? := objectFields?)
+      initialRelated.1 objectRelated found dead
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.dec objectId (amount + 1) check false objectFields? continuation))
+        (FaultObservation sourceRuntime (.deadObject location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := decrementStep (amount + 1) check objectFields?)
+    (failure := .sourceAddress (.deadObject objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
+/-- Repeating explicit deletion on a stale object preserves the exact related
+address/location fault and cannot enter the continuation. -/
+theorem concreteFaultLeaf_delete_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.del objectId continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some deleteContract)
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.del objectId continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    deleteStep_deadObject_of_refines initialRelated.1 objectRelated found dead
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.del objectId continuation))
+        (FaultObservation sourceRuntime (.deadObject location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := deleteStep)
+    (failure := .sourceAddress (.deadObject objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
+/-- An object-mode case chain whose generated prefix reads a stale
+discriminator faults before any constructor comparison or branch selection.
+The remainder of the adapted alternative chain stays abstract. -/
+theorem concreteFaultLeaf_cases_getTag_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {casesDecl : LCNF.Cases .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {discrIndex : Nat}
+    {discrWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.cases casesDecl)
+        ([.localGet discrIndex, .call id] ++ targetRest))
+    (discrLookup :
+      lookupValue sourceEnv casesDecl.discr =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hDiscr :
+      locals.get discrIndex =
+        some (.i32 (UInt32.ofNat discrWord.value)))
+    (discrRelated :
+      ValueRel witness .tobject (.word32 discrWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some getTagContract)
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.cases casesDecl)
+      ([.localGet discrIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    getTagStep_deadObject_of_refines initialRelated.1 discrRelated found dead
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv (.cases casesDecl))
+        (FaultObservation sourceRuntime (.deadObject location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, discrLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := getTagStep)
+    (failure := .sourceAddress (.deadObject discrWord))
+    sourceFault adapted initialRelated hDiscr hImp hSat hi hContract hParams
+    operation failureRelated
 
 /-- Export-level T4 shell. A syntax-directed body proof supplies the exact
 generated function selected by the static export certificate. -/
