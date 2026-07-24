@@ -323,6 +323,44 @@ def residentMemorySurfaceModule : Module := {
 #guard validateModule residentMemorySurfaceModule |>.isOk
 #guard encode residentMemorySurfaceModule |>.isOk
 
+def residentGlobalFunction : Function := {
+  name := `residentGlobal
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [.globalGet 0 .uint32, .ret] }
+
+def residentGlobalValue : Lean.FVarId := ⟨`residentGlobalValue⟩
+
+def residentGlobalSetFunction : Function := {
+  name := `residentGlobalSet
+  params := #[(residentGlobalValue, .uint32)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet residentGlobalValue,
+    .globalSet 0 .uint32,
+    .ret] }
+
+/-- Shared W7 surface: resident globals retain typed nonzero initialization. -/
+def residentGlobalSurfaceModule : Module := {
+  imports := #[]
+  functions := #[residentGlobalFunction, residentGlobalSetFunction]
+  exports := #[`residentGlobal, `residentGlobalSet]
+  initializers := #[]
+  runtimeOperations := #[]
+  globals := #[{ kind := .uint32, init := .i32 1024 }] }
+
+#guard residentGlobalSurfaceModule.globalKinds == #[.uint32]
+#guard validateModule residentGlobalSurfaceModule |>.isOk
+#guard encode residentGlobalSurfaceModule |>.isOk
+
+#guard match validateModule {
+    residentGlobalSurfaceModule with
+    globals := #[{ kind := .uint32, init := .i64 1024 }] } with
+  | .error (.invalidGlobalInitializer 0) => true
+  | _ => false
+
 #guard match validateModule { residentMemorySurfaceModule with memory := none } with
   | .error (.memoryInstructionWithoutMemory `residentLoad) => true
   | _ => false

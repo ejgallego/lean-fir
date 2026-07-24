@@ -110,8 +110,7 @@ theorem adapt_preserves_module_layout
             { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
           memoryExports := source.memory.toList.filterMap fun memory =>
             memory.exportName.map fun name => (name, 0)
-          globals := source.cacheGlobalKinds.toList.map fun kind =>
-            { init := zeroValue kind }
+          globals := globalDecls source
           exports := source.exports.toList.filterMap fun name =>
             (source.functions.findIdx? (·.name == name)).map fun index =>
               { name := name.toString
@@ -140,8 +139,7 @@ theorem adapt_preserves_module_layout
               { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
             memoryExports := source.memory.toList.filterMap fun memory =>
               memory.exportName.map fun name => (name, 0)
-            globals := source.cacheGlobalKinds.toList.map fun kind =>
-              { init := zeroValue kind }
+            globals := globalDecls source
             exports }
           cases targetValid : targetModule.validate with
           | error message =>

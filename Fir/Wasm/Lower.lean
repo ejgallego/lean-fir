@@ -52,6 +52,29 @@ structure MemoryDecl where
   exportName : Option String := none
   deriving Inhabited, BEq
 
+inductive GlobalInit where
+  | i32 (value : UInt32)
+  | i64 (value : UInt64)
+  | f32 (bits : UInt32)
+  | f64 (bits : UInt64)
+  deriving Inhabited, BEq, Repr
+
+def GlobalInit.valueType : GlobalInit → ValueType
+  | .i32 _ => .i32
+  | .i64 _ => .i64
+  | .f32 _ => .f32
+  | .f64 _ => .f64
+
+/--
+An initialized mutable Wasm global owned by resident runtime code. These
+globals are appended after the lazy-cache flag/value pairs, preserving every
+existing cache index while giving resident helpers stable private state.
+-/
+structure GlobalDecl where
+  kind : AbiKind
+  init : GlobalInit
+  deriving Inhabited, BEq, Repr
+
 structure Module where
   imports : Array Import
   functions : Array Function
@@ -65,6 +88,8 @@ structure Module where
   closureDispatch : Array Name := #[]
   /-- Optional module-owned wasm32 memory. Existing semantic-host modules omit it. -/
   memory : Option MemoryDecl := none
+  /-- Resident-runtime globals, physically appended after lazy-cache globals. -/
+  globals : Array GlobalDecl := #[]
   deriving Inhabited, BEq
 
 inductive CompileError where

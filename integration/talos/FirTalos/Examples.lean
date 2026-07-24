@@ -128,6 +128,14 @@ def adaptProgram? (program : Fir.LeanIR.ImpureProgram) : Option AdaptedModule :=
   | .ok target => target.globals.length == 2
   | .error _ => false
 
+#guard match adapt Fir.Wasm.Emit.Examples.residentGlobalSurfaceModule with
+  | .ok adapted =>
+      adapted.wasmModule.globals[0]?.any fun global =>
+        match global.init with
+        | .i32 value => value == 1024
+        | _ => false
+  | .error _ => false
+
 def residentBitsBody? : List Wasm.Instruction → Bool
   | [.const 7, .const 1, .and, .const 1, .shrU, .ret] => true
   | _ => false

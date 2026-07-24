@@ -69,6 +69,16 @@ Run the complete lane-local check with:
 ./check.sh
 ```
 
+The resident-global compatibility probe checks the shared state surface used
+by the forthcoming Wasm-owned heap frontier. Resident globals follow all
+lazy-cache flag/value globals, preserve typed nonzero initializers, and remain
+mutable:
+
+```text
+lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
+node run-resident-global.mjs _build/resident-global.wasm
+```
+
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
 defines and exports one-page memory, has no imports, and exports the raw
 `tobject → UInt32` helper `fir_getTag`. The browser-neutral smoke client writes

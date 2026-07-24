@@ -35,6 +35,7 @@ inductive SymbolicError where
   | invalidGlobalKind (function : Name) (index : Nat)
   | unknownCallTarget (function : Name)
   | invalidInitializer (name : Name)
+  | invalidGlobalInitializer (index : Nat)
   | invalidConstant (function : Name) (kind : AbiKind) (physical : ValueType)
   | invalidLocalRefinement (function : Name) (fvarId : FVarId) (kind : AbiKind)
   | invalidMemoryLimits
@@ -85,6 +86,14 @@ def Module.cacheGlobalKinds (module : Module) : Array AbiKind :=
         | some result => (kinds.push .uint32).push result
         | none => kinds
     | none => kinds
+
+/--
+Physical global order is a shared ABI: lazy-cache flag/value pairs retain
+their historical prefix and resident-runtime globals follow in declaration
+order.
+-/
+def Module.globalKinds (module : Module) : Array AbiKind :=
+  module.cacheGlobalKinds ++ module.globals.map (·.kind)
 
 def validateOperations : List RuntimeOp → Nat → Except SymbolicError Unit
   | [], _ => pure ()
@@ -165,6 +174,9 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
       throw (.invalidInitializer initializer)
     unless signature.params.isEmpty && signature.results.size == 1 do
       throw (.invalidInitializer initializer)
+  for (global, index) in module.globals.toList.zipIdx do
+    unless global.kind.valueType == global.init.valueType do
+      throw (.invalidGlobalInitializer index)
 
 abbrev OperandStack := List AbiKind
 
@@ -253,13 +265,13 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
       return { fallthrough := stack? }
   | .globalGet index kind => do
-      let some expected := context.module.cacheGlobalKinds[index]? |
+      let some expected := context.module.globalKinds[index]? |
         throw (.unknownGlobal context.function.name index)
       unless kind == expected do
         throw (.invalidGlobalKind context.function.name index)
       return { fallthrough := stack?.map (· ++ [kind]) }
   | .globalSet index kind => do
-      let some expected := context.module.cacheGlobalKinds[index]? |
+      let some expected := context.module.globalKinds[index]? |
         throw (.unknownGlobal context.function.name index)
       unless kind == expected do
         throw (.invalidGlobalKind context.function.name index)

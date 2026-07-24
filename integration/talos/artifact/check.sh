@@ -8,6 +8,8 @@ trap 'rm -rf "$first" "$second"' EXIT
 
 cd "$here"
 lake build
+lake exe fir-wasm-artifact resident-global _build/resident-global.wasm
+node run-resident-global.mjs _build/resident-global.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm

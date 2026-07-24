@@ -106,8 +106,7 @@ theorem abiLiteralAdaptedModule_layout :
             { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
           memoryExports := abiLiteralSourceModule.memory.toList.filterMap fun memory =>
             memory.exportName.map fun name => (name, 0)
-          globals := abiLiteralSourceModule.cacheGlobalKinds.toList.map fun kind =>
-            { init := zeroValue kind }
+          globals := globalDecls abiLiteralSourceModule
           exports := abiLiteralSourceModule.exports.toList.filterMap fun name =>
             (abiLiteralSourceModule.functions.findIdx? (·.name == name)).map
               fun index =>

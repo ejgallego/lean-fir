@@ -42,6 +42,22 @@ private def encodeI64 (value : UInt64) : Bytes :=
   #[chunk 0, chunk 7, chunk 14, chunk 21, chunk 28, chunk 35, chunk 42,
     chunk 49, chunk 56, UInt8.ofNat signedTop]
 
+private def encodeF32 (value : UInt32) : Bytes :=
+  #[value.toUInt8,
+    (value >>> (8 : UInt32)).toUInt8,
+    (value >>> (16 : UInt32)).toUInt8,
+    (value >>> (24 : UInt32)).toUInt8]
+
+private def encodeF64 (value : UInt64) : Bytes :=
+  #[value.toUInt8,
+    (value >>> (8 : UInt64)).toUInt8,
+    (value >>> (16 : UInt64)).toUInt8,
+    (value >>> (24 : UInt64)).toUInt8,
+    (value >>> (32 : UInt64)).toUInt8,
+    (value >>> (40 : UInt64)).toUInt8,
+    (value >>> (48 : UInt64)).toUInt8,
+    (value >>> (56 : UInt64)).toUInt8]
+
 private def concat (values : List Bytes) : Bytes :=
   values.foldl (· ++ ·) #[]
 
@@ -197,14 +213,23 @@ private def encodeMemory (memory : MemoryDecl) : Bytes :=
   | some pagesMax =>
       #[0x01] ++ encodeU32 memory.pagesMin.toNat ++ encodeU32 pagesMax.toNat
 
-private def encodeGlobal (kind : AbiKind) : Bytes :=
-  let initializer :=
+private def zeroGlobal (kind : AbiKind) : GlobalDecl := {
+  kind
+  init :=
     match kind.valueType with
-    | .i32 => #[0x41, 0x00, 0x0b]
-    | .i64 => #[0x42, 0x00, 0x0b]
-    | .f32 => #[0x43, 0x00, 0x00, 0x00, 0x00, 0x0b]
-    | .f64 => #[0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0b]
-  #[encodeValueType kind.valueType, 0x01] ++ initializer
+    | .i32 => .i32 0
+    | .i64 => .i64 0
+    | .f32 => .f32 0
+    | .f64 => .f64 0 }
+
+private def encodeGlobal (global : GlobalDecl) : Bytes :=
+  let initializer :=
+    match global.init with
+    | .i32 value => #[0x41] ++ encodeI32 value ++ #[0x0b]
+    | .i64 value => #[0x42] ++ encodeI64 value ++ #[0x0b]
+    | .f32 bits => #[0x43] ++ encodeF32 bits ++ #[0x0b]
+    | .f64 bits => #[0x44] ++ encodeF64 bits ++ #[0x0b]
+  #[encodeValueType global.kind.valueType, 0x01] ++ initializer
 
 private def encodeSection (id : UInt8) (payload : Bytes) : Bytes :=
   #[id] ++ encodeU32 payload.size ++ payload
@@ -230,7 +255,9 @@ def encode (module : Module) : Except EncodeError ByteArray := do
   let functionPayload := encodeVector <|
     module.functions.toList.zipIdx.map fun (_, index) =>
       encodeU32 (module.imports.size + index)
-  let globalPayload := encodeVector <| module.cacheGlobalKinds.toList.map encodeGlobal
+  let globals :=
+    module.cacheGlobalKinds.map zeroGlobal ++ module.globals
+  let globalPayload := encodeVector <| globals.toList.map encodeGlobal
   let functionExports ← module.exports.toList.mapM (encodeExport module)
   let memoryExports :=
     match module.memory.bind (·.exportName) with
@@ -248,7 +275,7 @@ def encode (module : Module) : Except EncodeError ByteArray := do
     bytes := bytes ++ encodeSection 0x03 functionPayload
   if let some memory := module.memory then
     bytes := bytes ++ encodeSection 0x05 (encodeVector [encodeMemory memory])
-  unless module.initializers.isEmpty do
+  unless globals.isEmpty do
     bytes := bytes ++ encodeSection 0x06 globalPayload
   unless functionExports.isEmpty && memoryExports.isEmpty do
     bytes := bytes ++ encodeSection 0x07 exportPayload

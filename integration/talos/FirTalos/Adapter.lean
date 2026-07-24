@@ -133,6 +133,17 @@ def zeroValue (kind : Fir.Wasm.AbiKind) : Wasm.Value :=
   | .f64 => .f64 0
   | _ => .i32 0
 
+def globalValue : Fir.Wasm.GlobalInit → Wasm.Value
+  | .i32 value => .i32 value
+  | .i64 value => .i64 value
+  | .f32 bits => .f32 bits
+  | .f64 bits => .f64 bits
+
+/-- Exact physical global order shared by adaptation and its layout theorem. -/
+def globalDecls (source : Fir.Wasm.Module) : List Wasm.GlobalDecl :=
+  source.cacheGlobalKinds.toList.map (fun kind => { init := zeroValue kind }) ++
+    source.globals.toList.map (fun global => { init := globalValue global.init })
+
 def function (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
     Except AdapterError Wasm.Function := do
   return {
@@ -157,8 +168,7 @@ def adapt (source : Fir.Wasm.Module) : Except AdapterError AdaptedModule := do
       { pagesMin := memory.pagesMin, pagesMax := memory.pagesMax }
     memoryExports := source.memory.toList.filterMap fun memory =>
       memory.exportName.map fun name => (name, 0)
-    globals := source.cacheGlobalKinds.toList.map fun kind =>
-      { init := zeroValue kind } }
+    globals := globalDecls source }
   match wasmModule.validate with
   | .ok _ => pure ()
   | .error message => throw (.targetValidation message)
