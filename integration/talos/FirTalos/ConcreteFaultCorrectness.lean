@@ -146,6 +146,302 @@ theorem CodeWP.toConcreteTrapsWith
   apply concreteTrapsWith_of_wp_body_at notImport found
   simpa [Wasm.Function.toLocals] using correct.2.2
 
+/-- One terminal failing source fragment paired with its compiler-adapted,
+trap-only concrete body proof. Operation-specific fault theorems construct
+this leaf; the recursive certificate below transports it through every
+successful prefix admitted by T2. -/
+def ConcreteFaultLeaf
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceCode : LCNF.Code .impure)
+    (target : Wasm.Program)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness)
+    (faultRuntime : RuntimeState)
+    (fault : RuntimeFault) : Prop :=
+  ExecEvaluates sourceExternals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (FaultObservation faultRuntime fault) ∧
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv sourceCode target targetStore targetLocals witness
+      [] (ConcreteFunctionFaultPost (RefinedFaultPost faultRuntime fault))
+
+/-- Syntax-directed T4 certificate. A terminal operation-specific fault leaf
+is transported backwards through successful direct lets, calls, external
+calls, lazy-cache paths, selected cases, and no-result effects. Thus the
+source and target must fail at the same dynamic point after the same
+successfully simulated prefix. -/
+inductive ConcreteFaultSimulation
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl) :
+    RuntimeState → Env → LCNF.Code .impure → Wasm.Program →
+      Wasm.Store Host → Wasm.Locals → RefinementWitness →
+      RuntimeState → RuntimeFault → Prop where
+  | terminal
+      (leaf :
+        ConcreteFaultLeaf context sourceModule sourceFunction labels module
+          hostEnv sourceExternals sourceRuntime sourceEnv sourceCode targetCode
+          targetStore targetLocals witness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode targetCode
+        targetStore targetLocals witness faultRuntime fault
+  | letValue
+      (valueCompiled :
+        Fir.Wasm.compileLetValue context decl = .ok valueCode)
+      (valueAdapted :
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue)
+      (resultFound :
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex)
+      (step :
+        LetStepSimulates context sourceFunction module hostEnv decl targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+          targetLocals nextLocals resultIndex witness nextWitness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+          nextStore nextLocals nextWitness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+        (targetValue ++ .localSet resultIndex :: targetRest)
+        targetStore targetLocals witness faultRuntime fault
+  | callLet
+      (valueCompiled :
+        Fir.Wasm.compileLetValue context decl = .ok valueCode)
+      (valueAdapted :
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue)
+      (resultFound :
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex)
+      (step :
+        CallLetStepSimulates context sourceFunction module hostEnv
+          sourceExternals decl continuation targetValue sourceRuntime
+          nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
+          nextLocals resultIndex witness nextWitness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+          nextStore nextLocals nextWitness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+        (targetValue ++ .localSet resultIndex :: targetRest)
+        targetStore targetLocals witness faultRuntime fault
+  | externalLet
+      (valueCompiled :
+        Fir.Wasm.compileLetValue context decl = .ok valueCode)
+      (valueAdapted :
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue)
+      (resultFound :
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex)
+      (step :
+        ExternalLetStepSimulates context sourceFunction module hostEnv
+          sourceExternals decl continuation targetValue sourceRuntime
+          nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
+          nextLocals resultIndex witness nextWitness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+          nextStore nextLocals nextWitness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+        (targetValue ++ .localSet resultIndex :: targetRest)
+        targetStore targetLocals witness faultRuntime fault
+  | lazyLet
+      (path : LazyCachePath)
+      (valueCompiled :
+        Fir.Wasm.compileLetValue context decl = .ok valueCode)
+      (valueAdapted :
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue)
+      (resultFound :
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex)
+      (step :
+        LazyLetStepSimulates path context sourceFunction module hostEnv
+          sourceExternals decl continuation targetValue sourceRuntime
+          nextRuntime sourceEnv sourceValue targetStore nextStore targetLocals
+          nextLocals resultIndex witness nextWitness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation targetRest
+          nextStore nextLocals nextWitness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+        (targetValue ++ .localSet resultIndex :: targetRest)
+        targetStore targetLocals witness faultRuntime fault
+  | caseOf
+      (target selectedTarget : Wasm.Program)
+      (step :
+        ConcreteCasesStepSimulates context sourceModule sourceFunction labels
+          module hostEnv sourceRuntime sourceEnv cases selected target
+          selectedTarget targetStore targetLocals witness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals sourceRuntime sourceEnv selected
+          selectedTarget targetStore targetLocals witness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.cases cases) target
+        targetStore targetLocals witness faultRuntime fault
+  | effect
+      (target targetRest : Wasm.Program)
+      (step :
+        EffectStepSimulates context sourceModule sourceFunction labels module
+          hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+          targetRest targetStore nextStore targetLocals witness nextWitness)
+      (continued :
+        ConcreteFaultSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals nextRuntime sourceEnv continuation
+          targetRest nextStore targetLocals nextWitness faultRuntime fault) :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv code target targetStore
+        targetLocals witness faultRuntime fault
+
+/-- The T4 syntax induction constructs the exact trap-only concrete body
+judgment from its terminal failure leaf. -/
+theorem ConcreteFaultSimulation.toCodeWP
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime faultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {fault : RuntimeFault}
+    (simulation :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+        targetStore targetLocals witness faultRuntime fault) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv sourceCode target targetStore targetLocals witness
+      [] (ConcreteFunctionFaultPost
+        (RefinedFaultPost faultRuntime fault)) := by
+  induction simulation with
+  | terminal leaf =>
+      exact leaf.2
+  | letValue valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_letValue valueCompiled valueAdapted resultFound step ih
+  | callLet valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_callLet valueCompiled valueAdapted resultFound step ih
+  | externalLet valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_externalLet valueCompiled valueAdapted resultFound step ih
+  | lazyLet _ valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_lazyLet valueCompiled valueAdapted resultFound step ih
+  | caseOf _ _ step _ ih =>
+      exact codeWP_caseOf step ih
+  | effect _ _ step _ ih =>
+      exact codeWP_effect step ih
+
+/-- The same T4 induction composes the exact finite source prefixes with the
+terminal fault execution. -/
+theorem ConcreteFaultSimulation.execEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime faultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {fault : RuntimeFault}
+    (simulation :
+      ConcreteFaultSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+        targetStore targetLocals witness faultRuntime fault) :
+    ExecEvaluates sourceExternals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (FaultObservation faultRuntime fault) := by
+  induction simulation with
+  | terminal leaf =>
+      exact leaf.1
+  | letValue _ _ _ step _ ih =>
+      exact sourceLetResult_thenExecEvaluates step.1 ih
+  | callLet _ _ _ step _ ih =>
+      exact sourceCallLetResult_thenExecEvaluates step.1 ih
+  | externalLet _ _ _ step _ ih =>
+      exact sourceExternalLetResult_thenExecEvaluates step.1 ih
+  | lazyLet _ _ _ _ step _ ih =>
+      exact sourceLazyLetResult_thenExecEvaluates step.1 ih
+  | caseOf _ _ step _ ih =>
+      exact sourceCaseResult_thenExecEvaluates step.1 ih
+  | effect _ _ step _ ih =>
+      exact sourceEffectResult_thenExecEvaluates step.1 ih
+
+/-- Function-index form of T4 for the complete syntax certificate. -/
+theorem ConcreteFaultSimulation.correct
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime faultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {fault : RuntimeFault}
+    (simulation :
+      ConcreteFaultSimulation context sourceModule sourceFunction [] module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
+        targetFunction.body initial
+        (targetFunction.toLocals parameters.reverse) initialWitness
+        faultRuntime fault)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (notImport : module.imports[functionIndex]? = none)
+    (functionFound :
+      module.funcs[functionIndex - module.imports.length]? =
+        some targetFunction) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (FaultObservation faultRuntime fault) ∧
+      ConcreteTrapsWith hostEnv module functionIndex initial
+        (parameters ++ callerTail) (RefinedFaultPost faultRuntime fault) := by
+  have parameterPrefix :
+      (parameters ++ callerTail).take targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  refine ⟨simulation.execEvaluates, ?_⟩
+  apply CodeWP.toConcreteTrapsWith notImport functionFound
+  simpa [parameterPrefix] using simulation.toCodeWP
+
 /-- An operation-level related concrete error produces exactly the public
 structured-fault postcondition when the concrete host traps. -/
 theorem refinedFaultPost_of_runtimeFailure
@@ -245,5 +541,42 @@ theorem ConcreteSupportedExport.faultCorrect
       ConcreteExportTrapsWith hosts.env target.wasmModule exportName initial
         (parameters ++ callerTail) (RefinedFaultPost faultRuntime fault) :=
   ⟨sourceEvaluates, spec.trapsWith parameterCount body⟩
+
+/-- T4 whole-export correctness constructed entirely by the syntax-directed
+fault simulation. No separately supplied source execution or target body
+judgment remains in the public theorem. -/
+theorem ConcreteSupportedExport.faultCorrectOfSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime faultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {fault : RuntimeFault}
+    (simulation :
+      ConcreteFaultSimulation context sourceModule sourceFunction []
+        target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
+        sourceCode spec.targetFunction.body initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness
+        faultRuntime fault)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (FaultObservation faultRuntime fault) ∧
+      ConcreteExportTrapsWith hosts.env target.wasmModule exportName initial
+        (parameters ++ callerTail) (RefinedFaultPost faultRuntime fault) :=
+  spec.faultCorrect simulation.execEvaluates parameterCount simulation.toCodeWP
 
 end FirTalos.Concrete

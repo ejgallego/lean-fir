@@ -2879,6 +2879,21 @@ the syntax-directed fault induction that constructs the source
 `ExecEvaluates` witness and trap-only body `CodeWP` from operation-specific
 failure certificates. No shared semantic contract or executable ABI changed.
 
+W6.6cl builds T4's syntax-directed fault certificate.
+`ConcreteFaultSimulation` starts from a terminal `ConcreteFaultLeaf` and
+transports its exact source fault and trap-only target proof backwards through
+successful direct lets, internal/closure calls, external calls, both
+lazy-cache paths, selected cases, and no-result effects. The six source-prefix
+composition lemmas are now observation-polymorphic, so success and fault
+proofs share one interpreter-step layer rather than duplicating it.
+`ConcreteFaultSimulation.toCodeWP` and `.execEvaluates` derive both dynamic
+premises, while `.correct` and
+`ConcreteSupportedExport.faultCorrectOfSimulation` deliver the function-index
+and generated-export forms of T4. Remaining coverage work consists only of
+constructing terminal leaves from the admitted operation-specific failure
+theorems and auditing the full supported-fault matrix. No shared semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

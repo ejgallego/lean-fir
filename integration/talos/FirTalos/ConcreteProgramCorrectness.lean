@@ -273,14 +273,15 @@ private theorem executeStep_source_cases
   rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
   simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen]
 
-private theorem sourceLetResult_thenExecEvaluates
+theorem sourceLetResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
-    {sourceValue resultValue : Value}
+    {sourceValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
         sourceValue)
@@ -288,10 +289,10 @@ private theorem sourceLetResult_thenExecEvaluates
       ExecEvaluates externals
         (sourceCodeState context nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   apply execEvaluates_of_steps
       (.step
         (executeStep_source_let externals context sourceRuntime nextRuntime
@@ -299,23 +300,23 @@ private theorem sourceLetResult_thenExecEvaluates
         (.refl _))
     continued
 
-private theorem sourceCaseResult_thenExecEvaluates
+theorem sourceCaseResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
     {cases : LCNF.Cases .impure}
     {selected : LCNF.Code .impure}
-    {resultValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceCaseResult sourceRuntime sourceEnv cases selected)
     (continued :
       ExecEvaluates externals
         (sourceCodeState context sourceRuntime sourceEnv selected)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.cases cases))
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   apply execEvaluates_of_steps
       (.step
         (executeStep_source_cases externals context sourceRuntime sourceEnv
@@ -323,35 +324,36 @@ private theorem sourceCaseResult_thenExecEvaluates
         (.refl _))
     continued
 
-private theorem sourceEffectResult_thenExecEvaluates
+theorem sourceEffectResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {code continuation : LCNF.Code .impure}
-    {resultValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (continued :
       ExecEvaluates externals
         (sourceCodeState context nextRuntime sourceEnv continuation)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv code)
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   apply execEvaluates_of_steps
       (.step (by simpa [sourceCodeState] using sourceStep externals) (.refl _))
     continued
 
-private theorem sourceExternalLetResult_thenExecEvaluates
+theorem sourceExternalLetResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
-    {sourceValue resultValue : Value}
+    {sourceValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceExternalLetResult context externals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue)
@@ -359,10 +361,10 @@ private theorem sourceExternalLetResult_thenExecEvaluates
       ExecEvaluates externals
         (sourceCodeState context nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   apply execEvaluates_of_steps
       (middle := sourceCodeState context nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation)
@@ -371,15 +373,16 @@ private theorem sourceExternalLetResult_thenExecEvaluates
         simpa [sourceCodeState] using sourceStep)
     continued
 
-private theorem sourceLazyLetResult_thenExecEvaluates
+theorem sourceLazyLetResult_thenExecEvaluates
     {path : LazyCachePath}
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
-    {sourceValue resultValue : Value}
+    {sourceValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue)
@@ -387,10 +390,10 @@ private theorem sourceLazyLetResult_thenExecEvaluates
       ExecEvaluates externals
         (sourceCodeState context nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   apply execEvaluates_of_steps
       (middle := sourceCodeState context nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation)
@@ -399,14 +402,15 @@ private theorem sourceLazyLetResult_thenExecEvaluates
         simpa [sourceCodeState] using sourceStep)
     continued
 
-private theorem sourceCallLetResult_thenExecEvaluates
+theorem sourceCallLetResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
-    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
-    {sourceValue resultValue : Value}
+    {sourceValue : Value}
+    {observation : Observation}
     (sourceStep :
       SourceCallLetResult context externals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue)
@@ -414,10 +418,10 @@ private theorem sourceCallLetResult_thenExecEvaluates
       ExecEvaluates externals
         (sourceCodeState context nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation)
-        (ReturnedObservation resultRuntime resultValue)) :
+        observation) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
-      (ReturnedObservation resultRuntime resultValue) := by
+      observation := by
   obtain ⟨count, callSteps⟩ := sourceStep
   apply execEvaluates_of_steps
       (middle := sourceCodeState context nextRuntime
