@@ -304,6 +304,21 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [.uint32] [address])
         return remaining ++ [result]
       return { fallthrough := stack? }
+  | .i32Load8U result _ => do
+      unless context.module.memory.isSome do
+        throw (.memoryInstructionWithoutMemory context.function.name)
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint32])
+        let remaining := stack.take (stack.length - 1)
+        let some address := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint32])
+        unless address.valueType == .i32 do
+          throw (.stackMismatch context.function.name [.uint32] [address])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
   | .i64Load result _ => do
       unless context.module.memory.isSome do
         throw (.memoryInstructionWithoutMemory context.function.name)

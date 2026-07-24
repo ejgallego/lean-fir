@@ -89,6 +89,7 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .i32And => return .and
   | .i32ShrU => return .shrU
   | .i32Load _ offset => return .load32 offset
+  | .i32Load8U _ offset => return .load8U offset
   | .i64Load _ offset => return .load64 offset
   | .i32WrapI64 _ => return .wrapI64
   | .block label body => do

@@ -295,6 +295,12 @@ The import audit therefore records the monotonic closure
 `351 → 350 → 349`: baseline, resident `getTag`, then resident
 `getTag + isShared`.
 
+The next projection slice uses the symbolic emitter's typed
+`i32.load8_u` surface for packed `UInt8` fields. Its binary encoding and Talos
+adaptation are validated independently before any compiler import is
+rewritten, so the narrow-load compatibility boundary remains separable from
+the later projection-helper correctness claim.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current
 JavaScript-hosted runtime, raw-layout smoke client, descriptor, final LCNF,

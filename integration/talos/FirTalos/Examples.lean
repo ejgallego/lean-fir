@@ -136,6 +136,10 @@ def residentLoadBody? : List Wasm.Instruction → Bool
   | [.localGet 0, .load64 32, .wrapI64, .ret] => true
   | _ => false
 
+def residentLoad8Body? : List Wasm.Instruction → Bool
+  | [.localGet 0, .load8U 32, .ret] => true
+  | _ => false
+
 #guard match adapt Fir.Wasm.Emit.Examples.residentMemorySurfaceModule with
   | .ok adapted =>
       adapted.wasmModule.imports.isEmpty &&
@@ -145,7 +149,9 @@ def residentLoadBody? : List Wasm.Instruction → Bool
         adapted.wasmModule.funcs[0]?.any fun function =>
           residentBitsBody? function.body &&
         adapted.wasmModule.funcs[1]?.any fun function =>
-          residentLoadBody? function.body
+          residentLoadBody? function.body &&
+        adapted.wasmModule.funcs[2]?.any fun function =>
+          residentLoad8Body? function.body
   | .error _ => false
 
 #guard match adapt Fir.Wasm.Emit.ResidentRuntime.getTagModule with

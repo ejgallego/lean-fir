@@ -26,6 +26,8 @@ inductive Instruction where
   | i32ShrU
   /-- Load from the module-owned memory at `address + offset`. -/
   | i32Load (result : AbiKind) (offset : UInt32)
+  /-- Zero-extend one byte from module-owned memory at `address + offset`. -/
+  | i32Load8U (result : AbiKind) (offset : UInt32)
   | i64Load (result : AbiKind) (offset : UInt32)
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)

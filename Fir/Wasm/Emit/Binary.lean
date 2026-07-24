@@ -130,6 +130,7 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .i32And => return #[0x71]
   | .i32ShrU => return #[0x76]
   | .i32Load _ offset => return #[0x28, 0x02] ++ encodeU32 offset.toNat
+  | .i32Load8U _ offset => return #[0x2d, 0x00] ++ encodeU32 offset.toNat
   | .i64Load _ offset => return #[0x29, 0x03] ++ encodeU32 offset.toNat
   | .i32WrapI64 _ => return #[0xa7]
   | .block label body => do

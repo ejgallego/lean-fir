@@ -300,12 +300,22 @@ def residentLoadFunction : Function := {
     .i32WrapI64 .uint32,
     .ret] }
 
+def residentLoad8Function : Function := {
+  name := `residentLoad8
+  params := #[(residentAddress, .tobject)]
+  results := #[.uint8]
+  locals := #[]
+  body := [
+    .localGet residentAddress,
+    .i32Load8U .uint8 32,
+    .ret] }
+
 /-- W7 shared-surface guard. Existing modules omit memory; a resident-runtime
 module may define/export it and use checked physical memory instructions. -/
 def residentMemorySurfaceModule : Module := {
   imports := #[]
-  functions := #[residentBitsFunction, residentLoadFunction]
-  exports := #[`residentBits, `residentLoad]
+  functions := #[residentBitsFunction, residentLoadFunction, residentLoad8Function]
+  exports := #[`residentBits, `residentLoad, `residentLoad8]
   initializers := #[]
   runtimeOperations := #[]
   memory := some { pagesMin := 1, exportName := some "memory" } }
