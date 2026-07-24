@@ -7382,6 +7382,203 @@ theorem SomeReachableMachineRelated.matchInvokeNameNext
                     by simpa only [targetSame] using targetStep,
                     ⟨rho, nextRelated⟩⟩
 
+/-- State-level closure-call matcher for every internal transition.  A
+reachable heap callee is classified by its live cell, closure declaration,
+arity, binding, and declaration body.  All non-closure and fault branches,
+plus external declaration entry, contradict the assumed internal result. -/
+theorem SomeReachableMachineRelated.matchInvokeValueNext
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeValue function arguments =>
+          have sourceSame : { source with
+              control := .invokeValue sourceFunction sourceArguments } =
+                source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeValue targetFunction targetArguments } =
+                target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeValue sourceFunction sourceArguments } =
+                  .next sourceAfter := by
+            simpa only [sourceSame] using sourceTransition
+          cases function with
+          | tagged payload =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | usize value =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | scalar value =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | erased =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | reuseNone =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | reuseSome mapping =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | @heap sourceLocation targetLocation mapping =>
+              cases sourceCellFound :
+                  findCell? source.runtime.heap sourceLocation with
+              | none =>
+                  simp [coreStep, invokeClosure, getLiveCell,
+                    sourceCellFound, fail] at sourceTransition'
+              | some sourceCell =>
+                  cases sourceLive : sourceCell.live with
+                  | false =>
+                      simp [coreStep, invokeClosure, getLiveCell,
+                        sourceCellFound, sourceLive, fail]
+                        at sourceTransition'
+                  | true =>
+                      cases sourceObject : sourceCell.object with
+                      | ctor object =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | boxed type value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | string value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | natural value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | integer value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | byteArray value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | «opaque» typeName =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | closure name arity sourceFixed =>
+                          cases sourceDeclFound :
+                              source.program.findDecl? name with
+                          | none =>
+                              simp [coreStep, invokeClosure, getLiveCell,
+                                sourceCellFound, sourceLive, sourceObject,
+                                invokeDecl, sourceDeclFound, fail]
+                                at sourceTransition'
+                          | some sourceDeclaration =>
+                              by_cases sourceTooFew :
+                                  (sourceFixed ++ sourceArguments).size <
+                                    sourceDeclaration.params.size
+                              · rcases
+                                    coreStep_invokeValue_closure_foundPartial_reachableRelated
+                                      source target programs frames arguments
+                                      mapping sourceCellFound sourceLive
+                                      sourceObject sourceDeclFound sourceTooFew
+                                      runtime with
+                                  ⟨larger, sourceNext, targetNext, extension,
+                                    sourceStep, targetStep, nextRelated⟩
+                                rw [sourceStep] at sourceTransition'
+                                cases sourceTransition'
+                                exact ⟨targetNext,
+                                  by simpa only [targetSame] using targetStep,
+                                  ⟨larger, nextRelated⟩⟩
+                              · cases sourceBinding :
+                                    bindParams sourceDeclaration.params
+                                      ((sourceFixed ++ sourceArguments).extract
+                                        0 sourceDeclaration.params.size) with
+                                | error fault =>
+                                    have sourceInvoke :
+                                        coreStep { source with
+                                          control := .invokeValue
+                                            (.object (.heap sourceLocation))
+                                            sourceArguments } =
+                                          invokeDecl { source with
+                                            control := .invokeValue
+                                              (.object (.heap sourceLocation))
+                                              sourceArguments }
+                                            name
+                                            (sourceFixed ++
+                                              sourceArguments) := by
+                                      simp [coreStep, invokeClosure,
+                                        getLiveCell, sourceCellFound,
+                                        sourceLive, sourceObject]
+                                    rw [sourceInvoke] at sourceTransition'
+                                    unfold invokeDecl at sourceTransition'
+                                    rw [sourceDeclFound] at sourceTransition'
+                                    simp only at sourceTransition'
+                                    rw [if_neg sourceTooFew, sourceBinding]
+                                      at sourceTransition'
+                                    contradiction
+                                | ok sourceEnv =>
+                                    cases sourceValue :
+                                        sourceDeclaration.value with
+                                    | code sourceCode =>
+                                        rcases
+                                            coreStep_invokeValue_closure_foundCode_reachableRelated
+                                              source target programs frames
+                                              arguments mapping sourceCellFound
+                                              sourceLive sourceObject
+                                              sourceDeclFound sourceValue
+                                              sourceTooFew sourceBinding
+                                              runtime with
+                                          ⟨sourceNext, targetNext, sourceStep,
+                                            targetStep, nextRelated⟩
+                                        rw [sourceStep] at sourceTransition'
+                                        cases sourceTransition'
+                                        exact ⟨targetNext,
+                                          by simpa only [targetSame] using
+                                            targetStep,
+                                          ⟨rho, nextRelated⟩⟩
+                                    | extern sourceInfo =>
+                                        have sourceInvoke :
+                                            coreStep { source with
+                                              control := .invokeValue
+                                                (.object
+                                                  (.heap sourceLocation))
+                                                sourceArguments } =
+                                              invokeDecl { source with
+                                                control := .invokeValue
+                                                  (.object
+                                                    (.heap sourceLocation))
+                                                  sourceArguments }
+                                                name
+                                                (sourceFixed ++
+                                                  sourceArguments) := by
+                                          simp [coreStep, invokeClosure,
+                                            getLiveCell, sourceCellFound,
+                                            sourceLive, sourceObject]
+                                        rw [sourceInvoke] at sourceTransition'
+                                        unfold invokeDecl at sourceTransition'
+                                        rw [sourceDeclFound]
+                                          at sourceTransition'
+                                        simp only at sourceTransition'
+                                        rw [if_neg sourceTooFew, sourceBinding,
+                                          sourceValue] at sourceTransition'
+                                        contradiction
+
 /-- A retained join declaration takes the same administrative step on both
 sides and installs related declaration bodies under the common identifier. -/
 theorem coreStep_retainedJoin_reachableRelated
