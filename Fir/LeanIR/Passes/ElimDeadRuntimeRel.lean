@@ -6572,6 +6572,84 @@ theorem ShadowRuntimeRel.deleteValueBoth_of_related
             exact rightSet
           exact ⟨rightResult, targetEffect, next⟩
 
+/-- Deletes on related published values either preserve the runtime relation
+or fail with related faults. -/
+theorem ShadowRuntimeRel.deleteValueBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (deleteValue left leftObject) (deleteValue right rightObject) := by
+  cases objects with
+  | tagged payload => exact .error (.same _)
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapping => exact .error (.same _)
+  | erased => exact .ok related
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [deleteValue, getLiveCell, leftFound, rightFound,
+            leftLiveEq, rightLiveEq, Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          let leftReplacement : HeapCell :=
+            { leftCell with rc := 0, live := false }
+          let rightReplacement : HeapCell :=
+            { rightCell with rc := 0, live := false }
+          have replacement :
+              HeapCellRel rho leftReplacement rightReplacement := by
+            refine ⟨by simp [leftReplacement, rightReplacement],
+              cells.2.1, by simp [leftReplacement, rightReplacement],
+              cells.2.2.2⟩
+          have leftOwned :
+              leftReplacement.object.ownedValues =
+                leftCell.object.ownedValues := by
+            simp [leftReplacement]
+          have rightOwned :
+              rightReplacement.object.ownedValues =
+                rightCell.object.ownedValues := by
+            simp [rightReplacement]
+          rcases related.setCellBoth mapping leftFound rightFound
+              leftOwned rightOwned replacement with
+            ⟨leftResult, rightResult, leftSet, rightSet, next⟩
+          have leftEffect :
+              deleteValue left (.object (.heap leftLocation)) =
+                .ok leftResult := by
+            unfold deleteValue
+            simp only [Bind.bind, Except.bind]
+            rw [show getLiveCell left leftLocation = .ok leftCell by
+              simp [getLiveCell, leftFound, leftLiveEq]]
+            simpa [leftReplacement] using leftSet
+          have rightEffect :
+              deleteValue right (.object (.heap rightLocation)) =
+                .ok rightResult := by
+            unfold deleteValue
+            simp only [Bind.bind, Except.bind]
+            rw [show getLiveCell right rightLocation = .ok rightCell by
+              simp [getLiveCell, rightFound, rightLiveEq]]
+            simpa [rightReplacement] using rightSet
+          rw [leftEffect, rightEffect]
+          exact .ok next
+
 /-- Scalar writes replace the `(width, offset)` entry only inside the
 unreachable source cell. -/
 theorem ShadowRuntimeRel.setScalarFieldLeftUnreachable

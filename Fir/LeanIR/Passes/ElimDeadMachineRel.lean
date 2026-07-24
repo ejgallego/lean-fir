@@ -10115,6 +10115,126 @@ theorem SomeReachableMachineRelated.increment_terminal
                               rw [sourceStep] at done'
                               contradiction
 
+/-- Terminal retained deletes transport missing-variable and heap-deletion
+faults, including renamed dead-object locations. -/
+theorem SomeReachableMachineRelated.delete_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .code (.del object sourceContinuation))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          rename_i used
+          rcases graph.deleteResidual with
+            ⟨targetContinuation, targetEq, continuation, objectMember⟩
+          subst targetCode
+          let sourceCurrent := withCodeControl source
+            (.del object sourceContinuation)
+          let targetCurrent := withCodeControl target
+            (.del object targetContinuation)
+          have sourceSame : sourceCurrent = source := by
+            cases source
+            simp_all [sourceCurrent, withCodeControl]
+          have targetSame : targetCurrent = target := by
+            cases target
+            simp_all [targetCurrent, withCodeControl]
+          have done' : coreStep sourceCurrent =
+              .done sourceObservation := by
+            simpa only [sourceSame] using done
+          cases sourceLookup : lookup source.env object with
+          | none =>
+              have looked := env object objectMember
+              rw [sourceLookup] at looked
+              generalize targetLookup :
+                lookup target.env object = targetOption at looked
+              cases targetOption with
+              | some targetValue => cases looked
+              | none =>
+                  have sourceFault : coreStep sourceCurrent =
+                      .done (observe sourceCurrent
+                        (.fault (.unknownVar object))) := by
+                    simp [sourceCurrent, withCodeControl, coreStep,
+                      lookupValue, sourceLookup, fail]
+                  have targetFault : coreStep targetCurrent =
+                      .done (observe targetCurrent
+                        (.fault (.unknownVar object))) := by
+                    simp [targetCurrent, withCodeControl, coreStep,
+                      lookupValue, targetLookup, fail]
+                  exact relatedFault_terminal
+                    (externals := externals) runtime
+                    (by simpa only [sourceSame] using sourceFault)
+                    (by simpa only [targetSame] using targetFault)
+                    done
+          | some sourceObject =>
+              have looked := env object objectMember
+              rw [sourceLookup] at looked
+              generalize targetLookup :
+                lookup target.env object = targetOption at looked
+              cases targetOption with
+              | none => cases looked
+              | some targetObject =>
+                  cases looked with
+                  | some objects =>
+                      have sourceRoot :
+                          sourceObject ∈
+                            envRootsOn used source.env ++
+                              sourceFrameRoots := by
+                        exact List.mem_append_left _
+                          (lookup_mem_envRootsOn objectMember sourceLookup)
+                      have effects :=
+                        runtime.deleteValueBoth_related sourceRoot objects
+                      generalize sourceEffectEq :
+                        deleteValue source.runtime sourceObject =
+                          sourceEffect at effects
+                      generalize targetEffectEq :
+                        deleteValue target.runtime targetObject =
+                          targetEffect at effects
+                      cases effects with
+                      | error faults =>
+                          rename_i sourceFaultValue targetFaultValue
+                          have sourceFault : coreStep sourceCurrent =
+                              .done (observe sourceCurrent
+                                (.fault sourceFaultValue)) := by
+                            simp [sourceCurrent, withCodeControl, coreStep,
+                              lookupValue, sourceLookup, sourceEffectEq, fail]
+                          have targetFault : coreStep targetCurrent =
+                              .done (observe targetCurrent
+                                (.fault targetFaultValue)) := by
+                            simp [targetCurrent, withCodeControl, coreStep,
+                              lookupValue, targetLookup, targetEffectEq, fail]
+                          exact relatedFaultRel_terminal
+                            (externals := externals) runtime faults
+                            (by simpa only [sourceSame] using sourceFault)
+                            (by simpa only [targetSame] using targetFault)
+                            done
+                      | ok nextRuntime =>
+                          rename_i sourceNextRuntime targetNextRuntime
+                          have sourceStep : coreStep sourceCurrent =
+                              .next { sourceCurrent with
+                                runtime := sourceNextRuntime
+                                control := .code sourceContinuation } := by
+                            simp [sourceCurrent, withCodeControl, coreStep,
+                              lookupValue, sourceLookup, sourceEffectEq]
+                          rw [sourceStep] at done'
+                          contradiction
+
 /-- Explicit unreachable nodes are retained and terminate with the common
 address-free `unreachable` fault. -/
 theorem SomeReachableMachineRelated.unreach_terminal
