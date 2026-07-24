@@ -84,16 +84,23 @@ lake exe fir-wasm-artifact resident-read-projections \
   _build/resident-read-projections.wasm
 node run-resident-read-projections.mjs \
   _build/resident-read-projections.wasm
+lake exe fir-wasm-artifact resident-closure-projections \
+  _build/resident-closure-projections.wasm
+node run-resident-closure-projections.mjs \
+  _build/resident-closure-projections.wasm
 ```
 
-All three modules and their `.wasm.json` descriptors are generated
-deterministically. The second module implements the valid-input portion of
+All four modules and their `.wasm.json` descriptors are generated
+deterministically. The `isShared` module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
 while a unique live heap object returns zero. The 983-byte projection module
 exports the exact four object and four packed-`UInt8` reads reachable from
 compiler-produced Lean 4.32 `prettyM`. Raw-header and concrete-host checks
 exercise all eight helpers; recognized non-heap, misaligned, dead, and
-non-constructor inputs trap without invoking JavaScript. These are generation-readiness
+non-constructor inputs trap without invoking JavaScript. The 1,466-byte
+closure-projection module exports the twelve distinct capture slot/result
+readers underlying 87 `prettyM` operations and checks the same direct-memory
+boundary for closure layouts. These are generation-readiness
 artifacts, not the later theorems that the linked helpers satisfy the W6
 contracts on related states. Setting `FIR_BROWSER=google-chrome` while running
 `./check.sh` executes the same smoke clients in a browser Worker alongside the
@@ -280,7 +287,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
   _build/source-pretty-format-resident-runtime.wasm \
-  _build/source-pretty-format-resident-projections.wasm
+  _build/source-pretty-format-resident-projections.wasm \
+  _build/source-pretty-format-resident-closure-projections.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -322,6 +330,22 @@ symbolic validator now rejects reachable arms that change the operand stack.
 Projection helpers keep guarded loads stack-neutral through typed locals.
 This closes generation readiness for these descriptors, not the later W6
 proof that the physical reads implement their semantic contracts.
+
+The closure-capture checkpoint shares helpers by physical slot and result kind.
+Compiler-produced call sites still carry their full function, arity, fixed
+count, and result descriptor; W6's related-state precondition is responsible
+for showing that a successful semantic projection reaches the corresponding
+physical slot. The linked artifact removes all 87 `closureProj` imports,
+exports twelve low-level helpers, preserves final LCNF, and executes the same
+raw `Format` corpus:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-closure-projections.wasm
+```
+
+The complete retained audit is now
+`351 → 350 → 349 → 341 → 254` function imports.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current

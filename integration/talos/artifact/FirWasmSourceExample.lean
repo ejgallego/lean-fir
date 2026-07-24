@@ -237,7 +237,7 @@ run_cmd do
       expectedReadProjections.all readProjections.contains do
     throwError "resident Format read-projection inventory changed"
   let residentProjectionResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileReadProjectionModule
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
   let residentProjectionArtifact ← match residentProjectionResult with
     | .ok artifact => pure artifact
@@ -258,6 +258,45 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident-projection Format module: {repr error}"
+  let closureProjections :=
+    residentProjectionArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentRuntime.supportsClosureProjection
+  let expectedClosureCoordinates :=
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatClosureProjectionCoordinates
+  unless closureProjections.size == 87 &&
+      closureProjections.all (fun operation =>
+        (Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation).any
+          expectedClosureCoordinates.contains) &&
+      expectedClosureCoordinates.all (fun coordinate =>
+        closureProjections.any fun operation =>
+          Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation ==
+            some coordinate) do
+    throwError "resident Format closure-projection inventory changed"
+  let residentClosureResult ← liftCoreM <|
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+  let residentClosureArtifact ← match residentClosureResult with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident closure-projection Format facade: {repr error}"
+  unless residentClosureArtifact.module.runtimeOperations.all fun operation =>
+      !Fir.Wasm.Emit.ResidentRuntime.supportsClosureProjection operation do
+    throwError "resident Format retained a supported closure-projection import"
+  unless residentClosureArtifact.module.imports.size + closureProjections.size ==
+      residentProjectionArtifact.module.imports.size do
+    throwError "resident Format closure-projection import accounting changed"
+  unless expectedClosureCoordinates.all fun coordinate =>
+      let operation : Fir.Wasm.RuntimeOp :=
+        .closureProj `resident (coordinate.1 + 2) (coordinate.1 + 1)
+          coordinate.1 coordinate.2
+      (Fir.Wasm.Emit.ResidentRuntime.closureProjectionName? operation).any
+        residentClosureArtifact.module.exports.contains do
+    throwError "resident Format closure-projection helper exports changed"
+  match ← residentClosureArtifact.write
+      "_build/source-pretty-format-resident-closure-projections.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident closure-projection Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

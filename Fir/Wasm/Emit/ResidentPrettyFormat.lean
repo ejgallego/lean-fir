@@ -46,10 +46,21 @@ Compile the monomorphic `prettyM` facade, retain the scalar-header checkpoint,
 then internalize every object and packed-`UInt8` projection supported by the
 resident load surface. The captured final LCNF remains unchanged.
 -/
-def compileModule (entry : Name) :
+def compileReadProjectionModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) := do
   let result ← compileRuntimeModule entry
   return result.bind <| linkRuntime "read projections"
     Fir.Wasm.Emit.ResidentRuntime.internalizeReadProjections
+
+/--
+Continue from the read-projection checkpoint and internalize all supported
+closure-capture projections. Helpers are shared by physical slot/result kind;
+the compiler and W6 refinement own operation-specific closure metadata.
+-/
+def compileModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileReadProjectionModule entry
+  return result.bind <| linkRuntime "closure projections"
+    Fir.Wasm.Emit.ResidentRuntime.internalizeClosureProjections
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

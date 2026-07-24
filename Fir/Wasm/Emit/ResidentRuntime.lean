@@ -181,6 +181,7 @@ inductive LinkError where
   | missingOperation (name : Name)
   | reservedDeclaration (name : Name)
   | unsupportedProjection (width offset : Nat) (result : AbiKind)
+  | unsupportedClosureProjection (index : Nat) (result : AbiKind)
   | projectionOffsetOverflow (value : Nat)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
@@ -390,6 +391,110 @@ def prettyFormatReadProjectionModule : Except LinkError Module := do
     runtimeOperations := #[]
     memory := some residentMemory }
 
+private def closureProjectionSuffix? : AbiKind → Option String
+  | .object => some "object"
+  | .tobject => some "tobject"
+  | .uint8 => some "uint8"
+  | .uint32 => some "uint32"
+  | _ => none
+
+def closureProjectionCoordinate? : RuntimeOp → Option (Nat × AbiKind)
+  | .closureProj _ _ _ index result =>
+      if (closureProjectionSuffix? result).isSome then
+        some (index, result)
+      else
+        none
+  | _ => none
+
+/--
+Resident closure-capture helpers are shared by descriptors with the same
+physical slot and result kind. Function/arity/fixed metadata is guaranteed by
+the compiler call site and the W6 related-state precondition; the later
+correctness theorem recovers those semantic checks.
+-/
+def closureProjectionName? (operation : RuntimeOp) : Option Name := do
+  let (index, result) ← closureProjectionCoordinate? operation
+  let suffix ← closureProjectionSuffix? result
+  return Name.mkSimple s!"fir_cproj_{index}_{suffix}"
+
+def supportsClosureProjection (operation : RuntimeOp) : Bool :=
+  (closureProjectionName? operation).isSome
+
+private def liveClosureProjectionBody
+    (load : List Instruction) : List Instruction :=
+  requireFlag liveFlag <|
+    [.localGet objectParam,
+      .i32Load .uint32 (offset headerKindOffset)] ++
+    equalsConst .uint32 ObjectKind.closure.code ++
+    [.ifElse load [.unreachable]]
+
+private def closureProjectionHeapBody
+    (load : List Instruction) : List Instruction :=
+  [.localGet objectParam] ++
+    equalsConst .tobject 0 ++
+    [.ifElse
+      [.unreachable]
+      ([.localGet objectParam,
+        .i32Const .uint32 (UInt32.ofNat (target.heapAlignment - 1)),
+        .i32And] ++
+        equalsConst .uint32 0 ++
+        [.ifElse (liveClosureProjectionBody load) [.unreachable]])]
+
+private def closureProjectionFunction (index : Nat) (result : AbiKind) :
+    Except LinkError Function := do
+  let probe : RuntimeOp :=
+    .closureProj `resident (index + 2) (index + 1) index result
+  let some name := closureProjectionName? probe |
+    throw (.unsupportedClosureProjection index result)
+  let fieldOffset ← checkedProjectionOffset <|
+    headerBytes + target.semanticSlotBytes * index
+  return {
+    name
+    params := #[(objectParam, .tobject)]
+    results := #[result]
+    locals := #[(resultLocal, result)]
+    body := closureProjectionHeapBody
+      [.localGet objectParam,
+        .i32Load result fieldOffset,
+        .localSet resultLocal] ++
+      [.localGet resultLocal, .ret] }
+
+def internalizeClosureProjections (module : Module) : Except LinkError Module := do
+  let operations := module.runtimeOperations.filter supportsClosureProjection
+  operations.foldlM (init := module) fun result operation => do
+    let some name := closureProjectionName? operation |
+      throw (.unsupportedClosureProjection 0 .erased)
+    let some (index, kind) := closureProjectionCoordinate? operation |
+      throw (.unsupportedClosureProjection 0 .erased)
+    let function ← closureProjectionFunction index kind
+    internalizeOperation operation name function result
+
+/-- The twelve distinct physical closure-capture reads reachable from `prettyM`. -/
+def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
+  (0, .object),
+  (0, .tobject),
+  (0, .uint8),
+  (1, .object),
+  (1, .tobject),
+  (1, .uint8),
+  (1, .uint32),
+  (2, .object),
+  (2, .tobject),
+  (3, .object),
+  (3, .tobject),
+  (4, .object)]
+
+def prettyFormatClosureProjectionModule : Except LinkError Module := do
+  let functions ← prettyFormatClosureProjectionCoordinates.mapM fun coordinate =>
+    closureProjectionFunction coordinate.1 coordinate.2
+  return {
+    imports := #[]
+    functions
+    exports := functions.map (·.name)
+    initializers := #[]
+    runtimeOperations := #[]
+    memory := some residentMemory }
+
 def getTagManifest : Json :=
   Json.mkObj [
     ("entry", getTagName.toString),
@@ -432,6 +537,23 @@ def prettyFormatReadProjectionManifest : Json :=
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 contract proofs pending")]
 
+private def closureProjectionEntryJson (coordinate : Nat × AbiKind) : Json :=
+  let operation : RuntimeOp :=
+    .closureProj `resident (coordinate.1 + 2) (coordinate.1 + 1)
+      coordinate.1 coordinate.2
+  Json.mkObj [
+    ("entry", (closureProjectionName? operation).getD .anonymous |>.toString),
+    ("index", coordinate.1),
+    ("result", (closureProjectionSuffix? coordinate.2).getD "unsupported")]
+
+def prettyFormatClosureProjectionManifest : Json :=
+  Json.mkObj [
+    ("entries", Json.arr <|
+      prettyFormatClosureProjectionCoordinates.map closureProjectionEntryJson),
+    ("memory", "memory"),
+    ("imports", Json.arr #[]),
+    ("status", "generation-only; W6 contract proofs pending")]
+
 #guard getTagModule.imports.isEmpty
 #guard getTagModule.memory.any fun memory =>
   memory.pagesMin == 1 && memory.exportName == some "memory"
@@ -447,6 +569,16 @@ def prettyFormatReadProjectionManifest : Json :=
       module.imports.isEmpty &&
       module.functions.size == prettyFormatReadProjections.size &&
       module.exports.size == prettyFormatReadProjections.size &&
+      (module.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.exportName == some "memory") &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+#guard match prettyFormatClosureProjectionModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.functions.size == prettyFormatClosureProjectionCoordinates.size &&
+      module.exports.size == prettyFormatClosureProjectionCoordinates.size &&
       (module.memory.any fun memory =>
         memory.pagesMin == 1 && memory.exportName == some "memory") &&
       (Fir.Wasm.validateModule module |>.isOk) &&

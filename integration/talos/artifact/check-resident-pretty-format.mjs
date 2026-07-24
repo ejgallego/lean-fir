@@ -5,9 +5,12 @@ const baselinePath = process.argv[2];
 const getTagPath = process.argv[3];
 const residentRuntimePath = process.argv[4];
 const residentProjectionPath = process.argv[5];
-assert.ok(baselinePath && getTagPath && residentRuntimePath && residentProjectionPath,
+const residentClosurePath = process.argv[6];
+assert.ok(baselinePath && getTagPath && residentRuntimePath &&
+  residentProjectionPath && residentClosurePath,
   "usage: node check-resident-pretty-format.mjs " +
-  "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm");
+  "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
+  "RESIDENT_CLOSURES.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -26,6 +29,7 @@ const baseline = readArtifact(baselinePath);
 const getTagResident = readArtifact(getTagPath);
 const residentRuntime = readArtifact(residentRuntimePath);
 const residentProjections = readArtifact(residentProjectionPath);
+const residentClosures = readArtifact(residentClosurePath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -55,6 +59,10 @@ assert.equal(operationCount(residentProjections, "objectProj"), 0,
   "resident-projection prettyM retained semantic object projections");
 assert.equal(operationCount(residentProjections, "scalarProj"), 0,
   "resident-projection prettyM retained semantic scalar projections");
+assert.equal(operationCount(residentProjections, "closureProj"), 87,
+  "resident-projection prettyM closure-projection inventory changed");
+assert.equal(operationCount(residentClosures, "closureProj"), 0,
+  "resident-closure prettyM retained semantic closure projections");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -78,6 +86,16 @@ assert.equal(
   "resident-projection prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentClosures) + 87,
+  functionImportCount(residentProjections),
+  "resident-closure prettyM did not remove exactly 87 function imports",
+);
+assert.equal(
+  residentClosures.manifest.imports.length,
+  functionImportCount(residentClosures),
+  "resident-closure prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -86,6 +104,11 @@ assert.equal(
   residentProjections.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-projection prettyM imports memory",
+);
+assert.equal(
+  residentClosures.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident-closure prettyM imports memory",
 );
 assert.ok(residentRuntime.exports.some(({ name, kind }) =>
   name === residentRuntime.manifest.entry && kind === "function"),
@@ -121,10 +144,35 @@ for (const name of [
 assert.ok(residentProjections.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident-projection prettyM memory export is missing");
+assert.ok(residentClosures.exports.some(({ name, kind }) =>
+  name === residentClosures.manifest.entry && kind === "function"),
+"resident-closure prettyM entry export is missing");
+for (const name of [
+  "fir_cproj_0_object",
+  "fir_cproj_0_tobject",
+  "fir_cproj_0_uint8",
+  "fir_cproj_1_object",
+  "fir_cproj_1_tobject",
+  "fir_cproj_1_uint8",
+  "fir_cproj_1_uint32",
+  "fir_cproj_2_object",
+  "fir_cproj_2_tobject",
+  "fir_cproj_3_object",
+  "fir_cproj_3_tobject",
+  "fir_cproj_4_object",
+]) {
+  assert.ok(residentClosures.exports.some((entry) =>
+    entry.name === name && entry.kind === "function"),
+  `resident-closure prettyM helper export ${name} is missing`);
+}
+assert.ok(residentClosures.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident-closure prettyM memory export is missing");
 
 console.log(
-  `PASS resident prettyM internalized getTag, isShared, and read projections ` +
+  `PASS resident prettyM internalized getTag, isShared, and projection families ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
-  `${functionImportCount(residentProjections)} function imports)`,
+  `${functionImportCount(residentProjections)} → ` +
+  `${functionImportCount(residentClosures)} function imports)`,
 );
