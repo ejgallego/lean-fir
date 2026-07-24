@@ -771,6 +771,8 @@ structure Case where
   requiredExecutedExternals : Array Lean.Name := #[]
   /-- Minimum dynamic dispatch counts for externals whose multiplicity is significant. -/
   requiredExecutedExternalCounts : Array ExecutedExternalCountRequirement := #[]
+  /-- Exact ordered external dispatch sequence, when this fixture pins one. -/
+  requiredExecutedExternalTrace : Option (Array Lean.Name) := none
   /-- External events promoted from backend telemetry into the semantic observation. -/
   effectProjections : Array EffectProjection := #[]
   provenance : Provenance := firProvenance "FIR validation fixture"
@@ -792,6 +794,7 @@ structure CaseDescriptor where
   requiredExternals : Array String
   requiredExecutedExternals : Array String
   requiredExecutedExternalCounts : Array ExecutedExternalCountRequirementDescriptor
+  requiredExecutedExternalTrace : Option (Array String)
   effectProjections : Array EffectProjectionDescriptor
   provenance : Provenance
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
@@ -813,6 +816,9 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   requiredExecutedExternalCounts :=
     validationCase.requiredExecutedExternalCounts.map
       ExecutedExternalCountRequirement.descriptor
+  requiredExecutedExternalTrace :=
+    validationCase.requiredExecutedExternalTrace.map fun trace =>
+      trace.map toString
   effectProjections := validationCase.effectProjections.map EffectProjection.descriptor
   provenance := validationCase.provenance }
 
@@ -1659,6 +1665,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
     provenance := firProvenance
       "Replace one alias, then retain and mutate the surviving child to test nested copy-on-write" },
   { id := "aliased-byte-array-self-replace"
@@ -1715,6 +1722,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
     provenance := firProvenance
       "Self-replace one alias, then mutate it while returning the untouched sibling occurrence" },
   { id := "byte-array-object-swap-unique"
@@ -1987,6 +1995,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat]
+    requiredExecutedExternalTrace := some #[``Int.ofNat]
     provenance := firProvenance "Compiler-built largest positive immediate Int" },
   { id := "int-literal-heap-positive"
     entry := ``Source.intPosHeap
@@ -1999,6 +2008,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat]
+    requiredExecutedExternalTrace := some #[``Int.ofNat]
     provenance := firProvenance "Compiler-built first positive heap Int" },
   { id := "int-literal-immediate-negative"
     entry := ``Source.intNegImmediate
@@ -2011,6 +2021,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.neg]
     provenance := firProvenance "Compiler-built smallest negative immediate Int" },
   { id := "int-literal-heap-negative"
     entry := ``Source.intNegHeap
@@ -2023,6 +2034,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.neg]
     provenance := firProvenance "Compiler-built first negative heap Int" },
   { id := "int-classify-immediate-positive"
     entry := ``Source.classifyInt
@@ -2037,6 +2049,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the largest positive immediate Int" },
   { id := "int-classify-heap-positive"
     entry := ``Source.classifyInt
@@ -2051,6 +2064,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the first positive heap Int" },
   { id := "int-classify-immediate-negative"
     entry := ``Source.classifyInt
@@ -2065,6 +2079,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the smallest negative immediate Int" },
   { id := "int-classify-heap-negative"
     entry := ``Source.classifyInt
@@ -2079,6 +2094,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the first negative heap Int" },
   { id := "nat-add-small"
     entry := ``Source.addNat
@@ -2093,6 +2109,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Nat.add]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Nat.add]
+    requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance "Controlled Nat.add external on tagged operands" },
   { id := "nat-add-tagged-to-heap"
     entry := ``Source.addNat
@@ -2107,6 +2124,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Nat.add]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Nat.add]
+    requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance "Nat.add crossing the tagged-to-heap result boundary" },
   { id := "nat-add-heap-input"
     entry := ``Source.addNat
@@ -2121,6 +2139,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``Nat.add]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``Nat.add]
+    requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
   { id := "effect-record-nat"
     entry := ``Source.recordOnce
@@ -2137,6 +2156,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``NativeEffects.recordImpl]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordImpl]
     effectProjections := #[{
       external := ``NativeEffects.recordImpl
       operation := "validation.record"
@@ -2162,6 +2182,8 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternalCounts :=
       #[{ external := ``NativeEffects.recordImpl, minimum := 2, maximum := some 2 }]
+    requiredExecutedExternalTrace :=
+      some #[``NativeEffects.recordImpl, ``NativeEffects.recordImpl]
     effectProjections := #[{
       external := ``NativeEffects.recordImpl
       operation := "validation.record"
@@ -2191,6 +2213,8 @@ def cases : Array Case := #[
     requiredExecutedExternalCounts :=
       #[{ external := ``NativeEffects.recordByteArrayImpl, minimum := 2,
           maximum := some 2 }]
+    requiredExecutedExternalTrace :=
+      some #[``NativeEffects.recordByteArrayImpl, ``NativeEffects.recordByteArrayImpl]
     effectProjections := #[{
       external := ``NativeEffects.recordByteArrayImpl
       operation := "validation.recordByteArray"
@@ -2222,6 +2246,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.size]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.size]
+    requiredExecutedExternalTrace := some #[``ByteArray.size]
     provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" },
   { id := "conditional-byte-array-get-taken"
     entry := ``Source.conditionalByteArrayGet
@@ -2244,6 +2269,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       #[{ external := ``ByteArray.get!, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance
       "Take a runtime Boolean branch and dispatch ByteArray.get! exactly once" },
   { id := "conditional-byte-array-get-skipped"
@@ -2266,6 +2292,7 @@ def cases : Array Case := #[
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       #[{ external := ``ByteArray.get!, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[]
     provenance := firProvenance
       "Skip a retained ByteArray.get! branch and require zero external dispatches" },
   { id := "byte-array-get-zero"
@@ -2282,6 +2309,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance "Read a zero byte through ByteArray.get!" },
   { id := "byte-array-get-high-bit"
     entry := ``Source.byteArrayGet
@@ -2298,6 +2326,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance "Read the first high-bit byte through ByteArray.get!" },
   { id := "byte-array-get-max"
     entry := ``Source.byteArrayGet
@@ -2314,6 +2343,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance "Read the maximum byte through ByteArray.get!" },
   { id := "byte-array-get-empty"
     entry := ``Source.byteArrayGet
@@ -2331,6 +2361,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at index zero from an empty ByteArray through ByteArray.get!" },
   { id := "byte-array-get-end"
@@ -2349,6 +2380,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at the exact end boundary through ByteArray.get!" },
   { id := "byte-array-get-heap-oob"
@@ -2369,6 +2401,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.get!]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at a heap-natural index through ByteArray.get!" },
   { id := "byte-array-set-unique"
@@ -2386,6 +2419,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
     provenance := firProvenance
       "Mutate a uniquely owned byte array in place through ByteArray.set!" },
   { id := "byte-array-set-shared"
@@ -2404,6 +2438,7 @@ def cases : Array Case := #[
     requiredExecutedExternals := #[``ByteArray.set!]
     requiredExecutedExternalCounts :=
       exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
     provenance := firProvenance
       "Copy a shared byte array while preserving its original alias through ByteArray.set!" }
 ]
@@ -2429,6 +2464,22 @@ def requiredFinalExecutedForms : Array String :=
   validationCase.requiredExternals.all fun external =>
     validationCase.requiredExecutedExternalCounts.any fun requirement =>
       requirement.external == external
+
+#guard cases.all fun validationCase =>
+  validationCase.requiredExternals.isEmpty ||
+    validationCase.requiredExecutedExternalTrace.isSome
+
+#guard cases.all fun validationCase =>
+  match validationCase.requiredExecutedExternalTrace with
+  | none => true
+  | some trace =>
+      trace.all validationCase.requiredExecutedExternals.contains &&
+      validationCase.requiredExecutedExternals.all trace.contains &&
+      validationCase.requiredExecutedExternalCounts.all fun requirement =>
+        let observed := trace.foldl (init := 0) fun count external =>
+          if external == requirement.external then count + 1 else count
+        observed == requirement.minimum &&
+          requirement.maximum == some observed
 
 #guard requiredFinalExecutedForms.all fun form =>
   cases.any fun validationCase => validationCase.requiredExecutedLcnfForms.contains form

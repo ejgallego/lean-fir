@@ -878,7 +878,12 @@ attached to later differential runs, including semantic mismatches.
 must occur in the compiled artifact; `requiredExecutedExternals` records the
 stronger path obligation that the interpreter must actually dispatch them.
 Both fields are required, even when empty, and are canonicalized as sorted
-sets.  Each case also carries an `effectProjections` array describing which
+sets. `requiredExecutedExternalTrace` is either `null` (no exact-order
+obligation) or an ordered array, where `[]` deliberately requires zero
+dispatches. Trace names must exactly reproduce `requiredExecutedExternals`, and
+the trace multiplicities must satisfy the declared external-count bounds.
+Unlike set-valued fields, this array is never sorted or deduplicated. Each case
+also carries an `effectProjections` array describing which
 external events become semantic effects, with external name, stable operation
 name, argument schemas, and optional result schema.  The field is required and
 canonicalized even when empty.  A projected external must also be required both
@@ -960,6 +965,11 @@ sequence.
 `requiredExecutedExternalCounts` supplies per-symbol
 `{external, minimum, maximum}` obligations, and the coverage report retains
 both per-case bound violations and corpus-wide required and observed totals.
+When `requiredExecutedExternalTrace` is non-null, the observed sequence must
+also match it element for element. All 27 current fixtures that retain an
+external pin an exact trace: the skipped conditional pins `[]`, repeated
+effects pin both occurrences, and the signed-integer fixtures pin construction
+before negation or comparison.
 The same exact-zero convention asserts that a statically retained external was
 not dispatched on the selected path.
 

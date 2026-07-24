@@ -32,6 +32,7 @@ LCNF_MANIFEST_FIELDS = {
     "requiredExternals",
     "requiredExecutedExternals",
     "requiredExecutedExternalCounts",
+    "requiredExecutedExternalTrace",
 }
 
 
@@ -59,6 +60,18 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                     f"native corpus manifest/{case_id}: duplicate {field_name}"
                 )
             return sorted(values)
+
+        def checked_optional_name_trace(field_name: str) -> list[str] | None:
+            trace = descriptor[field_name]
+            if trace is None:
+                return None
+            if not isinstance(trace, list) or not all(
+                isinstance(name, str) and name for name in trace
+            ):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed {field_name}"
+                )
+            return list(trace)
 
         def checked_count_requirements(
             field_name: str,
@@ -156,6 +169,34 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
             required_externals,
             required_executed_externals,
         )
+        required_executed_external_trace = checked_optional_name_trace(
+            "requiredExecutedExternalTrace"
+        )
+        if required_executed_external_trace is not None:
+            trace_names = set(required_executed_external_trace)
+            if trace_names != set(required_executed_externals):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: "
+                    "requiredExecutedExternalTrace names must exactly match "
+                    "requiredExecutedExternals"
+                )
+            if not trace_names <= set(required_externals):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: "
+                    "requiredExecutedExternalTrace names must be statically required"
+                )
+            trace_counts = trace_name_counts(required_executed_external_trace)
+            unsatisfied_trace_counts = unsatisfied_count_requirements(
+                prepared_external_count_requirements,
+                trace_counts,
+                "external",
+            )
+            if unsatisfied_trace_counts:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: "
+                    "requiredExecutedExternalTrace violates "
+                    "requiredExecutedExternalCounts"
+                )
 
         effect_externals = {
             projection["external"] for projection in descriptor["effectProjections"]
@@ -177,6 +218,7 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
         item["requiredExecutedExternalCounts"] = (
             prepared_external_count_requirements
         )
+        item["requiredExecutedExternalTrace"] = required_executed_external_trace
         prepared.append(item)
     return prepared
 
@@ -395,6 +437,8 @@ def coverage_report(
     executed_external_trace_diagnostic_count = 0
     executed_external_trace_valid_diagnostic_count = 0
     executed_external_trace_consistent_diagnostic_count = 0
+    executed_external_trace_requirement_count = 0
+    executed_external_trace_mismatch_count = 0
     executed_external_trace_event_count = 0
     interpreter_steps: list[int] = []
 
@@ -437,6 +481,9 @@ def coverage_report(
         required_executed_external_counts = descriptor[
             "requiredExecutedExternalCounts"
         ]
+        required_executed_external_trace = descriptor[
+            "requiredExecutedExternalTrace"
+        ]
         executed_obligations_active = bool(required_executed)
         executed_count_obligations_active = bool(required_executed_counts)
         executed_count_upper_bounds_active = any(
@@ -459,6 +506,9 @@ def coverage_report(
         executed_external_count_zero_counts_active = any(
             requirement["minimum"] == 0
             for requirement in required_executed_external_counts
+        )
+        executed_external_trace_obligations_active = (
+            required_executed_external_trace is not None
         )
         missing_static = sorted(set(required_static) - set(observed_static))
         missing_executed = sorted(set(required_executed) - set(observed_executed))
@@ -485,10 +535,21 @@ def coverage_report(
         external_trace_counts_consistent = (
             observed_executed_external_trace is not None
             and (
-                observed_executed_external_counts is None
+                not executed_external_counts_present
+                or observed_executed_external_counts is None
                 or trace_name_counts(observed_external_trace)
                 == observed_external_count_map
             )
+        )
+        external_trace_matches_required = (
+            observed_executed_external_trace
+            == required_executed_external_trace
+            if (
+                executed_external_trace_present
+                and observed_executed_external_trace is not None
+                and executed_external_trace_obligations_active
+            )
+            else None
         )
         unsatisfied_executed_external_counts = unsatisfied_count_requirements(
             required_executed_external_counts,
@@ -603,6 +664,12 @@ def coverage_report(
             executed_external_trace_present
             and external_trace_names_consistent
             and external_trace_counts_consistent
+        )
+        executed_external_trace_requirement_count += int(
+            executed_external_trace_obligations_active
+        )
+        executed_external_trace_mismatch_count += int(
+            external_trace_matches_required is False
         )
         if observed_executed_external_trace is not None:
             executed_external_trace_event_count += len(
@@ -722,6 +789,15 @@ def coverage_report(
                     "executed-external-trace diagnostic disagrees with "
                     "executed-external-counts"
                 )
+            if (
+                record is not None
+                and external_trace_matches_required is False
+            ):
+                audit_finding(
+                    "executed external trace differs from exact requirement "
+                    f"(required={json.dumps(required_executed_external_trace, separators=(',', ':'))}; "
+                    f"observed={json.dumps(observed_external_trace, separators=(',', ':'))})"
+                )
         if record is not None and not executed_external_missing_present:
             audit_finding("missing missing-executed-externals diagnostic")
         elif reported_missing_executed_externals != missing_executed_externals:
@@ -819,7 +895,12 @@ def coverage_report(
                             ),
                             "namesConsistent": external_trace_names_consistent,
                             "countsConsistent": external_trace_counts_consistent,
+                            "obligationsActive": (
+                                executed_external_trace_obligations_active
+                            ),
+                            "required": required_executed_external_trace,
                             "observed": observed_external_trace,
+                            "matchesRequired": external_trace_matches_required,
                         },
                     },
                 },
@@ -927,6 +1008,9 @@ def coverage_report(
                         ),
                     },
                     "trace": {
+                        "casesWithRequirements": (
+                            executed_external_trace_requirement_count
+                        ),
                         "casesWithDiagnostics": (
                             executed_external_trace_diagnostic_count
                         ),
@@ -935,6 +1019,9 @@ def coverage_report(
                         ),
                         "casesWithConsistentDiagnostics": (
                             executed_external_trace_consistent_diagnostic_count
+                        ),
+                        "mismatchedObligationCount": (
+                            executed_external_trace_mismatch_count
                         ),
                         "observedEventCount": executed_external_trace_event_count,
                     },

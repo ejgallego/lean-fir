@@ -118,6 +118,7 @@ def descriptor(
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
     executed_external_counts: list[dict] | None = None,
+    required_executed_external_trace: list[str] | None = None,
     effect_projections: list[dict] | None = None,
 ) -> dict:
     item = {
@@ -142,6 +143,7 @@ def descriptor(
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
         "requiredExecutedExternalCounts": executed_external_counts or [],
+        "requiredExecutedExternalTrace": required_executed_external_trace,
         "effectProjections": effect_projections or [],
     }
     return item
@@ -468,6 +470,11 @@ class HarnessTests(unittest.TestCase):
                 {"external": "Nat.add", "minimum": 2, "maximum": None},
                 {"external": "ByteArray.size", "minimum": 1, "maximum": 1},
             ],
+            required_executed_external_trace=[
+                "Nat.add",
+                "ByteArray.size",
+                "Nat.add",
+            ],
             effect_projections=[
                 {
                     "external": "Nat.add",
@@ -511,6 +518,10 @@ class HarnessTests(unittest.TestCase):
                 {"external": "ByteArray.size", "minimum": 1, "maximum": 1},
                 {"external": "Nat.add", "minimum": 2, "maximum": None},
             ],
+        )
+        self.assertEqual(
+            manifest[1]["requiredExecutedExternalTrace"],
+            ["Nat.add", "ByteArray.size", "Nat.add"],
         )
         self.assertEqual(
             [projection["external"] for projection in manifest[1]["effectProjections"]],
@@ -691,6 +702,27 @@ class HarnessTests(unittest.TestCase):
                 json.dumps(missing_counts), ["native", "--manifest"]
             )
 
+        missing_trace = descriptor("case")
+        del missing_trace["requiredExecutedExternalTrace"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredExecutedExternalTrace"
+        ):
+            harness.manifest_from_output(
+                json.dumps(missing_trace), ["native", "--manifest"]
+            )
+
+        for malformed_trace in ("Nat.add", ["Nat.add", ""], ["Nat.add", 1]):
+            malformed = descriptor("case")
+            malformed["requiredExecutedExternalTrace"] = malformed_trace
+            with self.subTest(malformed_trace=malformed_trace):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "malformed requiredExecutedExternalTrace",
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(malformed), ["native", "--manifest"]
+                    )
+
         for malformed_counts in (
             "Nat.add=2",
             [{"external": "Nat.add", "minimum": 2}],
@@ -795,6 +827,50 @@ class HarnessTests(unittest.TestCase):
             harness.manifest_from_output(
                 json.dumps(zero_required_executed), ["native", "--manifest"]
             )
+
+        wrong_trace_names = descriptor(
+            "case",
+            externals=["ByteArray.size", "Nat.add"],
+            executed_externals=["Nat.add"],
+            required_executed_external_trace=["ByteArray.size"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "names must exactly match requiredExecutedExternals",
+        ):
+            harness.manifest_from_output(
+                json.dumps(wrong_trace_names), ["native", "--manifest"]
+            )
+
+        trace_violates_counts = descriptor(
+            "case",
+            externals=["Nat.add"],
+            executed_externals=["Nat.add"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 2, "maximum": 2}
+            ],
+            required_executed_external_trace=["Nat.add"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "violates requiredExecutedExternalCounts",
+        ):
+            harness.manifest_from_output(
+                json.dumps(trace_violates_counts), ["native", "--manifest"]
+            )
+
+        exact_zero_trace = descriptor(
+            "case",
+            externals=["Nat.add"],
+            executed_external_counts=[
+                {"external": "Nat.add", "minimum": 0, "maximum": 0}
+            ],
+            required_executed_external_trace=[],
+        )
+        prepared = harness.manifest_from_output(
+            json.dumps(exact_zero_trace), ["native", "--manifest"]
+        )
+        self.assertEqual(prepared[0]["requiredExecutedExternalTrace"], [])
 
     def test_effect_projections_are_required_and_validated(self) -> None:
         missing = descriptor("case")
@@ -6649,9 +6725,11 @@ class HarnessTests(unittest.TestCase):
                         "unsatisfiedObligationCount": 0,
                     },
                     "trace": {
+                        "casesWithRequirements": 0,
                         "casesWithDiagnostics": 2,
                         "casesWithValidDiagnostics": 2,
                         "casesWithConsistentDiagnostics": 2,
+                        "mismatchedObligationCount": 0,
                         "observedEventCount": 1,
                     },
                 },
@@ -7002,6 +7080,7 @@ class HarnessTests(unittest.TestCase):
                 success("case", "lcnf"),
                 static="extern,return",
                 executed="extern,return",
+                static_externals="Nat.add,ByteArray.size",
                 executed_externals="Nat.add,ByteArray.size",
                 executed_external_counts=(
                     '[{"external":"Nat.add","count":1},'
@@ -7016,6 +7095,65 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(trace["observed"], ["ByteArray.size", "Nat.add"])
         self.assertTrue(trace["namesConsistent"])
         self.assertTrue(trace["countsConsistent"])
+
+        exact_manifest = [
+            descriptor(
+                "case",
+                externals=["ByteArray.size", "Nat.add"],
+                executed_externals=["ByteArray.size", "Nat.add"],
+                required_executed_external_trace=[
+                    "Nat.add",
+                    "ByteArray.size",
+                ],
+            )
+        ]
+        report, failures = harness.coverage_report(
+            exact_manifest, ordered, ["case"]
+        )
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed external trace differs from exact requirement "
+                '(required=["Nat.add","ByteArray.size"];'
+                ' observed=["ByteArray.size","Nat.add"])'
+            ],
+        )
+        trace = report["cases"][0]["externals"]["executed"]["trace"]
+        self.assertTrue(trace["obligationsActive"])
+        self.assertFalse(trace["matchesRequired"])
+        self.assertEqual(
+            report["summary"]["externals"]["executed"]["trace"][
+                "mismatchedObligationCount"
+            ],
+            1,
+        )
+
+        exact_empty_manifest = [
+            descriptor(
+                "case",
+                externals=["Nat.add"],
+                executed_external_counts=[
+                    {"external": "Nat.add", "minimum": 0, "maximum": 0}
+                ],
+                required_executed_external_trace=[],
+            )
+        ]
+        empty = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                static_externals="Nat.add",
+            )
+        }
+        report, failures = harness.coverage_report(
+            exact_empty_manifest, empty, ["case"]
+        )
+        self.assertEqual(failures, [])
+        trace = report["cases"][0]["externals"]["executed"]["trace"]
+        self.assertTrue(trace["obligationsActive"])
+        self.assertEqual(trace["required"], [])
+        self.assertTrue(trace["matchesRequired"])
 
     def test_external_telemetry_is_required_without_obligations(self) -> None:
         manifest = [descriptor("case")]
