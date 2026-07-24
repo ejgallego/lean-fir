@@ -132,9 +132,24 @@ def EventRel (rho : AddressRenaming) (left right : ExternalEvent) : Prop :=
   ArrayRel (ValueRel rho) left.args right.args ∧
   ValueRel rho left.result right.result
 
+/-- Runtime faults are observationally identical either literally or, for
+the two address-bearing diagnostics, through the active heap renaming.
+Keeping an explicit `same` constructor preserves exact fault observations
+even when the reported location is not otherwise reachable. -/
+inductive RuntimeFaultRel (rho : AddressRenaming) :
+    RuntimeFault → RuntimeFault → Prop where
+  | same (fault : RuntimeFault) : RuntimeFaultRel rho fault fault
+  | deadObject {left right : Location}
+      (mapped : rho.forward left = some right) :
+      RuntimeFaultRel rho (.deadObject left) (.deadObject right)
+  | referenceCountUnderflow {left right : Location}
+      (mapped : rho.forward left = some right) :
+      RuntimeFaultRel rho
+        (.referenceCountUnderflow left) (.referenceCountUnderflow right)
+
 def OutcomeRel (rho : AddressRenaming) : Outcome → Outcome → Prop
   | .returned left, .returned right => ValueRel rho left right
-  | .fault left, .fault right => left = right
+  | .fault left, .fault right => RuntimeFaultRel rho left right
   | _, _ => False
 
 def Observation.roots (observation : Observation) : List Value :=
