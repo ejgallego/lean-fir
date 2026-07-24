@@ -111,7 +111,12 @@ a facade. Construct the concrete host before instantiation as usual, then
 attach the exported memory before allocating or invoking:
 
 ```js
-const host = new ConcreteHost(manifest.imports);
+const host = new ConcreteHost(
+  manifest.imports,
+  manifest.initialRuntime,
+  undefined,
+  manifest.closureDispatch,
+);
 const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
 host.attachMemory(instance.exports.memory);
 ```
@@ -343,6 +348,15 @@ raw `Format` corpus:
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closure-projections.wasm
 ```
+
+Closure target IDs are now an explicit module contract rather than an
+accidental consequence of the remaining import order. Every descriptor carries
+the duplicate-free `closureDispatch` array generated in first-use order;
+resident linking preserves it even after closure imports disappear, and the
+concrete host uses it for allocation. On the proof side, this is the concrete
+table to which W6's `RefinementWitness.closureDispatch` must be related. A
+future table-layout change therefore remains a shared-contract change rather
+than a generation-only rewrite.
 
 The complete retained audit is now
 `351 → 350 → 349 → 341 → 254` function imports.

@@ -191,7 +191,7 @@ async function runInvocation(id, bytes, manifest, expectation) {
   assert.ok(WebAssembly.validate(bytes), `${id} failed WebAssembly validation`);
 
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry);
+    concreteArtifactExternalRegistry, manifest.closureDispatch);
   checkInitialRuntime(id, host, manifest.initialRuntime);
   const physicalArgs = manifest.params.map((kind, index) => {
     const semantic = concreteManifestValue(manifest.arguments[index]);
@@ -213,7 +213,7 @@ async function runInvocation(id, bytes, manifest, expectation) {
 
 async function runModule(id, bytes, manifest, expectation) {
   const host = new ConcreteHost(manifest.imports, undefined,
-    concreteArtifactExternalRegistry);
+    concreteArtifactExternalRegistry, manifest.closureDispatch);
   const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
   if (expectation.mode === "pretty-module") {
     checkConcretePrettyFormatModule(artifact);

@@ -125,6 +125,13 @@ async function readManifest(path, id, requireFixture) {
   assert.ok(manifest && typeof manifest === "object" && !Array.isArray(manifest),
     `${id} manifest must be an object`);
   assert.ok(Array.isArray(manifest.imports), `${id} manifest imports must be an array`);
+  assert.ok(Array.isArray(manifest.closureDispatch),
+    `${id} manifest closureDispatch must be an array`);
+  assert.equal(new Set(manifest.closureDispatch).size, manifest.closureDispatch.length,
+    `${id} manifest closureDispatch must not contain duplicates`);
+  assert.ok(manifest.closureDispatch.every((target) =>
+    typeof target === "string" && target.length > 0),
+  `${id} manifest closureDispatch must contain target names`);
   if (requireFixture) {
     assert.equal(manifest.fixture, id, `${id} manifest fixture mismatch`);
   }
@@ -150,14 +157,16 @@ async function readManifest(path, id, requireFixture) {
 function preflightManifest(manifest) {
   const blockers = [];
   try {
-    const host = new ConcreteHost(manifest.imports);
+    const host = new ConcreteHost(manifest.imports, undefined, undefined,
+      manifest.closureDispatch);
     host.imports(manifest.imports);
   } catch (error) {
     blockers.push({ kind: "import-construction", message: String(error.message ?? error) });
   }
   if (manifest.initialRuntime !== undefined) {
     try {
-      new ConcreteHost(manifest.imports, manifest.initialRuntime);
+      new ConcreteHost(manifest.imports, manifest.initialRuntime, undefined,
+        manifest.closureDispatch);
     } catch (error) {
       blockers.push({ kind: "initial-runtime", message: String(error.message ?? error) });
     }

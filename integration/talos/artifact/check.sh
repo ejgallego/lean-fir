@@ -192,6 +192,7 @@ node test-module-client.mjs \
   _build/source-usize-id.wasm
 node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
+node test-concrete-closure-dispatch.mjs
 node test-concrete-format-externals.mjs
 node test-concrete-initial-runtime.mjs
 node run-concrete-source-artifacts.mjs _build

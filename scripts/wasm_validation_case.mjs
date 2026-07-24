@@ -211,7 +211,8 @@ export async function executeSemanticWasmCase({
     `${caseId} effect projections must be an array`);
 
   const manifestKeys =
-    ["arguments", "entry", "fixture", "imports", "params", "result", "sourceEntry"];
+    ["arguments", "closureDispatch", "entry", "fixture", "imports", "params",
+      "result", "sourceEntry"];
   if (Object.hasOwn(compilerManifest, "initialRuntime")) {
     manifestKeys.push("initialRuntime");
   }
@@ -222,6 +223,11 @@ export async function executeSemanticWasmCase({
     `${caseId} source entry mismatch`);
   assert.equal(compilerManifest.entry, descriptor.entry, `${caseId} entry mismatch`);
   assert.ok(Array.isArray(compilerManifest.params), `${caseId} params must be an array`);
+  assert.ok(Array.isArray(compilerManifest.closureDispatch),
+    `${caseId} closureDispatch must be an array`);
+  assert.equal(new Set(compilerManifest.closureDispatch).size,
+    compilerManifest.closureDispatch.length,
+    `${caseId} closureDispatch must not contain duplicates`);
   assert.ok(Array.isArray(compilerManifest.arguments),
     `${caseId} arguments must be an array`);
   assert.equal(compilerManifest.params.length, descriptor.args.length,

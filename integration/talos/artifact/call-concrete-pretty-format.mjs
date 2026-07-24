@@ -10,7 +10,8 @@ const artifactPath = process.argv[2];
 assert.ok(artifactPath, "usage: node call-concrete-pretty-format.mjs ARTIFACT.wasm");
 
 const manifest = JSON.parse(fs.readFileSync(`${artifactPath}.json`, "utf8"));
-const host = new ConcreteHost(manifest.imports, undefined, concreteArtifactExternalRegistry);
+const host = new ConcreteHost(manifest.imports, undefined,
+  concreteArtifactExternalRegistry, manifest.closureDispatch);
 const artifact = await instantiateModuleArtifact({
   bytes: fs.readFileSync(artifactPath),
   manifest,

@@ -18,6 +18,8 @@ inductive SymbolicError where
   | duplicateImportKey
   | duplicateImportName (moduleName itemName : String)
   | runtimeOperationOrder
+  | duplicateClosureTarget (name : Name)
+  | missingClosureTarget (name : Name)
   | invalidRuntimeOperation (index : Nat)
   | invalidRuntimeImport (index : Nat)
   | invalidExternalImport (index : Nat)
@@ -120,6 +122,12 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
   let functionNames := module.functions.toList.map (·.name)
   if let some name := firstDuplicate? functionNames then
     throw (.duplicateFunction name)
+  if let some name := firstDuplicate? module.closureDispatch.toList then
+    throw (.duplicateClosureTarget name)
+  for operation in module.runtimeOperations do
+    if let some name := operation.closureTarget? then
+      unless module.closureDispatch.contains name do
+        throw (.missingClosureTarget name)
   let expectedOperations := collectRuntimeOps module.functions
   unless module.runtimeOperations == expectedOperations do
     throw .runtimeOperationOrder

@@ -58,6 +58,11 @@ structure Module where
   exports : Array Name
   initializers : Array Name
   runtimeOperations : Array RuntimeOp
+  /--
+  Stable target-ID table for concrete closure headers. Unlike runtime imports,
+  this metadata survives resident-runtime internalization.
+  -/
+  closureDispatch : Array Name := #[]
   /-- Optional module-owned wasm32 memory. Existing semantic-host modules omit it. -/
   memory : Option MemoryDecl := none
   deriving Inhabited, BEq
@@ -1242,6 +1247,7 @@ def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := d
     functions
     exports
     initializers := cachedDeclarations
-    runtimeOperations := operations }
+    runtimeOperations := operations
+    closureDispatch := collectClosureDispatch operations }
 
 end Fir.Wasm

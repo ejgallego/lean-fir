@@ -213,6 +213,26 @@ inductive RuntimeOp where
   | getTag
   deriving Inhabited, BEq
 
+/-- The source declaration whose stable identity is stored in a closure header. -/
+def RuntimeOp.closureTarget? : RuntimeOp → Option Name
+  | .partialApply function .. => some function
+  | .closureMatches function .. => some function
+  | .closureProj function .. => some function
+  | _ => none
+
+/--
+Build the stable module-wide closure dispatch table in first-use order.
+
+Resident-runtime linking may remove closure operations from the import surface,
+so this table is retained separately from `Module.runtimeOperations`.
+-/
+def collectClosureDispatch (operations : Array RuntimeOp) : Array Name :=
+  operations.foldl (init := #[]) fun targets operation =>
+    match operation.closureTarget? with
+    | none => targets
+    | some target =>
+        if targets.contains target then targets else targets.push target
+
 /-- Operation-specific semantic constraints not expressible by the plain constructor fields. -/
 def RuntimeOp.abiWellFormed : RuntimeOp → Bool
   | .literal value result => result.acceptsLiteral value

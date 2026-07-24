@@ -186,6 +186,10 @@ run_cmd do
   let moduleArtifact ← match result with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile Format facade: {repr error}"
+  unless moduleArtifact.module.closureDispatch.size == 38 &&
+      moduleArtifact.module.closureDispatch ==
+        Fir.Wasm.collectClosureDispatch moduleArtifact.module.runtimeOperations do
+    throwError "compiler Format closure-dispatch inventory changed"
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
@@ -285,6 +289,9 @@ run_cmd do
   unless residentClosureArtifact.module.imports.size + closureProjections.size ==
       residentProjectionArtifact.module.imports.size do
     throwError "resident Format closure-projection import accounting changed"
+  unless residentClosureArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch do
+    throwError "resident linking changed the stable closure-dispatch table"
   unless expectedClosureCoordinates.all fun coordinate =>
       let operation : Fir.Wasm.RuntimeOp :=
         .closureProj `resident (coordinate.1 + 2) (coordinate.1 + 1)

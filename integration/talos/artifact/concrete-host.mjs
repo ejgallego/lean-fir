@@ -109,7 +109,7 @@ export function concreteManifestValue(argument) {
  */
 export class ConcreteHost {
   constructor(manifestImports = [], initialRuntime = undefined,
-    externalRegistry = undefined) {
+    externalRegistry = undefined, closureDispatch = undefined) {
     this.memory = undefined;
     this.buffer = new ArrayBuffer(PAGE_BYTES);
     this.view = new DataView(this.buffer);
@@ -128,16 +128,31 @@ export class ConcreteHost {
     this.allocations = [];
 
     const operations = manifestImports.map((descriptor) => descriptor.operation);
-    this.closureDispatch = [];
+    const importedClosureDispatch = [];
     this.closureDescriptors = [];
     for (const operation of operations) {
       if (operation.kind === "partialApply" || operation.kind === "closureMatches" ||
           operation.kind === "closureProj") {
-        uniquePush(this.closureDispatch, operation.function);
+        uniquePush(importedClosureDispatch, operation.function);
       }
       if (operation.kind === "partialApply") {
         uniquePush(this.closureDescriptors, [...operation.fields], sameKinds);
       }
+    }
+    if (closureDispatch === undefined) {
+      this.closureDispatch = importedClosureDispatch;
+    } else {
+      assert.ok(Array.isArray(closureDispatch),
+        "concrete closure dispatch metadata must be an array");
+      assert.equal(new Set(closureDispatch).size, closureDispatch.length,
+        "concrete closure dispatch metadata must not contain duplicates");
+      assert.ok(closureDispatch.every((target) =>
+        typeof target === "string" && target.length > 0),
+      "concrete closure dispatch targets must be nonempty strings");
+      assert.ok(importedClosureDispatch.every((target) =>
+        closureDispatch.includes(target)),
+      "concrete closure dispatch metadata is missing an imported target");
+      this.closureDispatch = [...closureDispatch];
     }
     if (initialRuntime !== undefined) {
       this.loadInitialRuntime(initialRuntime);

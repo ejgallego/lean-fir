@@ -34,6 +34,7 @@ const host = new ConcreteHost(
   manifest.imports,
   undefined,
   concreteArtifactExternalRegistry,
+  manifest.closureDispatch,
 );
 const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
 console.log(checkConcretePrettyFormatModule(artifact));
