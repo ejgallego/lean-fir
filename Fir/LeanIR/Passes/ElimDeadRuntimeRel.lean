@@ -141,6 +141,119 @@ theorem unpersistedLiveCount_markPersistentLocationFuel_le
             exact Nat.le_trans
               (foldLe cell.object.ownedValues after) (by omega)
 
+/-- A heap update preserves the ownership graph when every lookup keeps the
+same optional heap object; reference-count and persistence metadata may
+change. -/
+def HeapOwnershipFrame (before after : Heap) : Prop :=
+  ∀ location,
+    (findCell? before location).map HeapCell.object =
+      (findCell? after location).map HeapCell.object
+
+namespace HeapOwnershipFrame
+
+theorem refl (heap : Heap) : HeapOwnershipFrame heap heap := by
+  intro location
+  rfl
+
+theorem trans
+    (first : HeapOwnershipFrame before middle)
+    (second : HeapOwnershipFrame middle after) :
+    HeapOwnershipFrame before after := by
+  intro location
+  exact (first location).trans (second location)
+
+theorem symm
+    (frame : HeapOwnershipFrame before after) :
+    HeapOwnershipFrame after before := by
+  intro location
+  exact (frame location).symm
+
+theorem reachable
+    (frame : HeapOwnershipFrame before after)
+    (reachable : Reachable before roots location) :
+    Reachable after roots location := by
+  induction reachable with
+  | root member => exact .root member
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      have objectRead := frame parent
+      rw [cellFound] at objectRead
+      cases afterFound : findCell? after parent with
+      | none => simp [afterFound] at objectRead
+      | some afterCell =>
+          simp only [afterFound, Option.map_some, Option.some.injEq] at objectRead
+          exact .child ih afterFound
+            (by simpa [← objectRead] using member) reference
+
+end HeapOwnershipFrame
+
+/-- Replacing one cell while retaining its heap object preserves the complete
+ownership graph. -/
+theorem heapOwnershipFrame_replace
+    (beforeFound : findCell? before modified = some beforeCell)
+    (afterFound : findCell? after modified = some afterCell)
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (objectEq : afterCell.object = beforeCell.object) :
+    HeapOwnershipFrame before after := by
+  intro location
+  by_cases same : location = modified
+  · subst location
+    simp [beforeFound, afterFound, objectEq]
+  · rw [frame location same]
+
+/-- Every fuel-bounded persistence traversal changes metadata only; its
+ownership graph is exactly the input graph. -/
+theorem heapOwnershipFrame_markPersistentLocationFuel
+    (fuel : Nat) (heap : Heap) (location : Location) :
+    HeapOwnershipFrame heap
+      (markPersistentLocationFuel fuel heap location) := by
+  induction fuel generalizing heap location with
+  | zero => exact .refl heap
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap location with
+      | none => exact .refl heap
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [skip]
+            exact .refl heap
+          · simp only [skip, Bool.false_eq_true, if_false]
+            obtain ⟨after, post⟩ :=
+              replaceCell_spec_of_find heap location cell
+                { cell with rc := 0, persistent := true } found
+            rw [post.replaced]
+            have parentFrame : HeapOwnershipFrame heap after :=
+              heapOwnershipFrame_replace found post.target post.frame rfl
+            have foldFrame (values : Array Value) (start : Heap) :
+                HeapOwnershipFrame start
+                  (values.foldl (init := start) fun next value =>
+                    match value with
+                    | .object (.heap child) =>
+                        markPersistentLocationFuel fuel next child
+                    | _ => next) := by
+              rw [← Array.foldl_toList]
+              generalize values.toList = items
+              induction items generalizing start with
+              | nil => exact .refl start
+              | cons value items itemsIH =>
+                  simp only [List.foldl]
+                  have headFrame : HeapOwnershipFrame start
+                      (match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel fuel start child
+                      | _ => start) := by
+                    cases value with
+                    | object reference =>
+                        cases reference with
+                        | tagged payload => exact .refl start
+                        | heap child => exact ih start child
+                    | usize | scalar | erased | reuseToken =>
+                        exact .refl start
+                  exact headFrame.trans (itemsIH _)
+            exact parentFrame.trans
+              (foldFrame cell.object.ownedValues after)
+
 /-- Extend a partial address bijection with one fresh source/target pair. -/
 def AddressRenaming.extend (rho : AddressRenaming)
     (left right : Location)
