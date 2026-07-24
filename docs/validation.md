@@ -950,7 +950,13 @@ the generic `extern` instruction form:
 Set membership cannot distinguish repeated calls to one primitive from calls
 to several different primitives. The runner therefore also emits
 `executed-external-counts` as positive `{external, count}` records, with keys
-that must exactly match `executed-externals`.
+that must exactly match `executed-externals`, and
+`executed-external-trace` as an ordered JSON array containing one external name
+per attempted dispatch. The harness requires all three views for every LCNF
+result. It checks that the trace's distinct names reproduce
+`executed-externals` and that its multiplicities reproduce
+`executed-external-counts`; neither a set nor counts can conceal a reordered
+sequence.
 `requiredExecutedExternalCounts` supplies per-symbol
 `{external, minimum, maximum}` obligations, and the coverage report retains
 both per-case bound violations and corpus-wide required and observed totals.
@@ -971,15 +977,16 @@ interpreter trace, preventing a missing snapshot from silently dropping a
 projected semantic effect.
 
 The report records per-case required, observed, and missing form and external
-sets, dynamic form counts, their corpus-wide summaries, and interpreter step
-counts. Every LCNF result must emit `executed-lcnf-forms`,
+sets, dynamic form and external counts, ordered external traces, their
+corpus-wide summaries, and interpreter step counts. Every LCNF result must emit
+`executed-lcnf-forms`,
 `executed-lcnf-form-counts`, `executed-externals`,
-`executed-external-counts`, and a positive `interpreter-steps` value, including
-cases whose executed requirement lists are empty. An empty list means “collect
-telemetry without a path-specific obligation”; it does not make the telemetry
-optional. Once a case lists an executed form, count, or external, failing to
-reach it with the required multiplicity fails validation just like a missing
-static obligation.
+`executed-external-counts`, `executed-external-trace`, and a positive
+`interpreter-steps` value, including cases whose executed requirement lists are
+empty. An empty list means “collect telemetry without a path-specific
+obligation”; it does not make the telemetry optional. Once a case lists an
+executed form, count, or external, failing to reach it with the required
+multiplicity fails validation just like a missing static obligation.
 This distinction prevents code merely present in an unvisited branch from
 satisfying an execution-coverage claim.  The checked corpus currently activates
 at least one executed-form obligation for every case, and the Lean case type

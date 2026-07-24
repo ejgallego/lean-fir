@@ -252,6 +252,33 @@ def diagnostic_named_counts(
     return True, dict(sorted(counts.items()))
 
 
+def diagnostic_name_trace(
+    record: dict | None, key: str
+) -> tuple[bool, list[str] | None]:
+    """Return an ordered JSON name trace, preserving absence vs invalidity."""
+    if record is None:
+        return False, []
+    values = diagnostics(record)
+    if key not in values:
+        return False, []
+    try:
+        trace = json.loads(values[key])
+    except (TypeError, json.JSONDecodeError):
+        return True, None
+    if not isinstance(trace, list) or not all(
+        isinstance(name, str) and name for name in trace
+    ):
+        return True, None
+    return True, trace
+
+
+def trace_name_counts(trace: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name in trace:
+        counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def named_count_items(
     counts: dict[str, int], name_key: str, value_key: str
 ) -> list[dict]:
@@ -365,6 +392,10 @@ def coverage_report(
     executed_external_count_required_totals: dict[str, int] = {}
     executed_external_count_bounded_maximum_totals: dict[str, int] = {}
     executed_external_count_observed_totals: dict[str, int] = {}
+    executed_external_trace_diagnostic_count = 0
+    executed_external_trace_valid_diagnostic_count = 0
+    executed_external_trace_consistent_diagnostic_count = 0
+    executed_external_trace_event_count = 0
     interpreter_steps: list[int] = []
 
     for case_id in sorted(selected):
@@ -391,6 +422,10 @@ def coverage_report(
             executed_external_counts_present,
             observed_executed_external_counts,
         ) = diagnostic_named_counts(record, "executed-external-counts", "external")
+        (
+            executed_external_trace_present,
+            observed_executed_external_trace,
+        ) = diagnostic_name_trace(record, "executed-external-trace")
         executed_external_missing_present, reported_missing_executed_externals = (
             diagnostic_forms(record, "missing-executed-externals")
         )
@@ -438,6 +473,23 @@ def coverage_report(
             set(required_executed_externals) - set(observed_executed_externals)
         )
         observed_external_count_map = observed_executed_external_counts or {}
+        observed_external_trace = observed_executed_external_trace or []
+        external_trace_names_consistent = (
+            observed_executed_external_trace is not None
+            and (
+                not executed_external_present
+                or sorted(set(observed_external_trace))
+                == observed_executed_externals
+            )
+        )
+        external_trace_counts_consistent = (
+            observed_executed_external_trace is not None
+            and (
+                observed_executed_external_counts is None
+                or trace_name_counts(observed_external_trace)
+                == observed_external_count_map
+            )
+        )
         unsatisfied_executed_external_counts = unsatisfied_count_requirements(
             required_executed_external_counts,
             observed_external_count_map,
@@ -540,6 +592,22 @@ def coverage_report(
                     executed_external_count_observed_totals.get(external, 0)
                     + count
                 )
+        executed_external_trace_diagnostic_count += int(
+            executed_external_trace_present
+        )
+        executed_external_trace_valid_diagnostic_count += int(
+            executed_external_trace_present
+            and observed_executed_external_trace is not None
+        )
+        executed_external_trace_consistent_diagnostic_count += int(
+            executed_external_trace_present
+            and external_trace_names_consistent
+            and external_trace_counts_consistent
+        )
+        if observed_executed_external_trace is not None:
+            executed_external_trace_event_count += len(
+                observed_executed_external_trace
+            )
         if steps is not None:
             interpreter_steps.append(steps)
 
@@ -628,6 +696,32 @@ def coverage_report(
                 "executed-external-counts diagnostic disagrees with "
                 "executed-externals"
             )
+        if record is not None and not executed_external_trace_present:
+            audit_finding("missing executed-external-trace diagnostic")
+        elif record is not None and observed_executed_external_trace is None:
+            audit_finding(
+                "executed-external-trace must be a JSON array of "
+                "nonempty external names"
+            )
+        else:
+            if (
+                record is not None
+                and executed_external_present
+                and not external_trace_names_consistent
+            ):
+                audit_finding(
+                    "executed-external-trace diagnostic disagrees with "
+                    "executed-externals"
+                )
+            if (
+                record is not None
+                and observed_executed_external_counts is not None
+                and not external_trace_counts_consistent
+            ):
+                audit_finding(
+                    "executed-external-trace diagnostic disagrees with "
+                    "executed-external-counts"
+                )
         if record is not None and not executed_external_missing_present:
             audit_finding("missing missing-executed-externals diagnostic")
         elif reported_missing_executed_externals != missing_executed_externals:
@@ -716,6 +810,16 @@ def coverage_report(
                                 observed_external_count_map, "external", "count"
                             ),
                             "unsatisfied": unsatisfied_executed_external_counts,
+                        },
+                        "trace": {
+                            "diagnosticPresent": executed_external_trace_present,
+                            "diagnosticValid": (
+                                executed_external_trace_present
+                                and observed_executed_external_trace is not None
+                            ),
+                            "namesConsistent": external_trace_names_consistent,
+                            "countsConsistent": external_trace_counts_consistent,
+                            "observed": observed_external_trace,
                         },
                     },
                 },
@@ -821,6 +925,18 @@ def coverage_report(
                         "unsatisfiedObligationCount": (
                             executed_external_count_missing_count
                         ),
+                    },
+                    "trace": {
+                        "casesWithDiagnostics": (
+                            executed_external_trace_diagnostic_count
+                        ),
+                        "casesWithValidDiagnostics": (
+                            executed_external_trace_valid_diagnostic_count
+                        ),
+                        "casesWithConsistentDiagnostics": (
+                            executed_external_trace_consistent_diagnostic_count
+                        ),
+                        "observedEventCount": executed_external_trace_event_count,
                     },
                 },
             },

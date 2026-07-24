@@ -158,6 +158,7 @@ def with_form_diagnostics(
     missing_static_externals: str | None = "",
     executed_externals: str | None = "",
     executed_external_counts: str | None = "__auto__",
+    executed_external_trace: str | None = "__auto__",
     missing_executed_externals: str | None = "",
 ) -> dict:
     diagnostics = []
@@ -223,6 +224,56 @@ def with_form_diagnostics(
             {
                 "key": "executed-external-counts",
                 "value": executed_external_counts,
+            }
+        )
+    if executed_external_trace == "__auto__":
+        trace: list[str] | None = None
+        if (
+            executed_external_counts is not None
+            and executed_external_counts != "__auto__"
+        ):
+            try:
+                count_items = json.loads(executed_external_counts)
+            except (TypeError, json.JSONDecodeError):
+                count_items = None
+            if (
+                isinstance(count_items, list)
+                and all(
+                    isinstance(item, dict)
+                    and set(item) == {"external", "count"}
+                    and isinstance(item["external"], str)
+                    and item["external"]
+                    and isinstance(item["count"], int)
+                    and not isinstance(item["count"], bool)
+                    and item["count"] > 0
+                    for item in count_items
+                )
+            ):
+                trace = [
+                    item["external"]
+                    for item in count_items
+                    for _ in range(item["count"])
+                ]
+        if trace is None and executed_externals is not None:
+            trace = list(
+                dict.fromkeys(
+                    external.strip()
+                    for external in executed_externals.split(",")
+                    if external.strip()
+                )
+            )
+        if trace is not None:
+            diagnostics.append(
+                {
+                    "key": "executed-external-trace",
+                    "value": json.dumps(trace, separators=(",", ":")),
+                }
+            )
+    elif executed_external_trace is not None:
+        diagnostics.append(
+            {
+                "key": "executed-external-trace",
+                "value": executed_external_trace,
             }
         )
     if missing_executed_externals is not None:
@@ -6597,6 +6648,12 @@ class HarnessTests(unittest.TestCase):
                         "observed": [{"external": "Nat.add", "count": 1}],
                         "unsatisfiedObligationCount": 0,
                     },
+                    "trace": {
+                        "casesWithDiagnostics": 2,
+                        "casesWithValidDiagnostics": 2,
+                        "casesWithConsistentDiagnostics": 2,
+                        "observedEventCount": 1,
+                    },
                 },
             },
         )
@@ -6876,9 +6933,89 @@ class HarnessTests(unittest.TestCase):
             finding_messages(failures),
             [
                 "case: executed-external-counts diagnostic disagrees with "
-                "executed-externals"
+                "executed-externals",
+                "case: executed-external-trace diagnostic disagrees with "
+                "executed-externals",
             ],
         )
+
+    def test_executed_external_trace_is_required_ordered_and_consistent(self) -> None:
+        manifest = [descriptor("case")]
+
+        missing = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_external_trace=None,
+            )
+        }
+        _, failures = harness.coverage_report(manifest, missing, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing executed-external-trace diagnostic"],
+        )
+
+        malformed = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                executed_externals="Nat.add",
+                executed_external_trace='["Nat.add",1]',
+            )
+        }
+        _, failures = harness.coverage_report(manifest, malformed, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-external-trace must be a JSON array of "
+                "nonempty external names"
+            ],
+        )
+
+        inconsistent_counts = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                executed_externals="Nat.add",
+                executed_external_counts=(
+                    '[{"external":"Nat.add","count":2}]'
+                ),
+                executed_external_trace='["Nat.add"]',
+            )
+        }
+        _, failures = harness.coverage_report(
+            manifest, inconsistent_counts, ["case"]
+        )
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-external-trace diagnostic disagrees with "
+                "executed-external-counts"
+            ],
+        )
+
+        ordered = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="extern,return",
+                executed="extern,return",
+                executed_externals="Nat.add,ByteArray.size",
+                executed_external_counts=(
+                    '[{"external":"Nat.add","count":1},'
+                    '{"external":"ByteArray.size","count":1}]'
+                ),
+                executed_external_trace='["ByteArray.size","Nat.add"]',
+            )
+        }
+        report, failures = harness.coverage_report(manifest, ordered, ["case"])
+        self.assertEqual(failures, [])
+        trace = report["cases"][0]["externals"]["executed"]["trace"]
+        self.assertEqual(trace["observed"], ["ByteArray.size", "Nat.add"])
+        self.assertTrue(trace["namesConsistent"])
+        self.assertTrue(trace["countsConsistent"])
 
     def test_external_telemetry_is_required_without_obligations(self) -> None:
         manifest = [descriptor("case")]
@@ -6901,6 +7038,7 @@ class HarnessTests(unittest.TestCase):
                 "case: missing missing-externals diagnostic",
                 "case: missing executed-externals diagnostic",
                 "case: missing executed-external-counts diagnostic",
+                "case: missing executed-external-trace diagnostic",
                 "case: missing missing-executed-externals diagnostic",
             ],
         )
