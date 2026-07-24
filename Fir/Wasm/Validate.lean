@@ -366,9 +366,17 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         popKinds context.function.name stack [.uint32]
       let thenFlow ← checkInstructions context branchInput thenBody
       let elseFlow ← checkInstructions context branchInput elseBody
+      let fallthrough ← mergeFallthrough context.function.name
+        thenFlow.fallthrough elseFlow.fallthrough
+      match branchInput, fallthrough with
+      | some expected, some actual =>
+          unless stackEquivalent actual expected do
+            throw (.stackMismatch context.function.name expected actual)
+      | none, some actual =>
+          throw (.stackMismatch context.function.name [] actual)
+      | _, none => pure ()
       return {
-        fallthrough := ← mergeFallthrough context.function.name
-          thenFlow.fallthrough elseFlow.fallthrough
+        fallthrough
         branches := thenFlow.branches ++ elseFlow.branches }
   | .br label => do
       let some target := context.findLabel? label |

@@ -807,6 +807,13 @@ def inner : Lean.FVarId := ⟨`inner⟩
   | _ => false
 
 #guard match validateModule (fixtureModule <| fixtureFunction [
+    .i32Const .uint32 0,
+    .ifElse [.i32Const .uint32 1] [.unreachable],
+    .ret] #[.uint32]) with
+  | .error (.stackMismatch `fixture [] [.uint32]) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
     .block outer [.block inner [.br outer]]]) with
   | .ok _ => true
   | _ => false
