@@ -9091,6 +9091,37 @@ theorem SomeReachableMachineRelated.matchCodeStep_of_ready
       rw [sourceControl, targetControl] at control
       cases control
 
+/-- Every internal machine step is now dispatched from the exposed source
+control.  Code and yielded controls use their finite-stuttering matchers;
+named and closure calls use the paired internal transitions established by
+their state-level classifiers. -/
+theorem SomeReachableMachineRelated.matchNextStep_of_ready
+    (related : SomeReachableMachineRelated fuel source target)
+    (ready : ReachableMachineReadyAt fuel source target)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready ready sourceControl
+        (.internal sourceTransition)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep sourceControl
+        (.internal sourceTransition)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation
