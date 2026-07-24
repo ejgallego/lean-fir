@@ -4429,6 +4429,145 @@ theorem ShadowRuntimeRel.setObjectFieldBoth
         rw [dif_pos rightBounded]
         simpa [rightReplacement] using rightEffect
 
+/-- Object-field writes to related published values either preserve the
+reachable runtime relation or fail with related faults. -/
+theorem ShadowRuntimeRel.setObjectFieldBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (fields : ValueRel rho leftField rightField)
+    (leftFieldRoot : ∀ {location},
+      leftField = .object (.heap location) →
+        Reachable left.heap (runtimeRoots left leftExtra) location)
+    (rightFieldRoot : ∀ {location},
+      rightField = .object (.heap location) →
+        Reachable right.heap (runtimeRoots right rightExtra) location) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (setObjectField left leftObject index leftField)
+      (setObjectField right rightObject index rightField) := by
+  cases objects with
+  | tagged payload => exact .error (.same _)
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapping => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have objectRelation := cells.2.2.2
+      generalize leftObjectEq : leftCell.object = leftHeapObject
+        at objectRelation
+      generalize rightObjectEq : rightCell.object = rightHeapObject
+        at objectRelation
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [setObjectField, modifyConstructor, getConstructor,
+            getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+            Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          cases objectRelation with
+          | ctor tag objectFields usizes scalars =>
+              rename_i leftConstructor rightConstructor
+              have sizeEq :
+                  leftConstructor.objectFields.size =
+                    rightConstructor.objectFields.size :=
+                arrayRel_size_eq objectFields
+              by_cases bounded :
+                  index < leftConstructor.objectFields.size
+              · rcases related.setObjectFieldBoth mapping leftReachable
+                    leftFound leftLiveEq leftObjectEq bounded leftFieldRoot
+                    rightFieldRoot fields with
+                  ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+                rw [leftEffect, rightEffect]
+                exact .ok next
+              · have rightUnbounded :
+                    ¬ index < rightConstructor.objectFields.size := by
+                  omega
+                have leftEffect :
+                    setObjectField left
+                        (.object (.heap leftLocation)) index leftField =
+                      .error (.objectFieldOutOfBounds index
+                        leftConstructor.objectFields.size) := by
+                  have constructor :
+                      getConstructor left (.object (.heap leftLocation)) =
+                        .ok (leftLocation, leftCell, leftConstructor) := by
+                    simp [getConstructor, getLiveCell, leftFound, leftLiveEq,
+                      leftObjectEq, Bind.bind, Except.bind]
+                    rfl
+                  unfold setObjectField modifyConstructor
+                  rw [constructor]
+                  simp only [Bind.bind, Except.bind]
+                  rw [dif_neg bounded]
+                have rightEffect :
+                    setObjectField right
+                        (.object (.heap rightLocation)) index rightField =
+                      .error (.objectFieldOutOfBounds index
+                        rightConstructor.objectFields.size) := by
+                  have constructor :
+                      getConstructor right (.object (.heap rightLocation)) =
+                        .ok (rightLocation, rightCell, rightConstructor) := by
+                    simp [getConstructor, getLiveCell, rightFound,
+                      rightLiveEq, rightObjectEq, Bind.bind, Except.bind]
+                    rfl
+                  unfold setObjectField modifyConstructor
+                  rw [constructor]
+                  simp only [Bind.bind, Except.bind]
+                  rw [dif_neg rightUnbounded]
+                rw [leftEffect, rightEffect, sizeEq]
+                exact .error (.same _)
+          | closure fixed =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | boxed value =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | string value =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | natural value =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | integer value =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | byteArray value =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+          | «opaque» typeName =>
+              simp [setObjectField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+              exact .error (.same _)
+
 /-- Interpreter-facing retained object write: related live operands, rooted
 inserted values, and one successful source mutation determine a successful
 related target mutation. -/
@@ -4610,6 +4749,225 @@ theorem ShadowRuntimeRel.setUSizeSlotBoth
         simp only [Bind.bind, Except.bind]
         rw [if_pos rightLower, dif_pos rightBounded]
         simpa [rightIndex, rightReplacement] using rightEffect
+
+/-- Absolute `usize`-slot writes to related published values either preserve
+the reachable runtime relation or fail with related faults. -/
+theorem ShadowRuntimeRel.setUSizeSlotBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (fields : ValueRel rho leftField rightField) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (setUSizeSlot left leftObject slot leftField)
+      (setUSizeSlot right rightObject slot rightField) := by
+  cases fields with
+  | tagged payload => exact .error (.same _)
+  | heap fieldMapping => exact .error (.same _)
+  | scalar field => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome fieldMapping => exact .error (.same _)
+  | usize field =>
+      cases objects with
+      | tagged payload => exact .error (.same _)
+      | usize value => exact .error (.same _)
+      | scalar value => exact .error (.same _)
+      | erased => exact .error (.same _)
+      | reuseNone => exact .error (.same _)
+      | reuseSome mapping => exact .error (.same _)
+      | @heap leftLocation rightLocation mapping =>
+          have leftReachable : Reachable left.heap
+              (runtimeRoots left leftExtra) leftLocation := by
+            exact .root
+              (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+          rcases related.heap.1 leftLocation leftReachable with
+            ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+              rightFound, cells⟩
+          have locationEq : mappedLocation = rightLocation := by
+            rw [mapping] at mappedEq
+            exact (Option.some.inj mappedEq).symm
+          subst mappedLocation
+          have liveEq := cells.2.2.1
+          have objectRelation := cells.2.2.2
+          generalize leftObjectEq : leftCell.object = leftHeapObject
+            at objectRelation
+          generalize rightObjectEq : rightCell.object = rightHeapObject
+            at objectRelation
+          cases rightLiveEq : rightCell.live with
+          | false =>
+              have leftLiveEq : leftCell.live = false := by
+                simpa [rightLiveEq] using liveEq
+              simp [setUSizeSlot, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                Bind.bind, Except.bind]
+              exact .error (.deadObject mapping)
+          | true =>
+              have leftLiveEq : leftCell.live = true := by
+                simpa [rightLiveEq] using liveEq
+              cases objectRelation with
+              | ctor tag objectFields usizes scalars =>
+                  rename_i leftConstructor rightConstructor
+                  have objectSize :
+                      leftConstructor.objectFields.size =
+                        rightConstructor.objectFields.size :=
+                    arrayRel_size_eq objectFields
+                  have usizeSize :
+                      leftConstructor.usizeFields.size =
+                        rightConstructor.usizeFields.size :=
+                    congrArg Array.size usizes
+                  have totalSize :
+                      leftConstructor.objectFields.size +
+                          leftConstructor.usizeFields.size =
+                        rightConstructor.objectFields.size +
+                          rightConstructor.usizeFields.size := by
+                    omega
+                  by_cases lower :
+                      leftConstructor.objectFields.size ≤ slot
+                  · have rightLower :
+                        rightConstructor.objectFields.size ≤ slot := by
+                      omega
+                    by_cases bounded :
+                        slot - leftConstructor.objectFields.size <
+                          leftConstructor.usizeFields.size
+                    · rcases related.setUSizeSlotBoth mapping leftReachable
+                          leftFound leftLiveEq leftObjectEq lower bounded field
+                        with
+                        ⟨leftResult, rightResult, leftEffect, rightEffect,
+                          next⟩
+                      rw [leftEffect, rightEffect]
+                      exact .ok next
+                    · have rightUnbounded :
+                          ¬ slot - rightConstructor.objectFields.size <
+                            rightConstructor.usizeFields.size := by
+                        omega
+                      have leftEffect :
+                          setUSizeSlot left
+                              (.object (.heap leftLocation)) slot
+                              (.usize field) =
+                            .error (.usizeFieldOutOfBounds slot
+                              (leftConstructor.objectFields.size +
+                                leftConstructor.usizeFields.size)) := by
+                        have constructor :
+                            getConstructor left
+                                (.object (.heap leftLocation)) =
+                              .ok (leftLocation, leftCell,
+                                leftConstructor) := by
+                          simp [getConstructor, getLiveCell, leftFound,
+                            leftLiveEq, leftObjectEq, Bind.bind, Except.bind]
+                          rfl
+                        unfold setUSizeSlot modifyConstructor
+                        rw [constructor]
+                        simp only [Bind.bind, Except.bind]
+                        rw [if_pos lower, dif_neg bounded]
+                      have rightEffect :
+                          setUSizeSlot right
+                              (.object (.heap rightLocation)) slot
+                              (.usize field) =
+                            .error (.usizeFieldOutOfBounds slot
+                              (rightConstructor.objectFields.size +
+                                rightConstructor.usizeFields.size)) := by
+                        have constructor :
+                            getConstructor right
+                                (.object (.heap rightLocation)) =
+                              .ok (rightLocation, rightCell,
+                                rightConstructor) := by
+                          simp [getConstructor, getLiveCell, rightFound,
+                            rightLiveEq, rightObjectEq, Bind.bind,
+                            Except.bind]
+                          rfl
+                        unfold setUSizeSlot modifyConstructor
+                        rw [constructor]
+                        simp only [Bind.bind, Except.bind]
+                        rw [if_pos rightLower, dif_neg rightUnbounded]
+                      rw [leftEffect, rightEffect, totalSize]
+                      exact .error (.same _)
+                  · have rightLower :
+                        ¬ rightConstructor.objectFields.size ≤ slot := by
+                      omega
+                    have leftEffect :
+                        setUSizeSlot left
+                            (.object (.heap leftLocation)) slot
+                            (.usize field) =
+                          .error (.usizeFieldOutOfBounds slot
+                            (leftConstructor.objectFields.size +
+                              leftConstructor.usizeFields.size)) := by
+                      have constructor :
+                          getConstructor left
+                              (.object (.heap leftLocation)) =
+                            .ok (leftLocation, leftCell,
+                              leftConstructor) := by
+                        simp [getConstructor, getLiveCell, leftFound,
+                          leftLiveEq, leftObjectEq, Bind.bind, Except.bind]
+                        rfl
+                      unfold setUSizeSlot modifyConstructor
+                      rw [constructor]
+                      simp only [Bind.bind, Except.bind]
+                      rw [if_neg lower]
+                    have rightEffect :
+                        setUSizeSlot right
+                            (.object (.heap rightLocation)) slot
+                            (.usize field) =
+                          .error (.usizeFieldOutOfBounds slot
+                            (rightConstructor.objectFields.size +
+                              rightConstructor.usizeFields.size)) := by
+                      have constructor :
+                          getConstructor right
+                              (.object (.heap rightLocation)) =
+                            .ok (rightLocation, rightCell,
+                              rightConstructor) := by
+                        simp [getConstructor, getLiveCell, rightFound,
+                          rightLiveEq, rightObjectEq, Bind.bind, Except.bind]
+                        rfl
+                      unfold setUSizeSlot modifyConstructor
+                      rw [constructor]
+                      simp only [Bind.bind, Except.bind]
+                      rw [if_neg rightLower]
+                    rw [leftEffect, rightEffect, totalSize]
+                    exact .error (.same _)
+              | closure fixed =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | boxed value =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | string value =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | natural value =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | integer value =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | byteArray value =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | «opaque» typeName =>
+                  simp [setUSizeSlot, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
 
 /-- Interpreter-facing retained absolute-slot write: related live operands and
 one successful source update determine a successful related target update. -/
@@ -4818,6 +5176,113 @@ theorem ShadowRuntimeRel.setScalarFieldBoth
         rw [constructor]
         simp only [Bind.bind, Except.bind]
         simpa [entry, rightFields, rightReplacement] using rightEffect
+
+/-- Packed-scalar writes to related published values either preserve the
+reachable runtime relation or fail with related faults. -/
+theorem ShadowRuntimeRel.setScalarFieldBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (fields : ValueRel rho leftField rightField) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (setScalarField left leftObject width offset leftField)
+      (setScalarField right rightObject width offset rightField) := by
+  cases fields with
+  | tagged payload => exact .error (.same _)
+  | heap fieldMapping => exact .error (.same _)
+  | usize field => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome fieldMapping => exact .error (.same _)
+  | scalar field =>
+      cases objects with
+      | tagged payload => exact .error (.same _)
+      | usize value => exact .error (.same _)
+      | scalar value => exact .error (.same _)
+      | erased => exact .error (.same _)
+      | reuseNone => exact .error (.same _)
+      | reuseSome mapping => exact .error (.same _)
+      | @heap leftLocation rightLocation mapping =>
+          have leftReachable : Reachable left.heap
+              (runtimeRoots left leftExtra) leftLocation := by
+            exact .root
+              (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+          rcases related.heap.1 leftLocation leftReachable with
+            ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+              rightFound, cells⟩
+          have locationEq : mappedLocation = rightLocation := by
+            rw [mapping] at mappedEq
+            exact (Option.some.inj mappedEq).symm
+          subst mappedLocation
+          have liveEq := cells.2.2.1
+          have objectRelation := cells.2.2.2
+          generalize leftObjectEq : leftCell.object = leftHeapObject
+            at objectRelation
+          generalize rightObjectEq : rightCell.object = rightHeapObject
+            at objectRelation
+          cases rightLiveEq : rightCell.live with
+          | false =>
+              have leftLiveEq : leftCell.live = false := by
+                simpa [rightLiveEq] using liveEq
+              simp [setScalarField, modifyConstructor, getConstructor,
+                getLiveCell, leftFound, rightFound, leftLiveEq, rightLiveEq,
+                Bind.bind, Except.bind]
+              exact .error (.deadObject mapping)
+          | true =>
+              have leftLiveEq : leftCell.live = true := by
+                simpa [rightLiveEq] using liveEq
+              cases objectRelation with
+              | ctor tag objectFields usizes scalars =>
+                  rename_i leftConstructor rightConstructor
+                  rcases related.setScalarFieldBoth mapping leftReachable
+                      leftFound leftLiveEq leftObjectEq width offset field with
+                    ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+                  rw [leftEffect, rightEffect]
+                  exact .ok next
+              | closure fixed =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | boxed value =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | string value =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | natural value =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | integer value =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | byteArray value =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
+              | «opaque» typeName =>
+                  simp [setScalarField, modifyConstructor, getConstructor,
+                    getLiveCell, leftFound, rightFound, leftLiveEq,
+                    rightLiveEq, leftObjectEq, rightObjectEq, Bind.bind,
+                    Except.bind]
+                  exact .error (.same _)
 
 /-- Interpreter-facing retained scalar write: related operands and one
 successful source mutation determine the identical packed-scalar update on
