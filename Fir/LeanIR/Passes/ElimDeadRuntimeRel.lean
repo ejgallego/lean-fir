@@ -254,6 +254,283 @@ theorem heapOwnershipFrame_markPersistentLocationFuel
             exact parentFrame.trans
               (foldFrame cell.object.ownedValues after)
 
+/-- Related reachable locations remain related after recursive persistence at
+one common sufficient fuel.  The two traversals follow related ownership
+arrays; the live-nonpersistent count guarantees that every effective child
+visit has enough remaining fuel. -/
+theorem heapRel_markPersistentLocationFuelBoth
+    (related : HeapRel rho left right leftRoots rightRoots)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable : Reachable left leftRoots leftLocation)
+    (rightReachable : Reachable right rightRoots rightLocation)
+    (leftBound : unpersistedLiveCount left ≤ fuel)
+    (rightBound : unpersistedLiveCount right ≤ fuel) :
+    HeapRel rho
+      (markPersistentLocationFuel fuel left leftLocation)
+      (markPersistentLocationFuel fuel right rightLocation)
+      leftRoots rightRoots := by
+  induction fuel generalizing left right leftLocation rightLocation with
+  | zero =>
+      simpa [markPersistentLocationFuel] using related
+  | succ fuel ih =>
+      rcases related.1 leftLocation leftReachable with
+        ⟨mapped, leftCell, rightCell, mappedEq, leftFound, rightFound,
+          cells⟩
+      have mappedSame : mapped = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mapped
+      rcases cells with ⟨rcEq, persistentEq, liveEq, objects⟩
+      cases leftLive : leftCell.live with
+      | false =>
+          have rightLive : rightCell.live = false := by
+            rw [← liveEq]
+            exact leftLive
+          simpa [markPersistentLocationFuel, leftFound, rightFound,
+            leftLive, rightLive] using related
+      | true =>
+          have rightLive : rightCell.live = true := by
+            rw [← liveEq]
+            exact leftLive
+          cases leftPersistent : leftCell.persistent with
+          | true =>
+              have rightPersistent : rightCell.persistent = true := by
+                rw [← persistentEq]
+                exact leftPersistent
+              simpa [markPersistentLocationFuel, leftFound, rightFound,
+                leftLive, rightLive, leftPersistent, rightPersistent] using
+                related
+          | false =>
+              have rightPersistent : rightCell.persistent = false := by
+                rw [← persistentEq]
+                exact leftPersistent
+              let leftReplacement : HeapCell :=
+                { leftCell with rc := 0, persistent := true }
+              let rightReplacement : HeapCell :=
+                { rightCell with rc := 0, persistent := true }
+              obtain ⟨leftAfter, leftPost⟩ :=
+                replaceCell_spec_of_find left leftLocation leftCell
+                  leftReplacement leftFound
+              obtain ⟨rightAfter, rightPost⟩ :=
+                replaceCell_spec_of_find right rightLocation rightCell
+                  rightReplacement rightFound
+              have replacements :
+                  HeapCellRel rho leftReplacement rightReplacement := by
+                exact ⟨rfl, rfl, liveEq, objects⟩
+              have leftParentFrame : HeapOwnershipFrame left leftAfter :=
+                heapOwnershipFrame_replace leftFound leftPost.target
+                  leftPost.frame rfl
+              have rightParentFrame : HeapOwnershipFrame right rightAfter :=
+                heapOwnershipFrame_replace rightFound rightPost.target
+                  rightPost.frame rfl
+              have parentRelated : HeapRel rho leftAfter rightAfter
+                  leftRoots rightRoots := by
+                constructor
+                · intro location afterReachable
+                  have beforeReachable :=
+                    leftParentFrame.symm.reachable afterReachable
+                  rcases related.1 location beforeReachable with
+                    ⟨target, sourceCell, targetCell, targetMapping,
+                      sourceFound, targetFound, oldCells⟩
+                  by_cases same : location = leftLocation
+                  · subst location
+                    have targetSame : target = rightLocation := by
+                      rw [mapping] at targetMapping
+                      exact (Option.some.inj targetMapping).symm
+                    subst target
+                    exact ⟨rightLocation, leftReplacement, rightReplacement,
+                      mapping, leftPost.target, rightPost.target, replacements⟩
+                  · have targetDifferent : target ≠ rightLocation := by
+                      intro targetSame
+                      subst target
+                      have oldInverse := rho.leftInverse targetMapping
+                      have newInverse := rho.leftInverse mapping
+                      rw [newInverse] at oldInverse
+                      exact same (Option.some.inj oldInverse).symm
+                    exact ⟨target, sourceCell, targetCell, targetMapping,
+                      by simpa [leftPost.frame location same] using sourceFound,
+                      by simpa [rightPost.frame target targetDifferent] using
+                        targetFound,
+                      oldCells⟩
+                · intro location afterReachable
+                  have beforeReachable :=
+                    rightParentFrame.symm.reachable afterReachable
+                  rcases related.2 location beforeReachable with
+                    ⟨source, targetCell, sourceCell, sourceMapping,
+                      targetFound, sourceFound, oldCells⟩
+                  have reverseMapping := rho.leftInverse mapping
+                  by_cases same : location = rightLocation
+                  · subst location
+                    have sourceSame : source = leftLocation := by
+                      rw [reverseMapping] at sourceMapping
+                      exact (Option.some.inj sourceMapping).symm
+                    subst source
+                    exact ⟨leftLocation, rightReplacement, leftReplacement,
+                      reverseMapping, rightPost.target, leftPost.target,
+                      replacements⟩
+                  · have sourceDifferent : source ≠ leftLocation := by
+                      intro sourceSame
+                      subst source
+                      have oldForward := rho.rightInverse sourceMapping
+                      rw [mapping] at oldForward
+                      exact same (Option.some.inj oldForward).symm
+                    exact ⟨source, targetCell, sourceCell, sourceMapping,
+                      by simpa [rightPost.frame location same] using targetFound,
+                      by simpa [leftPost.frame source sourceDifferent] using
+                        sourceFound,
+                      oldCells⟩
+              have leftParentReachable :
+                  Reachable leftAfter leftRoots leftLocation :=
+                leftParentFrame.reachable leftReachable
+              have rightParentReachable :
+                  Reachable rightAfter rightRoots rightLocation :=
+                rightParentFrame.reachable rightReachable
+              have leftAfterBound :
+                  unpersistedLiveCount leftAfter ≤ fuel := by
+                have dropped :=
+                  unpersistedLiveCount_replace_persistent leftFound leftLive
+                    leftPersistent leftPost.replaced
+                omega
+              have rightAfterBound :
+                  unpersistedLiveCount rightAfter ≤ fuel := by
+                have dropped :=
+                  unpersistedLiveCount_replace_persistent rightFound rightLive
+                    rightPersistent rightPost.replaced
+                omega
+              have foldRelated :
+                  ∀ {leftItems rightItems},
+                    ListRel (ValueRel rho) leftItems rightItems →
+                    (∀ value, value ∈ leftItems →
+                      value ∈ leftCell.object.ownedValues.toList) →
+                    (∀ value, value ∈ rightItems →
+                      value ∈ rightCell.object.ownedValues.toList) →
+                    ∀ {leftCurrent rightCurrent},
+                      HeapRel rho leftCurrent rightCurrent
+                          leftRoots rightRoots →
+                      HeapOwnershipFrame leftAfter leftCurrent →
+                      HeapOwnershipFrame rightAfter rightCurrent →
+                      unpersistedLiveCount leftCurrent ≤ fuel →
+                      unpersistedLiveCount rightCurrent ≤ fuel →
+                      HeapRel rho
+                        (leftItems.foldl (init := leftCurrent)
+                          fun next value =>
+                            match value with
+                            | .object (.heap child) =>
+                                markPersistentLocationFuel fuel next child
+                            | _ => next)
+                        (rightItems.foldl (init := rightCurrent)
+                          fun next value =>
+                            match value with
+                            | .object (.heap child) =>
+                                markPersistentLocationFuel fuel next child
+                            | _ => next)
+                        leftRoots rightRoots := by
+                intro leftItems rightItems values leftMember rightMember
+                  leftCurrent rightCurrent currentRelated leftFrame rightFrame
+                  leftCurrentBound rightCurrentBound
+                induction values generalizing leftCurrent rightCurrent with
+                | nil => exact currentRelated
+                | cons head tail tailIH =>
+                    rename_i leftHead rightHead leftTail rightTail
+                    have leftHeadMember :
+                        leftHead ∈ leftCell.object.ownedValues.toList :=
+                      leftMember leftHead List.mem_cons_self
+                    have rightHeadMember :
+                        rightHead ∈ rightCell.object.ownedValues.toList :=
+                      rightMember rightHead List.mem_cons_self
+                    have leftTailMember :
+                        ∀ value, value ∈ leftTail →
+                          value ∈ leftCell.object.ownedValues.toList := by
+                      intro value member
+                      exact leftMember value (List.mem_cons_of_mem _ member)
+                    have rightTailMember :
+                        ∀ value, value ∈ rightTail →
+                          value ∈ rightCell.object.ownedValues.toList := by
+                      intro value member
+                      exact rightMember value (List.mem_cons_of_mem _ member)
+                    cases head with
+                    | @heap leftChildLocation rightChildLocation headMapping =>
+                        have leftBaseChild :
+                            Reachable leftAfter leftRoots leftChildLocation :=
+                          .child leftParentReachable leftPost.target
+                            leftHeadMember rfl
+                        have rightBaseChild :
+                            Reachable rightAfter rightRoots rightChildLocation :=
+                          .child rightParentReachable rightPost.target
+                            rightHeadMember rfl
+                        have leftChild := leftFrame.reachable leftBaseChild
+                        have rightChild := rightFrame.reachable rightBaseChild
+                        have childRelated :=
+                          ih currentRelated headMapping leftChild rightChild
+                            leftCurrentBound rightCurrentBound
+                        have leftChildFrame :=
+                          heapOwnershipFrame_markPersistentLocationFuel fuel
+                            leftCurrent leftChildLocation
+                        have rightChildFrame :=
+                          heapOwnershipFrame_markPersistentLocationFuel fuel
+                            rightCurrent rightChildLocation
+                        have leftChildBound :
+                            unpersistedLiveCount
+                                (markPersistentLocationFuel fuel leftCurrent
+                                  leftChildLocation) ≤
+                              fuel :=
+                          Nat.le_trans
+                            (unpersistedLiveCount_markPersistentLocationFuel_le
+                              fuel leftCurrent leftChildLocation)
+                            leftCurrentBound
+                        have rightChildBound :
+                            unpersistedLiveCount
+                                (markPersistentLocationFuel fuel rightCurrent
+                                  rightChildLocation) ≤
+                              fuel :=
+                          Nat.le_trans
+                            (unpersistedLiveCount_markPersistentLocationFuel_le
+                              fuel rightCurrent rightChildLocation)
+                            rightCurrentBound
+                        simpa only [List.foldl] using
+                          tailIH leftTailMember rightTailMember childRelated
+                            (leftFrame.trans leftChildFrame)
+                            (rightFrame.trans rightChildFrame)
+                            leftChildBound rightChildBound
+                    | tagged payload | usize payload | scalar payload
+                    | erased | reuseNone | reuseSome headMapping =>
+                        simpa only [List.foldl] using
+                          tailIH leftTailMember rightTailMember currentRelated
+                            leftFrame rightFrame leftCurrentBound
+                            rightCurrentBound
+              simp only [markPersistentLocationFuel, leftFound, rightFound,
+                leftLive, rightLive, leftPersistent, rightPersistent,
+                Bool.not_true, Bool.false_or, Bool.false_eq_true, if_false]
+              have leftReplaced : replaceCell left leftLocation
+                  { object := leftCell.object, rc := 0, persistent := true } =
+                    some leftAfter := by
+                simpa [leftReplacement, leftLive] using leftPost.replaced
+              have rightReplaced : replaceCell right rightLocation
+                  { object := rightCell.object, rc := 0, persistent := true } =
+                    some rightAfter := by
+                simpa [rightReplacement, rightLive] using rightPost.replaced
+              rw [leftReplaced, rightReplaced]
+              simp only
+              rw [← Array.foldl_toList, ← Array.foldl_toList]
+              have ownedValuesOf :
+                  ∀ {leftObject rightObject},
+                    HeapObjectRel rho leftObject rightObject →
+                    ListRel (ValueRel rho)
+                      leftObject.ownedValues.toList
+                      rightObject.ownedValues.toList := by
+                intro leftObject rightObject objectRelated
+                cases objectRelated with
+                | ctor tag fields usizes scalars => exact fields
+                | closure fixed => exact fixed
+                | boxed value => exact .cons value .nil
+                | string value | natural value | integer value
+                | byteArray value | «opaque» value => exact .nil
+              have ownedValues := ownedValuesOf objects
+              exact foldRelated ownedValues
+                (fun _ member => member) (fun _ member => member)
+                parentRelated (.refl leftAfter) (.refl rightAfter)
+                leftAfterBound rightAfterBound
+
 /-- Extend a partial address bijection with one fresh source/target pair. -/
 def AddressRenaming.extend (rho : AddressRenaming)
     (left right : Location)
