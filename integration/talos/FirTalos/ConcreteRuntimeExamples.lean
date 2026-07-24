@@ -335,6 +335,33 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsWord? cachedHeapProgram 85
 
+/--
+Whole-module recursive cache regression: the cached root owns a constructor
+which owns the immediate payload. The second call must hit the published root
+after recursive persistence, and both generated projections must remain live.
+-/
+private def cachedNestedHeapDecl : LCNF.Decl .impure :=
+  decl `FirTalos.Concrete.cachedNestedHeap #[] objType (.code <|
+    .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 42))) <|
+    .let (letDecl p objType
+      (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+    .let (letDecl cachedQ objType
+      (.ctor { pairInfo with size := 1 } #[.fvar p])) <|
+    .return cachedQ)
+
+private def cachedNestedHeapProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[cachedNestedHeapDecl,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl p objType
+          (.fap `FirTalos.Concrete.cachedNestedHeap #[])) <|
+        .let (letDecl cachedQ objType
+          (.fap `FirTalos.Concrete.cachedNestedHeap #[])) <|
+        .let (letDecl x objType (.oproj 0 cachedQ)) <|
+        .let (letDecl r LCNF.ImpureType.tobject (.oproj 0 x)) <|
+        .return r)] }
+
+#guard fixtureReturnsWord? cachedNestedHeapProgram 85
+
 #guard fixtureReturnsWord? Fir.Wasm.abiObjectMutationProgram 177
 
 /-- Erased object arguments remain canonical physical zeroes across allocation,

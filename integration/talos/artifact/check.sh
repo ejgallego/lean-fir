@@ -30,7 +30,8 @@ lake exe fir-wasm-artifact resident-closure-matches \
 node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
 lake -d .. build FirTalos.Differential
-lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
+lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
+  Fir.Wasm.Emit.ResidentPrettyFormat
 lake -d ../../.. env lean FirWasmSourceExample.lean
 mapfile -t source_artifacts < <(
   node --input-type=module -e '

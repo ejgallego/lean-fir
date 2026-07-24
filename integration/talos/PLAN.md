@@ -3000,6 +3000,20 @@ continuation, with concrete failure occurring before bounds/coordinate checks
 or any heap write. Case tags, unbox, reset/reuse, and ownership underflow remain
 the next distinct fault families. No shared semantic contract or executable
 ABI changed.
+W6.6cu closes recursive cache persistence at the public composition boundary.
+`CachePersistenceRefines.of_related` selects the already-proved recursive
+mapped-heap simulation or the represented non-heap no-op directly from
+`ValueRel`; `ConcreteRuntimeRel.writeGlobal_of_related` composes that result
+with the typed concrete global update. General Talos
+`cacheSetStep_of_refines` no longer asks callers to manufacture a
+`CachePersistenceRefines` function or split heap and non-heap values. Its sole
+host/witness side condition is exact immutable closure-descriptor-table
+identity. A twice-called, two-constructor cached declaration permanently
+exercises miss publication, recursive persistence, hit reuse, and both
+generated projections through the complete resolver/Talos execution path.
+The existing FIR cached-graph and raw concrete header regressions remain the
+other two executable views of the same transition. No shared semantic
+contract or executable ABI changed.
 
 W6.6ct closes the constructor-kind case-discrimination leaf.
 `LiveHeapRel.readTag_expectedConstructor_refines` handles the

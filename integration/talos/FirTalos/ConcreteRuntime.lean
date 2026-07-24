@@ -2452,8 +2452,12 @@ theorem decodePhysicalLane_of_related
   | float32Bits valueRelated => cases valueRelated
   | float64Bits valueRelated => cases valueRelated
 
-/-- Successful concrete cache update refines FIR's `setGlobal` and returns the
-same physical lane for the generated Wasm global write. -/
+/--
+Every related physical value constructively drives the complete concrete
+cache transition. Recursive persistence is discharged from `ValueRel`; the
+caller supplies only the immutable host/witness descriptor-table identity.
+The host returns the same physical lane for the generated Wasm global write.
+-/
 theorem cacheSetStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
@@ -2463,10 +2467,8 @@ theorem cacheSetStep_of_refines
     (valueRelated : PhysicalValueRel witness kind physical semantic)
     (found : initial.host.runtime.globals.find? declaration = some slot)
     (kindEq : slot.kind = kind)
-    (persistence : ∀ lane,
-      decodePhysicalLane kind physical = .ok lane →
-      CachePersistenceRefines initial.host.runtime.heap witness runtime
-        kind lane semantic initial.host.closureDescriptors) :
+    (descriptorsEq : initial.host.closureDescriptors =
+      witness.closureDescriptors) :
     ∃ after,
       cacheSetStep declaration kind initial [physical] =
         .Return [physical] (replaceRuntime initial after) ∧
@@ -2476,103 +2478,11 @@ theorem cacheSetStep_of_refines
   obtain ⟨lane, decoded, laneRelated⟩ :=
     decodePhysicalLane_of_related valueRelated
   obtain ⟨after, operation, nextRuntimeRelated⟩ :=
-    Fir.Wasm.Concrete.ConcreteRuntimeRel.writeGlobal runtimeRelated found kindEq
-      laneRelated (persistence lane decoded)
+    Fir.Wasm.Concrete.ConcreteRuntimeRel.writeGlobal_of_related runtimeRelated
+      found kindEq laneRelated descriptorsEq
   refine ⟨after, ?_, ?_, valueRelated⟩
   · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
   · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated
-
-/-- Non-heap cache publication discharges persistence from the physical value
-relation itself, so generated clients need no separate persistence premise for
-scalars, erased/reuse lanes, direct tags, or promoted tags. -/
-theorem cacheSetStep_of_refines_nonHeapReference
-    {initial : Wasm.Store Host} {witness : RefinementWitness}
-    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
-    {physical : Wasm.Value} {semantic : Value} {slot : ConcreteGlobalSlot}
-    (runtimeRelated :
-      ConcreteRuntimeRel initial.host.runtime witness runtime)
-    (valueRelated : PhysicalValueRel witness kind physical semantic)
-    (found : initial.host.runtime.globals.find? declaration = some slot)
-    (kindEq : slot.kind = kind)
-    (nonHeap : IsNonHeapReference semantic) :
-    ∃ after,
-      cacheSetStep declaration kind initial [physical] =
-        .Return [physical] (replaceRuntime initial after) ∧
-      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
-        (runtime.setGlobal declaration semantic) ∧
-      PhysicalValueRel witness kind physical semantic := by
-  apply cacheSetStep_of_refines runtimeRelated valueRelated found kindEq
-  intro lane decoded
-  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
-    decodePhysicalLane_of_related valueRelated
-  rw [expectedDecoded] at decoded
-  have laneEq := Except.ok.inj decoded
-  subst lane
-  exact .of_nonHeapReference runtimeRelated.heap expectedRelated nonHeap
-
-/-- Ordinary boxed scalars, heap naturals, and strings likewise compose
-without a caller-supplied persistence premise; their complete cache transition
-follows from `LiveHeapRel`. -/
-theorem cacheSetStep_of_refines_heapLeaf
-    {initial : Wasm.Store Host} {witness : RefinementWitness}
-    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
-    {physical : Wasm.Value} {location : Location} {cell : HeapCell}
-    {slot : ConcreteGlobalSlot}
-    (runtimeRelated :
-      ConcreteRuntimeRel initial.host.runtime witness runtime)
-    (valueRelated : PhysicalValueRel witness kind physical
-      (.object (.heap location)))
-    (globalFound : initial.host.runtime.globals.find? declaration = some slot)
-    (kindEq : slot.kind = kind)
-    (cellFound : findCell? runtime.heap location = some cell)
-    (live : cell.live = true) (ordinary : cell.persistent = false)
-    (leafCell : NonrecursiveCell cell) :
-    ∃ after,
-      cacheSetStep declaration kind initial [physical] =
-        .Return [physical] (replaceRuntime initial after) ∧
-      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
-        (runtime.setGlobal declaration (.object (.heap location))) ∧
-      PhysicalValueRel witness kind physical (.object (.heap location)) := by
-  apply cacheSetStep_of_refines runtimeRelated valueRelated globalFound kindEq
-  intro lane decoded
-  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
-    decodePhysicalLane_of_related valueRelated
-  rw [expectedDecoded] at decoded
-  have laneEq := Except.ok.inj decoded
-  subst lane
-  exact .of_heapLeaf runtimeRelated.heap expectedRelated cellFound live ordinary
-    leafCell
-
-/-- Arbitrary mapped constructor, closure, boxed, natural, or string graphs compose
-through cache publication once the concrete host and refinement witness use
-the same immutable closure descriptor table. -/
-theorem cacheSetStep_of_refines_heapReference
-    {initial : Wasm.Store Host} {witness : RefinementWitness}
-    {runtime : RuntimeState} {declaration : Lean.Name} {kind : AbiKind}
-    {physical : Wasm.Value} {location : Location} {slot : ConcreteGlobalSlot}
-    (runtimeRelated :
-      ConcreteRuntimeRel initial.host.runtime witness runtime)
-    (valueRelated : PhysicalValueRel witness kind physical
-      (.object (.heap location)))
-    (globalFound : initial.host.runtime.globals.find? declaration = some slot)
-    (kindEq : slot.kind = kind)
-    (descriptorsEq : initial.host.closureDescriptors =
-      witness.closureDescriptors) :
-    ∃ after,
-      cacheSetStep declaration kind initial [physical] =
-        .Return [physical] (replaceRuntime initial after) ∧
-      ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
-        (runtime.setGlobal declaration (.object (.heap location))) ∧
-      PhysicalValueRel witness kind physical (.object (.heap location)) := by
-  apply cacheSetStep_of_refines runtimeRelated valueRelated globalFound kindEq
-  intro lane decoded
-  obtain ⟨expected, expectedDecoded, expectedRelated⟩ :=
-    decodePhysicalLane_of_related valueRelated
-  rw [expectedDecoded] at decoded
-  have laneEq := Except.ok.inj decoded
-  subst lane
-  rw [descriptorsEq]
-  exact .of_heapReference runtimeRelated.heap expectedRelated
 
 /-- Executable/refinement boundary for partial-application closure allocation.
 The `.tagged` result admitted by the current validator is deliberately absent;

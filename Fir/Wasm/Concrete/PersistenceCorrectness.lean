@@ -1518,6 +1518,61 @@ theorem CachePersistenceRefines.of_nonHeapReference
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
         by simpa [RuntimeState.markPersistent] using heapRelated⟩
 
+/--
+Every represented cache value constructively refines recursive persistence.
+The only semantic case that can recurse is a mapped heap reference; all other
+ABI lanes use the proved no-op boundary. Closure recursion reads the immutable
+descriptor table from the refinement witness, so the concrete caller must
+identify its host table with that same table.
+-/
+theorem CachePersistenceRefines.of_related
+    {concrete : MemoryState} {witness : RefinementWitness}
+    {semantic : RuntimeState} {kind : AbiKind} {lane : LaneValue}
+    {value : Value} {descriptors : ClosureDescriptorTable}
+    (heapRelated : LiveHeapRel concrete witness semantic)
+    (valueRelated : ValueRel witness kind lane value)
+    (descriptorsEq : descriptors = witness.closureDescriptors) :
+    CachePersistenceRefines concrete witness semantic kind lane value
+      descriptors := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          subst descriptors
+          exact .of_heapReference heapRelated valueRelated
+      | tagged payload =>
+          exact .of_nonHeapReference heapRelated valueRelated trivial
+  | usize value =>
+      exact .of_nonHeapReference heapRelated valueRelated trivial
+  | scalar value =>
+      exact .of_nonHeapReference heapRelated valueRelated trivial
+  | erased =>
+      exact .of_nonHeapReference heapRelated valueRelated trivial
+  | reuseToken location? =>
+      exact .of_nonHeapReference heapRelated valueRelated trivial
+
+/--
+A related cache write needs no representation-specific persistence premise.
+Recursive constructor/closure graphs and every non-heap lane are selected
+constructively from `ValueRel`; descriptor identity is the sole host/witness
+side condition.
+-/
+theorem ConcreteRuntimeRel.writeGlobal_of_related
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {semantic : RuntimeState} {name : Lean.Name} {slot : ConcreteGlobalSlot}
+    {kind : AbiKind} {lane : LaneValue} {value : Value}
+    {descriptors : ClosureDescriptorTable}
+    (related : ConcreteRuntimeRel concrete witness semantic)
+    (found : concrete.globals.find? name = some slot)
+    (kindEq : slot.kind = kind)
+    (valueRelated : ValueRel witness kind lane value)
+    (descriptorsEq : descriptors = witness.closureDescriptors) :
+    ∃ after,
+      concrete.writeGlobal name kind lane descriptors = .ok after ∧
+        ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
+  exact related.writeGlobal found kindEq valueRelated
+    (.of_related related.heap valueRelated descriptorsEq)
+
 /-- Cache writes of non-heap values no longer require callers to manufacture
 an explicit persistence witness. -/
 theorem ConcreteRuntimeRel.writeGlobal_nonHeapReference

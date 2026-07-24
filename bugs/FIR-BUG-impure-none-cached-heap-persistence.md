@@ -113,4 +113,8 @@ the original standalone group as `"left right"` at width 80 and
 `"left\nright"` at width 5. The full artifact check passes. W6 keeps the
 remaining constructive `LiveHeapRel` proof visible as
 `CachePersistenceRefines`; it no longer claims that a cache write leaves the
-heap unchanged.
+heap unchanged. The completed recursive proof now derives that boundary from
+`LiveHeapRel` and `ValueRel` for every represented value. General Talos
+`cacheSetStep_of_refines` composition therefore requires only the immutable
+host/witness closure-descriptor identity and no caller-supplied persistence
+witness or heap/non-heap case split.
