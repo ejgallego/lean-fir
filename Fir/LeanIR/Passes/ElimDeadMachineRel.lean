@@ -165,7 +165,7 @@ theorem relatedFault_terminal
       (observe target (.fault fault)) := by
     apply runtime.observationRel
         (leftOutcome := .fault fault) (rightOutcome := .fault fault)
-    · rfl
+    · exact .same _
     · intro value member
       simp [outcomeRoots] at member
     · intro value member
@@ -751,7 +751,7 @@ theorem invokeDecl_unknown_reachableObservation
       · apply runtime.observationRel
           (leftOutcome := .fault (.unknownDecl name))
           (rightOutcome := .fault (.unknownDecl name))
-        · rfl
+        · exact .same _
         · intro value member
           simp [outcomeRoots] at member
         · intro value member
@@ -827,7 +827,7 @@ theorem invokeDecl_bindingFault_reachableObservation
               · apply runtime.observationRel
                     (leftOutcome := .fault fault)
                     (rightOutcome := .fault fault)
-                · rfl
+                · exact .same _
                 · intro value member
                   simp [outcomeRoots] at member
                 · intro value member

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-runtime-fault-address-renaming
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-22
 reproduction: Fir/LeanIR/PassCorrectness.lean
-regression: none
+regression: Fir/LeanIR/PassCorrectness.lean
 ---
 
 # Summary
@@ -86,4 +86,9 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved by the shared `RuntimeFaultRel` contract in
+`Fir/LeanIR/PassCorrectness.lean`.  Exact faults remain related through its
+`same` constructor, while `deadObject` and `referenceCountUnderflow` carry
+the active `AddressRenaming` proof.  `OutcomeRel` now delegates fault
+observations to that relation, and `outcomeRel_mono` proves that extending a
+renaming preserves the new fault relation.

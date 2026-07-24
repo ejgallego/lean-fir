@@ -1226,7 +1226,15 @@ theorem outcomeRel_mono
   | fault leftFault =>
       cases right with
       | returned rightValue => exact related.elim
-      | fault rightFault => exact related
+      | fault rightFault =>
+          change RuntimeFaultRel smaller leftFault rightFault at related
+          change RuntimeFaultRel larger leftFault rightFault
+          cases related with
+          | same => exact .same _
+          | deadObject mapped =>
+              exact .deadObject (extension.forward mapped)
+          | referenceCountUnderflow mapped =>
+              exact .referenceCountUnderflow (extension.forward mapped)
 
 theorem heapRel_monoRenaming
     (extension : RenamingExtends smaller larger)
