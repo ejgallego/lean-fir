@@ -286,8 +286,10 @@ neutral execution fields and effect-projection shape, canonicalizes them, and
 preserves unknown extension keys.  Before selection and artifact writing, each
 participating adapter gets one `prepare_manifest` pass.  The LCNF adapter alone
 requires and canonicalizes `requiredLcnfForms`, `requiredExecutedLcnfForms`,
-`requiredExecutedLcnfFormCounts`, `requiredExternals`, and
-`requiredExecutedExternals`, plus `requiredExecutedExternalCounts`. Count
+`requiredExecutedLcnfFormCounts`, `requiredExecutedLcnfFormTrace`,
+`requiredAdministrativeStepKinds`, `requiredExternals`,
+`requiredExecutedExternals`, `requiredExecutedExternalCounts`, and
+`requiredExecutedExternalTrace`. Count
 requirements are nonnegative, unique by form or external name, and may only
 strengthen a corresponding static or executed requirement. Each requirement
 has an optional inclusive maximum no smaller than its minimum; equal bounds
@@ -878,6 +880,9 @@ attached to later differential runs, including semantic mismatches.
 sequence. A non-null sequence must contain every dynamically required form and
 its multiplicities must satisfy the declared form-count bounds; it is retained
 verbatim rather than canonicalized as a set.
+`requiredAdministrativeStepKinds` is a sorted, duplicate-free subset of the
+recognized administrative interpreter transitions. Each listed kind must
+occur in that case's `executed-step-trace`.
 `requiredExternals` records names that
 must occur in the compiled artifact; `requiredExecutedExternals` records the
 stronger path obligation that the interpreter must actually dispatch them.
@@ -917,7 +922,16 @@ kind for named/value invocation and yielded bind/apply/cache/final-result
 control. Coverage rejects unknown kinds, requires the trace length to equal
 `interpreter-steps`, and requires its ordered `form:` projection to reproduce
 `executed-lcnf-form-trace`. Executed forms must also be present in the compiled
-artifact's `lcnf-forms` inventory.
+artifact's `lcnf-forms` inventory. Per-case
+`requiredAdministrativeStepKinds` obligations turn selected administrative
+transitions into regression checks; the aggregate report retains their union,
+missing count, and every recognized kind not observed by the selected corpus.
+The Lean corpus guards currently require all five administrative kinds emitted
+by source-generated LCNF: named and value invocation plus yielded bind, cache,
+and final-result control. `admin:yield-apply` remains recognized and reported,
+but is not claimed as source coverage: current compiler output normalizes the
+curried and function-valued-declaration probes into arity-respecting calls, so
+neither reaches the machine's over-application frame.
 The manifest's optional
 `requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
 obligations. The harness requires count telemetry for every LCNF result,
@@ -1035,7 +1049,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 95 cases.  Beyond literals,
+The compiler-generated corpus currently has 97 cases.  Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,

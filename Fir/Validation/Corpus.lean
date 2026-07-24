@@ -767,6 +767,8 @@ structure Case where
   requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement := #[]
   /-- Exact ordered final-impure form sequence, when this fixture pins one. -/
   requiredExecutedLcnfFormTrace : Option (Array String) := none
+  /-- Source-generated administrative interpreter transitions this fixture must execute. -/
+  requiredAdministrativeStepKinds : Array String := #[]
   /-- Imported declarations that must remain in the compiled dependency closure. -/
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
@@ -794,6 +796,7 @@ structure CaseDescriptor where
   requiredExecutedLcnfForms : Array String
   requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement
   requiredExecutedLcnfFormTrace : Option (Array String)
+  requiredAdministrativeStepKinds : Array String
   requiredExternals : Array String
   requiredExecutedExternals : Array String
   requiredExecutedExternalCounts : Array ExecutedExternalCountRequirementDescriptor
@@ -815,6 +818,8 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
   requiredExecutedLcnfFormCounts := validationCase.requiredExecutedLcnfFormCounts
   requiredExecutedLcnfFormTrace := validationCase.requiredExecutedLcnfFormTrace
+  requiredAdministrativeStepKinds :=
+    validationCase.requiredAdministrativeStepKinds
   requiredExternals := validationCase.requiredExternals.map toString
   requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
   requiredExecutedExternalCounts :=
@@ -1050,7 +1055,9 @@ def cases : Array Case := #[
     native := fun _ => .nat Source.litNat
     tags := #["quick", "literal"]
     requiredLcnfForms := #["lit", "return"]
-    requiredExecutedLcnfForms := #["lit", "return"] },
+    requiredExecutedLcnfForms := #["lit", "return"]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-done"] },
   { id := "id-nat"
     entry := ``Source.idNat
     args := #[.nat 42]
@@ -1098,7 +1105,8 @@ def cases : Array Case := #[
     native := fun _ => .nat (Source.directCall 41)
     tags := #["quick", "call"]
     requiredLcnfForms := #["fap", "return"]
-    requiredExecutedLcnfForms := #["fap", "return"] },
+    requiredExecutedLcnfForms := #["fap", "return"]
+    requiredAdministrativeStepKinds := #["admin:yield-bind"] },
   { id := "captured-partial"
     entry := ``Source.capturedPartial
     dependencies := #[``Source.firstNat, ``Source.applyNat]
@@ -1108,7 +1116,8 @@ def cases : Array Case := #[
     native := fun _ => .nat (Source.capturedPartial 40 2)
     tags := #["quick", "closure", "partial-application"]
     requiredLcnfForms := #["pap", "fap", "return"]
-    requiredExecutedLcnfForms := #["pap", "fap", "return"] },
+    requiredExecutedLcnfForms := #["pap", "fap", "return"]
+    requiredAdministrativeStepKinds := #["admin:invoke-value"] },
   { id := "recursive-traversal"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -2507,7 +2516,30 @@ def requiredFinalExecutedForms : Array String :=
     "join", "jump", "lit", "oproj", "oset", "pap", "return", "setTag", "sproj", "sset",
     "unbox", "uproj", "uset"]
 
+/--
+Administrative transitions observed in well-typed LCNF emitted by the source
+compiler.  `admin:yield-apply` remains a recognized machine transition, but the
+compiler normalizes curried applications into arity-respecting calls rather
+than emitting the over-application needed to reach it.
+-/
+def requiredSourceAdministrativeStepKinds : Array String :=
+  #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+    "admin:yield-cache", "admin:yield-done"]
+
 #guard cases.all fun validationCase => !validationCase.requiredExecutedLcnfForms.isEmpty
+
+#guard cases.all fun validationCase =>
+  validationCase.requiredAdministrativeStepKinds.all fun kind =>
+    validationCase.requiredAdministrativeStepKinds.foldl
+      (fun count candidate => if candidate == kind then count + 1 else count) 0 == 1
+
+#guard cases.all fun validationCase =>
+  validationCase.requiredAdministrativeStepKinds.all
+    requiredSourceAdministrativeStepKinds.contains
+
+#guard requiredSourceAdministrativeStepKinds.all fun kind =>
+  cases.any fun validationCase =>
+    validationCase.requiredAdministrativeStepKinds.contains kind
 
 #guard cases.all fun validationCase =>
   validationCase.effectProjections.all fun projection =>

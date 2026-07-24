@@ -30,6 +30,7 @@ LCNF_MANIFEST_FIELDS = {
     "requiredExecutedLcnfForms",
     "requiredExecutedLcnfFormCounts",
     "requiredExecutedLcnfFormTrace",
+    "requiredAdministrativeStepKinds",
     "requiredExternals",
     "requiredExecutedExternals",
     "requiredExecutedExternalCounts",
@@ -198,6 +199,20 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
                     "requiredExecutedLcnfFormCounts"
                 )
 
+        required_administrative_step_kinds = checked_names(
+            "requiredAdministrativeStepKinds"
+        )
+        unknown_required_step_kinds = sorted(
+            set(required_administrative_step_kinds)
+            - ADMINISTRATIVE_STEP_KINDS
+        )
+        if unknown_required_step_kinds:
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: "
+                "unknown requiredAdministrativeStepKinds: "
+                + ",".join(unknown_required_step_kinds)
+            )
+
         required_externals = checked_names("requiredExternals")
         required_executed_externals = checked_names("requiredExecutedExternals")
         prepared_external_count_requirements = checked_count_requirements(
@@ -251,6 +266,9 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
         item["requiredExecutedLcnfForms"] = required_executed_forms
         item["requiredExecutedLcnfFormCounts"] = prepared_count_requirements
         item["requiredExecutedLcnfFormTrace"] = required_executed_form_trace
+        item["requiredAdministrativeStepKinds"] = (
+            required_administrative_step_kinds
+        )
         item["requiredExternals"] = required_externals
         item["requiredExecutedExternals"] = required_executed_externals
         item["requiredExecutedExternalCounts"] = (
@@ -485,6 +503,9 @@ def coverage_report(
     executed_step_trace_form_count = 0
     executed_step_trace_administrative_count = 0
     executed_step_trace_administrative_totals: dict[str, int] = {}
+    executed_step_trace_administrative_required: set[str] = set()
+    executed_step_trace_administrative_requirement_count = 0
+    executed_step_trace_administrative_missing_count = 0
     static_external_required: set[str] = set()
     static_external_observed: set[str] = set()
     executed_external_required: set[str] = set()
@@ -560,6 +581,9 @@ def coverage_report(
         required_executed_form_trace = descriptor[
             "requiredExecutedLcnfFormTrace"
         ]
+        required_administrative_step_kinds = descriptor[
+            "requiredAdministrativeStepKinds"
+        ]
         required_static_externals = descriptor["requiredExternals"]
         required_executed_externals = descriptor["requiredExecutedExternals"]
         required_executed_external_counts = descriptor[
@@ -580,6 +604,9 @@ def coverage_report(
         )
         executed_form_trace_obligations_active = (
             required_executed_form_trace is not None
+        )
+        administrative_step_obligations_active = bool(
+            required_administrative_step_kinds
         )
         static_external_obligations_active = bool(required_static_externals)
         executed_external_obligations_active = bool(required_executed_externals)
@@ -649,6 +676,10 @@ def coverage_report(
                 and observed_executed_form_trace is not None
             )
             else None
+        )
+        missing_administrative_step_kinds = sorted(
+            set(required_administrative_step_kinds)
+            - set(step_trace_administrative_counts)
         )
         unexpected_executed_forms = (
             sorted(set(observed_executed) - set(observed_static))
@@ -786,6 +817,15 @@ def coverage_report(
                     executed_step_trace_administrative_totals.get(kind, 0)
                     + count
                 )
+        executed_step_trace_administrative_required.update(
+            required_administrative_step_kinds
+        )
+        executed_step_trace_administrative_requirement_count += int(
+            administrative_step_obligations_active
+        )
+        executed_step_trace_administrative_missing_count += len(
+            missing_administrative_step_kinds
+        )
         static_external_required.update(required_static_externals)
         static_external_observed.update(observed_static_externals)
         executed_external_required.update(required_executed_externals)
@@ -984,6 +1024,11 @@ def coverage_report(
                         "executed-step-trace form projection disagrees with "
                         "executed-lcnf-form-trace"
                     )
+                if missing_administrative_step_kinds:
+                    audit_finding(
+                        "missing required administrative step kinds: "
+                        + ",".join(missing_administrative_step_kinds)
+                    )
         if record is not None and not steps_present:
             audit_finding("missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
@@ -1125,6 +1170,15 @@ def coverage_report(
                         "formSteps": step_trace_form_projection,
                         "administrativeCounts": named_count_items(
                             step_trace_administrative_counts, "kind", "count"
+                        ),
+                        "administrativeObligationsActive": (
+                            administrative_step_obligations_active
+                        ),
+                        "requiredAdministrativeKinds": (
+                            required_administrative_step_kinds
+                        ),
+                        "missingRequiredAdministrativeKinds": (
+                            missing_administrative_step_kinds
                         ),
                         "unknownKinds": step_trace_unknown_kinds,
                     },
@@ -1280,6 +1334,19 @@ def coverage_report(
                         executed_step_trace_administrative_totals,
                         "kind",
                         "count",
+                    ),
+                    "casesWithAdministrativeRequirements": (
+                        executed_step_trace_administrative_requirement_count
+                    ),
+                    "requiredAdministrativeKinds": sorted(
+                        executed_step_trace_administrative_required
+                    ),
+                    "missingAdministrativeObligationCount": (
+                        executed_step_trace_administrative_missing_count
+                    ),
+                    "unobservedAdministrativeKinds": sorted(
+                        ADMINISTRATIVE_STEP_KINDS
+                        - set(executed_step_trace_administrative_totals)
                     ),
                 },
                 "totalInterpreterSteps": sum(interpreter_steps),

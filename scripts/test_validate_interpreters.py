@@ -116,6 +116,7 @@ def descriptor(
     executed_forms: list[str] | None = None,
     executed_form_counts: list[dict] | None = None,
     required_executed_form_trace: list[str] | None = None,
+    required_administrative_step_kinds: list[str] | None = None,
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
     executed_external_counts: list[dict] | None = None,
@@ -142,6 +143,9 @@ def descriptor(
         "requiredExecutedLcnfForms": executed_forms or [],
         "requiredExecutedLcnfFormCounts": executed_form_counts or [],
         "requiredExecutedLcnfFormTrace": required_executed_form_trace,
+        "requiredAdministrativeStepKinds": (
+            required_administrative_step_kinds or []
+        ),
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
         "requiredExecutedExternalCounts": executed_external_counts or [],
@@ -431,7 +435,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(parsed[0]["futureBackendPolicy"], {"engine": "v8"})
         self.assertEqual(parsed[0]["effectProjections"], item["effectProjections"])
         with self.assertRaisesRegex(
-            harness.ValidationError, "missing requiredExecutedExternalCounts"
+            harness.ValidationError, "missing requiredAdministrativeStepKinds"
         ):
             lcnf.prepare_manifest(parsed)
 
@@ -577,6 +581,10 @@ class HarnessTests(unittest.TestCase):
                 {"form": "fap", "minimum": 1, "maximum": 3},
             ],
             required_executed_form_trace=["return", "fap", "return"],
+            required_administrative_step_kinds=[
+                "admin:yield-done",
+                "admin:invoke-name",
+            ],
             externals=["Nat.add", "ByteArray.size"],
             executed_externals=["Nat.add", "ByteArray.size"],
             executed_external_counts=[
@@ -622,6 +630,10 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(
             manifest[1]["requiredExecutedLcnfFormTrace"],
             ["return", "fap", "return"],
+        )
+        self.assertEqual(
+            manifest[1]["requiredAdministrativeStepKinds"],
+            ["admin:invoke-name", "admin:yield-done"],
         )
         self.assertEqual(
             manifest[1]["requiredExternals"], ["ByteArray.size", "Nat.add"]
@@ -695,6 +707,59 @@ class HarnessTests(unittest.TestCase):
                     harness.manifest_from_output(
                         json.dumps(malformed), ["native", "--manifest"]
                     )
+
+        missing_step_kinds = descriptor("case")
+        del missing_step_kinds["requiredAdministrativeStepKinds"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredAdministrativeStepKinds"
+        ):
+            harness.manifest_from_output(
+                json.dumps(missing_step_kinds), ["native", "--manifest"]
+            )
+
+        for malformed_step_kinds in (
+            "admin:invoke-name",
+            ["admin:invoke-name", ""],
+            ["admin:invoke-name", 1],
+        ):
+            malformed = descriptor("case")
+            malformed["requiredAdministrativeStepKinds"] = (
+                malformed_step_kinds
+            )
+            with self.subTest(malformed_step_kinds=malformed_step_kinds):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "malformed requiredAdministrativeStepKinds",
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(malformed), ["native", "--manifest"]
+                    )
+
+        duplicate_step_kinds = descriptor(
+            "case",
+            required_administrative_step_kinds=[
+                "admin:invoke-name",
+                "admin:invoke-name",
+            ],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "duplicate requiredAdministrativeStepKinds"
+        ):
+            harness.manifest_from_output(
+                json.dumps(duplicate_step_kinds), ["native", "--manifest"]
+            )
+
+        unknown_step_kind = descriptor(
+            "case",
+            required_administrative_step_kinds=["admin:not-a-step"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "unknown requiredAdministrativeStepKinds: admin:not-a-step",
+        ):
+            harness.manifest_from_output(
+                json.dumps(unknown_step_kind), ["native", "--manifest"]
+            )
 
         for malformed_counts in (
             "oset=2",
@@ -6528,6 +6593,12 @@ class HarnessTests(unittest.TestCase):
                     "formStepCount": 2,
                     "administrativeStepCount": 0,
                     "administrativeKinds": [],
+                    "casesWithAdministrativeRequirements": 0,
+                    "requiredAdministrativeKinds": [],
+                    "missingAdministrativeObligationCount": 0,
+                    "unobservedAdministrativeKinds": sorted(
+                        lcnf.ADMINISTRATIVE_STEP_KINDS
+                    ),
                 },
                 "totalInterpreterSteps": 2,
                 "minimumInterpreterSteps": 1,
@@ -6988,6 +7059,73 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(summary["formStepCount"], 1)
         self.assertEqual(
             summary["administrativeStepCount"], len(step_trace) - 1
+        )
+        self.assertEqual(summary["unobservedAdministrativeKinds"], [])
+
+    def test_administrative_step_kind_obligations_are_enforced(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                forms=["return"],
+                required_administrative_step_kinds=[
+                    "admin:invoke-name",
+                    "admin:yield-done",
+                ],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace=(
+                    '["admin:invoke-name","form:return","admin:yield-done"]'
+                ),
+                steps="3",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(failures, [])
+        coverage = report["cases"][0]["executed"]["stepTrace"]
+        self.assertTrue(coverage["administrativeObligationsActive"])
+        self.assertEqual(
+            coverage["requiredAdministrativeKinds"],
+            ["admin:invoke-name", "admin:yield-done"],
+        )
+        self.assertEqual(coverage["missingRequiredAdministrativeKinds"], [])
+        summary = report["summary"]["executed"]["stepTrace"]
+        self.assertEqual(summary["casesWithAdministrativeRequirements"], 1)
+        self.assertEqual(
+            summary["requiredAdministrativeKinds"],
+            ["admin:invoke-name", "admin:yield-done"],
+        )
+        self.assertEqual(summary["missingAdministrativeObligationCount"], 0)
+
+        missing = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace='["admin:invoke-name","form:return"]',
+                steps="2",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, missing, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing required administrative step kinds: admin:yield-done"],
+        )
+        self.assertEqual(
+            report["cases"][0]["executed"]["stepTrace"][
+                "missingRequiredAdministrativeKinds"
+            ],
+            ["admin:yield-done"],
+        )
+        self.assertEqual(
+            report["summary"]["executed"]["stepTrace"][
+                "missingAdministrativeObligationCount"
+            ],
+            1,
         )
 
     def test_executed_step_trace_negative_coverage_paths(self) -> None:
