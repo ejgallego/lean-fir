@@ -2865,6 +2865,20 @@ by a fixture-specific body or index. Physical parameters and caller operand
 tails remain general. T4 structured-fault correctness is the next proof
 milestone. No shared semantic contract or executable ABI changed.
 
+W6.6ck establishes T4's public structured-fault boundary.
+`ConcreteTrapsWith` is the fuel-free trap counterpart of Talos's
+success-only `TerminatesWith`; `concreteTrapsWith_of_wp_body_at` and
+`CodeWP.toConcreteTrapsWith` derive it from a trap-only generated-body weakest
+precondition. `RefinedFaultPost` requires the final concrete runtime to refine
+the source runtime at the fault point and requires the host failure to be a
+runtime `ConcreteError` related to the exact FIR `RuntimeFault` by
+`ConcreteErrorSourceRel`. ABI-shape and target memory/global traps therefore
+cannot satisfy the theorem. `ConcreteSupportedExport.faultCorrect` lifts the
+boundary through the generated export-name lookup. The remaining T4 work is
+the syntax-directed fault induction that constructs the source
+`ExecEvaluates` witness and trap-only body `CodeWP` from operation-specific
+failure certificates. No shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

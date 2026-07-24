@@ -27,4 +27,5 @@ import FirTalos.ConcreteProgramCorrectness
 import FirTalos.ConcreteClosureDispatch
 import FirTalos.ConcreteResolver
 import FirTalos.ConcreteSupportedExportCorrectness
+import FirTalos.ConcreteFaultCorrectness
 import FirTalos.ConcreteRuntimeExamples

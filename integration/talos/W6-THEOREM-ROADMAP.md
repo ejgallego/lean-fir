@@ -142,6 +142,25 @@ precedence information, including stale-object, bounds, malformed-layout,
 allocation, and external failures. A target trap without the related
 structured source error does not satisfy this theorem.
 
+The public endpoint is now explicit:
+
+```lean
+ExecEvaluates sourceExternals
+  (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+  (FaultObservation faultRuntime fault)
+∧
+ConcreteExportTrapsWith hostEnv module exportName arguments
+  (RefinedFaultPost faultRuntime fault)
+```
+
+`RefinedFaultPost` requires both `ConcreteRuntimeRel` at the source fault
+runtime and a `HostFailure.runtime` whose underlying `ConcreteError` satisfies
+`ConcreteErrorSourceRel` for `fault`. `ConcreteTrapsWith` supplies the
+fuel-independent target endpoint missing from Talos's success-only
+`TerminatesWith`, and the body-WP/export bridges are complete. The remaining
+obligation is a syntax-directed fault simulation that constructs both halves
+from the operation-level failure theorems.
+
 ### T5. Wasm-resident runtime linking
 
 W7 replaces concrete host functions with Wasm-resident implementations over
@@ -198,8 +217,8 @@ acceptance tests pass.
 3. Complete: add effect, call, external, lazy, and case constructors by
    consuming the existing W6.6 step theorems.
 4. Complete: package the whole generated export as T3.
-5. Build the fault induction T4 in parallel with remaining success
-   constructors.
+5. In progress: build the syntax-directed fault induction T4 on the completed
+   trap endpoint and export bridge.
 6. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 7. Close with T6 and the pure `prettyM` acceptance theorem.
