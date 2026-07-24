@@ -37,6 +37,110 @@ theorem trans
 
 end RootSubset
 
+/-- Number of live cells whose metadata still needs persistence promotion.
+This is the semantic termination measure for `markPersistentLocationFuel`:
+an effective visit marks its parent before recursively visiting children. -/
+def unpersistedLiveCount : Heap → Nat
+  | [] => 0
+  | (_, cell) :: rest =>
+      (if cell.live && !cell.persistent then 1 else 0) +
+        unpersistedLiveCount rest
+
+theorem unpersistedLiveCount_le_length (heap : Heap) :
+    unpersistedLiveCount heap ≤ heap.length := by
+  induction heap with
+  | nil => exact Nat.le_refl _
+  | cons entry rest ih =>
+      obtain ⟨location, cell⟩ := entry
+      simp only [unpersistedLiveCount, List.length_cons]
+      split <;> omega
+
+/-- Promoting one ordinary live cell removes exactly one unit from the
+persistence termination measure. -/
+theorem unpersistedLiveCount_replace_persistent
+    (found : findCell? heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (replaced : replaceCell heap location
+      { cell with rc := 0, persistent := true } = some after) :
+    unpersistedLiveCount after + 1 = unpersistedLiveCount heap := by
+  induction heap generalizing after with
+  | nil => simp [findCell?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, current⟩ := entry
+      by_cases here : candidate = location
+      · subst candidate
+        simp [findCell?] at found
+        subst current
+        simp [replaceCell] at replaced
+        subst after
+        simp [unpersistedLiveCount, live, ordinary]
+        omega
+      · have tailFound : findCell? rest location = some cell := by
+          simpa [findCell?, here] using found
+        cases tailReplaced : replaceCell rest location
+            { cell with rc := 0, persistent := true } with
+        | none => simp [replaceCell, here, tailReplaced] at replaced
+        | some tailAfter =>
+            have afterEq : after = (candidate, current) :: tailAfter := by
+              simpa [replaceCell, here, tailReplaced] using replaced.symm
+            subst after
+            have tailCount := ih tailFound tailReplaced
+            simp only [unpersistedLiveCount]
+            omega
+
+/-- Recursive persistence never creates a new unpersisted live cell. -/
+theorem unpersistedLiveCount_markPersistentLocationFuel_le
+    (fuel : Nat) (heap : Heap) (location : Location) :
+    unpersistedLiveCount
+        (markPersistentLocationFuel fuel heap location) ≤
+      unpersistedLiveCount heap := by
+  induction fuel generalizing heap location with
+  | zero => exact Nat.le_refl _
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap location with
+      | none => simp
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [skip]
+          · have live : cell.live = true := by
+              cases liveEq : cell.live <;> simp_all
+            have ordinary : cell.persistent = false := by
+              cases persistentEq : cell.persistent <;> simp_all
+            simp only [skip, Bool.false_eq_true, if_false]
+            obtain ⟨after, post⟩ :=
+              replaceCell_spec_of_find heap location cell
+                { cell with rc := 0, persistent := true } found
+            rw [post.replaced]
+            have parentDrop :=
+              unpersistedLiveCount_replace_persistent found live ordinary
+                post.replaced
+            have foldLe (values : Array Value) (start : Heap) :
+                unpersistedLiveCount
+                    (values.foldl (init := start) fun next value =>
+                      match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel fuel next child
+                      | _ => next) ≤
+                  unpersistedLiveCount start := by
+              rw [← Array.foldl_toList]
+              generalize values.toList = items
+              induction items generalizing start with
+              | nil => exact Nat.le_refl _
+              | cons value items itemsIH =>
+                  simp only [List.foldl]
+                  apply Nat.le_trans (itemsIH _)
+                  cases value with
+                  | object reference =>
+                      cases reference with
+                      | tagged payload => exact Nat.le_refl _
+                      | heap child => exact ih start child
+                  | usize | scalar | erased | reuseToken =>
+                      exact Nat.le_refl _
+            exact Nat.le_trans
+              (foldLe cell.object.ownedValues after) (by omega)
+
 /-- Extend a partial address bijection with one fresh source/target pair. -/
 def AddressRenaming.extend (rho : AddressRenaming)
     (left right : Location)
