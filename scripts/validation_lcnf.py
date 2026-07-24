@@ -29,6 +29,7 @@ LCNF_MANIFEST_FIELDS = {
     "requiredLcnfForms",
     "requiredExecutedLcnfForms",
     "requiredExecutedLcnfFormCounts",
+    "requiredExecutedLcnfFormTrace",
     "requiredExternals",
     "requiredExecutedExternals",
     "requiredExecutedExternalCounts",
@@ -160,6 +161,30 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
             required_forms,
             required_executed_forms,
         )
+        required_executed_form_trace = checked_optional_name_trace(
+            "requiredExecutedLcnfFormTrace"
+        )
+        if required_executed_form_trace is not None:
+            if not set(required_executed_forms) <= set(
+                required_executed_form_trace
+            ):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: "
+                    "requiredExecutedLcnfFormTrace must contain every "
+                    "requiredExecutedLcnfForms name"
+                )
+            trace_counts = trace_name_counts(required_executed_form_trace)
+            unsatisfied_trace_counts = unsatisfied_count_requirements(
+                prepared_count_requirements,
+                trace_counts,
+                "form",
+            )
+            if unsatisfied_trace_counts:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: "
+                    "requiredExecutedLcnfFormTrace violates "
+                    "requiredExecutedLcnfFormCounts"
+                )
 
         required_externals = checked_names("requiredExternals")
         required_executed_externals = checked_names("requiredExecutedExternals")
@@ -213,6 +238,7 @@ def prepare_manifest(descriptors: list[dict]) -> list[dict]:
         item["requiredLcnfForms"] = required_forms
         item["requiredExecutedLcnfForms"] = required_executed_forms
         item["requiredExecutedLcnfFormCounts"] = prepared_count_requirements
+        item["requiredExecutedLcnfFormTrace"] = required_executed_form_trace
         item["requiredExternals"] = required_externals
         item["requiredExecutedExternals"] = required_executed_externals
         item["requiredExecutedExternalCounts"] = (
@@ -415,6 +441,8 @@ def coverage_report(
     executed_form_trace_diagnostic_count = 0
     executed_form_trace_valid_diagnostic_count = 0
     executed_form_trace_consistent_diagnostic_count = 0
+    executed_form_trace_requirement_count = 0
+    executed_form_trace_mismatch_count = 0
     executed_form_trace_event_count = 0
     static_external_required: set[str] = set()
     static_external_observed: set[str] = set()
@@ -484,6 +512,9 @@ def coverage_report(
         required_static = descriptor["requiredLcnfForms"]
         required_executed = descriptor["requiredExecutedLcnfForms"]
         required_executed_counts = descriptor["requiredExecutedLcnfFormCounts"]
+        required_executed_form_trace = descriptor[
+            "requiredExecutedLcnfFormTrace"
+        ]
         required_static_externals = descriptor["requiredExternals"]
         required_executed_externals = descriptor["requiredExecutedExternals"]
         required_executed_external_counts = descriptor[
@@ -501,6 +532,9 @@ def coverage_report(
         executed_count_zero_counts_active = any(
             requirement["minimum"] == 0
             for requirement in required_executed_counts
+        )
+        executed_form_trace_obligations_active = (
+            required_executed_form_trace is not None
         )
         static_external_obligations_active = bool(required_static_externals)
         executed_external_obligations_active = bool(required_executed_externals)
@@ -536,6 +570,15 @@ def coverage_report(
                 or observed_executed_counts is None
                 or trace_name_counts(observed_form_trace) == observed_count_map
             )
+        )
+        form_trace_matches_required = (
+            observed_executed_form_trace == required_executed_form_trace
+            if (
+                executed_form_trace_present
+                and observed_executed_form_trace is not None
+                and executed_form_trace_obligations_active
+            )
+            else None
         )
         unsatisfied_executed_counts = unsatisfied_count_requirements(
             required_executed_counts, observed_count_map, "form"
@@ -628,6 +671,12 @@ def coverage_report(
             executed_form_trace_present
             and form_trace_names_consistent
             and form_trace_counts_consistent
+        )
+        executed_form_trace_requirement_count += int(
+            executed_form_trace_obligations_active
+        )
+        executed_form_trace_mismatch_count += int(
+            form_trace_matches_required is False
         )
         if observed_executed_form_trace is not None:
             executed_form_trace_event_count += len(observed_executed_form_trace)
@@ -792,6 +841,12 @@ def coverage_report(
                     "executed-lcnf-form-trace diagnostic disagrees with "
                     "executed-lcnf-form-counts"
                 )
+            if record is not None and form_trace_matches_required is False:
+                audit_finding(
+                    "executed LCNF form trace differs from exact requirement "
+                    f"(required={json.dumps(required_executed_form_trace, separators=(',', ':'))}; "
+                    f"observed={json.dumps(observed_form_trace, separators=(',', ':'))})"
+                )
         if record is not None and not steps_present:
             audit_finding("missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
@@ -911,7 +966,12 @@ def coverage_report(
                         ),
                         "namesConsistent": form_trace_names_consistent,
                         "countsConsistent": form_trace_counts_consistent,
+                        "obligationsActive": (
+                            executed_form_trace_obligations_active
+                        ),
+                        "required": required_executed_form_trace,
                         "observed": observed_form_trace,
+                        "matchesRequired": form_trace_matches_required,
                     },
                     "interpreterSteps": steps,
                 },
@@ -1018,12 +1078,16 @@ def coverage_report(
                     "unsatisfiedObligationCount": executed_count_missing_count,
                 },
                 "formTrace": {
+                    "casesWithRequirements": executed_form_trace_requirement_count,
                     "casesWithDiagnostics": executed_form_trace_diagnostic_count,
                     "casesWithValidDiagnostics": (
                         executed_form_trace_valid_diagnostic_count
                     ),
                     "casesWithConsistentDiagnostics": (
                         executed_form_trace_consistent_diagnostic_count
+                    ),
+                    "mismatchedObligationCount": (
+                        executed_form_trace_mismatch_count
                     ),
                     "observedEventCount": executed_form_trace_event_count,
                 },

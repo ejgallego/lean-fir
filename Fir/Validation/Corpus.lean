@@ -765,6 +765,8 @@ structure Case where
   requiredExecutedLcnfForms : Array String
   /-- Minimum dynamic counts for forms whose multiplicity is semantically significant. -/
   requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement := #[]
+  /-- Exact ordered final-impure form sequence, when this fixture pins one. -/
+  requiredExecutedLcnfFormTrace : Option (Array String) := none
   /-- Imported declarations that must remain in the compiled dependency closure. -/
   requiredExternals : Array Lean.Name := #[]
   /-- Imported declarations that this fixture must actually call. -/
@@ -791,6 +793,7 @@ structure CaseDescriptor where
   requiredLcnfForms : Array String
   requiredExecutedLcnfForms : Array String
   requiredExecutedLcnfFormCounts : Array ExecutedFormCountRequirement
+  requiredExecutedLcnfFormTrace : Option (Array String)
   requiredExternals : Array String
   requiredExecutedExternals : Array String
   requiredExecutedExternalCounts : Array ExecutedExternalCountRequirementDescriptor
@@ -811,6 +814,7 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   requiredLcnfForms := validationCase.requiredLcnfForms
   requiredExecutedLcnfForms := validationCase.requiredExecutedLcnfForms
   requiredExecutedLcnfFormCounts := validationCase.requiredExecutedLcnfFormCounts
+  requiredExecutedLcnfFormTrace := validationCase.requiredExecutedLcnfFormTrace
   requiredExternals := validationCase.requiredExternals.map toString
   requiredExecutedExternals := validationCase.requiredExecutedExternals.map toString
   requiredExecutedExternalCounts :=
@@ -1003,6 +1007,42 @@ private def assocInput : Source.Assoc :=
 private def assocExpected : Source.Assoc :=
   .node (.atom 1) (.node (.atom 2) (.node (.atom 3) (.atom 4)))
 
+private def branchFormTrace : Array String :=
+  #["cases", "lit", "return"]
+
+private def recursiveListFormTrace : Array String :=
+  #["lit", "fap", "cases", "oproj", "oproj",
+    "fap", "cases", "oproj", "oproj",
+    "fap", "cases", "oproj", "oproj",
+    "fap", "cases", "inc", "return",
+    "return", "return", "return", "return"]
+
+private def recursiveEmptyFormTrace : Array String :=
+  #["lit", "fap", "cases", "inc", "return", "return"]
+
+private def scalarEnumFormTrace : Array String :=
+  #["fap", "lit", "fap", "cases", "lit", "return", "return", "inc", "return"]
+
+private def intClassifyFormTrace : Array String :=
+  #["fap", "lit", "fap", "extern", "return",
+    "fap", "extern", "cases", "lit", "return"]
+
+private def conditionalExternalTakenFormTrace : Array String :=
+  #["cases", "lit", "fap", "extern", "return"]
+
+private def reuseChangeTagFormTrace : Array String :=
+  #["cases", "oproj", "join", "isShared", "cases", "jump", "fap", "inc", "return",
+    "dec", "cases", "join", "cases", "setTag", "oset", "jump", "return"]
+
+private def reuseGrowDeleteFormTrace : Array String :=
+  #["cases", "oproj", "join", "isShared", "cases", "jump", "fap", "inc", "return",
+    "dec", "cases", "del", "inc", "ctor", "return"]
+
+private def reuseGrowDeleteSharedFormTrace : Array String :=
+  #["inc", "fap", "cases", "oproj", "join", "isShared", "cases", "inc", "dec",
+    "jump", "fap", "inc", "return", "dec", "cases", "del", "inc", "ctor",
+    "return", "ctor", "return"]
+
 def cases : Array Case := #[
   { id := "lit-nat"
     entry := ``Source.litNat
@@ -1028,7 +1068,8 @@ def cases : Array Case := #[
     native := fun _ => .nat (Source.branchNat true)
     tags := #["quick", "control-flow"]
     requiredLcnfForms := #["cases", "lit", "return"]
-    requiredExecutedLcnfForms := #["cases", "lit", "return"] },
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some branchFormTrace },
   { id := "branch-nat-false"
     entry := ``Source.branchNat
     args := #[.bool false]
@@ -1037,7 +1078,8 @@ def cases : Array Case := #[
     native := fun _ => .nat (Source.branchNat false)
     tags := #["quick", "control-flow", "boundary"]
     requiredLcnfForms := #["cases", "lit", "return"]
-    requiredExecutedLcnfForms := #["cases", "lit", "return"] },
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some branchFormTrace },
   { id := "pair-first"
     entry := ``Source.pairFirst
     args := #[.ctor "Prod.mk" 0 #[.nat 41, .nat 42]]
@@ -1080,7 +1122,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfFormCounts :=
       #[{ form := "cases", minimum := 4, maximum := some 4 },
         { form := "fap", minimum := 4, maximum := some 4 },
-        { form := "oproj", minimum := 6, maximum := some 6 }] },
+        { form := "oproj", minimum := 6, maximum := some 6 }]
+    requiredExecutedLcnfFormTrace := some recursiveListFormTrace },
   { id := "recursive-empty"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]
@@ -1094,7 +1137,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfFormCounts :=
       #[{ form := "cases", minimum := 1, maximum := some 1 },
         { form := "fap", minimum := 1, maximum := some 1 },
-        { form := "oproj", minimum := 0, maximum := some 0 }] },
+        { form := "oproj", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some recursiveEmptyFormTrace },
   { id := "local-tail"
     entry := ``Source.localTailControl
     dependencies := #[`Fir.Validation.Corpus.Source.localTailControl.loop]
@@ -1108,7 +1152,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfFormCounts :=
       #[{ form := "cases", minimum := 4, maximum := some 4 },
         { form := "fap", minimum := 4, maximum := some 4 },
-        { form := "oproj", minimum := 6, maximum := some 6 }] },
+        { form := "oproj", minimum := 6, maximum := some 6 }]
+    requiredExecutedLcnfFormTrace := some recursiveListFormTrace },
   { id := "large-nat"
     entry := ``Source.largeNat
     resultSchema := .nat
@@ -1136,6 +1181,7 @@ def cases : Array Case := #[
     tags := #["quick", "constructor", "control-flow", "boundary", "heap"]
     requiredLcnfForms := #["cases", "lit", "return"]
     requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some branchFormTrace
     provenance := firProvenance "Nonempty constructor case over an initial heap graph" },
   { id := "nat-list-nonempty-bool"
     entry := ``Source.hasNatListElements
@@ -1146,6 +1192,7 @@ def cases : Array Case := #[
     tags := #["quick", "constructor", "control-flow", "boundary", "heap", "bool"]
     requiredLcnfForms := #["cases", "lit", "return"]
     requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some branchFormTrace
     provenance := firProvenance "Boolean result from a nonempty initial heap graph" },
   { id := "nat-list-empty-bool"
     entry := ``Source.hasNatListElements
@@ -1156,6 +1203,7 @@ def cases : Array Case := #[
     tags := #["quick", "constructor", "control-flow", "empty", "bool"]
     requiredLcnfForms := #["cases", "lit", "return"]
     requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some branchFormTrace
     provenance := firProvenance "Scalar false result from the empty list constructor" },
   { id := "unicode-string-roundtrip"
     entry := ``Source.idString
@@ -1833,6 +1881,7 @@ def cases : Array Case := #[
         { form := "oset", minimum := 1, maximum := some 1 },
         { form := "del", minimum := 0, maximum := some 0 },
         { form := "ctor", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some reuseChangeTagFormTrace
     provenance := firProvenance
       "Reuse a unique constructor at the same size while changing its runtime tag" },
   { id := "reuse-grow-delete"
@@ -1857,6 +1906,7 @@ def cases : Array Case := #[
         { form := "ctor", minimum := 1, maximum := some 1 },
         { form := "setTag", minimum := 0, maximum := some 0 },
         { form := "oset", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some reuseGrowDeleteFormTrace
     provenance := firProvenance
       "Delete a unique constructor before allocating a larger replacement" },
   { id := "reuse-grow-delete-shared"
@@ -1883,6 +1933,7 @@ def cases : Array Case := #[
         { form := "ctor", minimum := 2, maximum := some 2 },
         { form := "setTag", minimum := 0, maximum := some 0 },
         { form := "oset", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some reuseGrowDeleteSharedFormTrace
     provenance := firProvenance
       "Retain the original constructor while growing a shared replacement" },
   { id := "capture-17-list"
@@ -1923,6 +1974,7 @@ def cases : Array Case := #[
     tags := #["quick", "scalar", "control-flow", "enum", "regression"]
     requiredLcnfForms := #["fap", "inc", "return", "lit", "cases"]
     requiredExecutedLcnfForms := #["fap", "lit", "cases", "return", "inc"]
+    requiredExecutedLcnfFormTrace := some scalarEnumFormTrace
     provenance := firProvenance "Nullary enum lowered to UInt8 and matched internally" },
   { id := "int-positive-roundtrip"
     entry := ``Source.idInt
@@ -2045,6 +2097,7 @@ def cases : Array Case := #[
     tags := #["stress", "int", "signed", "cases", "external", "boundary"]
     requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
@@ -2060,6 +2113,7 @@ def cases : Array Case := #[
     tags := #["stress", "int", "signed", "cases", "external", "boundary", "heap"]
     requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
@@ -2075,6 +2129,7 @@ def cases : Array Case := #[
     tags := #["stress", "int", "signed", "negative", "cases", "external", "boundary"]
     requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
@@ -2090,6 +2145,7 @@ def cases : Array Case := #[
     tags := #["stress", "int", "signed", "negative", "cases", "external", "boundary", "heap"]
     requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalCounts :=
@@ -2265,6 +2321,7 @@ def cases : Array Case := #[
       #[{ form := "cases", minimum := 1, maximum := some 1 },
         { form := "fap", minimum := 1, maximum := some 1 },
         { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some conditionalExternalTakenFormTrace
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
@@ -2289,6 +2346,7 @@ def cases : Array Case := #[
       #[{ form := "cases", minimum := 1, maximum := some 1 },
         { form := "fap", minimum := 0, maximum := some 0 },
         { form := "extern", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some branchFormTrace
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternalCounts :=
       #[{ external := ``ByteArray.get!, minimum := 0, maximum := some 0 }]
@@ -2455,6 +2513,17 @@ def requiredFinalExecutedForms : Array String :=
   validationCase.effectProjections.all fun projection =>
     validationCase.requiredExternals.contains projection.external &&
     validationCase.requiredExecutedExternals.contains projection.external
+
+#guard cases.all fun validationCase =>
+  match validationCase.requiredExecutedLcnfFormTrace with
+  | none => true
+  | some trace =>
+      validationCase.requiredExecutedLcnfForms.all trace.contains &&
+      validationCase.requiredExecutedLcnfFormCounts.all fun requirement =>
+        let observed := trace.foldl (init := 0) fun count form =>
+          if form == requirement.form then count + 1 else count
+        observed == requirement.minimum &&
+          requirement.maximum == some observed
 
 #guard cases.all fun validationCase =>
   validationCase.requiredExecutedExternalCounts.all fun requirement =>

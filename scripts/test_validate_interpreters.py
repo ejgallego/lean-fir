@@ -115,6 +115,7 @@ def descriptor(
     forms: list[str] | None = None,
     executed_forms: list[str] | None = None,
     executed_form_counts: list[dict] | None = None,
+    required_executed_form_trace: list[str] | None = None,
     externals: list[str] | None = None,
     executed_externals: list[str] | None = None,
     executed_external_counts: list[dict] | None = None,
@@ -140,6 +141,7 @@ def descriptor(
         "requiredLcnfForms": forms or ["return"],
         "requiredExecutedLcnfForms": executed_forms or [],
         "requiredExecutedLcnfFormCounts": executed_form_counts or [],
+        "requiredExecutedLcnfFormTrace": required_executed_form_trace,
         "requiredExternals": externals or [],
         "requiredExecutedExternals": executed_externals or [],
         "requiredExecutedExternalCounts": executed_external_counts or [],
@@ -512,6 +514,7 @@ class HarnessTests(unittest.TestCase):
                 {"form": "return", "minimum": 2, "maximum": None},
                 {"form": "fap", "minimum": 1, "maximum": 3},
             ],
+            required_executed_form_trace=["return", "fap", "return"],
             externals=["Nat.add", "ByteArray.size"],
             executed_externals=["Nat.add", "ByteArray.size"],
             executed_external_counts=[
@@ -553,6 +556,10 @@ class HarnessTests(unittest.TestCase):
                 {"form": "fap", "minimum": 1, "maximum": 3},
                 {"form": "return", "minimum": 2, "maximum": None},
             ],
+        )
+        self.assertEqual(
+            manifest[1]["requiredExecutedLcnfFormTrace"],
+            ["return", "fap", "return"],
         )
         self.assertEqual(
             manifest[1]["requiredExternals"], ["ByteArray.size", "Nat.add"]
@@ -605,6 +612,27 @@ class HarnessTests(unittest.TestCase):
             harness.manifest_from_output(
                 json.dumps(missing_counts), ["native", "--manifest"]
             )
+
+        missing_trace = descriptor("case")
+        del missing_trace["requiredExecutedLcnfFormTrace"]
+        with self.assertRaisesRegex(
+            harness.ValidationError, "missing requiredExecutedLcnfFormTrace"
+        ):
+            harness.manifest_from_output(
+                json.dumps(missing_trace), ["native", "--manifest"]
+            )
+
+        for malformed_trace in ("cases,return", ["cases", ""], ["cases", 1]):
+            malformed = descriptor("case")
+            malformed["requiredExecutedLcnfFormTrace"] = malformed_trace
+            with self.subTest(malformed_trace=malformed_trace):
+                with self.assertRaisesRegex(
+                    harness.ValidationError,
+                    "malformed requiredExecutedLcnfFormTrace",
+                ):
+                    harness.manifest_from_output(
+                        json.dumps(malformed), ["native", "--manifest"]
+                    )
 
         for malformed_counts in (
             "oset=2",
@@ -704,6 +732,35 @@ class HarnessTests(unittest.TestCase):
         ):
             harness.manifest_from_output(
                 json.dumps(zero_required_executed), ["native", "--manifest"]
+            )
+
+        trace_missing_required_form = descriptor(
+            "case",
+            executed_forms=["cases", "return"],
+            required_executed_form_trace=["return"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "must contain every requiredExecutedLcnfForms name",
+        ):
+            harness.manifest_from_output(
+                json.dumps(trace_missing_required_form), ["native", "--manifest"]
+            )
+
+        trace_violates_counts = descriptor(
+            "case",
+            executed_forms=["cases", "return"],
+            executed_form_counts=[
+                {"form": "cases", "minimum": 2, "maximum": 2}
+            ],
+            required_executed_form_trace=["cases", "return"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "violates requiredExecutedLcnfFormCounts",
+        ):
+            harness.manifest_from_output(
+                json.dumps(trace_violates_counts), ["native", "--manifest"]
             )
 
     def test_duplicate_manifest_id_rejected(self) -> None:
@@ -6387,9 +6444,11 @@ class HarnessTests(unittest.TestCase):
                     "unsatisfiedObligationCount": 0,
                 },
                 "formTrace": {
+                    "casesWithRequirements": 0,
                     "casesWithDiagnostics": 2,
                     "casesWithValidDiagnostics": 2,
                     "casesWithConsistentDiagnostics": 2,
+                    "mismatchedObligationCount": 0,
                     "observedEventCount": 2,
                 },
                 "totalInterpreterSteps": 2,
@@ -6778,6 +6837,35 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(trace["observed"], ["cases", "lit", "return"])
         self.assertTrue(trace["namesConsistent"])
         self.assertTrue(trace["countsConsistent"])
+
+        exact_manifest = [
+            descriptor(
+                "case",
+                forms=["cases", "lit", "return"],
+                executed_forms=["cases", "lit", "return"],
+                required_executed_form_trace=["lit", "cases", "return"],
+            )
+        ]
+        report, failures = harness.coverage_report(
+            exact_manifest, ordered, ["case"]
+        )
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed LCNF form trace differs from exact requirement "
+                '(required=["lit","cases","return"];'
+                ' observed=["cases","lit","return"])'
+            ],
+        )
+        trace = report["cases"][0]["executed"]["formTrace"]
+        self.assertTrue(trace["obligationsActive"])
+        self.assertFalse(trace["matchesRequired"])
+        self.assertEqual(
+            report["summary"]["executed"]["formTrace"][
+                "mismatchedObligationCount"
+            ],
+            1,
+        )
 
     def test_coverage_artifact_is_deterministic(self) -> None:
         manifest = [descriptor("case")]

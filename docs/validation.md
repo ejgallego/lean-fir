@@ -874,6 +874,10 @@ by case ID with deterministic tag and required-form lists.  Each attempted
 comparison embeds the corresponding descriptor, so entry name, provenance,
 arguments, schemas, fuel, tags, and intended LCNF/external coverage remain
 attached to later differential runs, including semantic mismatches.
+`requiredExecutedLcnfFormTrace` is either `null` or an exact ordered form
+sequence. A non-null sequence must contain every dynamically required form and
+its multiplicities must satisfy the declared form-count bounds; it is retained
+verbatim rather than canonicalized as a set.
 `requiredExternals` records names that
 must occur in the compiled artifact; `requiredExecutedExternals` records the
 stronger path obligation that the interpreter must actually dispatch them.
@@ -916,6 +920,13 @@ bounds. Corpus-wide summaries retain summed observations, required minima, and
 bounded maxima. Per-case `requiredObservations` materializes every obligation's
 observed count, including zero even though the positive-only runtime telemetry
 correctly omits absent forms.
+
+When `requiredExecutedLcnfFormTrace` is non-null, the observed trace must also
+match element for element. The initial 18 contracts cover compact control-flow
+signatures: Boolean and list branches, recursive and local-tail traversal,
+scalar and signed classification, taken/skipped external branches, and
+unique/shared constructor reuse. Longer mixed-layout traces continue to
+produce consistency-checked telemetry without yet becoming exact obligations.
 
 The `path-exclusion` tag groups fixtures that pin negative control-flow
 evidence. Five shared copy-on-write fixtures statically retain `oset` because
