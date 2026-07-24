@@ -20,6 +20,10 @@ lake exe fir-wasm-artifact resident-closure-projections \
   _build/resident-closure-projections.wasm
 node run-resident-closure-projections.mjs \
   _build/resident-closure-projections.wasm
+lake exe fir-wasm-artifact resident-closure-matches \
+  _build/resident-closure-matches.wasm
+node run-resident-closure-matches.mjs \
+  _build/resident-closure-matches.wasm
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
@@ -42,6 +46,7 @@ resident_pretties=(
   "source-pretty-format-resident-runtime"
   "source-pretty-format-resident-projections"
   "source-pretty-format-resident-closure-projections"
+  "source-pretty-format-resident-closure-matches"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -72,12 +77,15 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-projections.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-closure-projections.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-closure-matches.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
   _build/source-pretty-format-resident-runtime.wasm \
   _build/source-pretty-format-resident-projections.wasm \
-  _build/source-pretty-format-resident-closure-projections.wasm
+  _build/source-pretty-format-resident-closure-projections.wasm \
+  _build/source-pretty-format-resident-closure-matches.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -186,6 +194,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-projections.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closure-projections.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-closure-matches.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -231,6 +241,14 @@ cmp "$first/resident/closure-projections.wasm" \
   "$second/resident/closure-projections.wasm"
 cmp "$first/resident/closure-projections.wasm.json" \
   "$second/resident/closure-projections.wasm.json"
+lake exe fir-wasm-artifact resident-closure-matches \
+  "$first/resident/closure-matches.wasm"
+lake exe fir-wasm-artifact resident-closure-matches \
+  "$second/resident/closure-matches.wasm"
+cmp "$first/resident/closure-matches.wasm" \
+  "$second/resident/closure-matches.wasm"
+cmp "$first/resident/closure-matches.wasm.json" \
+  "$second/resident/closure-matches.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

@@ -88,9 +88,13 @@ lake exe fir-wasm-artifact resident-closure-projections \
   _build/resident-closure-projections.wasm
 node run-resident-closure-projections.mjs \
   _build/resident-closure-projections.wasm
+lake exe fir-wasm-artifact resident-closure-matches \
+  _build/resident-closure-matches.wasm
+node run-resident-closure-matches.mjs \
+  _build/resident-closure-matches.wasm
 ```
 
-All four modules and their `.wasm.json` descriptors are generated
+All five modules and their `.wasm.json` descriptors are generated
 deterministically. The `isShared` module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
 while a unique live heap object returns zero. The 983-byte projection module
@@ -100,7 +104,9 @@ exercise all eight helpers; recognized non-heap, misaligned, dead, and
 non-constructor inputs trap without invoking JavaScript. The 1,466-byte
 closure-projection module exports the twelve distinct capture slot/result
 readers underlying 87 `prettyM` operations and checks the same direct-memory
-boundary for closure layouts. These are generation-readiness
+boundary for closure layouts. The 635-byte closure-match module distinguishes
+target, arity, and fixed-count mismatches directly in memory and checks both
+raw layouts and concrete-host allocations. These are generation-readiness
 artifacts, not the later theorems that the linked helpers satisfy the W6
 contracts on related states. Setting `FIR_BROWSER=google-chrome` while running
 `./check.sh` executes the same smoke clients in a browser Worker alongside the
@@ -359,7 +365,21 @@ future table-layout change therefore remains a shared-contract change rather
 than a generation-only rewrite.
 
 The complete retained audit is now
-`351 → 350 → 349 → 341 → 254` function imports.
+`351 → 350 → 349 → 341 → 254 → 177` function imports. The final checkpoint
+in that sequence internalizes all 77 `closureMatches` calls:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-closure-matches.wasm
+```
+
+Each exported matcher compares the stable target ID, total arity, and fixed
+capture count stored in the closure header. False candidates remain false;
+recognized non-heap, misaligned, dead, and non-closure inputs trap. The
+remaining 177 imports are 87 partial applications, 23 constructors, 20 cache
+initializations, 20 externals, and 27 literal/mutation/reference-count
+operations. The later W6 theorem still has to relate these physical comparisons
+to semantic `closureMatches` on related states.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current

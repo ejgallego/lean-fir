@@ -8,6 +8,9 @@ import {
 import {
   checkFetchedResidentClosureProjections,
 } from "./resident-closure-projections-client.mjs";
+import {
+  checkFetchedResidentClosureMatches,
+} from "./resident-closure-matches-client.mjs";
 
 try {
   const results = await Promise.all([
@@ -24,6 +27,9 @@ try {
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-closure-projections.wasm",
     ),
+    checkFetchedConcretePrettyFormat(
+      "./_build/source-pretty-format-resident-closure-matches.wasm",
+    ),
     checkFetchedResidentGetTag("./_build/resident-get-tag.wasm"),
     checkFetchedResidentIsShared("./_build/resident-is-shared.wasm"),
     checkFetchedResidentReadProjections(
@@ -31,6 +37,9 @@ try {
     ),
     checkFetchedResidentClosureProjections(
       "./_build/resident-closure-projections.wasm",
+    ),
+    checkFetchedResidentClosureMatches(
+      "./_build/resident-closure-matches.wasm",
     ),
   ]);
   globalThis.postMessage({ ok: true, result: results.join("\n") });

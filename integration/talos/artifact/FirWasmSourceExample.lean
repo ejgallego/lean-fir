@@ -277,7 +277,7 @@ run_cmd do
             some coordinate) do
     throwError "resident Format closure-projection inventory changed"
   let residentClosureResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileClosureProjectionModule
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
   let residentClosureArtifact ← match residentClosureResult with
     | .ok artifact => pure artifact
@@ -304,6 +304,36 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident closure-projection Format module: {repr error}"
+  let closureMatches := residentClosureArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentRuntime.isClosureMatch
+  unless closureMatches.size == 77 do
+    throwError "resident Format closure-match inventory changed"
+  let residentMatchResult ← liftCoreM <|
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+  let residentMatchArtifact ← match residentMatchResult with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident closure-match Format facade: {repr error}"
+  unless residentMatchArtifact.module.runtimeOperations.all fun operation =>
+      !Fir.Wasm.Emit.ResidentRuntime.isClosureMatch operation do
+    throwError "resident Format retained a closure-match import"
+  unless residentMatchArtifact.module.imports.size + closureMatches.size ==
+      residentClosureArtifact.module.imports.size do
+    throwError "resident Format closure-match import accounting changed"
+  unless residentMatchArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch do
+    throwError "closure-match linking changed the stable closure-dispatch table"
+  unless closureMatches.all fun operation =>
+      (Fir.Wasm.Emit.ResidentRuntime.closureMatchName?
+        residentMatchArtifact.module.closureDispatch operation).any
+          residentMatchArtifact.module.exports.contains do
+    throwError "resident Format closure-match helper exports changed"
+  match ← residentMatchArtifact.write
+      "_build/source-pretty-format-resident-closure-matches.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident closure-match Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

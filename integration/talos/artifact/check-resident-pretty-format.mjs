@@ -6,11 +6,12 @@ const getTagPath = process.argv[3];
 const residentRuntimePath = process.argv[4];
 const residentProjectionPath = process.argv[5];
 const residentClosurePath = process.argv[6];
+const residentMatchPath = process.argv[7];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
-  residentProjectionPath && residentClosurePath,
+  residentProjectionPath && residentClosurePath && residentMatchPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
-  "RESIDENT_CLOSURES.wasm");
+  "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -30,6 +31,7 @@ const getTagResident = readArtifact(getTagPath);
 const residentRuntime = readArtifact(residentRuntimePath);
 const residentProjections = readArtifact(residentProjectionPath);
 const residentClosures = readArtifact(residentClosurePath);
+const residentMatches = readArtifact(residentMatchPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -63,6 +65,10 @@ assert.equal(operationCount(residentProjections, "closureProj"), 87,
   "resident-projection prettyM closure-projection inventory changed");
 assert.equal(operationCount(residentClosures, "closureProj"), 0,
   "resident-closure prettyM retained semantic closure projections");
+assert.equal(operationCount(residentClosures, "closureMatches"), 77,
+  "resident-closure prettyM closure-match inventory changed");
+assert.equal(operationCount(residentMatches, "closureMatches"), 0,
+  "resident-match prettyM retained semantic closure matches");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -96,6 +102,16 @@ assert.equal(
   "resident-closure prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentMatches) + 77,
+  functionImportCount(residentClosures),
+  "resident-match prettyM did not remove exactly 77 function imports",
+);
+assert.equal(
+  residentMatches.manifest.imports.length,
+  functionImportCount(residentMatches),
+  "resident-match prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -110,6 +126,24 @@ assert.equal(
   0,
   "resident-closure prettyM imports memory",
 );
+assert.equal(
+  residentMatches.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident-match prettyM imports memory",
+);
+for (const artifact of [
+  getTagResident,
+  residentRuntime,
+  residentProjections,
+  residentClosures,
+  residentMatches,
+]) {
+  assert.deepStrictEqual(
+    artifact.manifest.closureDispatch,
+    baseline.manifest.closureDispatch,
+    "resident linking changed the stable closure-dispatch table",
+  );
+}
 assert.ok(residentRuntime.exports.some(({ name, kind }) =>
   name === residentRuntime.manifest.entry && kind === "function"),
 "resident-runtime prettyM entry export is missing");
@@ -168,11 +202,28 @@ for (const name of [
 assert.ok(residentClosures.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident-closure prettyM memory export is missing");
+assert.ok(residentMatches.exports.some(({ name, kind }) =>
+  name === residentMatches.manifest.entry && kind === "function"),
+"resident-match prettyM entry export is missing");
+for (const descriptor of residentClosures.manifest.imports.filter(
+  ({ operation }) => operation.kind === "closureMatches")) {
+  const { function: target, arity, fixed } = descriptor.operation;
+  const targetId = residentMatches.manifest.closureDispatch.indexOf(target);
+  assert.ok(targetId >= 0, `resident-match target ${target} is absent from dispatch`);
+  const name = `fir_cmatch_${targetId}_${arity}_${fixed}`;
+  assert.ok(residentMatches.exports.some((entry) =>
+    entry.name === name && entry.kind === "function"),
+  `resident-match prettyM helper export ${name} is missing`);
+}
+assert.ok(residentMatches.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident-match prettyM memory export is missing");
 
 console.log(
-  `PASS resident prettyM internalized getTag, isShared, and projection families ` +
+  `PASS resident prettyM internalized getTag, isShared, projection, and match families ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
-  `${functionImportCount(residentClosures)} function imports)`,
+  `${functionImportCount(residentClosures)} → ` +
+  `${functionImportCount(residentMatches)} function imports)`,
 );

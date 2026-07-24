@@ -57,10 +57,20 @@ Continue from the read-projection checkpoint and internalize all supported
 closure-capture projections. Helpers are shared by physical slot/result kind;
 the compiler and W6 refinement own operation-specific closure metadata.
 -/
-def compileModule (entry : Name) :
+def compileClosureProjectionModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) := do
   let result ← compileReadProjectionModule entry
   return result.bind <| linkRuntime "closure projections"
     Fir.Wasm.Emit.ResidentRuntime.internalizeClosureProjections
+
+/--
+Continue from the closure-projection checkpoint and internalize exact
+closure-identity tests using the stable module-wide dispatch table.
+-/
+def compileModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileClosureProjectionModule entry
+  return result.bind <| linkRuntime "closure matches"
+    Fir.Wasm.Emit.ResidentRuntime.internalizeClosureMatches
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

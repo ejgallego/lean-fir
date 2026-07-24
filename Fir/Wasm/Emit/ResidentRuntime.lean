@@ -182,6 +182,9 @@ inductive LinkError where
   | reservedDeclaration (name : Name)
   | unsupportedProjection (width offset : Nat) (result : AbiKind)
   | unsupportedClosureProjection (index : Nat) (result : AbiKind)
+  | unsupportedClosureMatch
+  | missingClosureTarget (function : Name)
+  | closureMetadataOverflow (value : Nat)
   | projectionOffsetOverflow (value : Nat)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
@@ -420,7 +423,7 @@ def closureProjectionName? (operation : RuntimeOp) : Option Name := do
 def supportsClosureProjection (operation : RuntimeOp) : Bool :=
   (closureProjectionName? operation).isSome
 
-private def liveClosureProjectionBody
+private def liveClosureBody
     (load : List Instruction) : List Instruction :=
   requireFlag liveFlag <|
     [.localGet objectParam,
@@ -428,7 +431,7 @@ private def liveClosureProjectionBody
     equalsConst .uint32 ObjectKind.closure.code ++
     [.ifElse load [.unreachable]]
 
-private def closureProjectionHeapBody
+private def closureHeapBody
     (load : List Instruction) : List Instruction :=
   [.localGet objectParam] ++
     equalsConst .tobject 0 ++
@@ -438,7 +441,7 @@ private def closureProjectionHeapBody
         .i32Const .uint32 (UInt32.ofNat (target.heapAlignment - 1)),
         .i32And] ++
         equalsConst .uint32 0 ++
-        [.ifElse (liveClosureProjectionBody load) [.unreachable]])]
+        [.ifElse (liveClosureBody load) [.unreachable]])]
 
 private def closureProjectionFunction (index : Nat) (result : AbiKind) :
     Except LinkError Function := do
@@ -453,7 +456,7 @@ private def closureProjectionFunction (index : Nat) (result : AbiKind) :
     params := #[(objectParam, .tobject)]
     results := #[result]
     locals := #[(resultLocal, result)]
-    body := closureProjectionHeapBody
+    body := closureHeapBody
       [.localGet objectParam,
         .i32Load result fieldOffset,
         .localSet resultLocal] ++
@@ -493,6 +496,98 @@ def prettyFormatClosureProjectionModule : Except LinkError Module := do
     exports := functions.map (·.name)
     initializers := #[]
     runtimeOperations := #[]
+    memory := some residentMemory }
+
+def closureMatchCoordinate? (dispatch : Array Name) : RuntimeOp →
+    Option (Nat × Nat × Nat)
+  | .closureMatches function arity fixed =>
+      (dispatch.findIdx? (· == function)).map fun targetId =>
+        (targetId, arity, fixed)
+  | _ => none
+
+def closureMatchName? (dispatch : Array Name) (operation : RuntimeOp) : Option Name :=
+  (closureMatchCoordinate? dispatch operation).map fun coordinate =>
+    Name.mkSimple s!"fir_cmatch_{coordinate.1}_{coordinate.2.1}_{coordinate.2.2}"
+
+def isClosureMatch : RuntimeOp → Bool
+  | .closureMatches .. => true
+  | _ => false
+
+private def checkedClosureWord (value : Nat) : Except LinkError UInt32 :=
+  if value < UInt32.size then
+    pure (UInt32.ofNat value)
+  else
+    throw (.closureMetadataOverflow value)
+
+private def closureMatchFunction (dispatch : Array Name) (operation : RuntimeOp) :
+    Except LinkError Function := do
+  let some (targetId, arity, fixed) := closureMatchCoordinate? dispatch operation |
+    match operation.closureTarget? with
+    | some function => throw (.missingClosureTarget function)
+    | none => throw .unsupportedClosureMatch
+  let some name := closureMatchName? dispatch operation |
+    throw .unsupportedClosureMatch
+  let targetId ← checkedClosureWord targetId
+  let arity ← checkedClosureWord arity
+  let fixed ← checkedClosureWord fixed
+  let compareMetadata :=
+    [.localGet objectParam,
+      .i32Load .uint32 (offset headerAux0Offset)] ++
+    equalsConst .uint32 targetId ++
+    [.localGet objectParam,
+      .i32Load .uint32 (offset headerAux1Offset)] ++
+    equalsConst .uint32 arity ++
+    [.i32And,
+      .localGet objectParam,
+      .i32Load .uint32 (offset headerAux2Offset)] ++
+    equalsConst .uint32 fixed ++
+    [.i32And,
+      .localSet resultLocal]
+  return {
+    name
+    params := #[(objectParam, .tobject)]
+    results := #[.uint32]
+    locals := #[(resultLocal, .uint32)]
+    body := closureHeapBody compareMetadata ++
+      [.localGet resultLocal, .ret] }
+
+/--
+Internalize exact closure identity tests against the stable module dispatch
+table. Each helper checks target ID, total arity, and fixed-capture count in
+linear memory; recognized non-closure inputs trap.
+
+The W6 related-state precondition remains responsible for target-table and
+capture-descriptor validity. The separate proof theorem must establish that
+these physical header comparisons implement semantic `closureMatches`.
+-/
+def internalizeClosureMatches (module : Module) : Except LinkError Module := do
+  let operations := module.runtimeOperations.filter isClosureMatch
+  operations.foldlM (init := module) fun result operation => do
+    let some name := closureMatchName? result.closureDispatch operation |
+      match operation.closureTarget? with
+      | some function => throw (.missingClosureTarget function)
+      | none => throw .unsupportedClosureMatch
+    let function ← closureMatchFunction result.closureDispatch operation
+    internalizeOperation operation name function result
+
+def closureMatchExampleDispatch : Array Name := #[`callee, `other]
+
+def closureMatchExampleOperations : Array RuntimeOp := #[
+  .closureMatches `callee 2 1,
+  .closureMatches `other 2 1,
+  .closureMatches `callee 3 1,
+  .closureMatches `callee 2 0]
+
+def closureMatchExampleModule : Except LinkError Module := do
+  let functions ← closureMatchExampleOperations.mapM
+    (closureMatchFunction closureMatchExampleDispatch)
+  return {
+    imports := #[]
+    functions
+    exports := functions.map (·.name)
+    initializers := #[]
+    runtimeOperations := #[]
+    closureDispatch := closureMatchExampleDispatch
     memory := some residentMemory }
 
 def getTagManifest : Json :=
@@ -554,6 +649,28 @@ def prettyFormatClosureProjectionManifest : Json :=
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 contract proofs pending")]
 
+private def closureMatchEntryJson (dispatch : Array Name)
+    (operation : RuntimeOp) : Json :=
+  match operation with
+  | .closureMatches function arity fixed =>
+      Json.mkObj [
+        ("entry", (closureMatchName? dispatch operation).getD .anonymous |>.toString),
+        ("function", function.toString),
+        ("targetId", (dispatch.findIdx? (· == function)).getD 0),
+        ("arity", arity),
+        ("fixed", fixed)]
+  | _ => Json.mkObj [("kind", "unsupported")]
+
+def closureMatchExampleManifest : Json :=
+  Json.mkObj [
+    ("entries", Json.arr <| closureMatchExampleOperations.map
+      (closureMatchEntryJson closureMatchExampleDispatch)),
+    ("closureDispatch", Json.arr <| closureMatchExampleDispatch.map fun name =>
+      (name.toString : Json)),
+    ("memory", "memory"),
+    ("imports", Json.arr #[]),
+    ("status", "generation-only; W6 contract proofs pending")]
+
 #guard getTagModule.imports.isEmpty
 #guard getTagModule.memory.any fun memory =>
   memory.pagesMin == 1 && memory.exportName == some "memory"
@@ -579,6 +696,17 @@ def prettyFormatClosureProjectionManifest : Json :=
       module.imports.isEmpty &&
       module.functions.size == prettyFormatClosureProjectionCoordinates.size &&
       module.exports.size == prettyFormatClosureProjectionCoordinates.size &&
+      (module.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.exportName == some "memory") &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+#guard match closureMatchExampleModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.functions.size == closureMatchExampleOperations.size &&
+      module.exports.size == closureMatchExampleOperations.size &&
+      module.closureDispatch == closureMatchExampleDispatch &&
       (module.memory.any fun memory =>
         memory.pagesMin == 1 && memory.exportName == some "memory") &&
       (Fir.Wasm.validateModule module |>.isOk) &&
