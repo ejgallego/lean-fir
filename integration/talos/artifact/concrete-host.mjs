@@ -110,6 +110,7 @@ export function concreteManifestValue(argument) {
 export class ConcreteHost {
   constructor(manifestImports = [], initialRuntime = undefined,
     externalRegistry = undefined) {
+    this.memory = undefined;
     this.buffer = new ArrayBuffer(PAGE_BYTES);
     this.view = new DataView(this.buffer);
     this.heapCursor = HEAP_BASE;
@@ -141,6 +142,39 @@ export class ConcreteHost {
     if (initialRuntime !== undefined) {
       this.loadInitialRuntime(initialRuntime);
     }
+  }
+
+  /**
+   * Move the concrete heap prepared before instantiation into a module-owned
+   * exported memory. The current W7 modules have no data segments, so the
+   * destination must still be zero-initialized. Later allocations and growth
+   * operate directly on this same WebAssembly.Memory.
+   */
+  attachMemory(memory) {
+    assert.ok(memory instanceof WebAssembly.Memory,
+      "concrete host can attach only a WebAssembly.Memory");
+    if (this.memory !== undefined) {
+      assert.equal(memory, this.memory,
+        "concrete host cannot rebind to a different WebAssembly.Memory");
+      this.buffer = memory.buffer;
+      this.view = new DataView(this.buffer);
+      return this;
+    }
+
+    const source = new Uint8Array(this.buffer);
+    if (memory.buffer.byteLength < source.byteLength) {
+      const missingPages =
+        Math.ceil((source.byteLength - memory.buffer.byteLength) / PAGE_BYTES);
+      memory.grow(missingPages);
+    }
+    const destination = new Uint8Array(memory.buffer);
+    assert.ok(destination.subarray(0, source.byteLength).every((byte) => byte === 0),
+      "module-owned concrete memory must be zero-initialized before attachment");
+    destination.set(source);
+    this.memory = memory;
+    this.buffer = memory.buffer;
+    this.view = new DataView(this.buffer);
+    return this;
   }
 
   initialNaturalLimbs(value) {
@@ -404,10 +438,21 @@ export class ConcreteHost {
   }
 
   growToFit(requiredBytes) {
+    if (this.memory !== undefined && this.buffer !== this.memory.buffer) {
+      this.buffer = this.memory.buffer;
+      this.view = new DataView(this.buffer);
+    }
     if (requiredBytes <= this.buffer.byteLength) {
       return;
     }
     const pages = Math.ceil(requiredBytes / PAGE_BYTES);
+    if (this.memory !== undefined) {
+      const currentPages = this.buffer.byteLength / PAGE_BYTES;
+      this.memory.grow(pages - currentPages);
+      this.buffer = this.memory.buffer;
+      this.view = new DataView(this.buffer);
+      return;
+    }
     const next = new ArrayBuffer(pages * PAGE_BYTES);
     new Uint8Array(next).set(new Uint8Array(this.buffer));
     this.buffer = next;

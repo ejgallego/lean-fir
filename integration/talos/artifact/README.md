@@ -86,6 +86,22 @@ satisfies the W6 `getTag` contract on related states. Setting
 `FIR_BROWSER=google-chrome` while running `./check.sh` executes the same smoke
 client in a browser Worker alongside the existing `prettyM` check.
 
+Remaining JavaScript runtime operations can use that module-owned heap without
+a facade. Construct the concrete host before instantiation as usual, then
+attach the exported memory before allocating or invoking:
+
+```js
+const host = new ConcreteHost(manifest.imports);
+const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+host.attachMemory(instance.exports.memory);
+```
+
+Attachment copies any initial heap prepared from the manifest, rejects
+nonzero module memory and rebinding, and routes subsequent allocation and
+growth through the same `WebAssembly.Memory`. This is the required transition
+boundary for incrementally internalizing runtime imports without maintaining
+two divergent heaps.
+
 This builds the Lean emitter, runs the semantic oracle through Lean, emits the corpus and oracle
 results twice, byte-compares all outputs, validates and instantiates every module in Node,
 executes `main`, and compares the V8 observation with FIR. It requires Lean 4.32, the
