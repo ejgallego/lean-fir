@@ -412,6 +412,10 @@ def coverage_report(
     executed_count_required_totals: dict[str, int] = {}
     executed_count_bounded_maximum_totals: dict[str, int] = {}
     executed_count_observed_totals: dict[str, int] = {}
+    executed_form_trace_diagnostic_count = 0
+    executed_form_trace_valid_diagnostic_count = 0
+    executed_form_trace_consistent_diagnostic_count = 0
+    executed_form_trace_event_count = 0
     static_external_required: set[str] = set()
     static_external_observed: set[str] = set()
     executed_external_required: set[str] = set()
@@ -452,6 +456,10 @@ def coverage_report(
         executed_counts_present, observed_executed_counts = diagnostic_named_counts(
             record, "executed-lcnf-form-counts", "form"
         )
+        (
+            executed_form_trace_present,
+            observed_executed_form_trace,
+        ) = diagnostic_name_trace(record, "executed-lcnf-form-trace")
         steps_present, steps = positive_int_diagnostic(record, "interpreter-steps")
         static_external_present, observed_static_externals = diagnostic_forms(
             record, "externals"
@@ -513,6 +521,22 @@ def coverage_report(
         missing_static = sorted(set(required_static) - set(observed_static))
         missing_executed = sorted(set(required_executed) - set(observed_executed))
         observed_count_map = observed_executed_counts or {}
+        observed_form_trace = observed_executed_form_trace or []
+        form_trace_names_consistent = (
+            observed_executed_form_trace is not None
+            and (
+                not executed_present
+                or sorted(set(observed_form_trace)) == observed_executed
+            )
+        )
+        form_trace_counts_consistent = (
+            observed_executed_form_trace is not None
+            and (
+                not executed_counts_present
+                or observed_executed_counts is None
+                or trace_name_counts(observed_form_trace) == observed_count_map
+            )
+        )
         unsatisfied_executed_counts = unsatisfied_count_requirements(
             required_executed_counts, observed_count_map, "form"
         )
@@ -595,6 +619,18 @@ def coverage_report(
                 executed_count_observed_totals[form] = (
                     executed_count_observed_totals.get(form, 0) + count
                 )
+        executed_form_trace_diagnostic_count += int(executed_form_trace_present)
+        executed_form_trace_valid_diagnostic_count += int(
+            executed_form_trace_present
+            and observed_executed_form_trace is not None
+        )
+        executed_form_trace_consistent_diagnostic_count += int(
+            executed_form_trace_present
+            and form_trace_names_consistent
+            and form_trace_counts_consistent
+        )
+        if observed_executed_form_trace is not None:
+            executed_form_trace_event_count += len(observed_executed_form_trace)
         static_external_required.update(required_static_externals)
         static_external_observed.update(observed_static_externals)
         executed_external_required.update(required_executed_externals)
@@ -730,6 +766,32 @@ def coverage_report(
                 "executed-lcnf-form-counts diagnostic disagrees with "
                 "executed-lcnf-forms"
             )
+        if record is not None and not executed_form_trace_present:
+            audit_finding("missing executed-lcnf-form-trace diagnostic")
+        elif record is not None and observed_executed_form_trace is None:
+            audit_finding(
+                "executed-lcnf-form-trace must be a JSON array of "
+                "nonempty form names"
+            )
+        else:
+            if (
+                record is not None
+                and executed_present
+                and not form_trace_names_consistent
+            ):
+                audit_finding(
+                    "executed-lcnf-form-trace diagnostic disagrees with "
+                    "executed-lcnf-forms"
+                )
+            if (
+                record is not None
+                and observed_executed_counts is not None
+                and not form_trace_counts_consistent
+            ):
+                audit_finding(
+                    "executed-lcnf-form-trace diagnostic disagrees with "
+                    "executed-lcnf-form-counts"
+                )
         if record is not None and not steps_present:
             audit_finding("missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
@@ -841,6 +903,16 @@ def coverage_report(
                         ),
                         "unsatisfied": unsatisfied_executed_counts,
                     },
+                    "formTrace": {
+                        "diagnosticPresent": executed_form_trace_present,
+                        "diagnosticValid": (
+                            executed_form_trace_present
+                            and observed_executed_form_trace is not None
+                        ),
+                        "namesConsistent": form_trace_names_consistent,
+                        "countsConsistent": form_trace_counts_consistent,
+                        "observed": observed_form_trace,
+                    },
                     "interpreterSteps": steps,
                 },
                 "externals": {
@@ -944,6 +1016,16 @@ def coverage_report(
                         executed_count_observed_totals, "form", "count"
                     ),
                     "unsatisfiedObligationCount": executed_count_missing_count,
+                },
+                "formTrace": {
+                    "casesWithDiagnostics": executed_form_trace_diagnostic_count,
+                    "casesWithValidDiagnostics": (
+                        executed_form_trace_valid_diagnostic_count
+                    ),
+                    "casesWithConsistentDiagnostics": (
+                        executed_form_trace_consistent_diagnostic_count
+                    ),
+                    "observedEventCount": executed_form_trace_event_count,
                 },
                 "totalInterpreterSteps": sum(interpreter_steps),
                 "minimumInterpreterSteps": min(interpreter_steps, default=None),

@@ -902,7 +902,12 @@ report for the selected cases.  It keeps two kinds of evidence separate:
 
 Set membership cannot distinguish one write from a sequence of writes. The
 runner therefore also emits `executed-lcnf-form-counts` as a JSON array of
-positive `{form, count}` records. The manifest's optional
+positive `{form, count}` records and `executed-lcnf-form-trace` as one ordered
+form name per executable interpreter transition. The harness requires all three
+views for every LCNF result: trace names must reproduce
+`executed-lcnf-forms`, and trace multiplicities must reproduce
+`executed-lcnf-form-counts`.
+The manifest's optional
 `requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
 obligations. The harness requires count telemetry for every LCNF result,
 validates it independently, checks that its keys exactly match
@@ -990,7 +995,7 @@ The report records per-case required, observed, and missing form and external
 sets, dynamic form and external counts, ordered external traces, their
 corpus-wide summaries, and interpreter step counts. Every LCNF result must emit
 `executed-lcnf-forms`,
-`executed-lcnf-form-counts`, `executed-externals`,
+`executed-lcnf-form-counts`, `executed-lcnf-form-trace`, `executed-externals`,
 `executed-external-counts`, `executed-external-trace`, and a positive
 `interpreter-steps` value, including cases whose executed requirement lists are
 empty. An empty list means “collect telemetry without a path-specific
