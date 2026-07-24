@@ -3747,11 +3747,23 @@ inductive DeletedLetReadyAt (state : MachineState) (roots : List Value) :
         fvarId, binderName, type,
         value := .reuse token info updateHeader arguments }
 
+/-- Additional ownership readiness for a retained let.  Most retained values
+need only liveness coverage.  A concrete reuse token is different: it is a
+heap capability rather than an ordinary object root, so its source cell must
+be known reachable before `ShadowRuntimeRel.heap` can transport that cell to
+the target. -/
+def RetainedLetReadyAt (state : MachineState) (roots : List Value) :
+    LCNF.LetValue .impure → Prop
+  | .reuse token _info _updateHeader _arguments =>
+      ∀ location,
+        lookupValue state.env token = .ok (.reuseToken (some location)) →
+          Reachable state.runtime.heap roots location
+  | _ => True
+
 /-- Readiness for a let edge in the reachable-runtime graph.  Retained lets
-need no additional semantic premise: their operands are covered by the live
-environment relation and both machines will execute them.  A deleted let
-must instead carry the operation-specific certificate consumed by the
-source-only rule below. -/
+carry liveness coverage plus the operation-specific ownership fact above.
+A deleted let instead carries the certificate consumed by its source-only
+rule below. -/
 inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
     (declaration : LCNF.LetDecl .impure)
     (sourceContinuation : LCNF.Code .impure) (state : MachineState)
@@ -3762,7 +3774,8 @@ inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
   | retained (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
-      (covered : LetValueCovered used declaration.value) :
+      (covered : LetValueCovered used declaration.value)
+      (ready : RetainedLetReadyAt state roots declaration.value) :
       ReachableLetReadyAt fuel used declaration sourceContinuation state roots
         (.retained targetContinuation continuation covered)
   | deleted (targetContinuation : LCNF.Code .impure)
@@ -4318,7 +4331,7 @@ theorem match_erasedLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedErasedLetStep sourceState targetState programs
           frames continuation joins env runtime step with
         ⟨targetAfter, targetPath, afterRelated⟩
@@ -4442,7 +4455,7 @@ theorem match_literalLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedLiteralLetStep sourceState targetState programs
           frames continuation joins env runtime step with
         ⟨larger, targetAfter, extension, targetPath, afterRelated⟩
@@ -4629,7 +4642,7 @@ theorem match_ctorLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedCtorLetStep sourceState targetState programs
           frames continuation joins env covered runtime step with
         ⟨larger, targetAfter, extension, targetPath, afterRelated⟩
@@ -4806,7 +4819,7 @@ theorem match_isSharedLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedIsSharedLetStep sourceState targetState programs
           frames continuation joins env covered runtime step with
         ⟨targetAfter, targetPath, afterRelated⟩
@@ -4983,7 +4996,7 @@ theorem match_objectProjectionLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedObjectProjectionLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -5160,7 +5173,7 @@ theorem match_uSizeProjectionLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedUSizeProjectionLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -5337,7 +5350,7 @@ theorem match_scalarProjectionLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedScalarProjectionLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -5513,7 +5526,7 @@ theorem match_unboxLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedUnboxLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -5703,7 +5716,7 @@ theorem match_boxLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedBoxLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -6002,7 +6015,7 @@ theorem match_papLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedPapLetStep
           sourceState targetState programs frames continuation joins env
           covered runtime step with
@@ -6163,7 +6176,7 @@ theorem match_fapLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedFapLetStep sourceState targetState programs frames
           continuation joins env covered runtime step with
         ⟨targetAfter, targetPath, afterRelated⟩
@@ -6421,7 +6434,7 @@ theorem match_fvarLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedFVarLetStep sourceState targetState programs
           frames continuation joins env covered.1 covered.2 runtime step with
         ⟨targetAfter, targetPath, afterRelated⟩
@@ -6600,11 +6613,278 @@ theorem match_resetLetCodeStep
         { targetState with control := .code targetCode } targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   cases ready with
-  | retained targetContinuation continuation covered =>
+  | retained targetContinuation continuation covered _retainedReady =>
       rcases match_retainedResetLetStep sourceState targetState programs
           frames continuation joins env covered runtime step with
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | deleted targetContinuation continuation absent ready =>
+      rcases match_deletedLetStep_of_ready sourceState targetState programs
+          frames continuation joins env absent runtime ready step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
+/-- A retained reuse evaluates related covered tokens and constructor
+arguments.  Failed tokens allocate related fresh constructors; concrete
+tokens consume the explicit reachability certificate and overwrite the
+mapped live cells in place. -/
+theorem match_retainedReuseLetStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : ShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (tokenMember : used.contains token = true)
+    (covered : ArgsCovered used arguments)
+    (ready : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      ReachableMachineRelated fuel larger sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceTokenRead :
+    lookupValue sourceState.env token = sourceTokenResult
+  cases sourceTokenResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceTokenRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceToken =>
+      have sourceTokenLookup :=
+        lookupValue_eq_ok_iff.mp sourceTokenRead
+      have tokens := env token tokenMember
+      rw [sourceTokenLookup] at tokens
+      generalize targetTokenLookup :
+        lookup targetState.env token = targetTokenOption at tokens
+      cases tokens with
+      | some tokenValues =>
+          rename_i targetToken
+          have targetTokenRead :
+              lookupValue targetState.env token = .ok targetToken :=
+            lookupValue_eq_ok_iff.mpr targetTokenLookup
+          generalize sourceArgumentsEq :
+            evalArgs sourceState.env arguments = sourceEvaluation
+          cases sourceEvaluation with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceTokenRead, sourceArgumentsEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceArguments =>
+              have evaluated := evalArgs_relOn env covered
+              rw [sourceArgumentsEq] at evaluated
+              generalize targetArgumentsEq :
+                evalArgs targetState.env arguments = targetEvaluation
+                  at evaluated
+              cases evaluated with
+              | ok argumentsRelated =>
+                  rename_i targetArguments
+                  generalize sourceReuseEq :
+                    reuse sourceState.runtime sourceToken info updateHeader
+                      sourceArguments = sourceReuseResult
+                  cases sourceReuseResult with
+                  | error fault =>
+                      have done : coreStep sourceCurrent =
+                          .done (observe sourceCurrent (.fault fault)) := by
+                        simp [sourceCurrent, coreStep, evalLetValue,
+                          sourceTokenRead, sourceArgumentsEq, sourceReuseEq,
+                          fail, Bind.bind, Except.bind]
+                      exact (noStep done).elim
+                  | ok sourcePair =>
+                      obtain ⟨sourceRuntime, sourceValue⟩ := sourcePair
+                      have arity :
+                          sourceArguments.size = info.size := by
+                        apply Classical.byContradiction
+                        intro mismatch
+                        cases sourceToken with
+                        | reuseToken location? =>
+                            cases location? <;>
+                              simp [reuse, allocCtor, mismatch, Bind.bind,
+                                Except.bind] at sourceReuseEq
+                        | object ref =>
+                            simp [reuse, Bind.bind, Except.bind]
+                              at sourceReuseEq
+                        | usize value =>
+                            simp [reuse, Bind.bind, Except.bind]
+                              at sourceReuseEq
+                        | scalar value =>
+                            simp [reuse, Bind.bind, Except.bind]
+                              at sourceReuseEq
+                        | erased =>
+                            simp [reuse, Bind.bind, Except.bind]
+                              at sourceReuseEq
+                      have publishedArguments :=
+                        runtime.publishEvalArgs covered sourceArgumentsEq
+                          targetArgumentsEq argumentsRelated
+                      have tail : ListRel (ValueRel rho)
+                          (envRootsOn used sourceState.env ++
+                            sourceFrameRoots)
+                          (envRootsOn used targetState.env ++
+                            targetFrameRoots) :=
+                        listRel_append (envRootsOn_related env) frames.roots
+                      have tokenReachable : ∀ location,
+                          sourceToken = .reuseToken (some location) →
+                            Reachable sourceState.runtime.heap
+                              (runtimeRoots sourceState.runtime
+                                (sourceArguments.toList ++
+                                  (envRootsOn used sourceState.env ++
+                                    sourceFrameRoots))) location := by
+                        intro location tokenEq
+                        have base : Reachable sourceState.runtime.heap
+                            (runtimeRoots sourceState.runtime
+                              (envRootsOn used sourceState.env ++
+                                sourceFrameRoots)) location := by
+                          apply ready location
+                          rw [sourceTokenRead, tokenEq]
+                        exact reachable_monoRoots
+                          (runtimeRoots_monoExtra (by
+                            intro value member
+                            exact List.mem_append_right _ member))
+                          base
+                      rcases publishedArguments.reuseBoth_of_related
+                          tokenValues argumentsRelated tail tokenReachable
+                          arity sourceReuseEq with
+                        ⟨larger, targetRuntime, targetValue, extension,
+                          targetReuseEq, values, reusedRuntime⟩
+                      let sourceExpected := {
+                        sourceState with
+                        runtime := sourceRuntime
+                        env := bind sourceState.env fvarId sourceValue
+                        control := .code sourceContinuation }
+                      let targetExpected := {
+                        targetState with
+                        runtime := targetRuntime
+                        env := bind targetState.env fvarId targetValue
+                        control := .code targetContinuation }
+                      have sourceTransition :
+                          coreStep sourceCurrent = .next sourceExpected := by
+                        simp [sourceCurrent, sourceExpected, coreStep,
+                          evalLetValue, sourceTokenRead, sourceArgumentsEq,
+                          sourceReuseEq, Bind.bind, Except.bind,
+                          Pure.pure, Except.pure]
+                      have targetTransition :
+                          coreStep targetCurrent = .next targetExpected := by
+                        simp [targetCurrent, targetExpected, coreStep,
+                          evalLetValue, targetTokenRead, targetArgumentsEq,
+                          targetReuseEq, Bind.bind, Except.bind,
+                          Pure.pure, Except.pure]
+                      have afterRelated :
+                          ReachableMachineRelated fuel larger
+                            sourceExpected targetExpected := by
+                        exact retainedLetValue_reachableRelated
+                          sourceState targetState sourceRuntime targetRuntime
+                          programs (frames.monoRenaming extension)
+                          continuation joins
+                          (envRelOn_monoRenaming extension env)
+                          values reusedRuntime
+                      exact ⟨larger, targetExpected, extension,
+                        match_internalCoreSteps sourceTransition
+                          targetTransition afterRelated
+                          (by simpa [sourceCurrent] using step)⟩
+
+/-- Complete graph-level matcher for reuse lets.  The retained branch consumes
+the concrete-token ownership readiness above; deleted reuse keeps its
+source-only garbage/unreachable-cell certificate. -/
+theorem match_reuseLetCodeStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.let {
+        fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments
+      } sourceContinuation) targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableLetReadyAt fuel used {
+        fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments
+      } sourceContinuation sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      graph.letResidual)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases ready with
+  | retained targetContinuation continuation covered retainedReady =>
+      rcases match_retainedReuseLetStep sourceState targetState programs
+          frames continuation joins env covered.1 covered.2 retainedReady
+          runtime step with
+        ⟨larger, targetAfter, extension, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨larger, afterRelated⟩⟩
   | deleted targetContinuation continuation absent ready =>
       rcases match_deletedLetStep_of_ready sourceState targetState programs
           frames continuation joins env absent runtime ready step with

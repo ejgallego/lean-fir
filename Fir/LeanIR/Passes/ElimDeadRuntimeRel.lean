@@ -1983,6 +1983,44 @@ theorem ShadowRuntimeRel.setCellBothRooted
       exact related.rightHeapFresh location oldBounded
   }
 
+/-- A heap frame away from one modified location either preserves a reachable
+candidate or discovers that the modified location was already reached along
+the old path. -/
+theorem reachable_heapFrame_or_modified
+    (frame : ∀ other, other ≠ modified →
+      findCell? after other = findCell? before other)
+    (reachable : Reachable before roots candidate) :
+    Reachable after roots candidate ∨ Reachable after roots modified := by
+  induction reachable with
+  | root member => exact Or.inl (.root member)
+  | child parentReachable cellFound member reference ih =>
+      rename_i parent child cell value
+      rcases ih with parentPreserved | modifiedReached
+      · by_cases same : parent = modified
+        · exact Or.inr (same ▸ parentPreserved)
+        · exact Or.inl (.child parentPreserved
+            (by rw [frame parent same]; exact cellFound) member reference)
+      · exact Or.inr modifiedReached
+
+/-- Replacing a cell preserves reachability of the replaced location itself.
+If an old path cycles through that location, the first visit already supplies
+the required post-update reachability. -/
+theorem reachable_setCell_location
+    (found : findCell? before.heap location = some current)
+    (effect : setCell before location replacement = .ok after)
+    (reachable :
+      Reachable before.heap (runtimeRoots before extra) location) :
+    Reachable after.heap (runtimeRoots after extra) location := by
+  rcases setCell_spec_of_find before location current replacement found with
+    ⟨result, resultEffect, _target, frame, _length, _nextLocation,
+      globals, _world, trace⟩
+  rw [effect] at resultEffect
+  cases resultEffect
+  rcases reachable_heapFrame_or_modified frame reachable with
+    preserved | reached
+  · simpa [runtimeRoots, globals, trace] using preserved
+  · simpa [runtimeRoots, globals, trace] using reached
+
 theorem ShadowRuntimeRel.roots
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
     ListRel (ValueRel rho)
@@ -6153,6 +6191,249 @@ theorem ShadowRuntimeRel.allocCtorBoth
     · simp [allocCtor, rightArity, empty, rightRuntime, rightValue,
         rightObject]
       rfl
+
+/-- Related retained reuse operations match.  The `none` branch delegates to
+paired constructor allocation and may extend the address renaming.  A
+concrete token reuses an already mapped reachable cell; its explicit
+reachability premise is the ownership boundary recorded by machine
+readiness. -/
+theorem ShadowRuntimeRel.reuseBoth_of_related
+    (related : ShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (tokens : ValueRel rho leftToken rightToken)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (tokenReachable : ∀ location,
+      leftToken = .reuseToken (some location) →
+        Reachable left.heap
+          (runtimeRoots left (leftArguments.toList ++ leftExtra)) location)
+    (arity : leftArguments.size = info.size)
+    (sourceEffect :
+      reuse left leftToken info updateHeader leftArguments =
+        .ok (leftResult, leftValue)) :
+    ∃ larger rightResult rightValue,
+      RenamingExtends rho larger ∧
+      reuse right rightToken info updateHeader rightArguments =
+        .ok (rightResult, rightValue) ∧
+      ValueRel larger leftValue rightValue ∧
+      ShadowRuntimeRel larger leftResult rightResult
+        (leftValue :: leftExtra) (rightValue :: rightExtra) := by
+  cases tokens with
+  | reuseNone =>
+      rcases related.allocCtorBoth arguments tail info arity with
+        ⟨larger, computedLeft, computedValue, rightResult, rightValue,
+          extension, leftAllocation, rightAllocation, values,
+          allocatedRuntime⟩
+      have leftReuse :
+          reuse left (.reuseToken none) info updateHeader leftArguments =
+            .ok (computedLeft, computedValue) := by
+        simpa [reuse] using leftAllocation
+      rw [leftReuse] at sourceEffect
+      have pairEq := Except.ok.inj sourceEffect
+      have runtimeEq := congrArg Prod.fst pairEq
+      have valueEq := congrArg Prod.snd pairEq
+      simp at runtimeEq valueEq
+      subst leftResult
+      subst leftValue
+      exact ⟨larger, rightResult, rightValue, extension,
+        by simpa [reuse] using rightAllocation, values, allocatedRuntime⟩
+  | @reuseSome leftLocation rightLocation mapping =>
+      have leftReachable := tokenReachable leftLocation rfl
+      have rightReachable :
+          Reachable right.heap
+            (runtimeRoots right
+              (rightArguments.toList ++ rightExtra)) rightLocation := by
+        rcases reachable_forward related.roots related.heap
+            leftReachable with
+          ⟨mappedLocation, mappedEq, reachable⟩
+        have locationEq : mappedLocation = rightLocation := by
+          rw [mapping] at mappedEq
+          exact (Option.some.inj mappedEq).symm
+        simpa [locationEq] using reachable
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have source := sourceEffect
+      simp only [reuse, Bind.bind, Except.bind] at source
+      rw [if_neg (by simp [arity])] at source
+      cases leftLiveEq : leftCell.live with
+      | false =>
+          simp [getLiveCell, leftFound, leftLiveEq] at source
+      | true =>
+          have rightLiveEq : rightCell.live = true := by
+            rw [← cells.2.2.1]
+            exact leftLiveEq
+          have leftGet :
+              getLiveCell left leftLocation = .ok leftCell := by
+            simp [getLiveCell, leftFound, leftLiveEq]
+          have rightGet :
+              getLiveCell right rightLocation = .ok rightCell := by
+            simp [getLiveCell, rightFound, rightLiveEq]
+          rw [leftGet] at source
+          simp only [Bind.bind, Except.bind] at source
+          have heapObjects := cells.2.2.2
+          generalize leftObjectEq :
+            leftCell.object = leftHeapObject at heapObjects
+          generalize rightObjectEq :
+            rightCell.object = rightHeapObject at heapObjects
+          cases heapObjects with
+          | @ctor leftConstructor rightConstructor oldTags oldFields
+              oldUSizes oldScalars =>
+              rw [leftObjectEq] at source
+              simp only at source
+              have rightArity :
+                  rightArguments.size = info.size := by
+                rw [← arity, arrayRel_size_eq arguments]
+              let leftTag :=
+                if updateHeader then info.cidx else leftConstructor.tag
+              let rightTag :=
+                if updateHeader then info.cidx else rightConstructor.tag
+              have newTags : leftTag = rightTag := by
+                simp [leftTag, rightTag, oldTags]
+              let leftObject : ConstructorObject := {
+                tag := leftTag
+                objectFields := leftArguments
+                usizeFields := Array.replicate info.usize 0
+                scalarFields := [] }
+              let rightObject : ConstructorObject := {
+                tag := rightTag
+                objectFields := rightArguments
+                usizeFields := Array.replicate info.usize 0
+                scalarFields := [] }
+              let leftReplacement : HeapCell :=
+                { leftCell with object := .ctor leftObject }
+              let rightReplacement : HeapCell :=
+                { rightCell with object := .ctor rightObject }
+              have replacement :
+                  HeapCellRel rho leftReplacement rightReplacement := by
+                refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+                exact @HeapObjectRel.ctor rho leftObject rightObject
+                  newTags arguments rfl rfl
+              have leftOwned : ∀ {child},
+                  Value.object (.heap child) ∈
+                      leftReplacement.object.ownedValues.toList →
+                    Value.object (.heap child) ∈
+                        leftCell.object.ownedValues.toList ∨
+                      Reachable left.heap
+                        (runtimeRoots left
+                          (leftArguments.toList ++ leftExtra)) child := by
+                intro child member
+                right
+                apply Reachable.root
+                apply extra_subset_runtimeRoots
+                apply List.mem_append_left
+                simpa [leftReplacement, leftObject,
+                  HeapObject.ownedValues] using member
+              have rightOwned : ∀ {child},
+                  Value.object (.heap child) ∈
+                      rightReplacement.object.ownedValues.toList →
+                    Value.object (.heap child) ∈
+                        rightCell.object.ownedValues.toList ∨
+                      Reachable right.heap
+                        (runtimeRoots right
+                          (rightArguments.toList ++ rightExtra)) child := by
+                intro child member
+                right
+                apply Reachable.root
+                apply extra_subset_runtimeRoots
+                apply List.mem_append_left
+                simpa [rightReplacement, rightObject,
+                  HeapObject.ownedValues] using member
+              rcases related.setCellBothRooted mapping leftFound rightFound
+                  leftOwned rightOwned replacement with
+                ⟨computedLeft, computedRight, leftSet, rightSet,
+                  updatedRuntime⟩
+              change (do
+                let runtime ←
+                  setCell left leftLocation leftReplacement
+                pure (runtime,
+                  Value.object (ObjectRef.heap leftLocation))) =
+                    .ok (leftResult, leftValue) at source
+              rw [leftSet] at source
+              have pairEq := Except.ok.inj source
+              have runtimeEq := congrArg Prod.fst pairEq
+              have valueEq := congrArg Prod.snd pairEq
+              simp at runtimeEq valueEq
+              subst leftResult
+              subst leftValue
+              have targetEffect :
+                  reuse right (.reuseToken (some rightLocation)) info
+                      updateHeader rightArguments =
+                    .ok (computedRight,
+                      .object (.heap rightLocation)) := by
+                simp only [reuse, Bind.bind, Except.bind]
+                rw [if_neg (by simp [rightArity])]
+                rw [rightGet]
+                simp only [Bind.bind, Except.bind]
+                rw [rightObjectEq]
+                change (do
+                  let runtime ←
+                    setCell right rightLocation rightReplacement
+                  pure (runtime,
+                    Value.object (ObjectRef.heap rightLocation))) = _
+                rw [rightSet]
+                rfl
+              have leftOutputReachable :
+                  Reachable computedLeft.heap
+                    (runtimeRoots computedLeft
+                      (leftArguments.toList ++ leftExtra)) leftLocation :=
+                reachable_setCell_location leftFound leftSet leftReachable
+              have rightOutputReachable :
+                  Reachable computedRight.heap
+                    (runtimeRoots computedRight
+                      (rightArguments.toList ++ rightExtra)) rightLocation :=
+                reachable_setCell_location rightFound rightSet rightReachable
+              have withOutput := updatedRuntime.prependReachable
+                (.heap mapping)
+                (by
+                  intro location equal
+                  cases equal
+                  exact leftOutputReachable)
+                (by
+                  intro location equal
+                  cases equal
+                  exact rightOutputReachable)
+              have finalRuntime := withOutput.restrictExtra
+                (.cons (.heap mapping) tail)
+                (by
+                  intro value member
+                  simp only [List.mem_cons] at member ⊢
+                  rcases member with same | old
+                  · exact Or.inl same
+                  · exact Or.inr (List.mem_append_right _ old))
+                (by
+                  intro value member
+                  simp only [List.mem_cons] at member ⊢
+                  rcases member with same | old
+                  · exact Or.inl same
+                  · exact Or.inr (List.mem_append_right _ old))
+              exact ⟨rho, computedRight, .object (.heap rightLocation),
+                RenamingExtends.refl rho, targetEffect, .heap mapping,
+                finalRuntime⟩
+          | closure fixed =>
+              simp [leftObjectEq] at source
+          | boxed value =>
+              simp [leftObjectEq] at source
+          | string value =>
+              simp [leftObjectEq] at source
+          | natural value =>
+              simp [leftObjectEq] at source
+          | integer value =>
+              simp [leftObjectEq] at source
+          | byteArray value =>
+              simp [leftObjectEq] at source
+          | «opaque» value =>
+              simp [leftObjectEq] at source
+  | tagged payload => simp [reuse, Bind.bind, Except.bind] at sourceEffect
+  | heap mapping => simp [reuse, Bind.bind, Except.bind] at sourceEffect
+  | usize value => simp [reuse, Bind.bind, Except.bind] at sourceEffect
+  | scalar value => simp [reuse, Bind.bind, Except.bind] at sourceEffect
+  | erased => simp [reuse, Bind.bind, Except.bind] at sourceEffect
 
 /-- A well-formed dead constructor evaluation either produces an immediate
 tag without changing the runtime, or allocates source-only unreachable
