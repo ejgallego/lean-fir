@@ -157,4 +157,13 @@ def residentLoadBody? : List Wasm.Instruction → Bool
         adapted.wasmModule.funcs.length == 1
   | .error _ => false
 
+#guard match adapt Fir.Wasm.Emit.ResidentRuntime.isSharedModule with
+  | .ok adapted =>
+      adapted.wasmModule.imports.isEmpty &&
+      adapted.wasmModule.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.pagesMax.isNone &&
+        adapted.wasmModule.memoryExports == [("memory", 0)] &&
+        adapted.wasmModule.funcs.length == 1
+  | .error _ => false
+
 end FirTalos

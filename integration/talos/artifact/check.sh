@@ -10,6 +10,8 @@ cd "$here"
 lake build
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
+lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
+node run-resident-is-shared.mjs _build/resident-is-shared.wasm
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
@@ -27,10 +29,15 @@ for source in "${source_artifacts[@]}"; do
   cp "_build/$source.wasm.json" "_build/$source-first.wasm.json"
   cp "_build/$source.wasm.lcnf" "_build/$source-first.wasm.lcnf"
 done
-resident_pretty="source-pretty-format-resident-get-tag"
-for suffix in wasm wasm.json wasm.lcnf; do
-  test -s "_build/$resident_pretty.$suffix"
-  cp "_build/$resident_pretty.$suffix" "_build/$resident_pretty-first.$suffix"
+resident_pretties=(
+  "source-pretty-format-resident-get-tag"
+  "source-pretty-format-resident-runtime"
+)
+for resident_pretty in "${resident_pretties[@]}"; do
+  for suffix in wasm wasm.json wasm.lcnf; do
+    test -s "_build/$resident_pretty.$suffix"
+    cp "_build/$resident_pretty.$suffix" "_build/$resident_pretty-first.$suffix"
+  done
 done
 lake -d ../../.. env lean FirWasmSourceExample.lean
 for source in "${source_artifacts[@]}"; do
@@ -38,8 +45,10 @@ for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"
   cmp "_build/$source-first.wasm.lcnf" "_build/$source.wasm.lcnf"
 done
-for suffix in wasm wasm.json wasm.lcnf; do
-  cmp "_build/$resident_pretty-first.$suffix" "_build/$resident_pretty.$suffix"
+for resident_pretty in "${resident_pretties[@]}"; do
+  for suffix in wasm wasm.json wasm.lcnf; do
+    cmp "_build/$resident_pretty-first.$suffix" "_build/$resident_pretty.$suffix"
+  done
 done
 cmp _build/source-usize-id-module.wasm _build/source-usize-id.wasm
 cmp _build/source-usize-id-module.wasm.lcnf _build/source-usize-id.wasm.lcnf
@@ -47,9 +56,12 @@ cmp _build/source-pretty-format-module.wasm _build/source-pretty-format.wasm
 cmp _build/source-pretty-format-module.wasm.lcnf _build/source-pretty-format.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-get-tag.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-runtime.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
-  _build/source-pretty-format-resident-get-tag.wasm
+  _build/source-pretty-format-resident-get-tag.wasm \
+  _build/source-pretty-format-resident-runtime.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -152,6 +164,8 @@ node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-runtime.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -176,6 +190,10 @@ lake exe fir-wasm-artifact resident-get-tag "$first/resident/get-tag.wasm"
 lake exe fir-wasm-artifact resident-get-tag "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm" "$second/resident/get-tag.wasm"
 cmp "$first/resident/get-tag.wasm.json" "$second/resident/get-tag.wasm.json"
+lake exe fir-wasm-artifact resident-is-shared "$first/resident/is-shared.wasm"
+lake exe fir-wasm-artifact resident-is-shared "$second/resident/is-shared.wasm"
+cmp "$first/resident/is-shared.wasm" "$second/resident/is-shared.wasm"
+cmp "$first/resident/is-shared.wasm.json" "$second/resident/is-shared.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

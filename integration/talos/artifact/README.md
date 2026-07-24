@@ -78,13 +78,18 @@ exported memory; no JavaScript runtime handler participates in the calls:
 ```text
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
+lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
+node run-resident-is-shared.mjs _build/resident-is-shared.wasm
 ```
 
-The module and its `.wasm.json` descriptor are generated deterministically.
-This is a generation-readiness artifact, not the later theorem that the helper
-satisfies the W6 `getTag` contract on related states. Setting
-`FIR_BROWSER=google-chrome` while running `./check.sh` executes the same smoke
-client in a browser Worker alongside the existing `prettyM` check.
+Both modules and their `.wasm.json` descriptors are generated
+deterministically. The second helper implements the valid-input portion of
+`isShared`: immediates and persistent/non-unique heap objects return one,
+while a unique live heap object returns zero. These are generation-readiness
+artifacts, not the later theorems that the linked helpers satisfy the W6
+contracts on related states. Setting `FIR_BROWSER=google-chrome` while running
+`./check.sh` executes the same smoke clients in a browser Worker alongside the
+existing `prettyM` check.
 
 Remaining JavaScript runtime operations can use that module-owned heap without
 a facade. Construct the concrete host before instantiation as usual, then
@@ -265,7 +270,8 @@ exactly the one `getTag` import:
 ```text
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
-  _build/source-pretty-format-resident-get-tag.wasm
+  _build/source-pretty-format-resident-get-tag.wasm \
+  _build/source-pretty-format-resident-runtime.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -275,6 +281,19 @@ Lean 4.32 `Format` constructors, Unicode, line behavior, repeated calls, and
 module-owned memory. This is an incremental generation result, not the final
 zero-function-import W7 artifact or a proof that the linked helper implements
 the W6 semantic contract.
+
+The next resident-runtime artifact adds `fir_isShared` without changing final
+LCNF, removes the one remaining `isShared` import, and executes through the
+same low-level client:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-runtime.wasm
+```
+
+The import audit therefore records the monotonic closure
+`351 → 350 → 349`: baseline, resident `getTag`, then resident
+`getTag + isShared`.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current

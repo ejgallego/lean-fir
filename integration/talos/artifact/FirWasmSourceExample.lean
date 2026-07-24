@@ -189,7 +189,8 @@ run_cmd do
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
-  let residentResult ← liftCoreM <| Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+  let residentResult ← liftCoreM <|
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileGetTagModule
     ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
   let residentArtifact ← match residentResult with
     | .ok artifact => pure artifact
@@ -208,6 +209,25 @@ run_cmd do
       "_build/source-pretty-format-resident-get-tag.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write resident Format module: {repr error}"
+  let residentRuntimeResult ← liftCoreM <|
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+  let residentRuntimeArtifact ← match residentRuntimeResult with
+    | .ok artifact => pure artifact
+    | .error error => throwError "failed to compile resident-runtime Format facade: {repr error}"
+  unless residentArtifact.module.runtimeOperations.contains .isShared &&
+      !residentRuntimeArtifact.module.runtimeOperations.contains .isShared &&
+      residentRuntimeArtifact.module.imports.size + 1 ==
+        residentArtifact.module.imports.size do
+    throwError "resident Format isShared import accounting changed"
+  unless residentRuntimeArtifact.module.exports.contains
+      Fir.Wasm.Emit.ResidentRuntime.isSharedName do
+    throwError "resident Format module does not export fir_isShared"
+  match ← residentRuntimeArtifact.write
+      "_build/source-pretty-format-resident-runtime.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident-runtime Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

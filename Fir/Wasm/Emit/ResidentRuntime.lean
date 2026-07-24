@@ -14,9 +14,13 @@ declaration instead of retaining the semantic-host import.
 -/
 def getTagName : Name := `fir_getTag
 
+def isSharedName : Name := `fir_isShared
+
 def objectParam : FVarId := ⟨`object⟩
 
 def resultLocal : FVarId := ⟨`result⟩
+
+def sharedLocal : FVarId := ⟨`shared⟩
 
 private def offset (value : Nat) : UInt32 := UInt32.ofNat value
 
@@ -102,51 +106,118 @@ def getTagFunction : Function := {
       .localGet resultLocal,
       .ret] }
 
+def residentMemory : MemoryDecl := {
+  pagesMin := 1
+  exportName := some "memory" }
+
+private def setShared (value : UInt32) : List Instruction :=
+  [.i32Const .uint8 value, .localSet sharedLocal]
+
+private def refCountSharingBody : List Instruction :=
+  [.localGet objectParam,
+    .i32Load .uint32 (offset headerRefCountOffset)] ++
+  equalsConst .uint32 1 ++
+  [.ifElse (setShared 0) (setShared 1)]
+
+private def sharingHeaderBody : List Instruction :=
+  loadFlags ++
+    [.i32Const .uint32 persistentFlag, .i32And] ++
+    equalsConst .uint32 persistentFlag ++
+    [.ifElse (setShared 1) refCountSharingBody]
+
+private def isSharedAlignedHeapBody : List Instruction :=
+  requireFlag liveFlag sharingHeaderBody
+
+private def isSharedHeapBody : List Instruction :=
+  [.localGet objectParam] ++
+    equalsConst .tobject 0 ++
+    [.ifElse
+      [.unreachable]
+      ([.localGet objectParam,
+        .i32Const .uint32 (UInt32.ofNat (target.heapAlignment - 1)),
+        .i32And] ++
+        equalsConst .uint32 0 ++
+        [.ifElse isSharedAlignedHeapBody [.unreachable]])]
+
+/--
+Executable valid-input portion of W6 `readIsShared`. Tagged immediates and
+persistent objects return one; a live ordinary heap object returns zero
+exactly when its reference count is one.
+
+As with `getTagFunction`, the proof that this helper implements the W6
+contract on related states remains a separate proof-lane theorem.
+-/
+def isSharedFunction : Function := {
+  name := isSharedName
+  params := #[(objectParam, .tobject)]
+  results := #[.uint8]
+  locals := #[(sharedLocal, .uint8)]
+  body :=
+    [.localGet objectParam,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse (setShared 1) isSharedHeapBody,
+      .localGet sharedLocal,
+      .ret] }
+
 def getTagModule : Module := {
   imports := #[]
   functions := #[getTagFunction]
   exports := #[getTagName]
   initializers := #[]
   runtimeOperations := #[]
-  memory := some { pagesMin := 1, exportName := some "memory" } }
+  memory := some residentMemory }
 
-def residentMemory : MemoryDecl := {
-  pagesMin := 1
-  exportName := some "memory" }
+def isSharedModule : Module := {
+  imports := #[]
+  functions := #[isSharedFunction]
+  exports := #[isSharedName]
+  initializers := #[]
+  runtimeOperations := #[]
+  memory := some residentMemory }
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
-  | missingGetTag
+  | missingOperation (name : Name)
   | reservedDeclaration (name : Name)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
-private partial def rewriteGetTagInstruction : Instruction → Instruction
-  | .call (.runtime .getTag) => .call (.declaration getTagName)
-  | .block label body => .block label (body.map rewriteGetTagInstruction)
+private partial def rewriteRuntimeInstruction (operation : RuntimeOp)
+    (name : Name) : Instruction → Instruction
+  | .call (.runtime candidate) =>
+      if candidate == operation then
+        .call (.declaration name)
+      else
+        .call (.runtime candidate)
+  | .block label body =>
+      .block label (body.map (rewriteRuntimeInstruction operation name))
   | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map rewriteGetTagInstruction)
-        (elseBody.map rewriteGetTagInstruction)
+      .ifElse (thenBody.map (rewriteRuntimeInstruction operation name))
+        (elseBody.map (rewriteRuntimeInstruction operation name))
   | instruction => instruction
 
-private def rewriteGetTagFunction (function : Function) : Function :=
-  { function with body := function.body.map rewriteGetTagInstruction }
+private def rewriteRuntimeFunction (operation : RuntimeOp) (name : Name)
+    (function : Function) : Function :=
+  { function with
+    body := function.body.map (rewriteRuntimeInstruction operation name) }
 
 /--
-Internalize the semantic `getTag` import in an already validated symbolic
-module. Runtime imports are rebuilt from the rewritten function bodies because
-their presentation names contain ordinals; external declaration imports retain
-their original stable names and order.
+Internalize one semantic runtime import in an already validated symbolic
+module. Runtime imports are rebuilt from the rewritten function bodies
+because their presentation names contain ordinals; external declaration
+imports retain their original stable names and order.
 -/
-def internalizeGetTag (module : Module) : Except LinkError Module := do
+private def internalizeOperation (operation : RuntimeOp) (name : Name)
+    (function : Function) (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
-  unless module.runtimeOperations.contains .getTag do
-    throw .missingGetTag
-  if module.imports.any (·.declaration? == some getTagName) then
-    throw (.reservedDeclaration getTagName)
+  unless module.runtimeOperations.contains operation do
+    throw (.missingOperation name)
+  if module.imports.any (·.declaration? == some name) then
+    throw (.reservedDeclaration name)
   let memory ←
     match module.memory with
     | none => pure residentMemory
@@ -154,13 +225,13 @@ def internalizeGetTag (module : Module) : Except LinkError Module := do
         unless memory == residentMemory do
           throw .incompatibleMemory
         pure memory
-  let functions := module.functions.map rewriteGetTagFunction
+  let functions := module.functions.map (rewriteRuntimeFunction operation name)
   let functions ←
-    match functions.find? (·.name == getTagName) with
-    | none => pure (functions.push getTagFunction)
-    | some function =>
-        unless function == getTagFunction do
-          throw (.reservedDeclaration getTagName)
+    match functions.find? (·.name == name) with
+    | none => pure (functions.push function)
+    | some existing =>
+        unless existing == function do
+          throw (.reservedDeclaration name)
         pure functions
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
   let externalImports := module.imports.filter (·.operation?.isNone)
@@ -169,12 +240,18 @@ def internalizeGetTag (module : Module) : Except LinkError Module := do
     module with
     imports
     functions
-    exports := Fir.Wasm.addUnique module.exports getTagName
+    exports := Fir.Wasm.addUnique module.exports name
     runtimeOperations
     memory := some memory }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
+
+def internalizeGetTag (module : Module) : Except LinkError Module :=
+  internalizeOperation .getTag getTagName getTagFunction module
+
+def internalizeIsShared (module : Module) : Except LinkError Module :=
+  internalizeOperation .isShared isSharedName isSharedFunction module
 
 def getTagManifest : Json :=
   Json.mkObj [
@@ -185,10 +262,24 @@ def getTagManifest : Json :=
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 contract proof pending")]
 
+def isSharedManifest : Json :=
+  Json.mkObj [
+    ("entry", isSharedName.toString),
+    ("params", Json.arr #["tobject"]),
+    ("result", "uint8"),
+    ("memory", "memory"),
+    ("imports", Json.arr #[]),
+    ("status", "generation-only; W6 contract proof pending")]
+
 #guard getTagModule.imports.isEmpty
 #guard getTagModule.memory.any fun memory =>
   memory.pagesMin == 1 && memory.exportName == some "memory"
 #guard Fir.Wasm.validateModule getTagModule |>.isOk
 #guard Fir.Wasm.Emit.encode getTagModule |>.isOk
+#guard isSharedModule.imports.isEmpty
+#guard isSharedModule.memory.any fun memory =>
+  memory.pagesMin == 1 && memory.exportName == some "memory"
+#guard Fir.Wasm.validateModule isSharedModule |>.isOk
+#guard Fir.Wasm.Emit.encode isSharedModule |>.isOk
 
 end Fir.Wasm.Emit.ResidentRuntime
