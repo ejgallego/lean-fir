@@ -9602,6 +9602,140 @@ theorem ReachableMachineRelatedWith.advance
         related.structural sourcePath targetPath afterStructural
       exact ⟨targetAfter, targetPath, afterStructural, afterInvariant⟩
 
+/-- A terminal retained return must be the related unknown-variable branch;
+a successful source lookup would instead produce an internal step. -/
+theorem SomeReachableMachineRelated.return_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .code (.return result))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          have targetEq := graph.returnTarget
+          subst targetCode
+          have sourceSame :
+              { source with control := .code (.return result) } = source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code (.return result) } = target := by
+            cases target
+            simp_all
+          have done' : coreStep
+              { source with control := .code (.return result) } =
+                .done sourceObservation := by
+            simpa only [sourceSame] using done
+          cases sourceRead : lookup source.env result with
+          | none =>
+              cases graph.covered with
+              | ret member =>
+                  have terminal := coreStep_return_unknown_terminal
+                    (externals := externals) source target env member
+                    sourceRead runtime done'
+                  simpa only [targetSame] using terminal
+          | some sourceValue =>
+              cases graph.covered with
+              | ret member =>
+                  rcases coreStep_return_reachableRelated source target
+                      programs frames env member sourceRead runtime with
+                    ⟨targetValue, targetRead, values, sourceStep,
+                      targetStep, afterRelated⟩
+                  rw [sourceStep] at done'
+                  contradiction
+
+/-- Terminal retained jumps transport all unknown-join, argument-evaluation,
+and parameter-binding faults through the graph-level jump theorem. -/
+theorem SomeReachableMachineRelated.jump_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .code (.jmp join arguments))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          have sourceSame :
+              { source with control := .code (.jmp join arguments) } =
+                source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code targetCode } = target := by
+            cases target
+            simp_all
+          have terminal := coreStep_jump_terminal
+            (externals := externals) source target graph joins env runtime
+            (by simpa only [sourceSame] using done)
+          simpa only [targetSame] using terminal
+
+/-- Explicit unreachable nodes are retained and terminate with the common
+address-free `unreachable` fault. -/
+theorem SomeReachableMachineRelated.unreach_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .code (.unreach type))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          have sourceSame :
+              { source with control := .code (.unreach type) } = source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code targetCode } = target := by
+            cases target
+            simp_all
+          have terminal := coreStep_unreach_terminal
+            (externals := externals) source target graph runtime
+            (by simpa only [sourceSame] using done)
+          simpa only [targetSame] using terminal
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation
