@@ -100,7 +100,9 @@ Attachment copies any initial heap prepared from the manifest, rejects
 nonzero module memory and rebinding, and routes subsequent allocation and
 growth through the same `WebAssembly.Memory`. This is the required transition
 boundary for incrementally internalizing runtime imports without maintaining
-two divergent heaps.
+two divergent heaps. `module-client.mjs` performs this attachment
+automatically when the module exports `memory`, while rejecting hosts that do
+not implement the concrete-memory boundary.
 
 This builds the Lean emitter, runs the semantic oracle through Lean, emits the corpus and oracle
 results twice, byte-compares all outputs, validates and instantiates every module in Node,
@@ -252,6 +254,27 @@ adapter:
 ```text
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
 ```
+
+The first compiler-produced W7 migration runs the identical captured final
+LCNF through a checked symbolic link step: every semantic `getTag` call is
+rewritten to the Wasm-resident `fir_getTag` helper, one-page memory is defined
+and exported, and the concrete client attaches to that memory before creating
+raw `Format` values. It retains the other 350 function imports while removing
+exactly the one `getTag` import:
+
+```text
+node check-resident-pretty-format.mjs \
+  _build/source-pretty-format-module.wasm \
+  _build/source-pretty-format-resident-get-tag.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-get-tag.wasm
+```
+
+Node and the browser exercise the same native-oracle strings, all eight raw
+Lean 4.32 `Format` constructors, Unicode, line behavior, repeated calls, and
+module-owned memory. This is an incremental generation result, not the final
+zero-function-import W7 artifact or a proof that the linked helper implements
+the W6 semantic contract.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current

@@ -11,6 +11,8 @@ chrome_data="$(mktemp -d)"
 
 test -s "$here/_build/resident-get-tag.wasm"
 test -s "$here/_build/resident-get-tag.wasm.json"
+test -s "$here/_build/source-pretty-format-resident-get-tag.wasm"
+test -s "$here/_build/source-pretty-format-resident-get-tag.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &

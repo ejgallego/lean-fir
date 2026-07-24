@@ -110,6 +110,72 @@ def getTagModule : Module := {
   runtimeOperations := #[]
   memory := some { pagesMin := 1, exportName := some "memory" } }
 
+def residentMemory : MemoryDecl := {
+  pagesMin := 1
+  exportName := some "memory" }
+
+inductive LinkError where
+  | invalidInput (error : SymbolicError)
+  | missingGetTag
+  | reservedDeclaration (name : Name)
+  | incompatibleMemory
+  | invalidOutput (error : SymbolicError)
+  deriving Inhabited, Repr
+
+private partial def rewriteGetTagInstruction : Instruction → Instruction
+  | .call (.runtime .getTag) => .call (.declaration getTagName)
+  | .block label body => .block label (body.map rewriteGetTagInstruction)
+  | .ifElse thenBody elseBody =>
+      .ifElse (thenBody.map rewriteGetTagInstruction)
+        (elseBody.map rewriteGetTagInstruction)
+  | instruction => instruction
+
+private def rewriteGetTagFunction (function : Function) : Function :=
+  { function with body := function.body.map rewriteGetTagInstruction }
+
+/--
+Internalize the semantic `getTag` import in an already validated symbolic
+module. Runtime imports are rebuilt from the rewritten function bodies because
+their presentation names contain ordinals; external declaration imports retain
+their original stable names and order.
+-/
+def internalizeGetTag (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  unless module.runtimeOperations.contains .getTag do
+    throw .missingGetTag
+  if module.imports.any (·.declaration? == some getTagName) then
+    throw (.reservedDeclaration getTagName)
+  let memory ←
+    match module.memory with
+    | none => pure residentMemory
+    | some memory =>
+        unless memory == residentMemory do
+          throw .incompatibleMemory
+        pure memory
+  let functions := module.functions.map rewriteGetTagFunction
+  let functions ←
+    match functions.find? (·.name == getTagName) with
+    | none => pure (functions.push getTagFunction)
+    | some function =>
+        unless function == getTagFunction do
+          throw (.reservedDeclaration getTagName)
+        pure functions
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+  let result : Module := {
+    module with
+    imports
+    functions
+    exports := Fir.Wasm.addUnique module.exports getTagName
+    runtimeOperations
+    memory := some memory }
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
 def getTagManifest : Json :=
   Json.mkObj [
     ("entry", getTagName.toString),

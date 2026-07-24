@@ -27,16 +27,29 @@ for source in "${source_artifacts[@]}"; do
   cp "_build/$source.wasm.json" "_build/$source-first.wasm.json"
   cp "_build/$source.wasm.lcnf" "_build/$source-first.wasm.lcnf"
 done
+resident_pretty="source-pretty-format-resident-get-tag"
+for suffix in wasm wasm.json wasm.lcnf; do
+  test -s "_build/$resident_pretty.$suffix"
+  cp "_build/$resident_pretty.$suffix" "_build/$resident_pretty-first.$suffix"
+done
 lake -d ../../.. env lean FirWasmSourceExample.lean
 for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm" "_build/$source.wasm"
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"
   cmp "_build/$source-first.wasm.lcnf" "_build/$source.wasm.lcnf"
 done
+for suffix in wasm wasm.json wasm.lcnf; do
+  cmp "_build/$resident_pretty-first.$suffix" "_build/$resident_pretty.$suffix"
+done
 cmp _build/source-usize-id-module.wasm _build/source-usize-id.wasm
 cmp _build/source-usize-id-module.wasm.lcnf _build/source-usize-id.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm _build/source-pretty-format.wasm
 cmp _build/source-pretty-format-module.wasm.lcnf _build/source-pretty-format.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-get-tag.wasm.lcnf
+node check-resident-pretty-format.mjs \
+  _build/source-pretty-format-module.wasm \
+  _build/source-pretty-format-resident-get-tag.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -137,6 +150,8 @@ node --input-type=module -e '
   _build/source-pretty-format-coverage.wasm
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-get-tag.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \

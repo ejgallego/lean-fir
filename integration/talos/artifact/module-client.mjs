@@ -45,6 +45,12 @@ export async function instantiateModuleArtifact({ bytes, manifest, host }) {
   requireCondition(WebAssembly.validate(bytes), "module failed WebAssembly validation");
 
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const memory = instance.exports.memory;
+  if (memory instanceof WebAssembly.Memory) {
+    requireCondition(typeof host.attachMemory === "function",
+      "module exports memory but its host does not provide attachMemory(memory)");
+    host.attachMemory(memory);
+  }
   const entry = instance.exports[manifest.entry];
   requireCondition(typeof entry === "function",
     `module export ${manifest.entry} must be a function`);

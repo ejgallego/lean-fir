@@ -1,6 +1,7 @@
 import Fir.Validation.Corpus
 import Fir.Wasm.Emit.Command
 import Fir.Wasm.Emit.PrettyFormat
+import Fir.Wasm.Emit.ResidentPrettyFormat
 
 open Lean Elab Command
 
@@ -188,6 +189,25 @@ run_cmd do
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
+  let residentResult ← liftCoreM <| Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+    ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+  let residentArtifact ← match residentResult with
+    | .ok artifact => pure artifact
+    | .error error => throwError "failed to compile resident Format facade: {repr error}"
+  unless moduleArtifact.module.runtimeOperations.contains .getTag &&
+      !residentArtifact.module.runtimeOperations.contains .getTag &&
+      residentArtifact.module.imports.size + 1 == moduleArtifact.module.imports.size do
+    throwError "resident Format getTag import accounting changed"
+  unless residentArtifact.module.memory.any fun memory =>
+      memory.pagesMin == 1 && memory.exportName == some "memory" do
+    throwError "resident Format module does not export its memory"
+  unless residentArtifact.module.exports.contains
+      Fir.Wasm.Emit.ResidentRuntime.getTagName do
+    throwError "resident Format module does not export fir_getTag"
+  match ← residentArtifact.write
+      "_build/source-pretty-format-resident-get-tag.wasm" with
+  | .ok () => pure ()
+  | .error error => throwError "failed to write resident Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with
