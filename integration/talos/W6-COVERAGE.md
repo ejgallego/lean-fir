@@ -50,6 +50,14 @@ Cross-cutting W6.5 state:
   Node/browser concrete host executes the matching external artifact with the same
   return/world/trace, executes a twice-called cached external with exactly one
   effect, and separately verifies reject-by-default behavior;
+- exact external source failures now have an arbitrary-arity terminal T4 leaf
+  over the generated local-load/call/local-set sequence; the source and
+  concrete implementations report the same `RuntimeFault`, and the
+  result-local write plus continuation remain unreachable;
+- source-fault preservation and target safety are audited separately in
+  `W6-FAULT-AUDIT.md`. Target memory/layout/global/ABI failures cannot satisfy
+  `ConcreteErrorSourceRel`; they require impossibility proofs under the
+  runtime relation and explicit wasm32 resource premises;
 - pure external responses now expose `ConcretePureExternalPost`: result
   allocation may extend the heap witness, while both worlds remain unchanged
   and each side's trace is exactly its previous trace plus the related call
@@ -97,6 +105,14 @@ Cross-cutting W6.5 state:
   `arityMismatch` faults in the concrete allocator; exact guards and the
   coordinated contract decision are tracked by
   `FIR-BUG-wasm-none-constructor-arity-fault-classification`;
+- explicit `.unreach` and the no-alternative case fallback currently become
+  the same native Talos `"unreachable"` trap with no structured host failure;
+  this blocks their T4 leaves under
+  `FIR-BUG-wasm-none-unreachable-fault-classification`;
+- a supported one-field-reset/two-field-reuse counterexample succeeds in FIR
+  but trips the concrete `reuseAllocationTooSmall` capacity check; the missing
+  validated retained-capacity invariant is tracked by
+  `FIR-BUG-wasm-none-reuse-capacity-semantic-gap`;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

@@ -586,6 +586,93 @@ theorem wp_effect_localGets_of_trap
   · exact operation
   · exact post
 
+/-- A concrete external implementation's exact source failure is preserved
+by the resolved Talos host. Argument decoding has already succeeded, so the
+foreign implementation is the operation that establishes the trap payload. -/
+theorem externalStep_sourceFailure
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store Host) (physicalArgs : List Wasm.Value)
+    (concreteArgs : List LaneValue) (fault : RuntimeFault)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (concreteCalled : initial.host.externals.call
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      initial.host.runtime = .error (.source fault)) :
+    externalStep operation resultKind initial physicalArgs =
+      trap (clearFailure initial)
+        (.runtime ((.source fault : ConcreteError).toTrap)) := by
+  simp [externalStep, decoded, ConcreteExternalImpl.invoke, concreteCalled]
+
+/-- Terminal T4 leaf for an arbitrary-arity generated external call whose
+concrete and source implementations report the same source fault. The trap
+preempts the generated result-local write and the entire continuation. -/
+theorem concreteFaultLeaf_external_sourceFailure
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {indices : List Nat}
+    {physicalArgs : List Wasm.Value}
+    {concreteArgs : List LaneValue}
+    {resultIndex : Nat}
+    {targetRest : Wasm.Program}
+    {fault : RuntimeFault}
+    (operation : ExternalOperation)
+    (resultKind : AbiKind)
+    (sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv code)
+        (FaultObservation sourceRuntime fault))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code
+        (indices.map Wasm.Instruction.localGet ++
+          .call id :: .localSet resultIndex :: targetRest))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? =
+      some (externalContract operation resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (concreteCalled : initial.host.externals.call
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      initial.host.runtime = .error (.source fault)) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv code
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime fault := by
+  have operationStep :=
+    externalStep_sourceFailure operation resultKind initial physicalArgs
+      concreteArgs fault decoded concreteCalled
+  obtain ⟨final, message, trapped, post⟩ :=
+    refinedFaultPost_of_runtimeFailure initialRelated.1
+      (ConcreteErrorSourceRel.source fault)
+  refine ⟨sourceFault, adapted, initialRelated, ?_⟩
+  simpa using wp_effect_localGets_of_trap
+    (step := externalStep operation resultKind)
+    (rest := .localSet resultIndex :: targetRest)
+    (indices := indices) (physicalArgs := physicalArgs) (tail := [])
+    hGets hImp hSat hi hContract hParams (operationStep.trans trapped)
+    (by simpa [ConcreteFunctionFaultPost] using post)
+
 /-- Generic terminal T4 leaf for a unary, result-producing concrete host
 operation. It centralizes compiler/adaptor composition and Talos trap
 propagation; operation-specific leaves supply only the source error, concrete

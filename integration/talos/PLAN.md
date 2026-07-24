@@ -2954,6 +2954,24 @@ remaining T4 work is a supported-fragment fault audit covering allocation,
 reset/reuse, calls, externals, and source-only malformed states. No shared
 semantic contract or executable ABI changed.
 
+W6.6cq closes T4's exact foreign-failure boundary and makes the remaining
+goal precise. `externalStep_sourceFailure` preserves an installed concrete
+external implementation's source-classified error after successful arbitrary-
+arity argument decoding, and
+`concreteFaultLeaf_external_sourceFailure` composes that trap through the
+generated local-load/call/local-set sequence while proving the result write
+and continuation unreachable. The final audit now separates T4 source-fault
+preservation from T4S target safety: target memory/layout/global/ABI failures
+cannot be related to invented FIR faults. Executable regressions record two
+admitted blockers. Explicit `.unreach` loses its structured payload in the
+native Wasm trap
+(`FIR-BUG-wasm-none-unreachable-fault-classification`), and a one-field
+allocation reset then reused for a two-field constructor succeeds in FIR but
+trips concrete retained-capacity checking
+(`FIR-BUG-wasm-none-reuse-capacity-semantic-gap`). `W6-FAULT-AUDIT.md`
+records the exact per-family matrix and next proof order. No shared semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

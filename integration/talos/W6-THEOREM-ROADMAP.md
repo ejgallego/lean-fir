@@ -138,9 +138,9 @@ source reaches sourceError
 ```
 
 The relation is `ConcreteErrorSourceRel`. The proof must retain operation and
-precedence information, including stale-object, bounds, malformed-layout,
-allocation, and external failures. A target trap without the related
-structured source error does not satisfy this theorem.
+precedence information for source faults, including stale-object, bounds,
+source-classified malformed requests, and external failures. A target trap
+without the related structured source error does not satisfy this theorem.
 
 The public endpoint is now explicit:
 
@@ -162,9 +162,25 @@ fuel-independent target endpoint missing from Talos's success-only
 terminal failing leaf through every successful prefix constructor from T2.
 The remaining obligation is the operation-level leaf matrix: each admitted
 source failure must construct `ConcreteFaultLeaf` without losing its exact
-payload or precedence. The first such leaf is complete for stale-object
-`isShared`; it uses the generic unary-host trap constructor intended for the
-projection and unboxing families.
+payload or precedence. Projection, mutation, ownership, tag, case-tag, and
+arbitrary-arity external terminal leaves are present. The exact matrix and
+known blockers are maintained in `W6-FAULT-AUDIT.md`.
+
+### T4S. Target safety
+
+Malformed concrete layout, ABI-shape errors, allocation exhaustion, missing
+generated metadata, and concrete-global failures are not FIR runtime faults.
+They therefore cannot be folded into `ConcreteErrorSourceRel`. W6 also needs
+the separate safety statement that these target-classified traps are
+unreachable from a related state under the validated fragment and explicit
+wasm32 resource premises.
+
+Allocation capacity and retained reuse capacity must be visible hypotheses or
+validated invariants. FIR's semantic heap is unbounded, so unconditional
+target totality would be false. The current reset/reuse counterexample is
+tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap`; native
+unreachability losing its source fault is tracked separately by
+`FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
 
@@ -209,6 +225,8 @@ W6 program correctness is complete when:
 - T2 covers every operation admitted by the supported fragment;
 - T3 is proved without fixture-specific compiler or layout assumptions;
 - T4 covers every structured failure admitted by that same fragment; and
+- T4S excludes target-only traps under the stated representation and resource
+  invariants; and
 - direct recompilation, `make check`, and `make talos-check` are green.
 
 W7 self-containment is complete when T5 covers every concrete runtime import
@@ -223,7 +241,10 @@ acceptance tests pass.
    consuming the existing W6.6 step theorems.
 4. Complete: package the whole generated export as T3.
 5. In progress: populate the completed T4 syntax induction with terminal
-   leaves for every structured failure admitted by the supported fragment.
-6. Let W7 generation proceed independently against the current concrete
+   leaves for every structured failure admitted by the supported fragment,
+   using `W6-FAULT-AUDIT.md` as the exact checklist.
+6. In progress: discharge T4S, first resolving the admitted unreachable and
+   retained-reuse-capacity counterexamples.
+7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
-7. Close with T6 and the pure `prettyM` acceptance theorem.
+8. Close with T6 and the pure `prettyM` acceptance theorem.

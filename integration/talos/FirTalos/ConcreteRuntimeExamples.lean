@@ -121,6 +121,57 @@ private def uninitializedScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard fixtureReturnsI64? uninitializedScalarProjectionProgram 0
 
+private def unreachableFaultProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] u64Type (.code (.unreach u64Type))] }
+
+#guard faulted? (runMain unreachableFaultProgram) .unreachable
+
+/-- Native Wasm unreachability currently loses FIR's structured fault
+classification. This regression prevents T4 from accidentally treating the
+plain Talos trap message as an exact `ConcreteErrorSourceRel` witness. -/
+private def unreachableTrapHasNoStructuredFailure : Bool :=
+  (runtimeFixture? unreachableFaultProgram).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Trap store message =>
+          message == "unreachable" && store.host.failure?.isNone
+      | _ => false
+
+#guard unreachableTrapHasNoStructuredFailure
+
+/-- A retained one-field allocation is too small for an in-place two-field
+replacement. FIR's allocation-agnostic semantic heap nevertheless succeeds,
+so this accepted program is the target-safety counterexample tracked by
+`FIR-BUG-wasm-none-reuse-capacity-semantic-gap`. -/
+private def oversizedReuseProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 70))) <|
+      .let (letDecl p objType
+        (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
+      .let (letDecl r objType (.reset 1 p)) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 71))) <|
+      .let (letDecl z objType
+        (.reuse r { pairInfo with size := 2 } false #[.fvar y, .fvar x])) <|
+      .let (letDecl s LCNF.ImpureType.tobject (.oproj 0 z)) <|
+      .return s)] }
+
+#guard Fir.Wasm.supportedProgram oversizedReuseProgram
+
+#guard returned? (runMain oversizedReuseProgram) (.object (.tagged 71))
+
+private def oversizedReuseTrapsOnConcreteCapacity : Bool :=
+  (runtimeFixture? oversizedReuseProgram).any fun fixture =>
+    fixture.importsResolveExactly &&
+      match fixture.runMain with
+      | .Trap store _ =>
+          match store.host.failure? with
+          | some (.runtime (.target (.memory
+              (.reuseAllocationTooSmall _ _)))) => true
+          | _ => false
+      | _ => false
+
+#guard oversizedReuseTrapsOnConcreteCapacity
+
 -- FIR identifies a deleted semantic location as a source `deadObject` fault;
 -- the concrete host retains its physical address in the source-address channel
 -- for witness-indexed translation back to that location.
