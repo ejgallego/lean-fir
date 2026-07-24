@@ -4046,6 +4046,15 @@ structure ReachableInvariantLaws (externals : ExternalSpec) (fuel : Nat)
   ready : ∀ {source target},
     SomeReachableMachineRelated fuel source target →
     invariant source target → ReachableMachineReadyAt fuel source target
+  external : ∀ {sourceBefore targetBefore request waiting response},
+    SomeReachableMachineRelated fuel sourceBefore targetBefore →
+    invariant sourceBefore targetBefore →
+    coreStep sourceBefore = .external request waiting →
+    externals request sourceBefore.runtime response →
+      ∃ targetAfter,
+        NonLockstep.Reaches externals targetBefore targetAfter ∧
+        SomeReachableMachineRelated fuel
+          (resumeExternal request waiting response) targetAfter
   stable : ∀ {sourceBefore targetBefore sourceAfter targetAfter},
     invariant sourceBefore targetBefore →
     SomeReachableMachineRelated fuel sourceBefore targetBefore →
@@ -9557,6 +9566,41 @@ theorem SomeReachableMachineRelated.matchNextStep_of_ready
       exact ⟨targetAfter,
         NonLockstep.reaches_of_step (.internal targetTransition),
         afterRelated⟩
+
+/-- Complete advance law for the structural relation paired with its semantic
+invariant.  Internal steps use the constructive control dispatcher; external
+steps use the explicit compatibility obligation rather than assuming that an
+arbitrary `ExternalSpec` respects address renaming.  `stable` then transports
+the auxiliary invariant across the chosen source and target paths. -/
+theorem ReachableMachineRelatedWith.advance
+    {invariant : MachineState → MachineState → Prop}
+    (laws : ReachableInvariantLaws externals fuel invariant)
+    (related : ReachableMachineRelatedWith fuel invariant source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      ReachableMachineRelatedWith fuel invariant sourceAfter targetAfter := by
+  cases step with
+  | internal transition =>
+      have ready : ReachableMachineReadyAt fuel source target :=
+        laws.ready related.structural related.invariant
+      rcases related.structural.matchNextStep_of_ready ready transition with
+        ⟨targetAfter, targetPath, afterStructural⟩
+      have sourcePath : NonLockstep.Reaches externals source sourceAfter :=
+        NonLockstep.reaches_of_step (.internal transition)
+      have afterInvariant := laws.stable related.invariant
+        related.structural sourcePath targetPath afterStructural
+      exact ⟨targetAfter, targetPath, afterStructural, afterInvariant⟩
+  | @external waiting request response transition externalProof =>
+      rcases laws.external related.structural related.invariant transition
+          externalProof with
+        ⟨targetAfter, targetPath, afterStructural⟩
+      have sourcePath : NonLockstep.Reaches externals source
+          (resumeExternal request waiting response) :=
+        NonLockstep.reaches_of_step (.external transition externalProof)
+      have afterInvariant := laws.stable related.invariant
+        related.structural sourcePath targetPath afterStructural
+      exact ⟨targetAfter, targetPath, afterStructural, afterInvariant⟩
 
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
