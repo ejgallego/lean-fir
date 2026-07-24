@@ -185,6 +185,17 @@ theorem reachable
           exact .child ih afterFound
             (by simpa [← objectRead] using member) reference
 
+theorem find_none
+    (frame : HeapOwnershipFrame before after)
+    (found : findCell? before location = none) :
+    findCell? after location = none := by
+  have objectRead := frame location
+  rw [found] at objectRead
+  cases afterFound : findCell? after location with
+  | none => rfl
+  | some cell =>
+      simp [afterFound] at objectRead
+
 end HeapOwnershipFrame
 
 /-- Replacing one cell while retaining its heap object preserves the complete
@@ -530,6 +541,164 @@ theorem heapRel_markPersistentLocationFuelBoth
                 (fun _ member => member) (fun _ member => member)
                 parentRelated (.refl leftAfter) (.refl rightAfter)
                 leftAfterBound rightAfterBound
+
+/-- If no live cell still needs promotion, persistence is an all-fuel no-op. -/
+theorem markPersistentLocationFuel_eq_of_count_zero
+    (empty : unpersistedLiveCount heap = 0)
+    (fuel : Nat) (location : Location) :
+    markPersistentLocationFuel fuel heap location = heap := by
+  induction fuel generalizing heap location with
+  | zero => rfl
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap location with
+      | none => rfl
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [skip]
+          · have live : cell.live = true := by
+              cases liveEq : cell.live <;> simp_all
+            have ordinary : cell.persistent = false := by
+              cases persistentEq : cell.persistent <;> simp_all
+            obtain ⟨after, post⟩ :=
+              replaceCell_spec_of_find heap location cell
+                { cell with rc := 0, persistent := true } found
+            have dropped :=
+              unpersistedLiveCount_replace_persistent found live ordinary
+                post.replaced
+            omega
+
+/-- Once the fuel covers every live nonpersistent cell, increasing it cannot
+change the persistence result. -/
+theorem markPersistentLocationFuel_eq_of_sufficient
+    (bound : unpersistedLiveCount heap ≤ fuel)
+    (fuelLe : fuel ≤ more) :
+    markPersistentLocationFuel fuel heap location =
+      markPersistentLocationFuel more heap location := by
+  induction fuel generalizing more heap location with
+  | zero =>
+      have empty : unpersistedLiveCount heap = 0 := by omega
+      rw [markPersistentLocationFuel_eq_of_count_zero empty more location]
+      rfl
+  | succ fuel ih =>
+      cases more with
+      | zero => omega
+      | succ more =>
+          have fuelLe' : fuel ≤ more := by omega
+          rw [markPersistentLocationFuel, markPersistentLocationFuel]
+          cases found : findCell? heap location with
+          | none => rfl
+          | some cell =>
+              by_cases skip : !cell.live || cell.persistent
+              · simp [skip]
+              · have live : cell.live = true := by
+                  cases liveEq : cell.live <;> simp_all
+                have ordinary : cell.persistent = false := by
+                  cases persistentEq : cell.persistent <;> simp_all
+                simp only [skip, Bool.false_eq_true, if_false]
+                obtain ⟨after, post⟩ :=
+                  replaceCell_spec_of_find heap location cell
+                    { cell with rc := 0, persistent := true } found
+                rw [post.replaced]
+                have afterBound :
+                    unpersistedLiveCount after ≤ fuel := by
+                  have dropped :=
+                    unpersistedLiveCount_replace_persistent found live ordinary
+                      post.replaced
+                  omega
+                have foldEq (items : List Value) (start : Heap)
+                    (startBound : unpersistedLiveCount start ≤ fuel) :
+                    items.foldl (init := start) (fun next value =>
+                      match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel fuel next child
+                      | _ => next) =
+                    items.foldl (init := start) (fun next value =>
+                      match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel more next child
+                      | _ => next) := by
+                  induction items generalizing start with
+                  | nil => rfl
+                  | cons value items itemsIH =>
+                      simp only [List.foldl]
+                      cases value with
+                      | object reference =>
+                          cases reference with
+                          | tagged payload => exact itemsIH start startBound
+                          | heap child =>
+                              change
+                                List.foldl (fun next value =>
+                                  match value with
+                                  | .object (.heap child) =>
+                                      markPersistentLocationFuel fuel next child
+                                  | _ => next)
+                                    (markPersistentLocationFuel fuel start child)
+                                    items =
+                                List.foldl (fun next value =>
+                                  match value with
+                                  | .object (.heap child) =>
+                                      markPersistentLocationFuel more next child
+                                  | _ => next)
+                                    (markPersistentLocationFuel more start child)
+                                    items
+                              have headEq := ih startBound fuelLe'
+                                (location := child)
+                              rw [headEq]
+                              exact itemsIH _ (Nat.le_trans
+                                (unpersistedLiveCount_markPersistentLocationFuel_le
+                                  more start child)
+                                startBound)
+                      | usize | scalar | erased | reuseToken =>
+                          exact itemsIH start startBound
+                change
+                  cell.object.ownedValues.foldl (init := after)
+                      (fun next value =>
+                        match value with
+                        | .object (.heap child) =>
+                            markPersistentLocationFuel fuel next child
+                        | _ => next) =
+                    cell.object.ownedValues.foldl (init := after)
+                      (fun next value =>
+                        match value with
+                        | .object (.heap child) =>
+                            markPersistentLocationFuel more next child
+                        | _ => next)
+                simpa only [Array.foldl_toList] using
+                  foldEq cell.object.ownedValues.toList after afterBound
+
+/-- The public heap-length fuel choices may differ because unreachable
+garbage differs.  Raising both to a common sufficient bound and using
+fuel stability recovers the paired reachable-heap relation. -/
+theorem heapRel_markPersistentBoth
+    (related : HeapRel rho left right leftRoots rightRoots)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftReachable : Reachable left leftRoots leftLocation)
+    (rightReachable : Reachable right rightRoots rightLocation) :
+    HeapRel rho
+      (markPersistentLocationFuel (left.length + 1) left leftLocation)
+      (markPersistentLocationFuel (right.length + 1) right rightLocation)
+      leftRoots rightRoots := by
+  let commonFuel := max left.length right.length + 1
+  have leftCount : unpersistedLiveCount left ≤ left.length + 1 :=
+    Nat.le_trans (unpersistedLiveCount_le_length left) (Nat.le_succ _)
+  have rightCount : unpersistedLiveCount right ≤ right.length + 1 :=
+    Nat.le_trans (unpersistedLiveCount_le_length right) (Nat.le_succ _)
+  have leftFuelLe : left.length + 1 ≤ commonFuel := by
+    dsimp [commonFuel]
+    omega
+  have rightFuelLe : right.length + 1 ≤ commonFuel := by
+    dsimp [commonFuel]
+    omega
+  have leftEq := markPersistentLocationFuel_eq_of_sufficient
+    (location := leftLocation) leftCount leftFuelLe
+  have rightEq := markPersistentLocationFuel_eq_of_sufficient
+    (location := rightLocation) rightCount rightFuelLe
+  rw [leftEq, rightEq]
+  exact heapRel_markPersistentLocationFuelBoth related mapping
+    leftReachable rightReachable
+    (Nat.le_trans leftCount leftFuelLe)
+    (Nat.le_trans rightCount rightFuelLe)
 
 /-- Extend a partial address bijection with one fresh source/target pair. -/
 def AddressRenaming.extend (rho : AddressRenaming)
@@ -958,6 +1127,44 @@ theorem heapCellRel_ownedValues
 def NamedValueRel (rho : AddressRenaming)
     (left right : Name × Value) : Prop :=
   left.1 = right.1 ∧ ValueRel rho left.2 right.2
+
+/-- Inserting related values under the same cache key preserves related
+global tables; the filtered tails make the replacement semantics explicit. -/
+theorem insertGlobal_related
+    (globals : ListRel (NamedValueRel rho) left right)
+    (value : ValueRel rho leftValue rightValue) :
+    ListRel (NamedValueRel rho)
+      (insertGlobal left name leftValue)
+      (insertGlobal right name rightValue) := by
+  unfold insertGlobal
+  apply ListRel.cons ⟨rfl, value⟩
+  induction globals with
+  | nil => exact .nil
+  | cons head tail ih =>
+      rename_i leftHead rightHead leftTail rightTail
+      obtain ⟨leftName, leftHeadValue⟩ := leftHead
+      obtain ⟨rightName, rightHeadValue⟩ := rightHead
+      rcases head with ⟨nameEq, headValue⟩
+      simp only at nameEq headValue
+      subst leftName
+      have headRelated : NamedValueRel rho
+          (rightName, leftHeadValue) (rightName, rightHeadValue) :=
+        ⟨rfl, headValue⟩
+      by_cases keep : rightName != name
+      · simpa [keep] using ListRel.cons headRelated ih
+      · simpa [keep] using ih
+
+/-- Every value retained by cache insertion is either the newly inserted
+value or came from the old global table. -/
+theorem insertGlobal_values_subset
+    (member : candidate ∈ (insertGlobal globals name value).map Prod.snd) :
+    candidate = value ∨ candidate ∈ globals.map Prod.snd := by
+  simp only [insertGlobal, List.map_cons, List.mem_cons] at member
+  rcases member with same | old
+  · exact Or.inl same
+  · rcases List.mem_map.mp old with ⟨entry, filtered, entryEq⟩
+    exact Or.inr (List.mem_map.mpr
+      ⟨entry, (List.mem_filter.mp filtered).1, entryEq⟩)
 
 /-- Related global tables make the same cache-hit decision and return related
 values.  This is the address-renamed counterpart of exact global equality. -/
@@ -2316,6 +2523,133 @@ structure ShadowRuntimeRel (rho : AddressRenaming)
     findCell? left.heap location = none
   rightHeapFresh : ∀ location, right.nextLocation ≤ location →
     findCell? right.heap location = none
+
+/-- Promoting related values already published as extra roots preserves the
+complete runtime relation, even when unreachable heap padding gives the two
+public persistence calls different fuel budgets. -/
+theorem ShadowRuntimeRel.markPersistentBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (value : ValueRel rho leftValue rightValue)
+    (leftPublished : leftValue ∈ leftExtra)
+    (rightPublished : rightValue ∈ rightExtra) :
+    ShadowRuntimeRel rho
+      (left.markPersistent leftValue)
+      (right.markPersistent rightValue)
+      leftExtra rightExtra := by
+  cases value with
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        apply Reachable.root
+        simp [runtimeRoots, leftPublished]
+      have rightReachable : Reachable right.heap
+          (runtimeRoots right rightExtra) rightLocation := by
+        apply Reachable.root
+        simp [runtimeRoots, rightPublished]
+      have heaps := heapRel_markPersistentBoth related.heap mapping
+        leftReachable rightReachable
+      exact {
+        extra := related.extra
+        globals := by
+          simpa using related.globals
+        world_eq := by
+          simpa using related.world_eq
+        trace := by
+          simpa using related.trace
+        heap := by
+          simpa [RuntimeState.markPersistent, runtimeRoots] using heaps
+        leftMappingFresh := by
+          intro location bounded
+          exact related.leftMappingFresh location (by simpa using bounded)
+        rightMappingFresh := by
+          intro location bounded
+          exact related.rightMappingFresh location (by simpa using bounded)
+        leftHeapFresh := by
+          intro location bounded
+          have oldNone := related.leftHeapFresh location
+            (by simpa using bounded)
+          have frame :=
+            heapOwnershipFrame_markPersistentLocationFuel
+              (left.heap.length + 1) left.heap leftLocation
+          simpa [RuntimeState.markPersistent] using frame.find_none oldNone
+        rightHeapFresh := by
+          intro location bounded
+          have oldNone := related.rightHeapFresh location
+            (by simpa using bounded)
+          have frame :=
+            heapOwnershipFrame_markPersistentLocationFuel
+              (right.heap.length + 1) right.heap rightLocation
+          simpa [RuntimeState.markPersistent] using frame.find_none oldNone
+      }
+  | tagged payload | usize payload | scalar payload | erased
+  | reuseNone | reuseSome mapping =>
+      simpa [RuntimeState.markPersistent] using related
+
+/-- Paired cache insertion preserves the reachable runtime relation when the
+cached values are already published roots.  Persistence handles the heap;
+insertion only replaces one related global entry, and its new root duplicates
+the already-published value. -/
+theorem ShadowRuntimeRel.setGlobalBoth
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (value : ValueRel rho leftValue rightValue)
+    (leftPublished : leftValue ∈ leftExtra)
+    (rightPublished : rightValue ∈ rightExtra) :
+    ShadowRuntimeRel rho
+      (left.setGlobal name leftValue)
+      (right.setGlobal name rightValue)
+      leftExtra rightExtra := by
+  have persisted := related.markPersistentBoth value
+    leftPublished rightPublished
+  have leftSubset : RootSubset
+      (runtimeRoots (left.setGlobal name leftValue) leftExtra)
+      (runtimeRoots (left.markPersistent leftValue) leftExtra) := by
+    intro candidate member
+    simp only [runtimeRoots, RuntimeState.setGlobal,
+      RuntimeState.markPersistent_globals, RuntimeState.markPersistent_trace,
+      List.mem_append] at member ⊢
+    rcases member with (extra | global) | traced
+    · exact Or.inl (Or.inl extra)
+    · rcases insertGlobal_values_subset global with same | old
+      · subst candidate
+        exact Or.inl (Or.inl leftPublished)
+      · exact Or.inl (Or.inr old)
+    · exact Or.inr traced
+  have rightSubset : RootSubset
+      (runtimeRoots (right.setGlobal name rightValue) rightExtra)
+      (runtimeRoots (right.markPersistent rightValue) rightExtra) := by
+    intro candidate member
+    simp only [runtimeRoots, RuntimeState.setGlobal,
+      RuntimeState.markPersistent_globals, RuntimeState.markPersistent_trace,
+      List.mem_append] at member ⊢
+    rcases member with (extra | global) | traced
+    · exact Or.inl (Or.inl extra)
+    · rcases insertGlobal_values_subset global with same | old
+      · subst candidate
+        exact Or.inl (Or.inl rightPublished)
+      · exact Or.inl (Or.inr old)
+    · exact Or.inr traced
+  exact {
+    extra := persisted.extra
+    globals := by
+      simpa [RuntimeState.setGlobal] using
+        insertGlobal_related related.globals value
+    world_eq := by
+      simpa [RuntimeState.setGlobal] using persisted.world_eq
+    trace := by
+      simpa [RuntimeState.setGlobal] using persisted.trace
+    heap := by
+      simpa [RuntimeState.setGlobal] using
+        heapRel_monoRoots persisted.heap leftSubset rightSubset
+    leftMappingFresh := by
+      simpa [RuntimeState.setGlobal] using persisted.leftMappingFresh
+    rightMappingFresh := by
+      simpa [RuntimeState.setGlobal] using persisted.rightMappingFresh
+    leftHeapFresh := by
+      simpa [RuntimeState.setGlobal] using persisted.leftHeapFresh
+    rightHeapFresh := by
+      simpa [RuntimeState.setGlobal] using persisted.rightHeapFresh
+  }
 
 /-- Updating one mapped live cell on each side preserves the complete runtime
 relation when the replacement cells remain related and keep the same ownership

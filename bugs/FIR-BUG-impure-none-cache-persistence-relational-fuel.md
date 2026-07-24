@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-cache-persistence-relational-fuel
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-22
 reproduction: Fir/LeanIR/Passes/ElimDeadMachineRel.lean
-regression: none
+regression: Fir/LeanIR/Passes/ElimDeadMachineRel.lean
 ---
 
 # Summary
@@ -93,4 +93,14 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved constructively without equating whole heaps or their lengths.
+`unpersistedLiveCount` supplies a decreasing measure bounded by heap length;
+`HeapOwnershipFrame` proves recursive persistence changes metadata without
+changing reachability; and `heapRel_markPersistentLocationFuelBoth` relates
+same-fuel traversals.  Fuel stability above the measure raises both public
+heap-length-derived budgets to a common bound, yielding
+`heapRel_markPersistentBoth` and `ShadowRuntimeRel.setGlobalBoth`.
+
+`coreStep_yieldedCache_reachableRelated`, `match_yieldedCacheStep`, and the
+state-level `SomeReachableMachineRelated.matchYieldedStep` permanently exercise
+the result through the previously blocked cache-frame transition.

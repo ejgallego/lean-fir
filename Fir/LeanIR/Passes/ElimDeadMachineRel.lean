@@ -7012,6 +7012,44 @@ theorem coreStep_yieldedApply_reachableRelated
     sourceFrameRoots, targetFrameRoots,
     programs, .invokeValue value arguments, frames, by simpa using runtime⟩
 
+/-- Restoring related cache frames persists and publishes the yielded values
+on both sides while retaining the related tail stack. -/
+theorem coreStep_yieldedCache_reachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ sourceFrameRoots)
+      ([targetValue] ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := sourceState.runtime.setGlobal name sourceValue
+      frames := sourceFrames
+      control := .yielded sourceValue }
+    let targetAfter := {
+      targetState with
+      runtime := targetState.runtime.setGlobal name targetValue
+      frames := targetFrames
+      control := .yielded targetValue }
+    coreStep { sourceState with
+        frames := .cache name :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .cache name :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  have nextRuntime := runtime.setGlobalBoth (name := name) value
+    (by simp) (by simp)
+  unfold ReachableMachineRelated
+  exact ⟨[sourceValue], [targetValue],
+    sourceFrameRoots, targetFrameRoots,
+    programs, .yielded value, frames, by simpa using nextRuntime⟩
+
 /-- Semantic-step wrapper for restoring related bind frames. -/
 theorem match_yieldedBindStep
     (sourceState targetState : MachineState)
@@ -7075,6 +7113,142 @@ theorem match_yieldedApplyStep
     ⟨sourceTransition, targetTransition, afterRelated⟩
   exact ⟨_, match_internalCoreSteps sourceTransition targetTransition
     afterRelated step⟩
+
+/-- Semantic-step wrapper for restoring related cache frames. -/
+theorem match_yieldedCacheStep
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho sourceFrames targetFrames
+      sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ sourceFrameRoots)
+      ([targetValue] ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        frames := .cache name :: sourceFrames
+        control := .yielded sourceValue } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          frames := .cache name :: targetFrames
+          control := .yielded targetValue } targetAfter ∧
+      ReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases coreStep_yieldedCache_reachableRelated sourceState targetState
+      programs frames value runtime with
+    ⟨sourceTransition, targetTransition, afterRelated⟩
+  exact ⟨_, match_internalCoreSteps sourceTransition targetTransition
+    afterRelated step⟩
+
+/-- State-level yielded advance for every saved-frame family.  Empty stacks
+are terminal; bind, apply, and cache heads delegate to their paired runtime
+matchers. -/
+theorem SomeReachableMachineRelated.matchYieldedStep
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | yielded value =>
+          cases sourceFrames : source.frames with
+          | nil =>
+              have done : coreStep source =
+                  .done (observe source (.returned sourceValue)) := by
+                simp [coreStep, sourceControl, sourceFrames]
+              cases step with
+              | internal transition =>
+                  rw [done] at transition
+                  contradiction
+              | external transition externalProof =>
+                  rw [done] at transition
+                  contradiction
+          | cons sourceHead sourceTail =>
+              cases targetFrames : target.frames with
+              | nil =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames
+              | cons targetHead targetTail =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames with
+                  | cons head tail =>
+                      cases head with
+                      | @bind used sourceContinuation targetContinuation
+                          sourceJoins targetJoins sourceEnv targetEnv fvarId
+                          graph joins env =>
+                          have sourceSame : { source with
+                              frames := .bind fvarId sourceContinuation
+                                sourceEnv sourceJoins :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .bind fvarId targetContinuation
+                                targetEnv targetJoins :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases match_yieldedBindStep
+                              (binder := fvarId) source target programs tail
+                              graph joins env value runtime
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetAfter, targetPath, afterRelated⟩
+                          exact ⟨targetAfter,
+                            by simpa only [targetSame] using targetPath,
+                            ⟨rho, afterRelated⟩⟩
+                      | @apply sourceArguments targetArguments arguments =>
+                          have sourceSame : { source with
+                              frames := .apply sourceArguments :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .apply targetArguments :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases match_yieldedApplyStep source target programs
+                              tail value arguments runtime
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetAfter, targetPath, afterRelated⟩
+                          exact ⟨targetAfter,
+                            by simpa only [targetSame] using targetPath,
+                            ⟨rho, afterRelated⟩⟩
+                      | cache name =>
+                          have sourceSame : { source with
+                              frames := .cache name :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .cache name :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases match_yieldedCacheStep (name := name)
+                              source target programs tail value
+                              (by simpa using runtime)
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetAfter, targetPath, afterRelated⟩
+                          exact ⟨targetAfter,
+                            by simpa only [targetSame] using targetPath,
+                            ⟨rho, afterRelated⟩⟩
 
 /-- A retained join declaration takes the same administrative step on both
 sides and installs related declaration bodies under the common identifier. -/
