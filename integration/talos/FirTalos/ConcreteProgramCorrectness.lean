@@ -115,6 +115,97 @@ theorem codeWP_letValue
       continuationAdapted, initialRelated, ?_⟩
   exact stepWP targetRest Q tail continuedWP
 
+/-- Turn a concrete case-chain proof back into the enclosing source `.cases`
+judgment. The chain already carries target adaptation, initial refinement, and
+the exact Talos weakest precondition. -/
+theorem codeWP_cases
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : LCNF.Cases .impure}
+    {fallback : List Fir.Wasm.Instruction}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context cases.alts.toList = .ok fallback)
+    (chain :
+      CaseChainWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv cases.discr cases.alts.toList fallback target
+        targetStore targetLocals witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals
+      witness tail Q := by
+  exact ⟨codeAdapted_cases ⟨fallback, fallbackCompiled, chain.1⟩,
+    chain.2.1, chain.2.2⟩
+
+/-- Concrete case-control-flow boundary. Operation-specific proofs establish
+the selected source branch and transform any proof of that branch into a proof
+of the complete generated test chain. Universality over the operand tail and
+postcondition makes the step reusable inside arbitrary generated functions. -/
+def ConcreteCasesStepSimulates
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (cases : LCNF.Cases .impure)
+    (selected : LCNF.Code .impure)
+    (target selectedTarget : Wasm.Program)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+    ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv selected selectedTarget targetStore
+          targetLocals witness tail Q →
+        CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals
+          witness tail Q
+
+/-- Recursive concrete `CodeWP` rule for a source-selected case branch. -/
+theorem codeWP_caseOf
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : LCNF.Cases .impure}
+    {selected : LCNF.Code .impure}
+    {target selectedTarget : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (step :
+      ConcreteCasesStepSimulates context sourceModule sourceFunction labels
+        module hostEnv sourceRuntime sourceEnv cases selected target
+        selectedTarget targetStore targetLocals witness)
+    (continued :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv selected selectedTarget targetStore targetLocals
+        witness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.cases cases) target targetStore targetLocals
+      witness tail Q :=
+  step.2 tail Q continued
+
 /-- Prefix a successful executable source run by any finite sequence of
 interpreter steps. This is the source-side composition rule needed once the
 concrete syntax certificate admits calls and foreign operations. -/
@@ -168,6 +259,20 @@ private theorem executeStep_source_let
   unfold sourceCodeState at evaluated
   simp [executeStep, coreStep, sourceCodeState, evaluated]
 
+private theorem executeStep_source_cases
+    (externals : ExternalImpl)
+    (context : Fir.Wasm.Context)
+    (runtime : RuntimeState)
+    (env : Env)
+    (cases : LCNF.Cases .impure)
+    (selected : LCNF.Code .impure)
+    (sourceStep : SourceCaseResult runtime env cases selected) :
+    executeStep externals
+        (sourceCodeState context runtime env (.cases cases)) =
+      .next (sourceCodeState context runtime env selected) := by
+  rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+  simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen]
+
 private theorem sourceLetResult_thenExecEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
@@ -191,6 +296,30 @@ private theorem sourceLetResult_thenExecEvaluates
       (.step
         (executeStep_source_let externals context sourceRuntime nextRuntime
           sourceEnv decl continuation sourceValue sourceStep)
+        (.refl _))
+    continued
+
+private theorem sourceCaseResult_thenExecEvaluates
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : LCNF.Cases .impure}
+    {selected : LCNF.Code .impure}
+    {resultValue : Value}
+    (sourceStep :
+      SourceCaseResult sourceRuntime sourceEnv cases selected)
+    (continued :
+      ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv selected)
+        (ReturnedObservation resultRuntime resultValue)) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv (.cases cases))
+      (ReturnedObservation resultRuntime resultValue) := by
+  apply execEvaluates_of_steps
+      (.step
+        (executeStep_source_cases externals context sourceRuntime sourceEnv
+          cases selected sourceStep)
         (.refl _))
     continued
 
@@ -298,11 +427,10 @@ private theorem sourceCallLetResult_thenExecEvaluates
     continued
 
 /-- Syntax-directed W6 certificate for concrete return, direct-value,
-no-result-effect, call, external, and lazy-cache code. Unlike
-`SuccessfulDeclaration`, this certificate derives its final runtime/value
-facts from the return leaf and threads them backwards through each concrete
-step. Case nodes remain a subsequent constructor over the same result
-indices. -/
+case-control-flow, no-result-effect, call, external, and lazy-cache code.
+Unlike `SuccessfulDeclaration`, this certificate derives its final
+runtime/value facts from the return leaf and threads them backwards through
+each concrete step. -/
 inductive ConcreteCodeSimulation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -432,6 +560,21 @@ inductive ConcreteCodeSimulation
         (targetValue ++ .localSet resultIndex :: targetRest)
         targetStore targetLocals witness resultRuntime resultValue resultKind
         resultStore resultWitness physical
+  | caseOf
+      (target selectedTarget : Wasm.Program)
+      (step :
+        ConcreteCasesStepSimulates context sourceModule sourceFunction labels
+          module hostEnv sourceRuntime sourceEnv cases selected target
+          selectedTarget targetStore targetLocals witness)
+      (continued :
+        ConcreteCodeSimulation context sourceModule sourceFunction labels
+          module hostEnv sourceExternals sourceRuntime sourceEnv selected
+          selectedTarget targetStore targetLocals witness resultRuntime
+          resultValue resultKind resultStore resultWitness physical) :
+      ConcreteCodeSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv (.cases cases) target
+        targetStore targetLocals witness resultRuntime resultValue resultKind
+        resultStore resultWitness physical
   | effect
       (target targetRest : Wasm.Program)
       (step :
@@ -496,12 +639,14 @@ theorem ConcreteCodeSimulation.toCodeWP
       exact codeWP_externalLet valueCompiled valueAdapted resultFound step ih
   | lazyLet _ valueCompiled valueAdapted resultFound step _ ih =>
       exact codeWP_lazyLet valueCompiled valueAdapted resultFound step ih
+  | caseOf _ _ step _ ih =>
+      exact codeWP_caseOf step ih
   | effect _ _ step _ ih =>
       exact codeWP_effect step ih
 
 /-- The concrete syntax induction composes every exact source prefix with its
 recursive continuation and therefore proves a real finite interpreter run,
-including calls, external calls, and both lazy-cache paths. -/
+including cases, calls, external calls, and both lazy-cache paths. -/
 theorem ConcreteCodeSimulation.execEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -539,6 +684,8 @@ theorem ConcreteCodeSimulation.execEvaluates
       exact sourceExternalLetResult_thenExecEvaluates step.1 ih
   | lazyLet _ _ _ _ step _ ih =>
       exact sourceLazyLetResult_thenExecEvaluates step.1 ih
+  | caseOf _ _ step _ ih =>
+      exact sourceCaseResult_thenExecEvaluates step.1 ih
   | effect _ _ step _ ih =>
       exact sourceEffectResult_thenExecEvaluates step.1 ih
 
@@ -579,6 +726,8 @@ theorem ConcreteCodeSimulation.runtimeRelated
       exact ih
   | lazyLet _ _ _ _ _ _ ih =>
       exact ih
+  | caseOf _ _ _ _ ih =>
+      exact ih
   | effect _ _ _ _ ih =>
       exact ih
 
@@ -618,6 +767,8 @@ theorem ConcreteCodeSimulation.failureClear
   | externalLet _ _ _ _ _ ih =>
       exact ih
   | lazyLet _ _ _ _ _ _ ih =>
+      exact ih
+  | caseOf _ _ _ _ ih =>
       exact ih
   | effect _ _ _ _ ih =>
       exact ih
@@ -663,6 +814,8 @@ theorem ConcreteCodeSimulation.valueRelated
   | externalLet _ _ _ _ _ ih =>
       exact ih
   | lazyLet _ _ _ _ _ _ ih =>
+      exact ih
+  | caseOf _ _ _ _ ih =>
       exact ih
   | effect _ _ _ _ ih =>
       exact ih

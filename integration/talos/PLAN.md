@@ -2838,6 +2838,18 @@ and physical-value facts still come only from the return leaf. Case nodes
 remain the next T2 constructor family. No shared semantic contract or
 executable ABI changed.
 
+W6.6ci completes T2's structural constructor family with concrete case
+control flow. `ConcreteCasesStepSimulates` records the source-selected branch
+and a caller-tail/postcondition-polymorphic transformer from that branch's
+`CodeWP` to the complete generated case chain. `codeWP_cases` exposes the
+existing concrete `CaseChainWP` as the enclosing source `.cases` judgment, and
+the new `ConcreteCodeSimulation.caseOf` constructor composes both target
+correctness and the exact one-step FIR branch selection with its recursive
+continuation. The syntax induction now covers every T2 category; the admitted
+program fragment remains determined by which operation- and path-specific
+step certificates have been proved. T3 whole-export packaging is next. No
+shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
