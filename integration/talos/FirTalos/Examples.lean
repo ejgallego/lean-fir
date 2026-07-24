@@ -172,4 +172,17 @@ def residentLoad8Body? : List Wasm.Instruction → Bool
         adapted.wasmModule.funcs.length == 1
   | .error _ => false
 
+#guard match Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjectionModule with
+  | .ok module =>
+      match adapt module with
+      | .ok adapted =>
+          adapted.wasmModule.imports.isEmpty &&
+          adapted.wasmModule.memory.any fun memory =>
+            memory.pagesMin == 1 && memory.pagesMax.isNone &&
+            adapted.wasmModule.memoryExports == [("memory", 0)] &&
+            adapted.wasmModule.funcs.length ==
+              Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjections.size
+      | .error _ => false
+  | .error _ => false
+
 end FirTalos

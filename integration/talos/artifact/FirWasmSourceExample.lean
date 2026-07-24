@@ -210,7 +210,7 @@ run_cmd do
   | .ok () => pure ()
   | .error error => throwError "failed to write resident Format module: {repr error}"
   let residentRuntimeResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileRuntimeModule
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
   let residentRuntimeArtifact ← match residentRuntimeResult with
     | .ok artifact => pure artifact
@@ -228,6 +228,36 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident-runtime Format module: {repr error}"
+  let readProjections := residentRuntimeArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentRuntime.supportsReadProjection
+  let expectedReadProjections :=
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjections
+  unless readProjections.size == expectedReadProjections.size &&
+      readProjections.all expectedReadProjections.contains &&
+      expectedReadProjections.all readProjections.contains do
+    throwError "resident Format read-projection inventory changed"
+  let residentProjectionResult ← liftCoreM <|
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+  let residentProjectionArtifact ← match residentProjectionResult with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident-projection Format facade: {repr error}"
+  unless residentProjectionArtifact.module.runtimeOperations.all fun operation =>
+      !Fir.Wasm.Emit.ResidentRuntime.supportsReadProjection operation do
+    throwError "resident Format retained a supported read-projection import"
+  unless residentProjectionArtifact.module.imports.size + readProjections.size ==
+      residentRuntimeArtifact.module.imports.size do
+    throwError "resident Format read-projection import accounting changed"
+  unless readProjections.all fun operation =>
+      (Fir.Wasm.Emit.ResidentRuntime.readProjectionName? operation).any
+        residentProjectionArtifact.module.exports.contains do
+    throwError "resident Format projection helper exports changed"
+  match ← residentProjectionArtifact.write
+      "_build/source-pretty-format-resident-projections.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident-projection Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

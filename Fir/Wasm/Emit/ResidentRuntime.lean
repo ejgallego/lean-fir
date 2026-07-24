@@ -180,9 +180,103 @@ inductive LinkError where
   | invalidInput (error : SymbolicError)
   | missingOperation (name : Name)
   | reservedDeclaration (name : Name)
+  | unsupportedProjection (width offset : Nat) (result : AbiKind)
+  | projectionOffsetOverflow (value : Nat)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
+
+private def objectProjectionSuffix? : AbiKind → Option String
+  | .object => some "object"
+  | .tagged => some "tagged"
+  | .tobject => some "tobject"
+  | .erased => some "erased"
+  | _ => none
+
+/--
+Reserved declaration/export name for one supported resident projection.
+The full semantic descriptor is encoded in the name so two distinct runtime
+imports can never alias one helper.
+-/
+def readProjectionName? : RuntimeOp → Option Name
+  | .objectProj index result =>
+      (objectProjectionSuffix? result).map fun suffix =>
+        Name.mkSimple s!"fir_oproj_{index}_{suffix}"
+  | .scalarProj width byteOffset .uint8 =>
+      some <| Name.mkSimple s!"fir_sproj_u8_{width}_{byteOffset}"
+  | _ => none
+
+def supportsReadProjection (operation : RuntimeOp) : Bool :=
+  (readProjectionName? operation).isSome
+
+private def checkedProjectionOffset (value : Nat) : Except LinkError UInt32 :=
+  if value < UInt32.size then
+    pure (UInt32.ofNat value)
+  else
+    throw (.projectionOffsetOverflow value)
+
+private def liveConstructorProjectionBody
+    (load : List Instruction) : List Instruction :=
+  requireFlag liveFlag <|
+    [.localGet objectParam,
+      .i32Load .uint32 (offset headerKindOffset)] ++
+    equalsConst .uint32 ObjectKind.constructor.code ++
+    [.ifElse load [.unreachable]]
+
+private def projectionHeapBody (load : List Instruction) : List Instruction :=
+  [.localGet objectParam] ++
+    equalsConst .tobject 0 ++
+    [.ifElse
+      [.unreachable]
+      ([.localGet objectParam,
+        .i32Const .uint32 (UInt32.ofNat (target.heapAlignment - 1)),
+        .i32And] ++
+        equalsConst .uint32 0 ++
+        [.ifElse (liveConstructorProjectionBody load) [.unreachable]])]
+
+private def objectProjectionFunction (index : Nat) (result : AbiKind) :
+    Except LinkError Function := do
+  let some name := readProjectionName? (.objectProj index result) |
+    throw (.unsupportedProjection index 0 result)
+  let fieldOffset ← checkedProjectionOffset <|
+    headerBytes + target.semanticSlotBytes * index
+  return {
+    name
+    params := #[(objectParam, .tobject)]
+    results := #[result]
+    locals := #[(resultLocal, result)]
+    body := projectionHeapBody
+      [.localGet objectParam,
+        .i32Load result fieldOffset,
+        .localSet resultLocal] ++
+      [.localGet resultLocal, .ret] }
+
+private def scalarUInt8ProjectionFunction (width byteOffset : Nat) :
+    Except LinkError Function := do
+  let some name := readProjectionName? (.scalarProj width byteOffset .uint8) |
+    throw (.unsupportedProjection width byteOffset .uint8)
+  let fieldOffset ← checkedProjectionOffset <|
+    headerBytes + target.semanticSlotBytes * width + byteOffset
+  return {
+    name
+    params := #[(objectParam, .tobject)]
+    results := #[.uint8]
+    locals := #[(resultLocal, .uint8)]
+    body := projectionHeapBody
+      [.localGet objectParam,
+        .i32Load8U .uint8 fieldOffset,
+        .localSet resultLocal] ++
+      [.localGet resultLocal, .ret] }
+
+private def readProjectionFunction (operation : RuntimeOp) :
+    Except LinkError Function :=
+  match operation with
+  | .objectProj index result => objectProjectionFunction index result
+  | .scalarProj width byteOffset .uint8 =>
+      scalarUInt8ProjectionFunction width byteOffset
+  | .scalarProj width byteOffset result =>
+      throw (.unsupportedProjection width byteOffset result)
+  | _ => throw (.unsupportedProjection 0 0 .erased)
 
 private partial def rewriteRuntimeInstruction (operation : RuntimeOp)
     (name : Name) : Instruction → Instruction
@@ -253,6 +347,49 @@ def internalizeGetTag (module : Module) : Except LinkError Module :=
 def internalizeIsShared (module : Module) : Except LinkError Module :=
   internalizeOperation .isShared isSharedName isSharedFunction module
 
+/--
+Internalize every object projection and packed `UInt8` projection supported by
+the current resident load surface. Other scalar widths stay explicit semantic
+imports until their typed load instructions land.
+
+The helpers trap on recognized non-heap, misaligned, dead, and non-constructor
+inputs. Their generation relies on the W6 related-state precondition for
+descriptor bounds and packed-coordinate validity; proving that implication is
+separate proof-lane work.
+-/
+def internalizeReadProjections (module : Module) : Except LinkError Module := do
+  let operations := module.runtimeOperations.filter supportsReadProjection
+  operations.foldlM (init := module) fun result operation => do
+    let some name := readProjectionName? operation |
+      throw (.unsupportedProjection 0 0 .erased)
+    let function ← readProjectionFunction operation
+    internalizeOperation operation name function result
+
+/-- The exact projection family exercised by compiler-produced Lean 4.32 `prettyM`. -/
+def prettyFormatReadProjections : Array RuntimeOp := #[
+  .objectProj 0 .object,
+  .objectProj 0 .tobject,
+  .objectProj 1 .tobject,
+  .objectProj 2 .tobject,
+  .scalarProj 0 0 .uint8,
+  .scalarProj 1 0 .uint8,
+  .scalarProj 1 1 .uint8,
+  .scalarProj 2 0 .uint8]
+
+/--
+Import-free module exposing the complete read-projection family needed by
+`prettyM`, independently of compiler linking.
+-/
+def prettyFormatReadProjectionModule : Except LinkError Module := do
+  let functions ← prettyFormatReadProjections.mapM readProjectionFunction
+  return {
+    imports := #[]
+    functions
+    exports := functions.map (·.name)
+    initializers := #[]
+    runtimeOperations := #[]
+    memory := some residentMemory }
+
 def getTagManifest : Json :=
   Json.mkObj [
     ("entry", getTagName.toString),
@@ -271,6 +408,30 @@ def isSharedManifest : Json :=
     ("imports", Json.arr #[]),
     ("status", "generation-only; W6 contract proof pending")]
 
+private def readProjectionEntryJson (operation : RuntimeOp) : Json :=
+  match operation with
+  | .objectProj index result =>
+      Json.mkObj [
+        ("entry", (readProjectionName? operation).getD .anonymous |>.toString),
+        ("kind", "objectProj"),
+        ("index", index),
+        ("result", (objectProjectionSuffix? result).getD "unsupported")]
+  | .scalarProj width byteOffset .uint8 =>
+      Json.mkObj [
+        ("entry", (readProjectionName? operation).getD .anonymous |>.toString),
+        ("kind", "scalarProj"),
+        ("width", width),
+        ("offset", byteOffset),
+        ("result", "uint8")]
+  | _ => Json.mkObj [("kind", "unsupported")]
+
+def prettyFormatReadProjectionManifest : Json :=
+  Json.mkObj [
+    ("entries", Json.arr <| prettyFormatReadProjections.map readProjectionEntryJson),
+    ("memory", "memory"),
+    ("imports", Json.arr #[]),
+    ("status", "generation-only; W6 contract proofs pending")]
+
 #guard getTagModule.imports.isEmpty
 #guard getTagModule.memory.any fun memory =>
   memory.pagesMin == 1 && memory.exportName == some "memory"
@@ -281,5 +442,15 @@ def isSharedManifest : Json :=
   memory.pagesMin == 1 && memory.exportName == some "memory"
 #guard Fir.Wasm.validateModule isSharedModule |>.isOk
 #guard Fir.Wasm.Emit.encode isSharedModule |>.isOk
+#guard match prettyFormatReadProjectionModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.functions.size == prettyFormatReadProjections.size &&
+      module.exports.size == prettyFormatReadProjections.size &&
+      (module.memory.any fun memory =>
+        memory.pagesMin == 1 && memory.exportName == some "memory") &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
 
 end Fir.Wasm.Emit.ResidentRuntime

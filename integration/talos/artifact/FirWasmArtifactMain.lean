@@ -60,11 +60,26 @@ def emitResidentIsShared (path : System.FilePath) : IO Unit := do
     Fir.Wasm.Emit.ResidentRuntime.isSharedManifest.compress
   IO.println s!"resident-is-shared: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentReadProjections (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjectionModule.mapError fun error =>
+      s!"resident read-projection linking failed: {repr error}"
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident read-projection encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatReadProjectionManifest.compress
+  IO.println s!"resident-read-projections: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def usage : String :=
   let names := String.intercalate "|" (fixtures.map (·.name))
   s!"usage: fir-wasm-artifact <{names}> <output.wasm>\n" ++
     "       fir-wasm-artifact resident-get-tag <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-read-projections <output.wasm>\n" ++
     "       fir-wasm-artifact all <output-directory>"
 
 def main (args : List String) : IO UInt32 := do
@@ -80,6 +95,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-is-shared", output] =>
         emitResidentIsShared output
+        return 0
+    | ["resident-read-projections", output] =>
+        emitResidentReadProjections output
         return 0
     | [name, output] =>
         let some fixture := findFixture? name | throw (IO.userError s!"unknown fixture: {name}")

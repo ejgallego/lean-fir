@@ -80,12 +80,20 @@ lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
 node run-resident-is-shared.mjs _build/resident-is-shared.wasm
+lake exe fir-wasm-artifact resident-read-projections \
+  _build/resident-read-projections.wasm
+node run-resident-read-projections.mjs \
+  _build/resident-read-projections.wasm
 ```
 
-Both modules and their `.wasm.json` descriptors are generated
-deterministically. The second helper implements the valid-input portion of
+All three modules and their `.wasm.json` descriptors are generated
+deterministically. The second module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
-while a unique live heap object returns zero. These are generation-readiness
+while a unique live heap object returns zero. The 983-byte projection module
+exports the exact four object and four packed-`UInt8` reads reachable from
+compiler-produced Lean 4.32 `prettyM`. Raw-header and concrete-host checks
+exercise all eight helpers; recognized non-heap, misaligned, dead, and
+non-constructor inputs trap without invoking JavaScript. These are generation-readiness
 artifacts, not the later theorems that the linked helpers satisfy the W6
 contracts on related states. Setting `FIR_BROWSER=google-chrome` while running
 `./check.sh` executes the same smoke clients in a browser Worker alongside the
@@ -271,7 +279,8 @@ exactly the one `getTag` import:
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
-  _build/source-pretty-format-resident-runtime.wasm
+  _build/source-pretty-format-resident-runtime.wasm \
+  _build/source-pretty-format-resident-projections.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -295,11 +304,24 @@ The import audit therefore records the monotonic closure
 `351 → 350 → 349`: baseline, resident `getTag`, then resident
 `getTag + isShared`.
 
-The next projection slice uses the symbolic emitter's typed
-`i32.load8_u` surface for packed `UInt8` fields. Its binary encoding and Talos
-adaptation are validated independently before any compiler import is
-rewritten, so the narrow-load compatibility boundary remains separable from
-the later projection-helper correctness claim.
+The next retained artifact internalizes the exact eight read projections
+reachable from this `prettyM`: four typed object-slot reads and four packed
+`UInt8` reads. It preserves final LCNF byte-for-byte, exports each low-level
+helper, and reduces function imports from 349 to 341:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-projections.wasm
+```
+
+The typed `i32.load8_u` compatibility surface remains independently validated
+in the binary encoder and Talos adapter. During this slice,
+`FIR-BUG-wasm-none-value-producing-if-encoding` found and fixed a validator
+gap: because the binary encoder emits empty-block `if` instructions, the
+symbolic validator now rejects reachable arms that change the operand stack.
+Projection helpers keep guarded loads stack-neutral through typed locals.
+This closes generation readiness for these descriptors, not the later W6
+proof that the physical reads implement their semantic contracts.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 rebuilds that module and prepares a self-contained copy of the current

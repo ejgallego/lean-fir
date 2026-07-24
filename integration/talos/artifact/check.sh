@@ -12,6 +12,10 @@ lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
 node run-resident-is-shared.mjs _build/resident-is-shared.wasm
+lake exe fir-wasm-artifact resident-read-projections \
+  _build/resident-read-projections.wasm
+node run-resident-read-projections.mjs \
+  _build/resident-read-projections.wasm
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command
 lake -d ../../.. env lean FirWasmSourceExample.lean
@@ -32,6 +36,7 @@ done
 resident_pretties=(
   "source-pretty-format-resident-get-tag"
   "source-pretty-format-resident-runtime"
+  "source-pretty-format-resident-projections"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -58,10 +63,13 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-get-tag.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-runtime.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-projections.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
-  _build/source-pretty-format-resident-runtime.wasm
+  _build/source-pretty-format-resident-runtime.wasm \
+  _build/source-pretty-format-resident-projections.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -166,6 +174,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-runtime.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-projections.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -194,6 +204,14 @@ lake exe fir-wasm-artifact resident-is-shared "$first/resident/is-shared.wasm"
 lake exe fir-wasm-artifact resident-is-shared "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm" "$second/resident/is-shared.wasm"
 cmp "$first/resident/is-shared.wasm.json" "$second/resident/is-shared.wasm.json"
+lake exe fir-wasm-artifact resident-read-projections \
+  "$first/resident/read-projections.wasm"
+lake exe fir-wasm-artifact resident-read-projections \
+  "$second/resident/read-projections.wasm"
+cmp "$first/resident/read-projections.wasm" \
+  "$second/resident/read-projections.wasm"
+cmp "$first/resident/read-projections.wasm.json" \
+  "$second/resident/read-projections.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

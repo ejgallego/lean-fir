@@ -33,12 +33,23 @@ def compileGetTagModule (entry : Name) :
 
 /--
 Compile the monomorphic `prettyM` facade and internalize the currently landed
-W7 runtime closure (`getTag` and `isShared`) in order.
+W7 scalar-header closure (`getTag` and `isShared`) in order.
 -/
-def compileModule (entry : Name) :
+def compileRuntimeModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) := do
   let result ← compileGetTagModule entry
   return result.bind <| linkRuntime "isShared"
     Fir.Wasm.Emit.ResidentRuntime.internalizeIsShared
+
+/--
+Compile the monomorphic `prettyM` facade, retain the scalar-header checkpoint,
+then internalize every object and packed-`UInt8` projection supported by the
+resident load surface. The captured final LCNF remains unchanged.
+-/
+def compileModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileRuntimeModule entry
+  return result.bind <| linkRuntime "read projections"
+    Fir.Wasm.Emit.ResidentRuntime.internalizeReadProjections
 
 end Fir.Wasm.Emit.ResidentPrettyFormat
