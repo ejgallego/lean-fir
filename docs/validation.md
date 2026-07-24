@@ -923,6 +923,14 @@ executing neither `del` nor `ctor`. Both grow/delete variants execute one
 executes one `ctor`, and the shared wrapper executes two because it also
 constructs the returned pair.
 
+External path exclusion uses a paired control over one compiled declaration.
+Both `conditional-byte-array-get-*` fixtures statically retain
+`ByteArray.get!`. The taken Boolean branch requires one `fap`, one `extern`,
+and exactly one dispatch of that symbol. The skipped branch requires zero
+executions of both forms and zero dispatches, while still requiring the static
+external identity. This separates an honestly unreachable call site from a
+misspelled or optimized-away requirement.
+
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
 

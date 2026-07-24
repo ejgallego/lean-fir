@@ -657,6 +657,10 @@ def byteArrayGet (value : ByteArray) (index : Nat) : UInt8 :=
   value.get! index
 
 @[noinline]
+def conditionalByteArrayGet (read : Bool) (value : ByteArray) : UInt8 :=
+  if read then value.get! 0 else 42
+
+@[noinline]
 def byteArraySetUnique (value : ByteArray) : ByteArray :=
   value.set! 0 255
 
@@ -2185,6 +2189,51 @@ def cases : Array Case := #[
     requiredExternals := #[``ByteArray.size]
     requiredExecutedExternals := #[``ByteArray.size]
     provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" },
+  { id := "conditional-byte-array-get-taken"
+    entry := ``Source.conditionalByteArrayGet
+    args := #[.bool true, .bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat
+        (Source.conditionalByteArrayGet true ⟨#[0, 127, 128, 255]⟩).toNat)
+    tags :=
+      #["quick", "bytes", "packed-layout", "external", "pure", "control-flow",
+        "scalar", "multiplicity"]
+    requiredLcnfForms := #["cases", "lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.get!, minimum := 1, maximum := some 1 }]
+    provenance := firProvenance
+      "Take a runtime Boolean branch and dispatch ByteArray.get! exactly once" },
+  { id := "conditional-byte-array-get-skipped"
+    entry := ``Source.conditionalByteArrayGet
+    args := #[.bool false, .bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := .bits 8
+    native := fun _ =>
+      .bits 8 (UInt64.ofNat
+        (Source.conditionalByteArrayGet false ⟨#[0, 127, 128, 255]⟩).toNat)
+    tags :=
+      #["quick", "bytes", "packed-layout", "external", "pure", "control-flow",
+        "scalar", "boundary", "path-exclusion", "multiplicity"]
+    requiredLcnfForms := #["cases", "lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["cases", "lit", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "cases", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 0, maximum := some 0 },
+        { form := "extern", minimum := 0, maximum := some 0 }]
+    requiredExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.get!, minimum := 0, maximum := some 0 }]
+    provenance := firProvenance
+      "Skip a retained ByteArray.get! branch and require zero external dispatches" },
   { id := "byte-array-get-zero"
     entry := ``Source.byteArrayGet
     args := #[.bytes #[0, 127, 128, 255], .nat 0]
