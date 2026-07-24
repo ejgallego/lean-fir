@@ -7250,6 +7250,138 @@ theorem SomeReachableMachineRelated.matchYieldedStep
                             by simpa only [targetSame] using targetPath,
                             ⟨rho, afterRelated⟩⟩
 
+/-- State-level named-call matcher for every internal transition.  Cache hits
+publish an already-related global, while cache misses and nonempty calls
+classify declaration invocation into closure allocation or internal body
+entry.  Unknown declarations, binding faults, and external declarations
+cannot produce the assumed internal `next` result. -/
+theorem SomeReachableMachineRelated.matchInvokeNameNext
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeName name targetArguments } = target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeName name sourceArguments } =
+                  .next sourceAfter := by
+            simpa only [sourceSame] using sourceTransition
+          have matchDeclaration
+              (sourceReady : InvokeNameDeclReady source.runtime
+                name sourceArguments) :
+              ∃ targetAfter,
+                coreStep target = .next targetAfter ∧
+                SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+            cases sourceFound :
+                source.program.findDecl? name with
+            | none =>
+                cases sourceReady with
+                | nonempty nonempty =>
+                    simp [coreStep, nonempty, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+                | cacheMiss empty miss =>
+                    simp [coreStep, empty, miss, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+            | some sourceDeclaration =>
+                by_cases sourceTooFew :
+                    sourceArguments.size < sourceDeclaration.params.size
+                · rcases
+                      coreStep_invokeName_foundPartial_of_declReady_reachableRelated
+                        source target programs frames arguments sourceReady
+                        sourceFound sourceTooFew runtime with
+                    ⟨larger, sourceNext, targetNext, extension,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨larger, nextRelated⟩⟩
+                · cases sourceBinding :
+                      bindParams sourceDeclaration.params
+                        (sourceArguments.extract 0
+                          sourceDeclaration.params.size) with
+                  | error fault =>
+                      cases sourceReady with
+                      | nonempty nonempty =>
+                          simp [coreStep, nonempty, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                      | cacheMiss empty miss =>
+                          simp [coreStep, empty, miss, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                  | ok sourceEnv =>
+                      cases sourceValue : sourceDeclaration.value with
+                      | code sourceCode =>
+                          rcases
+                              coreStep_invokeName_foundCode_of_declReady_reachableRelated
+                                source target programs frames arguments
+                                sourceReady sourceFound sourceValue
+                                sourceTooFew sourceBinding runtime with
+                            ⟨sourceNext, targetNext, sourceStep, targetStep,
+                              nextRelated⟩
+                          rw [sourceStep] at sourceTransition'
+                          cases sourceTransition'
+                          exact ⟨targetNext,
+                            by simpa only [targetSame] using targetStep,
+                            ⟨rho, nextRelated⟩⟩
+                      | extern sourceInfo =>
+                          cases sourceReady with
+                          | nonempty nonempty =>
+                              simp [coreStep, nonempty, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+                          | cacheMiss empty miss =>
+                              simp [coreStep, empty, miss, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+          cases sourceEmpty : sourceArguments.isEmpty with
+          | false =>
+              exact matchDeclaration (.nonempty sourceEmpty)
+          | true =>
+              cases sourceGlobal :
+                  findGlobal? source.runtime.globals name with
+              | none =>
+                  exact matchDeclaration
+                    (.cacheMiss sourceEmpty sourceGlobal)
+              | some sourceValue =>
+                  rcases coreStep_invokeName_cacheHit_reachableRelated
+                      source target programs frames arguments sourceEmpty
+                      sourceGlobal runtime with
+                    ⟨targetValue, sourceNext, targetNext, targetGlobal,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨rho, nextRelated⟩⟩
+
 /-- A retained join declaration takes the same administrative step on both
 sides and installs related declaration bodies under the common identifier. -/
 theorem coreStep_retainedJoin_reachableRelated
