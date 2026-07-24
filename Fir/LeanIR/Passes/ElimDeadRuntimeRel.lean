@@ -5188,6 +5188,59 @@ theorem ShadowRuntimeRel.incLocationBoth
         rw [if_neg (by simp [rightPersistent])]
         simpa [rightReplacement] using rightEffect
 
+/-- Reference-count increments on related published values either preserve
+the runtime relation or fail with related faults. -/
+theorem ShadowRuntimeRel.incValueBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (incValue left leftObject amount check)
+      (incValue right rightObject amount check) := by
+  cases objects with
+  | tagged payload =>
+      cases check with
+      | false => exact .error (.same _)
+      | true => exact .ok related
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapping => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [incValue, incLocation, getLiveCell, leftFound, rightFound,
+            leftLiveEq, rightLiveEq, Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          rcases related.incLocationBoth mapping leftReachable leftFound
+              leftLiveEq amount with
+            ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+          rw [show incValue left (.object (.heap leftLocation)) amount check =
+              incLocation left leftLocation amount by rfl,
+            show incValue right (.object (.heap rightLocation)) amount check =
+              incLocation right rightLocation amount by rfl,
+            leftEffect, rightEffect]
+          exact .ok next
+
 /-- Interpreter-facing retained increment. A successful source effect fixes
 the same successful target effect for related live operands. -/
 theorem ShadowRuntimeRel.incValueBoth_of_related
