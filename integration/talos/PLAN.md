@@ -2909,6 +2909,20 @@ consumable by `ConcreteFaultSimulation`, not merely an operation-level host
 equation. Projection and mutation failure families remain next in the leaf
 matrix. No shared semantic contract or executable ABI changed.
 
+W6.6cn extends T4's terminal leaves across the projection family.
+`concreteFaultLeaf_objectProjection_outOfBounds` and
+`concreteFaultLeaf_usizeProjection_outOfBounds` preserve the exact FIR slot
+index and declared bound through the compiler, numeric adapter, concrete host,
+and Talos trap. Their dead-object counterparts prove the stronger precedence
+property: liveness is checked before bounds and the concrete wasm32 address is
+related to the source heap location. The packed-scalar dead-object leaf proves
+the same precedence uniformly for the supported `UInt8`, `UInt16`, `UInt32`,
+and `UInt64` result lanes, independently of width and offset. All five are
+instances of `concreteFaultLeaf_unaryHostLet` and are directly consumable by
+`ConcreteFaultSimulation`. Packed-scalar coordinate faults and the mutation
+families remain in the terminal-leaf matrix. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

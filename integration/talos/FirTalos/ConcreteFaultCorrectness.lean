@@ -705,6 +705,523 @@ theorem concreteFaultLeaf_isShared_deadObject
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
 
+/-- An object projection past the declared constructor field count becomes the
+same FIR bounds fault in the generated concrete body. -/
+theorem concreteFaultLeaf_objectProjection_outOfBounds
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex index : Nat}
+    {objectWord : Word32}
+    {sourceObject : Value}
+    {resultKind : AbiKind}
+    {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .oproj index objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.objectProj index resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.objectProj index resultKind)) =
+        some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor :
+      witness.descriptors.lookup? objectWord =
+        some (.constructor info fieldKinds))
+    (projected :
+      getObjectField sourceRuntime sourceObject index =
+        .error (.objectFieldOutOfBounds index info.size))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (objectProjContract index))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime
+      (.objectFieldOutOfBounds index info.size) := by
+  have operation :=
+    objectProjStep_outOfBounds_of_refines initialRelated.1 objectRelated
+      descriptor projected
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.objectProj index resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.objectFieldOutOfBounds index info.size) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        getObjectField sourceRuntime sourceObject index) =
+      .error (.objectFieldOutOfBounds index info.size)
+    rw [projected]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := objectProjStep index)
+    (failure := .source (.objectFieldOutOfBounds index info.size))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    (.source (.objectFieldOutOfBounds index info.size))
+
+/-- Object projection checks liveness before bounds or payload access, so a
+stale operand preserves the exact address/location dead-object relation. -/
+theorem concreteFaultLeaf_objectProjection_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex index : Nat}
+    {objectWord : Word32}
+    {resultKind : AbiKind}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .oproj index objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.objectProj index resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.objectProj index resultKind)) =
+        some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (objectProjContract index))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    objectProjStep_deadObject_of_refines index initialRelated.1 objectRelated
+      found dead
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.objectProj index resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.deadObject location) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        getObjectField sourceRuntime (.object (.heap location)) index) =
+      .error (.deadObject location)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := objectProjStep index)
+    (failure := .sourceAddress (.deadObject objectWord))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
+/-- A `USize` projection past the combined object/`USize` slot count retains
+the exact FIR bounds payload. -/
+theorem concreteFaultLeaf_usizeProjection_outOfBounds
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex index : Nat}
+    {objectWord : Word32}
+    {sourceObject : Value}
+    {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .uproj index objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.usizeProj index))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.usizeProj index)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (descriptor :
+      witness.descriptors.lookup? objectWord =
+        some (.constructor info fieldKinds))
+    (projected :
+      getUSizeSlot sourceRuntime sourceObject index =
+        .error (.usizeFieldOutOfBounds index (info.size + info.usize)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (usizeProjContract index))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime
+      (.usizeFieldOutOfBounds index (info.size + info.usize)) := by
+  have operation :=
+    usizeProjStep_outOfBounds_of_refines initialRelated.1 objectRelated
+      descriptor projected
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.usizeProj index))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.usizeFieldOutOfBounds index
+          (info.size + info.usize)) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        getUSizeSlot sourceRuntime sourceObject index) =
+      .error (.usizeFieldOutOfBounds index (info.size + info.usize))
+    rw [projected]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := usizeProjStep index)
+    (failure := .source
+      (.usizeFieldOutOfBounds index (info.size + info.usize)))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    (.source (.usizeFieldOutOfBounds index (info.size + info.usize)))
+
+/-- A stale `USize` projection faults at the common liveness gate before slot
+bounds are inspected. -/
+theorem concreteFaultLeaf_usizeProjection_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex index : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .uproj index objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.usizeProj index))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.usizeProj index)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (usizeProjContract index))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    usizeProjStep_deadObject_of_refines index initialRelated.1 objectRelated
+      found dead
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.usizeProj index))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.deadObject location) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        getUSizeSlot sourceRuntime (.object (.heap location)) index) =
+      .error (.deadObject location)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := usizeProjStep index)
+    (failure := .sourceAddress (.deadObject objectWord))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
+/-- A stale packed-scalar projection faults at the common liveness gate before
+its width, offset, or scalar result kind can affect the outcome. -/
+theorem concreteFaultLeaf_scalarProjection_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex width offset : Nat}
+    {resultKind : AbiKind}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok
+          [.localGet objectId,
+            .call (.runtime (.scalarProj width offset resultKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.scalarProj width offset resultKind)) =
+        some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (supported :
+      resultKind = .uint8 ∨ resultKind = .uint16 ∨
+        resultKind = .uint32 ∨ resultKind = .uint64)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (scalarProjContract width offset resultKind))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    scalarProjStep_deadObject_of_refines width offset resultKind supported
+      initialRelated.1 objectRelated found dead
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId,
+            .call (.runtime (.scalarProj width offset resultKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.deadObject location) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        getScalarField sourceRuntime (.object (.heap location)) width offset) =
+      .error (.deadObject location)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := scalarProjStep width offset resultKind)
+    (failure := .sourceAddress (.deadObject objectWord))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
 /-- Export-level T4 shell. A syntax-directed body proof supplies the exact
 generated function selected by the static export certificate. -/
 theorem ConcreteSupportedExport.trapsWith
