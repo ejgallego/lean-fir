@@ -197,7 +197,7 @@ acceptance tests pass.
 2. Introduce the return/direct-let spine of `ConcreteCodeSimulation`.
 3. Complete: add effect, call, external, lazy, and case constructors by
    consuming the existing W6.6 step theorems.
-4. Package the whole generated export as T3.
+4. Complete: package the whole generated export as T3.
 5. Build the fault induction T4 in parallel with remaining success
    constructors.
 6. Let W7 generation proceed independently against the current concrete

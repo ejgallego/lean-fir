@@ -2850,6 +2850,19 @@ program fragment remains determined by which operation- and path-specific
 step certificates have been proved. T3 whole-export packaging is next. No
 shared semantic contract or executable ABI changed.
 
+W6.6cj closes T3 whole-export success. `ConcreteSupportedExport` packages
+only static admission, lowering, source-function lookup, Talos adaptation,
+concrete-host resolution/alignment, exported-name resolution, generated
+function lookup, and the single-result ABI. Its
+`toSuccessfulDeclaration` theorem combines that exact exported function body
+with T2's `ConcreteCodeSimulation`; its public `correct` theorem yields the
+finite FIR `ExecEvaluates` witness together with
+`ConcreteExportTerminatesWith` under `RefinedReturnPost`. Thus the target
+function and index are selected by the generated module's export table, not
+by a fixture-specific body or index. Physical parameters and caller operand
+tails remain general. T4 structured-fault correctness is the next proof
+milestone. No shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
