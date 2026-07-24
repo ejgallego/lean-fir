@@ -66,8 +66,8 @@ the premise that derives its operation equation remains to be packaged.
 | `USize` projection | `expectedConstructor`, `deadObject`, `usizeFieldOutOfBounds` | all three exact terminal leaves complete |
 | packed-scalar projection | `expectedConstructor`, `deadObject`, `scalarFieldMissing` | constructor/dead leaves complete; missing-coordinate mismatch is `FIR-BUG-wasm-none-uninitialized-scalar-projection` |
 | constructor cases / `getTag` | `expectedConstructor`, `deadObject`, `invalidCases` | dead leaf complete; expected-constructor is exact runtime; missing-alt fallback is blocked by `FIR-BUG-wasm-none-unreachable-fault-classification` |
-| object and `USize` mutation | `expectedConstructor`, `deadObject`, bounds | dead and bounds leaves complete; expected-constructor packaging pending |
-| packed-scalar mutation and tag mutation | `expectedConstructor`, `deadObject` | dead leaves complete; expected-constructor packaging pending |
+| object and `USize` mutation | `expectedConstructor`, `deadObject`, bounds | all exact terminal leaves complete |
+| packed-scalar mutation and tag mutation | `expectedConstructor`, `deadObject` | all exact terminal leaves complete for every supported integer width |
 | `isShared` | `expectedObject`, `deadObject` | dead leaf complete; the ABI relation excludes `expectedObject` for an admitted related operand |
 | increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | stale leaves complete; exact underflow relation exists; underflow/recursive leaves and release-fuel exclusion remain |
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
@@ -100,8 +100,8 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package the remaining exact-source constructor-kind leaves for case tags,
-   mutation, and boxed/reset readers using the common checked-header theorem.
+1. Package the remaining exact-source constructor-kind leaves for case tags
+   and boxed/reset readers using the common checked-header theorem.
 2. Add the address-related underflow leaf and prove its precedence over
    recursive release.
 3. Resolve the structured `unreachable` transport as an isolated semantic

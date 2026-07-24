@@ -3786,6 +3786,224 @@ theorem reuseStep_some_of_refines
     semanticReuse⟩
   simp [reuseStep, argsLength, decoded, concreteReuse, replaceHeap, clearFailure]
 
+/-- Constructor-tag mutation crosses the common checked-header gate before
+encoding the replacement tag or writing the header. A related heap object
+rejected by FIR as a nonconstructor therefore produces the exact same source
+fault at the Talos boundary. -/
+theorem setTagStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {location : Location}
+    (tag : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor runtime (.object (.heap location)) =
+        .error .expectedConstructor) :
+    setTagStep tag initial [.i32 (UInt32.ofNat objectWord.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      setTag runtime (.object (.heap location)) tag =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated.object_to_tobject constructorFailed
+  have writeFailed :
+      writeTag initial.host.runtime.heap objectWord tag =
+        .error (.source .expectedConstructor) := by
+    unfold writeTag
+    rw [headerFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      writeFailed, ConcreteError.toTrap]
+  · unfold setTag modifyConstructor
+    rw [constructorFailed]
+    rfl
+
+/-- Object-slot mutation rejects a nonconstructor at the common header gate,
+before bounds, padding, old-field decoding, or the payload write. -/
+theorem objectSetStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord fieldWord : Word32}
+    {location : Location} {fieldKind : AbiKind} {field : Value}
+    (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor runtime (.object (.heap location)) =
+        .error .expectedConstructor) :
+    objectSetStep index fieldKind initial
+        [.i32 (UInt32.ofNat objectWord.value),
+          .i32 (UInt32.ofNat fieldWord.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      setObjectField runtime (.object (.heap location)) index field =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated.object_to_tobject constructorFailed
+  have readFailed :
+      readObjectField initial.host.runtime.heap objectWord index =
+        .error (.source .expectedConstructor) := by
+    unfold readObjectField
+    rw [headerFailed]
+    rfl
+  have writeFailed :
+      writeObjectField initial.host.runtime.heap objectWord index fieldWord =
+        .error (.source .expectedConstructor) := by
+    unfold writeObjectField
+    rw [readFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      writeFailed, ConcreteError.toTrap]
+  · unfold setObjectField modifyConstructor
+    rw [constructorFailed]
+    rfl
+
+/-- Absolute-slot `USize` mutation reaches the same constructor gate before
+slot arithmetic or a memory write. -/
+theorem usizeSetStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {field : UInt64}
+    {location : Location}
+    (index : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor runtime (.object (.heap location)) =
+        .error .expectedConstructor) :
+    usizeSetStep index initial
+        [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      setUSizeSlot runtime (.object (.heap location)) index (.usize field) =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated.object_to_tobject constructorFailed
+  have writeFailed :
+      writeUSizeSlot initial.host.runtime.heap objectWord index field =
+        .error (.source .expectedConstructor) := by
+    unfold writeUSizeSlot
+    rw [headerFailed]
+    rfl
+  refine ⟨?_, ?_, .source .expectedConstructor⟩
+  · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      writeFailed, ConcreteError.toTrap]
+  · unfold setUSizeSlot
+    unfold modifyConstructor
+    rw [constructorFailed]
+    rfl
+
+/-- One kind-indexed theorem covers the four supported packed-integer
+mutations. Each concrete writer and FIR's semantic mutation fail at the common
+constructor gate before coordinate validation or a payload write. -/
+theorem scalarSetStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32}
+    {location : Location} {slotIndex byteOffset : Nat}
+    {physicalField : Wasm.Value} {field : ScalarValue}
+    {fieldKind : AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (fieldRelated :
+      PhysicalValueRel witness fieldKind physicalField (.scalar field))
+    (constructorFailed :
+      getConstructor runtime (.object (.heap location)) =
+        .error .expectedConstructor) :
+    scalarSetStep slotIndex byteOffset fieldKind initial
+        [.i32 (UInt32.ofNat objectWord.value), physicalField] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar field) = .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have headerFailed :=
+    runtimeRelated.heap.readConstructorHeader_expectedConstructor_refines
+      objectRelated.object_to_tobject constructorFailed
+  have semanticFailure :
+      setScalarField runtime (.object (.heap location)) slotIndex byteOffset
+          (.scalar field) = .error .expectedConstructor := by
+    unfold setScalarField
+    unfold modifyConstructor
+    rw [constructorFailed]
+    rfl
+  cases fieldRelated with
+  | word32 fieldRelated =>
+      cases fieldRelated with
+      | uint8 encoded =>
+          rename_i fieldWord fieldValue
+          have writeFailed :
+              writeScalarUInt8Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset (UInt8.ofNat fieldWord.value) =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt8Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
+      | uint16 encoded =>
+          rename_i fieldWord fieldValue
+          have writeFailed :
+              writeScalarUInt16Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset (UInt16.ofNat fieldWord.value) =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt16Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
+      | uint32 encoded =>
+          rename_i fieldWord fieldValue
+          have writeFailed :
+              writeScalarUInt32Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset (UInt32.ofNat fieldWord.value) =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt32Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
+  | word64 fieldRelated =>
+      cases fieldRelated with
+      | uint64 =>
+          rename_i fieldValue
+          have writeFailed :
+              writeScalarUInt64Field initial.host.runtime.heap objectWord
+                  slotIndex byteOffset fieldValue =
+                .error (.source .expectedConstructor) := by
+            unfold writeScalarUInt64Field
+            rw [headerFailed]
+            rfl
+          refine ⟨?_, semanticFailure, .source .expectedConstructor⟩
+          simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            writeFailed, ConcreteError.toTrap]
+  | float32Bits fieldRelated => cases fieldRelated
+  | float64Bits fieldRelated => cases fieldRelated
+
 /-- Every successful semantic constructor modification is heap-only. This is
 shared by tag, object, USize, and packed-scalar mutation composition. -/
 theorem modifyConstructor_heapOnly

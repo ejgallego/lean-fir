@@ -1792,6 +1792,312 @@ theorem concreteFaultLeaf_scalarProjection_expectedConstructor
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
 
+/-- An object-slot mutation of a related nonconstructor faults at the common
+header gate before bounds, padding, old-field decoding, or any heap write. -/
+theorem concreteFaultLeaf_objectSet_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {fieldKind : AbiKind}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex fieldIndex : Nat}
+    {objectWord fieldWord : Word32}
+    {location : Location}
+    {field : Value}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.oset objectId index (.fvar fieldId) continuation)
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (fieldLookup : evalArg sourceEnv (.fvar fieldId) = .ok field)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (hField :
+      locals.get fieldIndex =
+        some (.i32 (UInt32.ofNat fieldWord.value)))
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor sourceRuntime (.object (.heap location)) =
+        .error .expectedConstructor)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (objectSetContract index fieldKind))
+    (hParams : imp.params.length = 2) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.oset objectId index (.fvar fieldId) continuation)
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    objectSetStep_expectedConstructor_of_refines
+      (fieldWord := fieldWord) (fieldKind := fieldKind) (field := field)
+      index initialRelated.1 objectRelated constructorFailed
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.oset objectId index (.fvar fieldId) continuation))
+        (FaultObservation sourceRuntime .expectedConstructor) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, lookupValue, objectLookup,
+      fieldLookup, semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_binaryHostEffect
+    (step := objectSetStep index fieldKind)
+    (failure := .source .expectedConstructor)
+    sourceFault adapted initialRelated hObject hField hImp hSat hi hContract
+    hParams operation failureRelated
+
+/-- Absolute-slot `USize` mutation preserves the same nonconstructor fault and
+does not reach slot arithmetic or its continuation. -/
+theorem concreteFaultLeaf_usizeSet_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {index : Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex fieldIndex : Nat}
+    {objectWord : Word32}
+    {field : UInt64}
+    {location : Location}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.uset objectId index fieldId continuation)
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize field))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (hField : locals.get fieldIndex = some (.i64 field))
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor sourceRuntime (.object (.heap location)) =
+        .error .expectedConstructor)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (usizeSetContract index))
+    (hParams : imp.params.length = 2) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.uset objectId index fieldId continuation)
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    usizeSetStep_expectedConstructor_of_refines
+      (field := field) index initialRelated.1 objectRelated constructorFailed
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.uset objectId index fieldId continuation))
+        (FaultObservation sourceRuntime .expectedConstructor) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup, fieldLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_binaryHostEffect
+    (step := usizeSetStep index)
+    (failure := .source .expectedConstructor)
+    sourceFault adapted initialRelated hObject hField hImp hSat hi hContract
+    hParams operation failureRelated
+
+/-- A single kind-indexed leaf covers UInt8/16/32/64 mutation of a related
+nonconstructor. The physical-value relation fixes the concrete field lane
+while the common header theorem fixes the exact trap. -/
+theorem concreteFaultLeaf_scalarSet_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId}
+    {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex fieldIndex : Nat}
+    {objectWord : Word32}
+    {physicalField : Wasm.Value}
+    {field : ScalarValue}
+    {fieldKind : AbiKind}
+    {location : Location}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (fieldLookup :
+      lookupValue sourceEnv fieldId = .ok (.scalar field))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (hField : locals.get fieldIndex = some physicalField)
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (fieldRelated :
+      PhysicalValueRel witness fieldKind physicalField (.scalar field))
+    (constructorFailed :
+      getConstructor sourceRuntime (.object (.heap location)) =
+        .error .expectedConstructor)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (scalarSetContract slotIndex byteOffset fieldKind))
+    (hParams : imp.params.length = 2) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.sset objectId slotIndex byteOffset fieldId type continuation)
+      ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    scalarSetStep_expectedConstructor_of_refines
+      (slotIndex := slotIndex) (byteOffset := byteOffset)
+      initialRelated.1 objectRelated fieldRelated constructorFailed
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.sset objectId slotIndex byteOffset fieldId type continuation))
+        (FaultObservation sourceRuntime .expectedConstructor) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup, fieldLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_binaryHostEffect
+    (step := scalarSetStep slotIndex byteOffset fieldKind)
+    (failure := .source .expectedConstructor)
+    sourceFault adapted initialRelated hObject hField hImp hSat hi hContract
+    hParams operation failureRelated
+
+/-- Constructor-tag mutation of a related nonconstructor faults before
+encoding the replacement tag, writing the header, or entering its
+continuation. -/
+theorem concreteFaultLeaf_setTag_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {tag : Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.setTag objectId tag continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .object (.word32 objectWord)
+        (.object (.heap location)))
+    (constructorFailed :
+      getConstructor sourceRuntime (.object (.heap location)) =
+        .error .expectedConstructor)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (setTagContract tag))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.setTag objectId tag continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    setTagStep_expectedConstructor_of_refines tag initialRelated.1
+      objectRelated constructorFailed
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.setTag objectId tag continuation))
+        (FaultObservation sourceRuntime .expectedConstructor) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := setTagStep tag)
+    (failure := .source .expectedConstructor)
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
 /-- An object-field write beyond the live constructor payload preserves the
 exact source-classified bounds fault and does not enter its continuation. -/
 theorem concreteFaultLeaf_objectSet_outOfBounds

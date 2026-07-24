@@ -164,9 +164,10 @@ The remaining obligation is the operation-level leaf matrix: each admitted
 source failure must construct `ConcreteFaultLeaf` without losing its exact
 payload or precedence. Projection, mutation, ownership, tag, case-tag, and
 arbitrary-arity external terminal leaves are present. Direct object, `USize`,
-and packed-scalar projections now also preserve the common
-`expectedConstructor` gateway across every related object representation. The
-exact matrix and known blockers are maintained in `W6-FAULT-AUDIT.md`.
+and packed-scalar projection plus mutation now preserve the common
+`expectedConstructor` gateway across every admitted related operand; tag
+mutation shares the same boundary. The exact matrix and known blockers are
+maintained in `W6-FAULT-AUDIT.md`.
 
 ### T4S. Target safety
 

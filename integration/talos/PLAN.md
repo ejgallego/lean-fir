@@ -2988,6 +2988,19 @@ tags, mutation, unbox, and reset/reuse constructor-kind leaves remain separate
 because their semantic gateways accept different object subsets. No shared
 semantic contract or executable ABI changed.
 
+W6.6cs closes the constructor-kind mutation family. The common checked-header
+theorem now drives exact `expectedConstructor` host equations for constructor
+tag, object-slot, absolute-`USize`, and all four packed-integer writers. The
+object and `USize` leaves compose those equations through generated binary
+effect calls; packed mutation uses one `PhysicalValueRel`-indexed leaf across
+the UInt8/16/32 i32 lanes and UInt64 i64 lane; tag mutation uses the unary
+effect boundary. Every leaf proves the FIR fault at the unchanged source
+runtime, the matching source-classified Talos trap, and an unreachable
+continuation, with concrete failure occurring before bounds/coordinate checks
+or any heap write. Case tags, unbox, reset/reuse, and ownership underflow remain
+the next distinct fault families. No shared semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
