@@ -8546,6 +8546,48 @@ theorem match_codeStep_of_ready
           exact match_scalarSetCodeStep sourceState targetState programs frames
             graph joins env runtime headReady step
 
+/-- State-level active-code advance: unpack the proof-valued roots and
+renaming, specialize pair readiness to the exposed graph, and delegate the
+operational work to `match_codeStep_of_ready`. -/
+theorem SomeReachableMachineRelated.matchCodeStep_of_ready
+    (related : SomeReachableMachineRelated fuel source target)
+    (ready : ReachableMachineReadyAt fuel source target)
+    (sourceControl : source.control = .code sourceCode)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  have originalControl := control
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          have codeReady := ready programs originalControl frames runtime
+            sourceControl targetControl graph
+          have sourceSame :
+              { source with control := .code sourceCode } = source := by
+            cases source
+            simp_all
+          have targetSame :
+              { target with control := .code targetCode } = target := by
+            cases target
+            simp_all
+          simpa only [sourceSame, targetSame] using
+            (match_codeStep_of_ready source target programs frames graph joins
+              env runtime codeReady (by simpa only [sourceSame] using step))
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation
