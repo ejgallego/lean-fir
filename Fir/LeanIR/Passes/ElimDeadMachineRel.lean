@@ -8390,6 +8390,162 @@ theorem match_deleteCodeStep
             ⟨targetPath, finalRelated⟩
           exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
 
+/-- Unified semantic-step dispatcher for an active related code graph.
+`ReachableCodeReadyAt` supplies the exact ownership certificate required by
+conditionally deleted or concrete-token operations; every syntactic family
+then delegates to its independently proved graph matcher. -/
+theorem match_codeStep_of_ready
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used sourceCode targetCode)
+    (joins : ShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : ReachableCodeReadyAt fuel used sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots)) graph)
+    (step : Step externals
+      { sourceState with control := .code sourceCode } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      SomeReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases sourceCode with
+  | «let» declaration sourceContinuation =>
+      cases ready with
+      | letE graph headReady =>
+          cases declaration with
+          | mk fvarId binderName type value =>
+              cases value with
+              | lit literal =>
+                  exact match_literalLetCodeStep sourceState targetState
+                    programs frames graph joins env runtime headReady step
+              | erased =>
+                  exact match_erasedLetCodeStep sourceState targetState
+                    programs frames graph joins env runtime headReady step
+              | fvar function arguments =>
+                  exact match_fvarLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | ctor info arguments =>
+                  exact match_ctorLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | oproj index object =>
+                  exact match_objectProjectionLetCodeStep sourceState
+                    targetState programs frames graph joins env runtime
+                    headReady step
+              | uproj index object =>
+                  exact match_uSizeProjectionLetCodeStep sourceState
+                    targetState programs frames graph joins env runtime
+                    headReady step
+              | sproj index offset object =>
+                  exact match_scalarProjectionLetCodeStep sourceState
+                    targetState programs frames graph joins env runtime
+                    headReady step
+              | reset count object =>
+                  exact match_resetLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | reuse token info updateHeader arguments =>
+                  exact match_reuseLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | fap name arguments =>
+                  exact match_fapLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | pap name arguments =>
+                  exact match_papLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | box boxedType input =>
+                  exact match_boxLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | unbox object =>
+                  exact match_unboxLetCodeStep sourceState targetState programs
+                    frames graph joins env runtime headReady step
+              | isShared object =>
+                  exact match_isSharedLetCodeStep sourceState targetState
+                    programs frames graph joins env runtime headReady step
+              | proj _ _ _ impossible | const _ _ _ impossible =>
+                  nomatch impossible
+  | jp declaration sourceContinuation =>
+      cases ready with
+      | join graph headReady =>
+          exact match_joinCodeStep sourceState targetState programs frames
+            graph joins env runtime headReady step
+  | cases caseInfo =>
+      cases caseInfo with
+      | mk typeName resultType discr alternatives =>
+          cases ready with
+          | cases graph =>
+              exact match_casesCodeStep sourceState targetState programs
+                frames graph joins env runtime step
+  | jmp join arguments =>
+      cases ready with
+      | jump graph =>
+          exact match_jumpCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | «fun» _ _ impossible =>
+      nomatch impossible
+  | «return» result =>
+      cases ready with
+      | ret graph =>
+          exact match_returnCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | unreach type =>
+      cases ready with
+      | unreachable graph =>
+          have done : coreStep
+              { sourceState with control := .code (.unreach type) } =
+                .done (observe
+                  { sourceState with control := .code (.unreach type) }
+                  (.fault .unreachable)) := by
+            simp [coreStep, fail]
+          cases step with
+          | internal transition =>
+              rw [done] at transition
+              contradiction
+          | external transition externalProof =>
+              rw [done] at transition
+              contradiction
+  | setTag object tag sourceContinuation =>
+      cases ready with
+      | setTag graph =>
+          exact match_setTagCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | inc object amount check persistent sourceContinuation =>
+      cases ready with
+      | increment graph =>
+          exact match_incrementCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | dec object amount check persistent objects sourceContinuation =>
+      cases ready with
+      | decrement graph =>
+          exact match_decrementCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | del object sourceContinuation =>
+      cases ready with
+      | delete graph =>
+          exact match_deleteCodeStep sourceState targetState programs frames
+            graph joins env runtime step
+  | oset object index field sourceContinuation =>
+      cases ready with
+      | objectSet graph headReady =>
+          exact match_objectSetCodeStep sourceState targetState programs frames
+            graph joins env runtime headReady step
+  | uset object index field sourceContinuation =>
+      cases ready with
+      | usizeSet graph headReady =>
+          exact match_uSizeSetCodeStep sourceState targetState programs frames
+            graph joins env runtime headReady step
+  | sset object width offset field type sourceContinuation =>
+      cases ready with
+      | scalarSet graph headReady =>
+          exact match_scalarSetCodeStep sourceState targetState programs frames
+            graph joins env runtime headReady step
+
 /-- A related yielded value on an empty stack projects to the repository's
 shared reachable-observation relation. -/
 theorem ReachableMachineRelated.yieldedObservation
