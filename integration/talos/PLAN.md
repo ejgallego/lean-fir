@@ -2895,6 +2895,19 @@ constructing terminal leaves from the admitted operation-specific failure
 theorems and auditing the full supported-fault matrix. No shared semantic
 contract or executable ABI changed.
 
+W6.6cm proves T4's first operation-specific terminal leaf. The new generic
+`wp_exact_host_call_of_trap` turns an exact contract-governed host trap into a
+Talos weakest precondition, while `sourceLetFault_execEvaluates` turns any
+direct `evalLetValue` error into the canonical FIR fault observation.
+`concreteFaultLeaf_unaryHostLet` factors the shared compiler/adaptor and trap
+composition used by unary result-producing imports. Its first instance,
+`concreteFaultLeaf_isShared_deadObject`, proves that a stale semantic heap
+location passed to generated `isShared` traps with the related concrete
+wasm32 address under `ConcreteErrorSourceRel`. This is an actual terminal leaf
+consumable by `ConcreteFaultSimulation`, not merely an operation-level host
+equation. Projection and mutation failure families remain next in the leaf
+matrix. No shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

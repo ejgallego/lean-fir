@@ -162,7 +162,9 @@ fuel-independent target endpoint missing from Talos's success-only
 terminal failing leaf through every successful prefix constructor from T2.
 The remaining obligation is the operation-level leaf matrix: each admitted
 source failure must construct `ConcreteFaultLeaf` without losing its exact
-payload or precedence.
+payload or precedence. The first such leaf is complete for stale-object
+`isShared`; it uses the generic unary-host trap constructor intended for the
+projection and unboxing families.
 
 ### T5. Wasm-resident runtime linking
 

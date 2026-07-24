@@ -146,6 +146,73 @@ theorem CodeWP.toConcreteTrapsWith
   apply concreteTrapsWith_of_wp_body_at notImport found
   simpa [Wasm.Function.toLocals] using correct.2.2
 
+/-- Generic exact-contract lifting for a concrete host trap. A trap aborts the
+remaining instruction sequence, so the only continuation obligation is the
+trap postcondition itself. -/
+theorem wp_exact_host_call_of_trap
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {spec : Wasm.HostSpec host} {id : Nat} {imp : Wasm.ImportDecl}
+    {step : Wasm.Store host → List Wasm.Value → Wasm.HostResult host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {initial final : Wasm.Store host} {locals : Wasm.Locals}
+    {physicalArgs : List Wasm.Value} {message : String}
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hArgs :
+      (locals.values.take imp.params.length).reverse = physicalArgs)
+    (operation : step initial physicalArgs = .Trap final message)
+    (post : Q (.Trap final message)) :
+    Wasm.wp module (.call id :: rest) Q initial locals env := by
+  apply Wasm.wp_call_host_contract hImp hSat hi hContract
+  · intro actualResults actualFinal contract
+    change Wasm.HostResult.Return actualResults actualFinal =
+      step initial
+        (locals.values.take imp.params.length).reverse at contract
+    rw [hArgs, operation] at contract
+    contradiction
+  · intro actualFinal actualMessage contract
+    change Wasm.HostResult.Trap actualFinal actualMessage =
+      step initial
+        (locals.values.take imp.params.length).reverse at contract
+    rw [hArgs, operation] at contract
+    injection contract with finalEq messageEq
+    subst actualFinal
+    subst actualMessage
+    exact post
+
+/-- A direct source `let` error is already a complete finite execution: the
+initial machine state takes no successful prefix steps and its next
+interpreter step produces the canonical fault observation. -/
+theorem sourceLetFault_execEvaluates
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {fault : RuntimeFault}
+    (evaluated :
+      evalLetValue
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.let decl continuation)) decl = .error fault) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv
+        (.let decl continuation))
+      (FaultObservation sourceRuntime fault) := by
+  refine ⟨0, _, .refl _, ?_⟩
+  have evaluated' :
+      evalLetValue {
+        program := context.program
+        control := .code (.let decl continuation)
+        env := sourceEnv
+        runtime := sourceRuntime } decl = .error fault := by
+    simpa [sourceCodeState] using evaluated
+  simp [executeStep, coreStep, sourceCodeState, evaluated', fail, observe,
+    FaultObservation]
+
 /-- One terminal failing source fragment paired with its compiler-adapted,
 trap-only concrete body proof. Operation-specific fault theorems construct
 this leaf; the recursive certificate below transports it through every
@@ -460,6 +527,183 @@ theorem refinedFaultPost_of_runtimeFailure
   unfold trap
   refine ⟨_, _, rfl, witness, failure, ?_, rfl, failureRelated⟩
   simpa [clearFailure] using runtimeRelated
+
+/-- Generic terminal T4 leaf for a unary, result-producing concrete host
+operation. It centralizes compiler/adaptor composition and Talos trap
+propagation; operation-specific leaves supply only the source error, concrete
+trap equation, and exact source-failure relation. -/
+theorem concreteFaultLeaf_unaryHostLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {operandIndex resultIndex : Nat}
+    {physical : Wasm.Value}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetRest : Wasm.Program}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    {failure : ConcreteError}
+    {fault : RuntimeFault}
+    (evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error fault)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok [.localGet operandIndex, .call id])
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hOperand : locals.get operandIndex = some physical)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = 1)
+    (operation :
+      step initial [physical] =
+        trap (clearFailure initial) (.runtime failure.toTrap))
+    (failureRelated : ConcreteErrorSourceRel witness failure fault) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet operandIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime fault := by
+  obtain ⟨final, message, trapped, post⟩ :=
+    refinedFaultPost_of_runtimeFailure initialRelated.1 failureRelated
+  constructor
+  · exact sourceLetFault_execEvaluates evaluated
+  · refine ⟨codeAdapted_let valueCompiled valueAdapted resultFound
+        continuationAdapted, initialRelated, ?_⟩
+    have hOperandTail :
+        ({ locals with values := [] } : Wasm.Locals).get operandIndex =
+          some physical := by
+      simpa [Wasm.Locals.get] using hOperand
+    rw [Wasm.wp_localGet_cons, hOperandTail]
+    apply wp_exact_host_call_of_trap
+      (step := step) (physicalArgs := [physical])
+      hImp hSat hi hContract
+    · simp [hParams]
+    · exact operation.trans trapped
+    · simpa [ConcreteFunctionFaultPost] using post
+
+/-- First terminal T4 leaf: a stale object passed to generated `isShared`.
+The source fault names its semantic heap location, while the concrete host
+records the related wasm32 address. -/
+theorem concreteFaultLeaf_isShared_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .isShared objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime .isShared)])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime .isShared) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some isSharedContract)
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    isSharedStep_deadObject_of_refines initialRelated.1 objectRelated found dead
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime .isShared)] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.deadObject location) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        isShared sourceRuntime (.object (.heap location))) =
+      .error (.deadObject location)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := isSharedStep)
+    (failure := .sourceAddress (.deadObject objectWord))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
 
 /-- Export-level T4 shell. A syntax-directed body proof supplies the exact
 generated function selected by the static export certificate. -/
