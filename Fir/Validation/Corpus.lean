@@ -740,6 +740,10 @@ def ExecutedExternalCountRequirement.descriptor
   minimum := requirement.minimum
   maximum := requirement.maximum }
 
+private def exactlyOnceExternalCounts
+    (externals : Array Lean.Name) : Array ExecutedExternalCountRequirement :=
+  externals.map fun external => { external, minimum := 1, maximum := some 1 }
+
 /-- A source case and the backend-neutral metadata needed to run it. -/
 structure Case where
   id : String
@@ -1653,6 +1657,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := aliasedChildCopyOnWriteForms
     requiredExternals := #[``ByteArray.set!]
     requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!]
     provenance := firProvenance
       "Replace one alias, then retain and mutate the surviving child to test nested copy-on-write" },
   { id := "aliased-byte-array-self-replace"
@@ -1707,6 +1713,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := aliasedChildCopyOnWriteForms
     requiredExternals := #[``ByteArray.set!]
     requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!]
     provenance := firProvenance
       "Self-replace one alias, then mutate it while returning the untouched sibling occurrence" },
   { id := "byte-array-object-swap-unique"
@@ -1977,6 +1985,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
     requiredExternals := #[``Int.ofNat]
     requiredExecutedExternals := #[``Int.ofNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat]
     provenance := firProvenance "Compiler-built largest positive immediate Int" },
   { id := "int-literal-heap-positive"
     entry := ``Source.intPosHeap
@@ -1987,6 +1997,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
     requiredExternals := #[``Int.ofNat]
     requiredExecutedExternals := #[``Int.ofNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat]
     provenance := firProvenance "Compiler-built first positive heap Int" },
   { id := "int-literal-immediate-negative"
     entry := ``Source.intNegImmediate
@@ -1997,6 +2009,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
     requiredExternals := #[``Int.ofNat, ``Int.neg]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.neg]
     provenance := firProvenance "Compiler-built smallest negative immediate Int" },
   { id := "int-literal-heap-negative"
     entry := ``Source.intNegHeap
@@ -2007,6 +2021,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "inc"]
     requiredExternals := #[``Int.ofNat, ``Int.neg]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.neg]
     provenance := firProvenance "Compiler-built first negative heap Int" },
   { id := "int-classify-immediate-positive"
     entry := ``Source.classifyInt
@@ -2019,6 +2035,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the largest positive immediate Int" },
   { id := "int-classify-heap-positive"
     entry := ``Source.classifyInt
@@ -2031,6 +2049,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the first positive heap Int" },
   { id := "int-classify-immediate-negative"
     entry := ``Source.classifyInt
@@ -2043,6 +2063,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the smallest negative immediate Int" },
   { id := "int-classify-heap-negative"
     entry := ``Source.classifyInt
@@ -2055,6 +2077,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
     requiredExternals := #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the first negative heap Int" },
   { id := "nat-add-small"
     entry := ``Source.addNat
@@ -2067,6 +2091,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``Nat.add]
     requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.add]
     provenance := firProvenance "Controlled Nat.add external on tagged operands" },
   { id := "nat-add-tagged-to-heap"
     entry := ``Source.addNat
@@ -2079,6 +2105,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``Nat.add]
     requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.add]
     provenance := firProvenance "Nat.add crossing the tagged-to-heap result boundary" },
   { id := "nat-add-heap-input"
     entry := ``Source.addNat
@@ -2091,6 +2119,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``Nat.add]
     requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
   { id := "effect-record-nat"
     entry := ``Source.recordOnce
@@ -2105,6 +2135,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``NativeEffects.recordImpl]
     requiredExecutedExternals := #[``NativeEffects.recordImpl]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``NativeEffects.recordImpl]
     effectProjections := #[{
       external := ``NativeEffects.recordImpl
       operation := "validation.record"
@@ -2188,6 +2220,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.size]
     requiredExecutedExternals := #[``ByteArray.size]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.size]
     provenance := firProvenance "Controlled ByteArray.size external on packed boundary bytes" },
   { id := "conditional-byte-array-get-taken"
     entry := ``Source.conditionalByteArrayGet
@@ -2246,6 +2280,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance "Read a zero byte through ByteArray.get!" },
   { id := "byte-array-get-high-bit"
     entry := ``Source.byteArrayGet
@@ -2260,6 +2296,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance "Read the first high-bit byte through ByteArray.get!" },
   { id := "byte-array-get-max"
     entry := ``Source.byteArrayGet
@@ -2274,6 +2312,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance "Read the maximum byte through ByteArray.get!" },
   { id := "byte-array-get-empty"
     entry := ``Source.byteArrayGet
@@ -2289,6 +2329,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at index zero from an empty ByteArray through ByteArray.get!" },
   { id := "byte-array-get-end"
@@ -2305,6 +2347,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at the exact end boundary through ByteArray.get!" },
   { id := "byte-array-get-heap-oob"
@@ -2323,6 +2367,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
     requiredExternals := #[``ByteArray.get!]
     requiredExecutedExternals := #[``ByteArray.get!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!]
     provenance := firProvenance
       "Read the default byte at a heap-natural index through ByteArray.get!" },
   { id := "byte-array-set-unique"
@@ -2338,6 +2384,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
     requiredExternals := #[``ByteArray.set!]
     requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!]
     provenance := firProvenance
       "Mutate a uniquely owned byte array in place through ByteArray.set!" },
   { id := "byte-array-set-shared"
@@ -2354,6 +2402,8 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["lit", "inc", "fap", "extern", "ctor", "return"]
     requiredExternals := #[``ByteArray.set!]
     requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!]
     provenance := firProvenance
       "Copy a shared byte array while preserving its original alias through ByteArray.set!" }
 ]
@@ -2370,6 +2420,15 @@ def requiredFinalExecutedForms : Array String :=
   validationCase.effectProjections.all fun projection =>
     validationCase.requiredExternals.contains projection.external &&
     validationCase.requiredExecutedExternals.contains projection.external
+
+#guard cases.all fun validationCase =>
+  validationCase.requiredExecutedExternalCounts.all fun requirement =>
+    requirement.maximum == some requirement.minimum
+
+#guard cases.all fun validationCase =>
+  validationCase.requiredExternals.all fun external =>
+    validationCase.requiredExecutedExternalCounts.any fun requirement =>
+      requirement.external == external
 
 #guard requiredFinalExecutedForms.all fun form =>
   cases.any fun validationCase => validationCase.requiredExecutedLcnfForms.contains form

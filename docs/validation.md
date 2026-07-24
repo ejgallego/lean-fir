@@ -931,6 +931,14 @@ executions of both forms and zero dispatches, while still requiring the static
 external identity. This separates an honestly unreachable call site from a
 misspelled or optimized-away requirement.
 
+The FIR corpus requires an exact count for every statically required external.
+Existing ByteArray reads, writes, size queries, natural addition, single
+recorded effects, and signed-integer construction/classification now pin every
+required symbol to one dispatch. The sequenced effect fixtures retain their
+exact count of two, while the conditional skipped branch retains zero. Corpus
+guards reject both a bounded-but-inexact external count and a required external
+without a matching count obligation.
+
 The same static/executed split applies to external identity, independently of
 the generic `extern` instruction form:
 
