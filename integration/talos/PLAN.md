@@ -2923,6 +2923,20 @@ instances of `concreteFaultLeaf_unaryHostLet` and are directly consumable by
 families remain in the terminal-leaf matrix. No shared semantic contract or
 executable ABI changed.
 
+W6.6co extends T4 through generated no-result field mutations.
+`wp_effect_localGets_of_trap` proves the stack-polymorphic Talos boundary for
+source-order local loads followed by an exact-contract host trap, and
+`concreteFaultLeaf_binaryHostEffect` packages it with the finite FIR fault and
+the initial refinement witness. Object and `USize` setters now have terminal
+leaves for both exact bounds faults and stale-object precedence. Packed-scalar
+setters use one `PhysicalValueRel`-indexed leaf that dispatches across the
+supported `UInt8`, `UInt16`, `UInt32`, and `UInt64` lanes while retaining the
+correct i32/i64 physical operand. All leaves abort before their source or
+generated continuation, preserve the unchanged runtime at the fault point,
+and are directly consumable by `ConcreteFaultSimulation`. Unary ownership and
+tag effects remain in the terminal-leaf matrix. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
