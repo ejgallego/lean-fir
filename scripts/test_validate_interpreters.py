@@ -158,7 +158,8 @@ def with_form_diagnostics(
     executed: str | None = None,
     executed_counts: str | None = "__auto__",
     executed_form_trace: str | None = "__auto__",
-    steps: str | None = "1",
+    executed_step_trace: str | None = "__auto__",
+    steps: str | None = "__auto__",
     static_externals: str | None = "",
     missing_static_externals: str | None = "",
     executed_externals: str | None = "",
@@ -193,6 +194,7 @@ def with_form_diagnostics(
         diagnostics.append(
             {"key": "executed-lcnf-form-counts", "value": executed_counts}
         )
+    form_trace_for_steps: list[str] | None = None
     if executed_form_trace == "__auto__":
         form_trace: list[str] | None = None
         if executed_counts is not None and executed_counts != "__auto__":
@@ -227,6 +229,7 @@ def with_form_diagnostics(
                 )
             )
         if form_trace is not None:
+            form_trace_for_steps = form_trace
             diagnostics.append(
                 {
                     "key": "executed-lcnf-form-trace",
@@ -234,14 +237,73 @@ def with_form_diagnostics(
                 }
             )
     elif executed_form_trace is not None:
+        try:
+            parsed_form_trace = json.loads(executed_form_trace)
+        except (TypeError, json.JSONDecodeError):
+            parsed_form_trace = None
+        if isinstance(parsed_form_trace, list) and all(
+            isinstance(form, str) and form for form in parsed_form_trace
+        ):
+            form_trace_for_steps = parsed_form_trace
         diagnostics.append(
             {
                 "key": "executed-lcnf-form-trace",
                 "value": executed_form_trace,
             }
         )
-    if steps is not None:
-        diagnostics.append({"key": "interpreter-steps", "value": steps})
+    if form_trace_for_steps is None and executed is not None:
+        form_trace_for_steps = list(
+            dict.fromkeys(
+                form.strip()
+                for form in executed.split(",")
+                if form.strip()
+            )
+        )
+    emitted_step_trace: list[str] | None = None
+    if executed_step_trace == "__auto__":
+        if form_trace_for_steps is not None:
+            emitted_step_trace = [
+                f"form:{form}" for form in form_trace_for_steps
+            ]
+            if not emitted_step_trace:
+                emitted_step_trace = ["admin:yield-done"]
+            if (
+                steps is not None
+                and steps != "__auto__"
+                and steps.isdecimal()
+                and int(steps) > len(emitted_step_trace)
+            ):
+                emitted_step_trace.extend(
+                    ["admin:yield-done"]
+                    * (int(steps) - len(emitted_step_trace))
+                )
+            diagnostics.append(
+                {
+                    "key": "executed-step-trace",
+                    "value": json.dumps(
+                        emitted_step_trace, separators=(",", ":")
+                    ),
+                }
+            )
+    elif executed_step_trace is not None:
+        try:
+            parsed_step_trace = json.loads(executed_step_trace)
+        except (TypeError, json.JSONDecodeError):
+            parsed_step_trace = None
+        if isinstance(parsed_step_trace, list) and all(
+            isinstance(kind, str) and kind for kind in parsed_step_trace
+        ):
+            emitted_step_trace = parsed_step_trace
+        diagnostics.append(
+            {"key": "executed-step-trace", "value": executed_step_trace}
+        )
+    resolved_steps = steps
+    if steps == "__auto__":
+        resolved_steps = str(max(1, len(emitted_step_trace or [])))
+    if resolved_steps is not None:
+        diagnostics.append(
+            {"key": "interpreter-steps", "value": resolved_steps}
+        )
     if static_externals is not None:
         diagnostics.append({"key": "externals", "value": static_externals})
     if missing_static_externals is not None:
@@ -6451,6 +6513,22 @@ class HarnessTests(unittest.TestCase):
                     "mismatchedObligationCount": 0,
                     "observedEventCount": 2,
                 },
+                "staticConsistency": {
+                    "casesConsistent": 2,
+                    "unexpectedFormCount": 0,
+                },
+                "stepTrace": {
+                    "casesWithDiagnostics": 2,
+                    "casesWithValidDiagnostics": 2,
+                    "casesWithCompleteCoverage": 2,
+                    "casesWithConsistentFormProjection": 2,
+                    "observedStepCount": 2,
+                    "classifiedStepCount": 2,
+                    "unclassifiedStepCount": 0,
+                    "formStepCount": 2,
+                    "administrativeStepCount": 0,
+                    "administrativeKinds": [],
+                },
                 "totalInterpreterSteps": 2,
                 "minimumInterpreterSteps": 1,
                 "maximumInterpreterSteps": 1,
@@ -6496,6 +6574,7 @@ class HarnessTests(unittest.TestCase):
                 "case: missing executed-lcnf-forms diagnostic",
                 "case: missing executed-lcnf-form-counts diagnostic",
                 "case: missing executed-lcnf-form-trace diagnostic",
+                "case: missing executed-step-trace diagnostic",
             ],
         )
         executed = report["cases"][0]["executed"]
@@ -6865,6 +6944,169 @@ class HarnessTests(unittest.TestCase):
                 "mismatchedObligationCount"
             ],
             1,
+        )
+
+    def test_executed_step_trace_covers_steps_and_administrative_kinds(self) -> None:
+        manifest = [descriptor("case", forms=["return"])]
+        administrative_kinds = sorted(lcnf.ADMINISTRATIVE_STEP_KINDS)
+        step_trace = [
+            "admin:invoke-name",
+            "form:return",
+            *administrative_kinds,
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace=json.dumps(step_trace),
+                steps=str(len(step_trace)),
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(failures, [])
+        coverage = report["cases"][0]["executed"]["stepTrace"]
+        self.assertTrue(coverage["diagnosticValid"])
+        self.assertTrue(coverage["completeCoverage"])
+        self.assertTrue(coverage["formProjectionConsistent"])
+        self.assertEqual(coverage["formSteps"], ["return"])
+        expected_counts = {
+            kind: 1 for kind in administrative_kinds
+        }
+        expected_counts["admin:invoke-name"] += 1
+        self.assertEqual(
+            coverage["administrativeCounts"],
+            [
+                {"kind": kind, "count": count}
+                for kind, count in sorted(expected_counts.items())
+            ],
+        )
+        summary = report["summary"]["executed"]["stepTrace"]
+        self.assertEqual(summary["observedStepCount"], len(step_trace))
+        self.assertEqual(summary["classifiedStepCount"], len(step_trace))
+        self.assertEqual(summary["unclassifiedStepCount"], 0)
+        self.assertEqual(summary["formStepCount"], 1)
+        self.assertEqual(
+            summary["administrativeStepCount"], len(step_trace) - 1
+        )
+
+    def test_executed_step_trace_negative_coverage_paths(self) -> None:
+        manifest = [descriptor("case", forms=["return"])]
+
+        missing = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace=None,
+            )
+        }
+        _, failures = harness.coverage_report(manifest, missing, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            ["case: missing executed-step-trace diagnostic"],
+        )
+
+        malformed = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace='["form:return",1]',
+            )
+        }
+        _, failures = harness.coverage_report(manifest, malformed, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-step-trace must be a JSON array of "
+                "nonempty step kinds"
+            ],
+        )
+
+        unknown = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace=(
+                    '["form:return","admin:not-classified"]'
+                ),
+                steps="2",
+            )
+        }
+        _, failures = harness.coverage_report(manifest, unknown, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-step-trace contains unknown step kinds: "
+                "admin:not-classified"
+            ],
+        )
+
+        incomplete = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace='["form:return"]',
+                steps="2",
+            )
+        }
+        _, failures = harness.coverage_report(manifest, incomplete, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-step-trace does not cover every interpreter "
+                "step (trace=1; steps=2)"
+            ],
+        )
+
+        reordered_forms = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="cases,return",
+                executed="cases,return",
+                executed_counts=(
+                    '[{"form":"cases","count":1},'
+                    '{"form":"return","count":1}]'
+                ),
+                executed_form_trace='["cases","return"]',
+                executed_step_trace='["form:return","form:cases"]',
+                steps="2",
+            )
+        }
+        _, failures = harness.coverage_report(
+            manifest, reordered_forms, ["case"]
+        )
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed-step-trace form projection disagrees with "
+                "executed-lcnf-form-trace"
+            ],
+        )
+
+    def test_executed_forms_must_come_from_the_compiled_artifact(self) -> None:
+        manifest = [descriptor("case", forms=["return"])]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "lcnf"),
+                static="return",
+                executed="ghost,return",
+            )
+        }
+        report, failures = harness.coverage_report(manifest, results, ["case"])
+        self.assertEqual(
+            finding_messages(failures),
+            [
+                "case: executed LCNF forms absent from the compiled artifact: "
+                "ghost"
+            ],
+        )
+        self.assertEqual(
+            report["cases"][0]["executed"]["staticConsistency"],
+            {"consistent": False, "unexpectedForms": ["ghost"]},
         )
 
     def test_coverage_artifact_is_deterministic(self) -> None:

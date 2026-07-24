@@ -36,6 +36,18 @@ LCNF_MANIFEST_FIELDS = {
     "requiredExecutedExternalTrace",
 }
 
+ADMINISTRATIVE_STEP_KINDS = frozenset(
+    {
+        "admin:invoke-name",
+        "admin:invoke-value",
+        "admin:yield-apply",
+        "admin:yield-bind",
+        "admin:yield-cache",
+        "admin:yield-done",
+    }
+)
+FORM_STEP_PREFIX = "form:"
+
 
 def prepare_manifest(descriptors: list[dict]) -> list[dict]:
     """Validate and canonicalize the LCNF-owned manifest extension."""
@@ -347,6 +359,23 @@ def trace_name_counts(trace: list[str]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def step_trace_inventory(
+    trace: list[str],
+) -> tuple[list[str], dict[str, int], list[str]]:
+    """Project form steps, count administrative kinds, and retain unknown kinds."""
+    forms: list[str] = []
+    administrative: list[str] = []
+    unknown: list[str] = []
+    for kind in trace:
+        if kind.startswith(FORM_STEP_PREFIX) and kind != FORM_STEP_PREFIX:
+            forms.append(kind[len(FORM_STEP_PREFIX) :])
+        elif kind in ADMINISTRATIVE_STEP_KINDS:
+            administrative.append(kind)
+        else:
+            unknown.append(kind)
+    return forms, trace_name_counts(administrative), unknown
+
+
 def named_count_items(
     counts: dict[str, int], name_key: str, value_key: str
 ) -> list[dict]:
@@ -444,6 +473,18 @@ def coverage_report(
     executed_form_trace_requirement_count = 0
     executed_form_trace_mismatch_count = 0
     executed_form_trace_event_count = 0
+    executed_static_consistent_case_count = 0
+    executed_unexpected_static_form_count = 0
+    executed_step_trace_diagnostic_count = 0
+    executed_step_trace_valid_diagnostic_count = 0
+    executed_step_trace_complete_coverage_count = 0
+    executed_step_trace_form_projection_count = 0
+    executed_step_trace_observed_count = 0
+    executed_step_trace_classified_count = 0
+    executed_step_trace_unclassified_count = 0
+    executed_step_trace_form_count = 0
+    executed_step_trace_administrative_count = 0
+    executed_step_trace_administrative_totals: dict[str, int] = {}
     static_external_required: set[str] = set()
     static_external_observed: set[str] = set()
     executed_external_required: set[str] = set()
@@ -488,6 +529,10 @@ def coverage_report(
             executed_form_trace_present,
             observed_executed_form_trace,
         ) = diagnostic_name_trace(record, "executed-lcnf-form-trace")
+        (
+            executed_step_trace_present,
+            observed_executed_step_trace,
+        ) = diagnostic_name_trace(record, "executed-step-trace")
         steps_present, steps = positive_int_diagnostic(record, "interpreter-steps")
         static_external_present, observed_static_externals = diagnostic_forms(
             record, "externals"
@@ -579,6 +624,39 @@ def coverage_report(
                 and executed_form_trace_obligations_active
             )
             else None
+        )
+        observed_step_trace = observed_executed_step_trace or []
+        (
+            step_trace_form_projection,
+            step_trace_administrative_counts,
+            step_trace_unknown_kinds,
+        ) = step_trace_inventory(observed_step_trace)
+        step_trace_valid = (
+            executed_step_trace_present
+            and observed_executed_step_trace is not None
+            and not step_trace_unknown_kinds
+        )
+        step_trace_complete_coverage = (
+            len(observed_step_trace) == steps
+            if step_trace_valid and steps is not None
+            else None
+        )
+        step_trace_form_projection_consistent = (
+            step_trace_form_projection == observed_form_trace
+            if (
+                step_trace_valid
+                and executed_form_trace_present
+                and observed_executed_form_trace is not None
+            )
+            else None
+        )
+        unexpected_executed_forms = (
+            sorted(set(observed_executed) - set(observed_static))
+            if static_present and executed_present
+            else []
+        )
+        executed_static_consistent = (
+            static_present and executed_present and not unexpected_executed_forms
         )
         unsatisfied_executed_counts = unsatisfied_count_requirements(
             required_executed_counts, observed_count_map, "form"
@@ -680,6 +758,34 @@ def coverage_report(
         )
         if observed_executed_form_trace is not None:
             executed_form_trace_event_count += len(observed_executed_form_trace)
+        executed_static_consistent_case_count += int(executed_static_consistent)
+        executed_unexpected_static_form_count += len(unexpected_executed_forms)
+        executed_step_trace_diagnostic_count += int(executed_step_trace_present)
+        executed_step_trace_valid_diagnostic_count += int(step_trace_valid)
+        executed_step_trace_complete_coverage_count += int(
+            step_trace_complete_coverage is True
+        )
+        executed_step_trace_form_projection_count += int(
+            step_trace_form_projection_consistent is True
+        )
+        if observed_executed_step_trace is not None:
+            executed_step_trace_observed_count += len(observed_executed_step_trace)
+            executed_step_trace_classified_count += (
+                len(step_trace_form_projection)
+                + sum(step_trace_administrative_counts.values())
+            )
+            executed_step_trace_unclassified_count += len(
+                step_trace_unknown_kinds
+            )
+            executed_step_trace_form_count += len(step_trace_form_projection)
+            executed_step_trace_administrative_count += sum(
+                step_trace_administrative_counts.values()
+            )
+            for kind, count in step_trace_administrative_counts.items():
+                executed_step_trace_administrative_totals[kind] = (
+                    executed_step_trace_administrative_totals.get(kind, 0)
+                    + count
+                )
         static_external_required.update(required_static_externals)
         static_external_observed.update(observed_static_externals)
         executed_external_required.update(required_executed_externals)
@@ -775,6 +881,11 @@ def coverage_report(
                 "missing required executed LCNF forms: "
                 f"{','.join(missing_executed)}"
             )
+        if unexpected_executed_forms:
+            audit_finding(
+                "executed LCNF forms absent from the compiled artifact: "
+                f"{','.join(unexpected_executed_forms)}"
+            )
         if unsatisfied_executed_counts:
             audit_finding(
                 "executed LCNF form counts outside required bounds: "
@@ -847,6 +958,32 @@ def coverage_report(
                     f"(required={json.dumps(required_executed_form_trace, separators=(',', ':'))}; "
                     f"observed={json.dumps(observed_form_trace, separators=(',', ':'))})"
                 )
+        if record is not None and not executed_step_trace_present:
+            audit_finding("missing executed-step-trace diagnostic")
+        elif record is not None and observed_executed_step_trace is None:
+            audit_finding(
+                "executed-step-trace must be a JSON array of nonempty step kinds"
+            )
+        elif record is not None:
+            if step_trace_unknown_kinds:
+                audit_finding(
+                    "executed-step-trace contains unknown step kinds: "
+                    + ",".join(sorted(set(step_trace_unknown_kinds)))
+                )
+            else:
+                if (
+                    steps is not None
+                    and step_trace_complete_coverage is False
+                ):
+                    audit_finding(
+                        "executed-step-trace does not cover every interpreter step "
+                        f"(trace={len(observed_step_trace)}; steps={steps})"
+                    )
+                if step_trace_form_projection_consistent is False:
+                    audit_finding(
+                        "executed-step-trace form projection disagrees with "
+                        "executed-lcnf-form-trace"
+                    )
         if record is not None and not steps_present:
             audit_finding("missing interpreter-steps diagnostic")
         elif record is not None and steps is None:
@@ -973,6 +1110,24 @@ def coverage_report(
                         "observed": observed_form_trace,
                         "matchesRequired": form_trace_matches_required,
                     },
+                    "staticConsistency": {
+                        "consistent": executed_static_consistent,
+                        "unexpectedForms": unexpected_executed_forms,
+                    },
+                    "stepTrace": {
+                        "diagnosticPresent": executed_step_trace_present,
+                        "diagnosticValid": step_trace_valid,
+                        "completeCoverage": step_trace_complete_coverage,
+                        "formProjectionConsistent": (
+                            step_trace_form_projection_consistent
+                        ),
+                        "observed": observed_step_trace,
+                        "formSteps": step_trace_form_projection,
+                        "administrativeCounts": named_count_items(
+                            step_trace_administrative_counts, "kind", "count"
+                        ),
+                        "unknownKinds": step_trace_unknown_kinds,
+                    },
                     "interpreterSteps": steps,
                 },
                 "externals": {
@@ -1090,6 +1245,42 @@ def coverage_report(
                         executed_form_trace_mismatch_count
                     ),
                     "observedEventCount": executed_form_trace_event_count,
+                },
+                "staticConsistency": {
+                    "casesConsistent": executed_static_consistent_case_count,
+                    "unexpectedFormCount": (
+                        executed_unexpected_static_form_count
+                    ),
+                },
+                "stepTrace": {
+                    "casesWithDiagnostics": (
+                        executed_step_trace_diagnostic_count
+                    ),
+                    "casesWithValidDiagnostics": (
+                        executed_step_trace_valid_diagnostic_count
+                    ),
+                    "casesWithCompleteCoverage": (
+                        executed_step_trace_complete_coverage_count
+                    ),
+                    "casesWithConsistentFormProjection": (
+                        executed_step_trace_form_projection_count
+                    ),
+                    "observedStepCount": executed_step_trace_observed_count,
+                    "classifiedStepCount": (
+                        executed_step_trace_classified_count
+                    ),
+                    "unclassifiedStepCount": (
+                        executed_step_trace_unclassified_count
+                    ),
+                    "formStepCount": executed_step_trace_form_count,
+                    "administrativeStepCount": (
+                        executed_step_trace_administrative_count
+                    ),
+                    "administrativeKinds": named_count_items(
+                        executed_step_trace_administrative_totals,
+                        "kind",
+                        "count",
+                    ),
                 },
                 "totalInterpreterSteps": sum(interpreter_steps),
                 "minimumInterpreterSteps": min(interpreter_steps, default=None),

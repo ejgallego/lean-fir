@@ -911,6 +911,13 @@ form name per executable interpreter transition. The harness requires all three
 views for every LCNF result: trace names must reproduce
 `executed-lcnf-forms`, and trace multiplicities must reproduce
 `executed-lcnf-form-counts`.
+`executed-step-trace` closes the remaining accounting gap. It contains exactly
+one item per interpreter transition: either `form:<name>` or an administrative
+kind for named/value invocation and yielded bind/apply/cache/final-result
+control. Coverage rejects unknown kinds, requires the trace length to equal
+`interpreter-steps`, and requires its ordered `form:` projection to reproduce
+`executed-lcnf-form-trace`. Executed forms must also be present in the compiled
+artifact's `lcnf-forms` inventory.
 The manifest's optional
 `requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
 obligations. The harness requires count telemetry for every LCNF result,
@@ -1006,7 +1013,8 @@ The report records per-case required, observed, and missing form and external
 sets, dynamic form and external counts, ordered external traces, their
 corpus-wide summaries, and interpreter step counts. Every LCNF result must emit
 `executed-lcnf-forms`,
-`executed-lcnf-form-counts`, `executed-lcnf-form-trace`, `executed-externals`,
+`executed-lcnf-form-counts`, `executed-lcnf-form-trace`,
+`executed-step-trace`, `executed-externals`,
 `executed-external-counts`, `executed-external-trace`, and a positive
 `interpreter-steps` value, including cases whose executed requirement lists are
 empty. An empty list means “collect telemetry without a path-specific
