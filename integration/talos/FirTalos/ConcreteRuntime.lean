@@ -5277,6 +5277,30 @@ theorem getTagStep_of_refines
   rw [Word32.ofUInt32_ofNat_value, read]
   simp [tagToNat]
 
+/-- A representation-polymorphic case discriminator rejected by FIR as a
+nonconstructor produces the exact source-classified concrete trap before any
+generated alternative comparison. -/
+theorem getTagStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {value : Value}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) value)
+    (tagFailed : getTag runtime value = .error .expectedConstructor) :
+    getTagStep initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      getTag runtime value = .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  have readFailed :=
+    runtimeRelated.heap.readTag_expectedConstructor_refines valueRelated
+      tagFailed
+  refine ⟨?_, tagFailed, .source .expectedConstructor⟩
+  simp [getTagStep, clearFailure, Word32.ofUInt32_ofNat_value, readFailed,
+    ConcreteError.toTrap]
+
 /-- Stale tag observation preserves the exact witness-indexed source fault at
 the Talos host boundary. -/
 theorem getTagStep_deadObject_of_refines

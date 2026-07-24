@@ -3001,6 +3001,19 @@ or any heap write. Case tags, unbox, reset/reuse, and ownership underflow remain
 the next distinct fault families. No shared semantic contract or executable
 ABI changed.
 
+W6.6ct closes the constructor-kind case-discrimination leaf.
+`LiveHeapRel.readTag_expectedConstructor_refines` handles the
+representation-polymorphic `.tobject` boundary directly: the FIR failure
+premise eliminates immediate and promoted tags, while the heap branch proves
+exact rejection for every represented live nonconstructor cell and eliminates
+the genuine-constructor branch. The Talos host theorem preserves the
+source-classified trap, and the terminal object-mode case leaf proves the
+generated `local.get; getTag` prefix traps before any constructor comparison,
+alternative selection, or branch body. Stale discrimination remains covered
+by its address-related leaf; missing-alternative `invalidCases` remains the
+separate structured-unreachable blocker. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

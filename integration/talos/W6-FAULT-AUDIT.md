@@ -65,7 +65,7 @@ the premise that derives its operation equation remains to be packaged.
 | object projection | `expectedConstructor`, `deadObject`, `objectFieldOutOfBounds` | all three exact terminal leaves complete |
 | `USize` projection | `expectedConstructor`, `deadObject`, `usizeFieldOutOfBounds` | all three exact terminal leaves complete |
 | packed-scalar projection | `expectedConstructor`, `deadObject`, `scalarFieldMissing` | constructor/dead leaves complete; missing-coordinate mismatch is `FIR-BUG-wasm-none-uninitialized-scalar-projection` |
-| constructor cases / `getTag` | `expectedConstructor`, `deadObject`, `invalidCases` | dead leaf complete; expected-constructor is exact runtime; missing-alt fallback is blocked by `FIR-BUG-wasm-none-unreachable-fault-classification` |
+| constructor cases / `getTag` | `expectedConstructor`, `deadObject`, `invalidCases` | constructor/dead leaves complete; missing-alt fallback is blocked by `FIR-BUG-wasm-none-unreachable-fault-classification` |
 | object and `USize` mutation | `expectedConstructor`, `deadObject`, bounds | all exact terminal leaves complete |
 | packed-scalar mutation and tag mutation | `expectedConstructor`, `deadObject` | all exact terminal leaves complete for every supported integer width |
 | `isShared` | `expectedObject`, `deadObject` | dead leaf complete; the ABI relation excludes `expectedObject` for an admitted related operand |
@@ -100,8 +100,8 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package the remaining exact-source constructor-kind leaves for case tags
-   and boxed/reset readers using the common checked-header theorem.
+1. Package the remaining exact-source constructor-kind leaves for boxed,
+   reset, and reuse readers using the common checked-header theorem.
 2. Add the address-related underflow leaf and prove its precedence over
    recursive release.
 3. Resolve the structured `unreachable` transport as an isolated semantic

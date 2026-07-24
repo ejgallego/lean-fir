@@ -2864,6 +2864,71 @@ theorem concreteFaultLeaf_delete_deadObject
     sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
     operation failureRelated
 
+/-- An object-mode case chain whose related discriminator is not a
+constructor faults at the generated `getTag` prefix before any alternative
+comparison or branch selection. The remainder of the adapted chain stays
+abstract. -/
+theorem concreteFaultLeaf_cases_getTag_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {casesDecl : LCNF.Cases .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {discrIndex : Nat}
+    {discrWord : Word32}
+    {discrValue : Value}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.cases casesDecl)
+        ([.localGet discrIndex, .call id] ++ targetRest))
+    (discrLookup :
+      lookupValue sourceEnv casesDecl.discr = .ok discrValue)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hDiscr :
+      locals.get discrIndex =
+        some (.i32 (UInt32.ofNat discrWord.value)))
+    (discrRelated :
+      ValueRel witness .tobject (.word32 discrWord) discrValue)
+    (tagFailed :
+      getTag sourceRuntime discrValue = .error .expectedConstructor)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some getTagContract)
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.cases casesDecl)
+      ([.localGet discrIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    getTagStep_expectedConstructor_of_refines initialRelated.1 discrRelated
+      tagFailed
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv (.cases casesDecl))
+        (FaultObservation sourceRuntime .expectedConstructor) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, discrLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := getTagStep)
+    (failure := .source .expectedConstructor)
+    sourceFault adapted initialRelated hDiscr hImp hSat hi hContract hParams
+    operation failureRelated
+
 /-- An object-mode case chain whose generated prefix reads a stale
 discriminator faults before any constructor comparison or branch selection.
 The remainder of the adapted alternative chain stays abstract. -/

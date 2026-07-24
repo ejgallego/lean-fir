@@ -166,8 +166,8 @@ payload or precedence. Projection, mutation, ownership, tag, case-tag, and
 arbitrary-arity external terminal leaves are present. Direct object, `USize`,
 and packed-scalar projection plus mutation now preserve the common
 `expectedConstructor` gateway across every admitted related operand; tag
-mutation shares the same boundary. The exact matrix and known blockers are
-maintained in `W6-FAULT-AUDIT.md`.
+mutation and object-mode case discrimination share the same boundary. The
+exact matrix and known blockers are maintained in `W6-FAULT-AUDIT.md`.
 
 ### T4S. Target safety
 

@@ -1488,6 +1488,109 @@ theorem LiveHeapRel.readTag_tobject_refines
           rw [← tagEq]
           simpa using related.readTaggedReferenceTag_refines taggedRelated
 
+/-- A representation-polymorphic case discriminator rejected by FIR as a
+nonconstructor is rejected by the concrete tag reader with the same source
+fault. Related tagged values are eliminated by the failure premise; every
+ordinary live nonconstructor heap shape is rejected after the common live
+header read. -/
+theorem LiveHeapRel.readTag_expectedConstructor_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value}
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (tagFailed : getTag runtime value = .error .expectedConstructor) :
+    readTag state word = .error (.source .expectedConstructor) := by
+  have failOfHeader (header : Header)
+      (headerRead : state.readLiveHeader word = .ok header)
+      (notConstructor : header.kind ≠ .constructor)
+      (notPromoted : header.isPromotedTag = false) :
+      readTag state word = .error (.source .expectedConstructor) := by
+    have heap :=
+      (MemoryState.PrefixExtension.readLiveHeader_facts state word header
+        headerRead).1
+    unfold readTag
+    rw [heap]
+    simp only [headerRead, Bind.bind, Except.bind, liftMemory]
+    have constructorFalse : (header.kind == .constructor) = false := by
+      cases kindEq : header.kind
+      case constructor => contradiction
+      all_goals native_decide
+    rw [constructorFalse]
+    change (if header.isPromotedTag then
+      liftMemory (state.memory.readUInt64 (word.value + headerBytes))
+    else .error (.source .expectedConstructor)) =
+      .error (.source .expectedConstructor)
+    rw [notPromoted]
+    rfl
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          cases taggedRelated <;> simp [getTag] at tagFailed
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨cell, found, cellRelation⟩ :=
+                related.concreteToSemantic _ _ mapped
+              have live : cell.live = true := by
+                cases liveEq : cell.live with
+                | false =>
+                    simp [getTag, getLiveCell, found, liveEq] at tagFailed
+                    simp only [Bind.bind, Except.bind] at tagFailed
+                    have faultEq := Except.error.inj tagFailed
+                    cases faultEq
+                | true => rfl
+              have liveRelated := cellRelation.live_of_eq_true live
+              cases liveRelated with
+              | constructor descriptor objectEq objectRelated headerRead
+                  headerKind refCount persistent cellLive =>
+                  simp [getTag, getLiveCell, found, live] at tagFailed
+                  simp only [Bind.bind, Except.bind] at tagFailed
+                  rw [objectEq] at tagFailed
+                  contradiction
+              | boxed descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.boxed == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | natural descriptor objectEq headerRead headerKind marker extent
+                  limbsFit decoded refCount persistent cellLive =>
+                  exact failOfHeader _ headerRead (by simp [headerKind])
+                    (by simp [Header.isPromotedTag, headerKind, marker,
+                      bigNaturalMarker, promotedTagMarker])
+              | integer descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.integer == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | string descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.string == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | closure closureRelated =>
+                  cases closureRelated with
+                  | closure objectEq objectRelated headerRead headerKind
+                      descriptorLookup fixedCount extent refCount persistent
+                      cellLive =>
+                      have different :
+                          (ObjectKind.closure == ObjectKind.natural) = false := by
+                        decide
+                      exact failOfHeader _ headerRead (by simp [headerKind])
+                        (by simp [Header.isPromotedTag, headerKind, different])
+
 /-- The common checked constructor-header gate preserves
 `expectedConstructor` for every representation-polymorphic object. The source
 failure excludes a genuine live constructor; tagged values and every other
