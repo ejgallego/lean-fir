@@ -426,6 +426,15 @@ def BinderNamesAvoid (forbidden : FVarId)
 def BinderNamesUnique (binders : List FVarId) : Prop :=
   binders.Pairwise (fun left right => left.name ≠ right.name)
 
+/-- Declaration-wide uniqueness includes top-level parameters before the
+canonical body enumeration, exactly matching FIR's hygiene policy. -/
+def DeclCodeBinderNamesUnique (declaration : LCNF.Decl .impure) : Prop :=
+  match declaration.value with
+  | .extern _ => BinderNamesUnique (paramIds declaration.params)
+  | .code code =>
+      BinderNamesUnique
+        (paramIds declaration.params ++ codeBinderIds code)
+
 /-- Declaration-body ownership is an exact transparent binder enumeration
 plus global runtime-name uniqueness. -/
 structure CodeBinderOwnership (code : LCNF.Code .impure) where
@@ -493,6 +502,12 @@ theorem BinderNamesUnique.tail_unique
     (unique : BinderNamesUnique (head :: tail)) :
     BinderNamesUnique tail :=
   List.Pairwise.of_cons unique
+
+theorem codeBinderOwnership_of_declUnique
+    (unique :
+      BinderNamesUnique (paramIds parameters ++ codeBinderIds code)) :
+    Nonempty (CodeBinderOwnership code) :=
+  CodeBinderOwnership.canonicalExists unique.right_of_append
 
 /-- A listed alternative inherits exact, unique ownership from the enclosing
 alternative list. -/
@@ -770,6 +785,54 @@ theorem pushParams_sourceJoins
     (index : ScopeIndex) (params : Array (LCNF.Param .impure)) :
     (index.pushParams params).sourceJoins = index.sourceJoins := by
   exact pushParamList_sourceJoins index params.toList
+
+/-- Parameters enter the variable scope from left to right, so their final
+scope representation is the reverse parameter-id list followed by the outer
+scope. -/
+theorem pushParamList_sourceScope
+    (index : ScopeIndex) (params : List (LCNF.Param .impure)) :
+    (index.pushParamList params).sourceScope =
+      (params.map (fun param => param.fvarId)).reverse ++
+        index.sourceScope := by
+  induction params generalizing index with
+  | nil => rfl
+  | cons param rest ih =>
+      rw [ScopeIndex.pushParamList, ih]
+      simp [ScopeIndex.pushVar, List.append_assoc]
+
+theorem pushParams_sourceScope
+    (index : ScopeIndex) (params : Array (LCNF.Param .impure)) :
+    (index.pushParams params).sourceScope =
+      (paramIds params).reverse ++ index.sourceScope := by
+  exact pushParamList_sourceScope index params.toList
+
+/-- A body binder from a declaration-wide unique enumeration is fresh for
+the declaration's initial parameter scope. -/
+theorem freshForInitialParameterScope_of_declUnique
+    (unique :
+      BinderNamesUnique (paramIds parameters ++ codeBinderIds code))
+    (member : forbidden ∈ codeBinderIds code) :
+    FreshForScope forbidden
+      (ScopeIndex.empty.pushParams parameters).sourceScope := by
+  have paramsAvoid :
+      BinderNamesAvoid forbidden (paramIds parameters) :=
+    unique.left_avoids_of_mem_right member
+  intro candidate inScope
+  rw [pushParams_sourceScope] at inScope
+  have candidateMember :
+      candidate ∈ (paramIds parameters).reverse := by
+    simpa [ScopeIndex.empty, List.contains_iff_mem] using inScope
+  exact paramsAvoid candidate (by simpa using candidateMember)
+
+/-- Declaration bodies begin with no join binders, and parameter insertion
+does not change the join scope. -/
+theorem freshForInitialJoinScope
+    (forbidden : FVarId) (parameters : Array (LCNF.Param .impure)) :
+    FreshForScope forbidden
+      (ScopeIndex.empty.pushParams parameters).sourceJoins := by
+  rw [pushParams_sourceJoins]
+  intro candidate inScope
+  simp [ScopeIndex.empty] at inScope
 
 theorem argAvoids_of_scoped
     (fresh : FreshForScope forbidden scope)
