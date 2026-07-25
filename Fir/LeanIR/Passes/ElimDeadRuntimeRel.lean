@@ -3162,6 +3162,116 @@ theorem ShadowRuntimeRel.reindexClosureCall
     exact reachable_monoRootReachability
       (closureCallRoots_reachable rightFound rightObject) reachable
 
+/-- Results of reading a live constructor preserve the concrete heap
+location, the complete cell relation, and the constructor payload relation. -/
+def ConstructorReadRel (rho : AddressRenaming) :
+    (Location × HeapCell × ConstructorObject) →
+      (Location × HeapCell × ConstructorObject) → Prop
+  | (leftLocation, leftCell, leftObject),
+      (rightLocation, rightCell, rightObject) =>
+    rho.forward leftLocation = some rightLocation ∧
+      HeapCellRel rho leftCell rightCell ∧
+      HeapObjectRel rho (.ctor leftObject) (.ctor rightObject)
+
+/-- A retained value-producing runtime operation may allocate fresh objects,
+so its paired successful result existentially records the extended address
+renaming together with the newly published values and runtime relation. -/
+def RuntimeValuePairRel (rho : AddressRenaming)
+    (leftExtra rightExtra : List Value) :
+    (RuntimeState × Value) → (RuntimeState × Value) → Prop
+  | (leftRuntime, leftValue), (rightRuntime, rightValue) =>
+    ∃ larger,
+      RenamingExtends rho larger ∧
+      ValueRel larger leftValue rightValue ∧
+      ShadowRuntimeRel larger leftRuntime rightRuntime
+        (leftValue :: leftExtra) (rightValue :: rightExtra)
+
+/-- Reading a constructor from related published values either produces
+related constructor payloads or fails with related runtime faults.  This is
+the common fault-preservation interface used by all retained projections. -/
+theorem ShadowRuntimeRel.getConstructorBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ExceptRel (RuntimeFaultRel rho) (ConstructorReadRel rho)
+      (getConstructor left leftValue) (getConstructor right rightValue) := by
+  cases values with
+  | tagged payload => exact .error (.same _)
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapped => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable : Reachable left.heap
+          (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ leftMember)
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      have liveEq := cells.2.2.1
+      have objectRelation := cells.2.2.2
+      generalize leftObjectEq : leftCell.object = leftObject
+        at objectRelation
+      generalize rightObjectEq : rightCell.object = rightObject
+        at objectRelation
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using liveEq
+          simp [getConstructor, getLiveCell, leftFound, rightFound,
+            leftLiveEq, rightLiveEq, Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using liveEq
+          cases objectRelation with
+          | ctor tag objectFields usizes scalars =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+              exact .ok ⟨mapping, cells,
+                .ctor tag objectFields usizes scalars⟩
+          | closure fixed =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | boxed value =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | string value =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | natural value =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | integer value =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | byteArray value =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+          | «opaque» typeName =>
+              simp [getConstructor, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind]
+              exact .error (.same _)
+
 /-- Constructor-tag reads of related published values either return the same
 tag or fail with related runtime faults.  In particular, a dead heap reference
 reports the concrete source and target locations related by `rho`. -/
@@ -3321,6 +3431,72 @@ theorem ShadowRuntimeRel.isSharedBoth_of_related
           · exact related.prependNonHeap (.scalar _)
               (by intro location; simp) (by intro location; simp)
 
+/-- Sharedness queries preserve successful scalar results and runtime faults.
+Dead-object diagnostics are transported through the active address
+renaming. -/
+theorem ShadowRuntimeRel.isSharedBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ExceptRel (RuntimeFaultRel rho) (ValueRel rho)
+      (isShared left leftValue) (isShared right rightValue) := by
+  generalize sourceReadEq : isShared left leftValue = sourceRead
+  cases sourceRead with
+  | ok leftResult =>
+      rcases related.isSharedBoth_of_related leftMember values sourceReadEq with
+        ⟨rightResult, targetRead, results, _next⟩
+      rw [targetRead]
+      exact .ok results
+  | error sourceFault =>
+      cases values with
+      | tagged payload => simp [isShared] at sourceReadEq
+      | usize value =>
+          simp [isShared] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | scalar value =>
+          simp [isShared] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | erased =>
+          simp [isShared] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseNone =>
+          simp [isShared] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseSome mapped =>
+          simp [isShared] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | @heap leftLocation rightLocation mapping =>
+          have leftReachable : Reachable left.heap
+              (runtimeRoots left leftExtra) leftLocation := by
+            exact .root
+              (extra_subset_runtimeRoots left leftExtra _ leftMember)
+          rcases related.heap.1 leftLocation leftReachable with
+            ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+              rightFound, cells⟩
+          have locationEq : mappedLocation = rightLocation := by
+            rw [mapping] at mappedEq
+            exact (Option.some.inj mappedEq).symm
+          subst mappedLocation
+          cases rightLiveEq : rightCell.live with
+          | false =>
+              have leftLiveEq : leftCell.live = false := by
+                simpa [rightLiveEq] using cells.2.2.1
+              simp [isShared, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, Functor.map, Except.map]
+                at sourceReadEq ⊢
+              subst sourceFault
+              exact .error (.deadObject mapping)
+          | true =>
+              have leftLiveEq : leftCell.live = true := by
+                simpa [rightLiveEq] using cells.2.2.1
+              simp [isShared, getLiveCell, leftFound, leftLiveEq,
+                Functor.map, Except.map] at sourceReadEq
+
 /-- A successful object-field projection from a related published
 constructor succeeds at the same index on the target.  The selected fields
 are related and, as children of already reachable constructor roots, may be
@@ -3469,6 +3645,72 @@ theorem ShadowRuntimeRel.getObjectFieldBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
 
+/-- Object-field projections preserve both successful values and runtime
+faults.  Bounds faults agree because related constructors have equally sized
+object-field arrays. -/
+theorem ShadowRuntimeRel.getObjectFieldBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho) (ValueRel rho)
+      (getObjectField left leftObject index)
+      (getObjectField right rightObject index) := by
+  generalize sourceReadEq :
+      getObjectField left leftObject index = sourceRead
+  cases sourceRead with
+  | ok leftField =>
+      rcases related.getObjectFieldBoth_of_related leftMember objects
+          sourceReadEq with
+        ⟨rightField, targetRead, fields, _next⟩
+      rw [targetRead]
+      exact .ok fields
+  | error sourceFault =>
+      have constructors :=
+        related.getConstructorBoth_related leftMember objects
+      generalize sourceConstructorEq :
+          getConstructor left leftObject = sourceConstructor at constructors
+      generalize targetConstructorEq :
+          getConstructor right rightObject = targetConstructor at constructors
+      cases constructors with
+      | error faults =>
+          simp [getObjectField, sourceConstructorEq, targetConstructorEq,
+            Bind.bind, Except.bind] at sourceReadEq ⊢
+          subst sourceFault
+          exact .error faults
+      | ok constructorRelation =>
+          rename_i sourceConstructor targetConstructor
+          obtain ⟨leftLocation, leftCell, leftValue⟩ := sourceConstructor
+          obtain ⟨rightLocation, rightCell, rightValue⟩ := targetConstructor
+          rcases constructorRelation with
+            ⟨mapping, cells, constructors⟩
+          cases constructors with
+          | ctor tag fields usizes scalars =>
+              have sizeEq :
+                  leftValue.objectFields.size =
+                    rightValue.objectFields.size :=
+                arrayRel_size_eq fields
+              have sourceUnbounded :
+                  leftValue.objectFields[index]? = none := by
+                cases fieldEq : leftValue.objectFields[index]? with
+                | none => rfl
+                | some value =>
+                    simp [getObjectField, sourceConstructorEq, fieldEq,
+                      Bind.bind, Except.bind, Pure.pure, Except.pure]
+                      at sourceReadEq
+              have targetUnbounded :
+                  rightValue.objectFields[index]? = none := by
+                simpa [Array.getElem?_eq_getElem, sizeEq] using sourceUnbounded
+              simp [getObjectField, sourceConstructorEq, targetConstructorEq,
+                sourceUnbounded, targetUnbounded, Bind.bind, Except.bind]
+                at sourceReadEq ⊢
+              have faultEq : sourceFault =
+                  .objectFieldOutOfBounds index
+                    leftValue.objectFields.size := by
+                simpa using (Except.error.inj sourceReadEq).symm
+              subst sourceFault
+              rw [← sizeEq]
+              exact .error (.same _)
+
 /-- Every successful absolute fixed-slot `USize` read returns an unboxed
 word value. -/
 theorem getUSizeSlot_ok_eq_usize
@@ -3607,6 +3849,61 @@ theorem ShadowRuntimeRel.getUSizeSlotBoth_of_related
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
 
+/-- Absolute `USize` projections preserve both results and faults.  Related
+constructors have the same object-field prefix length and identical `USize`
+payload arrays, so every fixed-slot outcome agrees exactly after the common
+constructor read. -/
+theorem ShadowRuntimeRel.getUSizeSlotBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho) (ValueRel rho)
+      (getUSizeSlot left leftObject slot)
+      (getUSizeSlot right rightObject slot) := by
+  generalize sourceReadEq :
+      getUSizeSlot left leftObject slot = sourceRead
+  cases sourceRead with
+  | ok leftField =>
+      rcases related.getUSizeSlotBoth_of_related leftMember objects
+          sourceReadEq with
+        ⟨rightField, targetRead, fields, _next⟩
+      rw [targetRead]
+      exact .ok fields
+  | error sourceFault =>
+      have constructors :=
+        related.getConstructorBoth_related leftMember objects
+      generalize sourceConstructorEq :
+          getConstructor left leftObject = sourceConstructor at constructors
+      generalize targetConstructorEq :
+          getConstructor right rightObject = targetConstructor at constructors
+      cases constructors with
+      | error faults =>
+          simp [getUSizeSlot, sourceConstructorEq, targetConstructorEq,
+            Bind.bind, Except.bind] at sourceReadEq ⊢
+          subst sourceFault
+          exact .error faults
+      | ok constructorRelation =>
+          rename_i sourceConstructor targetConstructor
+          obtain ⟨leftLocation, leftCell, leftValue⟩ := sourceConstructor
+          obtain ⟨rightLocation, rightCell, rightValue⟩ := targetConstructor
+          rcases constructorRelation with
+            ⟨mapping, cells, constructors⟩
+          cases constructors with
+          | ctor tag fields usizes scalars =>
+              have sizeEq :
+                  leftValue.objectFields.size =
+                    rightValue.objectFields.size :=
+                arrayRel_size_eq fields
+              have targetRead :
+                  getUSizeSlot right rightObject slot =
+                    .error sourceFault := by
+                simpa [getUSizeSlot, sourceConstructorEq,
+                  targetConstructorEq, sizeEq, usizes,
+                  Bind.bind, Except.bind, Pure.pure, Except.pure]
+                  using sourceReadEq
+              rw [targetRead]
+              exact .error (.same _)
+
 /-- Every successful packed-scalar read returns an unboxed scalar value. -/
 theorem getScalarField_ok_eq_scalar
     (read : getScalarField runtime object width offset = .ok result) :
@@ -3737,6 +4034,56 @@ theorem ShadowRuntimeRel.getScalarFieldBoth_of_related
               simp [getScalarField, getConstructor, getLiveCell,
                 leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
+
+/-- Packed-scalar projections preserve both results and faults.  The packed
+field table is identical in related constructors, so missing-field faults
+agree exactly once the common constructor read succeeds. -/
+theorem ShadowRuntimeRel.getScalarFieldBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho) (ValueRel rho)
+      (getScalarField left leftObject width offset)
+      (getScalarField right rightObject width offset) := by
+  generalize sourceReadEq :
+      getScalarField left leftObject width offset = sourceRead
+  cases sourceRead with
+  | ok leftField =>
+      rcases related.getScalarFieldBoth_of_related leftMember objects
+          sourceReadEq with
+        ⟨rightField, targetRead, fields, _next⟩
+      rw [targetRead]
+      exact .ok fields
+  | error sourceFault =>
+      have constructors :=
+        related.getConstructorBoth_related leftMember objects
+      generalize sourceConstructorEq :
+          getConstructor left leftObject = sourceConstructor at constructors
+      generalize targetConstructorEq :
+          getConstructor right rightObject = targetConstructor at constructors
+      cases constructors with
+      | error faults =>
+          simp [getScalarField, sourceConstructorEq, targetConstructorEq,
+            Bind.bind, Except.bind] at sourceReadEq ⊢
+          subst sourceFault
+          exact .error faults
+      | ok constructorRelation =>
+          rename_i sourceConstructor targetConstructor
+          obtain ⟨leftLocation, leftCell, leftValue⟩ := sourceConstructor
+          obtain ⟨rightLocation, rightCell, rightValue⟩ := targetConstructor
+          rcases constructorRelation with
+            ⟨mapping, cells, constructors⟩
+          cases constructors with
+          | ctor tag fields usizes scalars =>
+              have targetRead :
+                  getScalarField right rightObject width offset =
+                    .error sourceFault := by
+                simpa [getScalarField, sourceConstructorEq,
+                  targetConstructorEq, scalars,
+                  Bind.bind, Except.bind, Pure.pure, Except.pure]
+                  using sourceReadEq
+              rw [targetRead]
+              exact .error (.same _)
 
 /-- Successful tagged-object unboxing always produces an immediate scalar or
 `USize` word. -/
@@ -3899,6 +4246,87 @@ theorem ShadowRuntimeRel.unboxBoth_of_related
           | «opaque» value =>
               simp [unbox, getLiveCell, leftFound, leftLiveEq, leftObjectEq,
                 Bind.bind, Except.bind] at sourceRead
+
+/-- Unboxing related published objects preserves both returned payloads and
+runtime faults.  A dead boxed object reports the corresponding renamed
+location; representation and scalar-type faults agree exactly. -/
+theorem ShadowRuntimeRel.unboxBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho) (ValueRel rho)
+      (unbox left type leftObject) (unbox right type rightObject) := by
+  generalize sourceReadEq : unbox left type leftObject = sourceRead
+  cases sourceRead with
+  | ok leftResult =>
+      rcases related.unboxBoth_of_related leftMember objects sourceReadEq with
+        ⟨rightResult, targetRead, results, _next⟩
+      rw [targetRead]
+      exact .ok results
+  | error sourceFault =>
+      cases objects with
+      | tagged payload =>
+          have targetRead :
+              unbox right type (.object (.tagged payload)) =
+                .error sourceFault := by
+            simpa [unbox] using sourceReadEq
+          rw [targetRead]
+          exact .error (.same _)
+      | usize value =>
+          simp [unbox] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | scalar value =>
+          simp [unbox] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | erased =>
+          simp [unbox] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseNone =>
+          simp [unbox] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseSome mapped =>
+          simp [unbox] at sourceReadEq
+          subst sourceFault
+          exact .error (.same _)
+      | @heap leftLocation rightLocation mapping =>
+          have leftReachable : Reachable left.heap
+              (runtimeRoots left leftExtra) leftLocation := by
+            exact .root
+              (extra_subset_runtimeRoots left leftExtra _ leftMember)
+          rcases related.heap.1 leftLocation leftReachable with
+            ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+              rightFound, cells⟩
+          have locationEq : mappedLocation = rightLocation := by
+            rw [mapping] at mappedEq
+            exact (Option.some.inj mappedEq).symm
+          subst mappedLocation
+          have objectRelation := cells.2.2.2
+          generalize leftObjectEq : leftCell.object = leftHeapObject
+            at objectRelation
+          generalize rightObjectEq : rightCell.object = rightHeapObject
+            at objectRelation
+          cases rightLiveEq : rightCell.live with
+          | false =>
+              have leftLiveEq : leftCell.live = false := by
+                simpa [rightLiveEq] using cells.2.2.1
+              simp [unbox, getLiveCell, leftFound, rightFound,
+                leftLiveEq, rightLiveEq, Bind.bind, Except.bind]
+                at sourceReadEq ⊢
+              subst sourceFault
+              exact .error (.deadObject mapping)
+          | true =>
+              have leftLiveEq : leftCell.live = true := by
+                simpa [rightLiveEq] using cells.2.2.1
+              cases objectRelation <;>
+                simp_all [unbox, getLiveCell, leftFound, rightFound,
+                  Bind.bind, Except.bind] <;>
+                first
+                | contradiction
+                | exact .error (.same _)
 
 /-- Reading a mapped heap reference that is published as a control root
 returns related cells at the mapped locations. -/
@@ -7033,6 +7461,41 @@ theorem ShadowRuntimeRel.decValueOnceBoth_related
       simpa [decValueOnce] using
         related.decLocationBoth_related mapping reachable
 
+/-- Releasing pointwise-related published values left-to-right preserves
+related runtimes and faults after every prefix. -/
+theorem ShadowRuntimeRel.releaseListBoth_related
+    (related : ShadowRuntimeRel rho left right leftRoots rightRoots)
+    (values : ListRel (ValueRel rho) leftValues rightValues)
+    (leftPublished : RootSubset leftValues leftRoots) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftRoots rightRoots)
+      (leftValues.foldlM (init := left)
+        fun runtime value => decValueOnce runtime value true)
+      (rightValues.foldlM (init := right)
+        fun runtime value => decValueOnce runtime value true) := by
+  induction values generalizing left right with
+  | nil =>
+      exact .ok related
+  | @cons leftHead rightHead leftTail rightTail heads tails recurse =>
+      have headPublished : leftHead ∈ leftRoots :=
+        leftPublished leftHead List.mem_cons_self
+      have tailPublished : RootSubset leftTail leftRoots := by
+        intro value member
+        exact leftPublished value (List.mem_cons_of_mem leftHead member)
+      simp only [List.foldlM_cons, Bind.bind, Except.bind]
+      have headResults :=
+        related.decValueOnceBoth_related headPublished heads (check := true)
+      generalize leftHeadEq :
+          decValueOnce left leftHead true = leftHeadResult at headResults
+      generalize rightHeadEq :
+          decValueOnce right rightHead true = rightHeadResult at headResults
+      cases headResults with
+      | error faults =>
+          exact .error faults
+      | ok next =>
+          exact recurse next tailPublished
+
 /-- Repeating a related public decrement preserves the relation after every
 successful source iteration. -/
 theorem ShadowRuntimeRel.decValueBoth_of_related
@@ -7520,6 +7983,396 @@ theorem ShadowRuntimeRel.resetBoth_of_related
               | «opaque» value =>
                   simp [reset, leftGet, leftSharedEq, leftObjectEq,
                     Bind.bind, Except.bind] at sourceEffect
+
+/-- Reset preserves both successful reuse tokens and faults.  Shared objects
+delegate to the public recursive decrement relation; unique constructors
+clear and release related field prefixes through `releaseListBoth_related`. -/
+theorem ShadowRuntimeRel.resetBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho)
+      (RuntimeValuePairRel rho leftExtra rightExtra)
+      (reset left count leftObject) (reset right count rightObject) := by
+  cases objects with
+  | tagged payload =>
+      simp [reset]
+      exact .ok ⟨rho, .refl rho, .reuseNone,
+        related.prependNonHeap .reuseNone
+          (by intro location; simp) (by intro location; simp)⟩
+  | usize value => exact .error (.same _)
+  | scalar value => exact .error (.same _)
+  | erased => exact .error (.same _)
+  | reuseNone => exact .error (.same _)
+  | reuseSome mapping => exact .error (.same _)
+  | @heap leftLocation rightLocation mapping =>
+      have leftReachable :
+          Reachable left.heap (runtimeRoots left leftExtra) leftLocation := by
+        exact .root (extra_subset_runtimeRoots left leftExtra _ objectRoot)
+      have rightReachable :
+          Reachable right.heap (runtimeRoots right rightExtra)
+            rightLocation := by
+        rcases reachable_forward related.roots related.heap
+            leftReachable with
+          ⟨mappedLocation, mappedEq, reachable⟩
+        have locationEq : mappedLocation = rightLocation := by
+          rw [mapping] at mappedEq
+          exact (Option.some.inj mappedEq).symm
+        simpa [locationEq] using reachable
+      rcases related.heap.1 leftLocation leftReachable with
+        ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+          rightFound, cells⟩
+      have locationEq : mappedLocation = rightLocation := by
+        rw [mapping] at mappedEq
+        exact (Option.some.inj mappedEq).symm
+      subst mappedLocation
+      cases rightLiveEq : rightCell.live with
+      | false =>
+          have leftLiveEq : leftCell.live = false := by
+            simpa [rightLiveEq] using cells.2.2.1
+          simp [reset, getLiveCell, leftFound, rightFound,
+            leftLiveEq, rightLiveEq, Bind.bind, Except.bind]
+          exact .error (.deadObject mapping)
+      | true =>
+          have leftLiveEq : leftCell.live = true := by
+            simpa [rightLiveEq] using cells.2.2.1
+          have leftGet : getLiveCell left leftLocation = .ok leftCell := by
+            simp [getLiveCell, leftFound, leftLiveEq]
+          have rightGet : getLiveCell right rightLocation = .ok rightCell := by
+            simp [getLiveCell, rightFound, rightLiveEq]
+          have persistentEq :
+              leftCell.persistent = rightCell.persistent := cells.2.1
+          have rcEq : leftCell.rc = rightCell.rc := cells.1
+          cases leftSharedEq :
+              (leftCell.persistent || leftCell.rc != 1) with
+          | true =>
+              have rightSharedEq :
+                  (rightCell.persistent || rightCell.rc != 1) = true := by
+                simpa [← persistentEq, ← rcEq] using leftSharedEq
+              have decrements :=
+                related.decLocationBoth_related mapping leftReachable
+              generalize leftDecEq :
+                  decLocation left leftLocation = leftDecResult at decrements
+              generalize rightDecEq :
+                  decLocation right rightLocation = rightDecResult at decrements
+              cases decrements with
+              | error faults =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftDecEq, rightDecEq,
+                    Bind.bind, Except.bind]
+                  exact .error faults
+              | ok next =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftDecEq, rightDecEq,
+                    Bind.bind, Except.bind]
+                  exact .ok ⟨rho, .refl rho, .reuseNone,
+                    next.prependNonHeap .reuseNone
+                      (by intro location; simp)
+                      (by intro location; simp)⟩
+          | false =>
+              have rightSharedEq :
+                  (rightCell.persistent || rightCell.rc != 1) = false := by
+                simpa [← persistentEq, ← rcEq] using leftSharedEq
+              have objectRelation := cells.2.2.2
+              generalize leftObjectEq :
+                leftCell.object = leftHeapObject at objectRelation
+              generalize rightObjectEq :
+                rightCell.object = rightHeapObject at objectRelation
+              cases objectRelation with
+              | @ctor leftConstructor rightConstructor tag fields usizes
+                  scalars =>
+                  have sizeEq :
+                      leftConstructor.objectFields.size =
+                        rightConstructor.objectFields.size :=
+                    arrayRel_size_eq fields
+                  by_cases tooMany :
+                      count > leftConstructor.objectFields.size
+                  · have rightTooMany :
+                        count > rightConstructor.objectFields.size := by
+                      rwa [← sizeEq]
+                    simp [reset, leftGet, rightGet, leftSharedEq,
+                      rightSharedEq, leftObjectEq, rightObjectEq,
+                      tooMany, rightTooMany, Bind.bind, Except.bind]
+                    rw [← sizeEq]
+                    exact .error (.same _)
+                  · have rightTooMany :
+                        ¬ count > rightConstructor.objectFields.size := by
+                      rwa [← sizeEq]
+                    let leftReleased :=
+                      leftConstructor.objectFields.extract 0 count
+                    let rightReleased :=
+                      rightConstructor.objectFields.extract 0 count
+                    let leftCleared :=
+                      leftConstructor.objectFields.mapIdx fun index field =>
+                        if index < count then .object (.tagged 0) else field
+                    let rightCleared :=
+                      rightConstructor.objectFields.mapIdx fun index field =>
+                        if index < count then .object (.tagged 0) else field
+                    have releasedFields :
+                        ArrayRel (ValueRel rho)
+                          leftReleased rightReleased :=
+                      arrayRel_extract fields 0 count
+                    have clearedFields :
+                        ArrayRel (ValueRel rho)
+                          leftCleared rightCleared :=
+                      arrayRel_mapIdx_replacePrefix fields (.tagged 0) count
+                    let leftReplacement : HeapCell :=
+                      { leftCell with object := .ctor {
+                          leftConstructor with
+                          objectFields := leftCleared } }
+                    let rightReplacement : HeapCell :=
+                      { rightCell with object := .ctor {
+                          rightConstructor with
+                          objectFields := rightCleared } }
+                    have replacement :
+                        HeapCellRel rho leftReplacement rightReplacement := by
+                      refine ⟨cells.1, cells.2.1, cells.2.2.1, ?_⟩
+                      dsimp only [leftReplacement, rightReplacement]
+                      exact @HeapObjectRel.ctor rho
+                        { leftConstructor with objectFields := leftCleared }
+                        { rightConstructor with objectFields := rightCleared }
+                        tag clearedFields usizes scalars
+                    have published := related.publishOwnedValues
+                      leftReachable rightReachable leftFound rightFound cells
+                    have leftOwned : ∀ {child},
+                        Value.object (.heap child) ∈
+                            leftReplacement.object.ownedValues.toList →
+                          Value.object (.heap child) ∈
+                              leftCell.object.ownedValues.toList ∨
+                            Reachable left.heap
+                              (runtimeRoots left
+                                (leftCell.object.ownedValues.toList ++
+                                  leftExtra)) child := by
+                      intro child member
+                      left
+                      have clearedMember :
+                          Value.object (.heap child) ∈ leftCleared.toList := by
+                        simpa [leftReplacement, HeapObject.ownedValues] using
+                          member
+                      have oldMember :=
+                        heap_mem_of_mem_clearPrefix
+                          leftConstructor.objectFields clearedMember
+                      simpa [leftObjectEq, HeapObject.ownedValues] using
+                        oldMember
+                    have rightOwned : ∀ {child},
+                        Value.object (.heap child) ∈
+                            rightReplacement.object.ownedValues.toList →
+                          Value.object (.heap child) ∈
+                              rightCell.object.ownedValues.toList ∨
+                            Reachable right.heap
+                              (runtimeRoots right
+                                (rightCell.object.ownedValues.toList ++
+                                  rightExtra)) child := by
+                      intro child member
+                      left
+                      have clearedMember :
+                          Value.object (.heap child) ∈ rightCleared.toList := by
+                        simpa [rightReplacement, HeapObject.ownedValues] using
+                          member
+                      have oldMember :=
+                        heap_mem_of_mem_clearPrefix
+                          rightConstructor.objectFields clearedMember
+                      simpa [rightObjectEq, HeapObject.ownedValues] using
+                        oldMember
+                    rcases published.setCellBothRooted mapping leftFound
+                        rightFound leftOwned rightOwned replacement with
+                      ⟨leftParent, rightParent, leftSet, rightSet,
+                        parentRelated⟩
+                    have leftSubset : RootSubset leftReleased.toList
+                        leftCell.object.ownedValues.toList := by
+                      intro value member
+                      have oldMember :=
+                        array_mem_of_mem_extract
+                          leftConstructor.objectFields member
+                      simpa [leftObjectEq, HeapObject.ownedValues] using
+                        oldMember
+                    have folded := parentRelated.releaseListBoth_related
+                      releasedFields
+                      (by
+                        intro value member
+                        exact List.mem_append_left _
+                          (leftSubset value member))
+                    generalize leftFoldEq :
+                        leftReleased.toList.foldlM (init := leftParent)
+                          (fun runtime field =>
+                            decValueOnce runtime field true) =
+                          leftFoldResult at folded
+                    generalize rightFoldEq :
+                        rightReleased.toList.foldlM (init := rightParent)
+                          (fun runtime field =>
+                            decValueOnce runtime field true) =
+                          rightFoldResult at folded
+                    have leftSetRaw :
+                        setCell left leftLocation
+                            { leftCell with object := .ctor {
+                                leftConstructor with objectFields :=
+                                  (Array.mapIdx
+                                    (fun index field =>
+                                      if index < count then
+                                        .object (.tagged 0)
+                                      else field)
+                                    leftConstructor.objectFields) } } =
+                          .ok leftParent := by
+                      simpa [leftReplacement, leftCleared] using leftSet
+                    have rightSetRaw :
+                        setCell right rightLocation
+                            { rightCell with object := .ctor {
+                                rightConstructor with objectFields :=
+                                  (Array.mapIdx
+                                    (fun index field =>
+                                      if index < count then
+                                        .object (.tagged 0)
+                                      else field)
+                                    rightConstructor.objectFields) } } =
+                          .ok rightParent := by
+                      simpa [rightReplacement, rightCleared] using rightSet
+                    cases folded with
+                    | error faults =>
+                        rename_i leftFault rightFault
+                        have leftFoldRaw :
+                            Array.foldlM
+                                (fun runtime field =>
+                                  decValueOnce runtime field true)
+                                leftParent
+                                (leftConstructor.objectFields.extract
+                                  0 count) =
+                              .error leftFault := by
+                          simpa only [leftReleased, Array.foldlM_toList]
+                            using leftFoldEq
+                        have rightFoldRaw :
+                            Array.foldlM
+                                (fun runtime field =>
+                                  decValueOnce runtime field true)
+                                rightParent
+                                (rightConstructor.objectFields.extract
+                                  0 count) =
+                              .error rightFault := by
+                          simpa only [rightReleased, Array.foldlM_toList]
+                            using rightFoldEq
+                        have leftEffect :
+                            reset left count
+                                (.object (.heap leftLocation)) =
+                              .error leftFault := by
+                          simp only [reset, leftGet, Bind.bind, Except.bind]
+                          rw [if_neg (by simpa using leftSharedEq)]
+                          rw [leftObjectEq]
+                          simp only
+                          rw [if_neg tooMany]
+                          rw [leftSetRaw]
+                          simp only
+                          rw [leftFoldRaw]
+                        have rightEffect :
+                            reset right count
+                                (.object (.heap rightLocation)) =
+                              .error rightFault := by
+                          simp only [reset, rightGet, Bind.bind, Except.bind]
+                          rw [if_neg (by simpa using rightSharedEq)]
+                          rw [rightObjectEq]
+                          simp only
+                          rw [if_neg rightTooMany]
+                          rw [rightSetRaw]
+                          simp only
+                          rw [rightFoldRaw]
+                        rw [leftEffect, rightEffect]
+                        exact .error faults
+                    | ok finalPublished =>
+                        rename_i leftResult rightResult
+                        have leftFoldRaw :
+                            Array.foldlM
+                                (fun runtime field =>
+                                  decValueOnce runtime field true)
+                                leftParent
+                                (leftConstructor.objectFields.extract
+                                  0 count) =
+                              .ok leftResult := by
+                          simpa only [leftReleased, Array.foldlM_toList]
+                            using leftFoldEq
+                        have rightFoldRaw :
+                            Array.foldlM
+                                (fun runtime field =>
+                                  decValueOnce runtime field true)
+                                rightParent
+                                (rightConstructor.objectFields.extract
+                                  0 count) =
+                              .ok rightResult := by
+                          simpa only [rightReleased, Array.foldlM_toList]
+                            using rightFoldEq
+                        have leftEffect :
+                            reset left count
+                                (.object (.heap leftLocation)) =
+                              .ok (leftResult,
+                                .reuseToken (some leftLocation)) := by
+                          simp only [reset, leftGet, Bind.bind, Except.bind]
+                          rw [if_neg (by simpa using leftSharedEq)]
+                          rw [leftObjectEq]
+                          simp only
+                          rw [if_neg tooMany]
+                          rw [leftSetRaw]
+                          simp only
+                          rw [leftFoldRaw]
+                          rfl
+                        have rightEffect :
+                            reset right count
+                                (.object (.heap rightLocation)) =
+                              .ok (rightResult,
+                                .reuseToken (some rightLocation)) := by
+                          simp only [reset, rightGet, Bind.bind, Except.bind]
+                          rw [if_neg (by simpa using rightSharedEq)]
+                          rw [rightObjectEq]
+                          simp only
+                          rw [if_neg rightTooMany]
+                          rw [rightSetRaw]
+                          simp only
+                          rw [rightFoldRaw]
+                          rfl
+                        have restricted :=
+                          finalPublished.restrictExtra related.extra
+                            (by
+                              intro value member
+                              exact List.mem_append_right _ member)
+                            (by
+                              intro value member
+                              exact List.mem_append_right _ member)
+                        rw [leftEffect, rightEffect]
+                        exact .ok ⟨rho, .refl rho, .reuseSome mapping,
+                          restricted.prependNonHeap (.reuseSome mapping)
+                            (by intro location; simp)
+                            (by intro location; simp)⟩
+              | closure fixed =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | boxed value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | string value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | natural value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | integer value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | byteArray value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
+              | «opaque» value =>
+                  simp [reset, leftGet, rightGet, leftSharedEq,
+                    rightSharedEq, leftObjectEq, rightObjectEq,
+                    Bind.bind, Except.bind]
+                  exact .error (.same _)
 
 /-- Interpreter-facing retained delete. Erased failed-reset tokens are
 synchronized no-ops; a related live heap operand marks the mapped cells dead
@@ -8161,6 +9014,59 @@ theorem ShadowRuntimeRel.boxBoth_of_related
             Pure.pure, Except.pure],
           resultValues, nextRuntime⟩
 
+/-- Boxing related published inputs preserves both allocation results and
+faults.  Ill-shaped operands fail with the same address-free scalar fault. -/
+theorem ShadowRuntimeRel.boxBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftMember : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ExceptRel (RuntimeFaultRel rho)
+      (RuntimeValuePairRel rho leftExtra rightExtra)
+      (box left type leftValue) (box right type rightValue) := by
+  generalize sourceBoxEq : box left type leftValue = sourceBox
+  cases sourceBox with
+  | ok sourceResult =>
+      obtain ⟨leftRuntime, leftResult⟩ := sourceResult
+      rcases related.boxBoth_of_related leftMember values sourceBoxEq with
+        ⟨larger, rightRuntime, rightResult, extension, targetBox,
+          results, next⟩
+      rw [targetBox]
+      exact .ok ⟨larger, extension, results, next⟩
+  | error sourceFault =>
+      cases values with
+      | scalar scalar =>
+          by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+          · simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure] at sourceBoxEq
+          · simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure] at sourceBoxEq
+      | usize word =>
+          by_cases small : word.toNat ≤ maxTaggedPayload
+          · simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure] at sourceBoxEq
+          · simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure] at sourceBoxEq
+      | tagged payload =>
+          simp [box, Bind.bind, Except.bind] at sourceBoxEq
+          subst sourceFault
+          exact .error (.same _)
+      | heap mapped =>
+          simp [box, Bind.bind, Except.bind] at sourceBoxEq
+          subst sourceFault
+          exact .error (.same _)
+      | erased =>
+          simp [box, Bind.bind, Except.bind] at sourceBoxEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseNone =>
+          simp [box, Bind.bind, Except.bind] at sourceBoxEq
+          subst sourceFault
+          exact .error (.same _)
+      | reuseSome mapped =>
+          simp [box, Bind.bind, Except.bind] at sourceBoxEq
+          subst sourceFault
+          exact .error (.same _)
+
 /-- Related fixed arguments allocate matching retained closures. The freshly
 allocated references replace their captured arguments as direct roots because
 the arguments are thereafter reachable through the closure ownership edge. -/
@@ -8336,6 +9242,34 @@ theorem ShadowRuntimeRel.allocCtorBoth
     · simp [allocCtor, rightArity, empty, rightRuntime, rightValue,
         rightObject]
       rfl
+
+/-- Constructor allocation preserves either a fresh related value pair or
+the exact arity fault. -/
+theorem ShadowRuntimeRel.allocCtorBoth_related
+    (related : ShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (info : LCNF.CtorInfo) :
+    ExceptRel (RuntimeFaultRel rho)
+      (RuntimeValuePairRel rho leftExtra rightExtra)
+      (allocCtor left info leftArguments)
+      (allocCtor right info rightArguments) := by
+  by_cases arity : leftArguments.size = info.size
+  · rcases related.allocCtorBoth arguments tail info arity with
+      ⟨larger, leftRuntime, leftValue, rightRuntime, rightValue,
+        extension, leftEffect, rightEffect, values, next⟩
+    rw [leftEffect, rightEffect]
+    exact .ok ⟨larger, extension, values, next⟩
+  · have rightArity : rightArguments.size ≠ info.size := by
+      intro equal
+      apply arity
+      rw [arrayRel_size_eq arguments]
+      exact equal
+    simp [allocCtor, arity, rightArity]
+    rw [← arrayRel_size_eq arguments]
+    exact .error (.same _)
 
 /-- Related retained reuse operations match.  The `none` branch delegates to
 paired constructor allocation and may extend the address renaming.  A
@@ -8579,6 +9513,225 @@ theorem ShadowRuntimeRel.reuseBoth_of_related
   | usize value => simp [reuse, Bind.bind, Except.bind] at sourceEffect
   | scalar value => simp [reuse, Bind.bind, Except.bind] at sourceEffect
   | erased => simp [reuse, Bind.bind, Except.bind] at sourceEffect
+
+/-- Retained reuse preserves both successful allocation/update results and
+faults.  The concrete-token branch uses its explicit reachability premise to
+transport dead-object diagnostics and constructor-shape checks. -/
+theorem ShadowRuntimeRel.reuseBoth_related
+    (related : ShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (tokens : ValueRel rho leftToken rightToken)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (tokenReachable : ∀ location,
+      leftToken = .reuseToken (some location) →
+        Reachable left.heap
+          (runtimeRoots left (leftArguments.toList ++ leftExtra)) location) :
+    ExceptRel (RuntimeFaultRel rho)
+      (RuntimeValuePairRel rho leftExtra rightExtra)
+      (reuse left leftToken info updateHeader leftArguments)
+      (reuse right rightToken info updateHeader rightArguments) := by
+  generalize sourceEffectEq :
+      reuse left leftToken info updateHeader leftArguments = sourceEffect
+  cases sourceEffect with
+  | ok sourceResult =>
+      obtain ⟨leftResult, leftValue⟩ := sourceResult
+      have arity : leftArguments.size = info.size := by
+        by_cases equal : leftArguments.size = info.size
+        · exact equal
+        · cases tokens <;>
+            simp [reuse, allocCtor, equal, Bind.bind, Except.bind,
+              Pure.pure, Except.pure] at sourceEffectEq
+      rcases related.reuseBoth_of_related tokens arguments tail tokenReachable
+          arity sourceEffectEq with
+        ⟨larger, rightResult, rightValue, extension, targetEffect,
+          values, next⟩
+      rw [targetEffect]
+      exact .ok ⟨larger, extension, values, next⟩
+  | error sourceFault =>
+      cases tokens with
+      | reuseNone =>
+          have allocations :=
+            related.allocCtorBoth_related arguments tail info
+          have sourceAllocation :
+              allocCtor left info leftArguments = .error sourceFault := by
+            simpa [reuse] using sourceEffectEq
+          rw [sourceAllocation] at allocations
+          simpa [reuse] using allocations
+      | tagged payload =>
+          simp [reuse, Bind.bind, Except.bind] at sourceEffectEq
+          have faultEq := Except.error.inj sourceEffectEq
+          subst sourceFault
+          exact .error (.same _)
+      | heap mapping =>
+          simp [reuse, Bind.bind, Except.bind] at sourceEffectEq
+          have faultEq := Except.error.inj sourceEffectEq
+          subst sourceFault
+          exact .error (.same _)
+      | usize value =>
+          simp [reuse, Bind.bind, Except.bind] at sourceEffectEq
+          have faultEq := Except.error.inj sourceEffectEq
+          subst sourceFault
+          exact .error (.same _)
+      | scalar value =>
+          simp [reuse, Bind.bind, Except.bind] at sourceEffectEq
+          have faultEq := Except.error.inj sourceEffectEq
+          subst sourceFault
+          exact .error (.same _)
+      | erased =>
+          simp [reuse, Bind.bind, Except.bind] at sourceEffectEq
+          have faultEq := Except.error.inj sourceEffectEq
+          subst sourceFault
+          exact .error (.same _)
+      | @reuseSome leftLocation rightLocation mapping =>
+          have leftReachable := tokenReachable leftLocation rfl
+          have rightArityEq :
+              rightArguments.size = leftArguments.size :=
+            (arrayRel_size_eq arguments).symm
+          by_cases arity : leftArguments.size = info.size
+          · have rightArity : rightArguments.size = info.size := by
+              rw [rightArityEq, arity]
+            rcases related.heap.1 leftLocation leftReachable with
+              ⟨mappedLocation, leftCell, rightCell, mappedEq, leftFound,
+                rightFound, cells⟩
+            have locationEq : mappedLocation = rightLocation := by
+              rw [mapping] at mappedEq
+              exact (Option.some.inj mappedEq).symm
+            subst mappedLocation
+            cases rightLiveEq : rightCell.live with
+            | false =>
+                have leftLiveEq : leftCell.live = false := by
+                  simpa [rightLiveEq] using cells.2.2.1
+                simp [reuse, arity, rightArity, getLiveCell,
+                  leftFound, rightFound, leftLiveEq, rightLiveEq,
+                  Bind.bind, Except.bind] at sourceEffectEq ⊢
+                have faultEq := sourceEffectEq
+                subst sourceFault
+                exact .error (.deadObject mapping)
+            | true =>
+                have leftLiveEq : leftCell.live = true := by
+                  simpa [rightLiveEq] using cells.2.2.1
+                have leftGet :
+                    getLiveCell left leftLocation = .ok leftCell := by
+                  simp [getLiveCell, leftFound, leftLiveEq]
+                have objectRelation := cells.2.2.2
+                generalize leftObjectEq :
+                  leftCell.object = leftHeapObject at objectRelation
+                generalize rightObjectEq :
+                  rightCell.object = rightHeapObject at objectRelation
+                cases objectRelation with
+                | @ctor leftConstructor rightConstructor oldTags oldFields
+                    oldUSizes oldScalars =>
+                    let leftTag :=
+                      if updateHeader then info.cidx
+                      else leftConstructor.tag
+                    let leftObject : ConstructorObject := {
+                      tag := leftTag
+                      objectFields := leftArguments
+                      usizeFields := Array.replicate info.usize 0
+                      scalarFields := [] }
+                    let leftReplacement : HeapCell :=
+                      { leftCell with object := .ctor leftObject }
+                    rcases setCell_spec_of_find left leftLocation leftCell
+                        leftReplacement leftFound with
+                      ⟨leftResult, leftSet, _leftTarget, _leftFrame,
+                        _leftLength, _leftNext, _leftGlobals, _leftWorld,
+                        _leftTrace⟩
+                    have sourceSuccess :
+                        reuse left (.reuseToken (some leftLocation)) info
+                            updateHeader leftArguments =
+                          .ok (leftResult,
+                            .object (.heap leftLocation)) := by
+                      simp only [reuse, Bind.bind, Except.bind]
+                      rw [if_neg (by simp [arity])]
+                      rw [leftGet]
+                      simp only [Bind.bind, Except.bind]
+                      rw [leftObjectEq]
+                      change (do
+                        let runtime ←
+                          setCell left leftLocation leftReplacement
+                        pure (runtime,
+                          Value.object (ObjectRef.heap leftLocation))) = _
+                      rw [leftSet]
+                      rfl
+                    rw [sourceSuccess] at sourceEffectEq
+                    contradiction
+                | closure fixed =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | boxed value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | string value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | natural value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | integer value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | byteArray value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+                | «opaque» value =>
+                    simp [reuse, arity, rightArity, getLiveCell,
+                      leftFound, rightFound, leftLiveEq, rightLiveEq,
+                      leftObjectEq, rightObjectEq, Bind.bind, Except.bind]
+                      at sourceEffectEq ⊢
+                    have faultEq := Except.error.inj sourceEffectEq
+                    subst sourceFault
+                    exact .error (.same _)
+          · have rightArity : rightArguments.size ≠ info.size := by
+              intro equal
+              apply arity
+              rw [← rightArityEq]
+              exact equal
+            have sizeEq :
+                leftArguments.size = rightArguments.size :=
+              arrayRel_size_eq arguments
+            have sourceFaultEq : sourceFault =
+                .malformed s!"reuse for {info.name} expected {info.size} object fields, got {leftArguments.size}" := by
+              have normalized := sourceEffectEq
+              simp only [reuse] at normalized
+              rw [if_pos (by simpa using arity)] at normalized
+              simpa using (Except.error.inj normalized).symm
+            subst sourceFault
+            simp only [reuse]
+            rw [if_pos (by simpa using rightArity)]
+            rw [← sizeEq]
+            exact .error (.same _)
 
 /-- A well-formed dead constructor evaluation either produces an immediate
 tag without changing the runtime, or allocates source-only unreachable

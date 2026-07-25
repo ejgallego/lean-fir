@@ -9602,6 +9602,798 @@ theorem ReachableMachineRelatedWith.advance
         related.structural sourcePath targetPath afterStructural
       exact ⟨targetAfter, targetPath, afterStructural, afterInvariant⟩
 
+/-- A retained let that fails in the source fails with a related runtime
+fault in the target. Covered environment reads synchronize lookup faults;
+operation-specific runtime relations transport heap-sensitive faults. -/
+theorem evalLetValue_error_related
+    (programs : ProgramRelated (ShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : ReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (covered : LetValueCovered used declaration.value)
+    (ready : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      declaration.value)
+    (sourceError :
+      evalLetValue sourceState declaration = .error sourceFault) :
+    ∃ targetFault,
+      evalLetValue targetState declaration = .error targetFault ∧
+      RuntimeFaultRel rho sourceFault targetFault := by
+  have tail : ListRel (ValueRel rho)
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots) :=
+    listRel_append (envRootsOn_related env) frames.roots
+  have lookupRelated (fvarId : FVarId)
+      (member : used.contains fvarId = true) :
+      RuntimeResultRel (ValueRel rho)
+        (lookupValue sourceState.env fvarId)
+        (lookupValue targetState.env fvarId) := by
+    have related := env fvarId member
+    generalize sourceLookup :
+        lookup sourceState.env fvarId = sourceResult at related
+    generalize targetLookup :
+        lookup targetState.env fvarId = targetResult at related
+    cases related with
+    | none =>
+        simpa [lookupValue, sourceLookup, targetLookup] using
+          (RuntimeResultRel.error (relation := ValueRel rho)
+            (.unknownVar fvarId))
+    | some value =>
+        simpa [lookupValue, sourceLookup, targetLookup] using
+          (RuntimeResultRel.ok value)
+  rcases declaration with ⟨fvarId, binderName, type, value⟩
+  cases value with
+  | lit literal =>
+      simp [evalLetValue, Pure.pure, Except.pure] at sourceError
+  | erased =>
+      simp [evalLetValue, Pure.pure, Except.pure] at sourceError
+  | fvar function arguments =>
+      rcases covered with ⟨functionMember, argumentsCovered⟩
+      have functions := lookupRelated function functionMember
+      generalize sourceFunctionEq :
+          lookupValue sourceState.env function = sourceFunction at functions
+      generalize targetFunctionEq :
+          lookupValue targetState.env function = targetFunction at functions
+      cases functions with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceFunctionEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetFunctionEq,
+              Bind.bind, Except.bind],
+            .same fault⟩
+      | ok functionValues =>
+          have evaluated := evalArgs_relOn env argumentsCovered
+          generalize sourceArgumentsEq :
+              evalArgs sourceState.env arguments = sourceArguments
+                at evaluated
+          generalize targetArgumentsEq :
+              evalArgs targetState.env arguments = targetArguments
+                at evaluated
+          cases evaluated with
+          | error fault =>
+              have faultEq : sourceFault = fault := by
+                simpa [evalLetValue, sourceFunctionEq, sourceArgumentsEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨fault,
+                by simp [evalLetValue, targetFunctionEq, targetArgumentsEq,
+                  Bind.bind, Except.bind],
+                .same fault⟩
+          | ok argumentValues =>
+              simp only [evalLetValue, sourceFunctionEq,
+                sourceArgumentsEq, Bind.bind, Except.bind] at sourceError
+              split at sourceError <;> cases sourceError
+  | ctor info arguments =>
+      have evaluated := evalArgs_relOn env covered
+      generalize sourceArgumentsEq :
+          evalArgs sourceState.env arguments = sourceArguments at evaluated
+      generalize targetArgumentsEq :
+          evalArgs targetState.env arguments = targetArguments at evaluated
+      cases evaluated with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceArgumentsEq,
+              Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetArgumentsEq,
+              Bind.bind, Except.bind],
+            .same fault⟩
+      | ok argumentValues =>
+          rename_i sourceValues targetValues
+          have published := runtime.publishEvalArgs covered
+            sourceArgumentsEq targetArgumentsEq argumentValues
+          have effects :=
+            published.allocCtorBoth_related argumentValues tail info
+          generalize sourceEffectEq :
+              allocCtor sourceState.runtime info sourceValues =
+                sourceEffect at effects
+          generalize targetEffectEq :
+              allocCtor targetState.runtime info targetValues =
+                targetEffect at effects
+          cases effects with
+          | error faults =>
+              rename_i sourceOperationFault targetOperationFault
+              have faultEq : sourceFault = sourceOperationFault := by
+                simpa [evalLetValue, sourceArgumentsEq, sourceEffectEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetOperationFault,
+                by simp [evalLetValue, targetArgumentsEq, targetEffectEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok next =>
+              simp [evalLetValue, sourceArgumentsEq, sourceEffectEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | oproj index object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have reads :=
+            runtime.getObjectFieldBoth_related sourceRoot objectValues
+              (index := index)
+          generalize sourceReadEq :
+              getObjectField sourceState.runtime sourceObjectValue index =
+                sourceRead at reads
+          generalize targetReadEq :
+              getObjectField targetState.runtime targetObjectValue index =
+                targetRead at reads
+          cases reads with
+          | error faults =>
+              rename_i sourceReadFault targetReadFault
+              have faultEq : sourceFault = sourceReadFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceReadEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetReadFault,
+                by simp [evalLetValue, targetObjectEq, targetReadEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok fields =>
+              simp [evalLetValue, sourceObjectEq, sourceReadEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | uproj slot object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have reads :=
+            runtime.getUSizeSlotBoth_related sourceRoot objectValues
+              (slot := slot)
+          generalize sourceReadEq :
+              getUSizeSlot sourceState.runtime sourceObjectValue slot =
+                sourceRead at reads
+          generalize targetReadEq :
+              getUSizeSlot targetState.runtime targetObjectValue slot =
+                targetRead at reads
+          cases reads with
+          | error faults =>
+              rename_i sourceReadFault targetReadFault
+              have faultEq : sourceFault = sourceReadFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceReadEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetReadFault,
+                by simp [evalLetValue, targetObjectEq, targetReadEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok fields =>
+              simp [evalLetValue, sourceObjectEq, sourceReadEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | sproj width offset object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have reads :=
+            runtime.getScalarFieldBoth_related sourceRoot objectValues
+              (width := width) (offset := offset)
+          generalize sourceReadEq :
+              getScalarField sourceState.runtime sourceObjectValue
+                  width offset =
+                sourceRead at reads
+          generalize targetReadEq :
+              getScalarField targetState.runtime targetObjectValue
+                  width offset =
+                targetRead at reads
+          cases reads with
+          | error faults =>
+              rename_i sourceReadFault targetReadFault
+              have faultEq : sourceFault = sourceReadFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceReadEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetReadFault,
+                by simp [evalLetValue, targetObjectEq, targetReadEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok fields =>
+              simp [evalLetValue, sourceObjectEq, sourceReadEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | fap name arguments =>
+      have evaluated := evalArgs_relOn env covered
+      generalize sourceArgumentsEq :
+          evalArgs sourceState.env arguments = sourceArguments at evaluated
+      generalize targetArgumentsEq :
+          evalArgs targetState.env arguments = targetArguments at evaluated
+      cases evaluated with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceArgumentsEq,
+              Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetArgumentsEq,
+              Bind.bind, Except.bind],
+            .same fault⟩
+      | ok argumentValues =>
+          simp [evalLetValue, sourceArgumentsEq,
+            Bind.bind, Except.bind, Pure.pure, Except.pure] at sourceError
+  | pap name arguments =>
+      have evaluated := evalArgs_relOn env covered
+      generalize sourceArgumentsEq :
+          evalArgs sourceState.env arguments = sourceArguments at evaluated
+      generalize targetArgumentsEq :
+          evalArgs targetState.env arguments = targetArguments at evaluated
+      cases evaluated with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceArgumentsEq,
+              Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetArgumentsEq,
+              Bind.bind, Except.bind],
+            .same fault⟩
+      | ok argumentValues =>
+          rename_i sourceValues targetValues
+          have found := programs.findDecl? name
+          generalize sourceFoundEq :
+              sourceState.program.findDecl? name = sourceFound at found
+          generalize targetFoundEq :
+              targetState.program.findDecl? name = targetFound at found
+          cases found with
+          | none =>
+              have faultEq : sourceFault = .unknownDecl name := by
+                simp only [evalLetValue, sourceArgumentsEq,
+                  Bind.bind, Except.bind] at sourceError
+                rw [sourceFoundEq] at sourceError
+                change Except.error (.unknownDecl name) =
+                  Except.error sourceFault at sourceError
+                exact (Except.error.inj sourceError).symm
+              subst sourceFault
+              exact ⟨.unknownDecl name,
+                by
+                  simp only [evalLetValue, targetArgumentsEq,
+                    Bind.bind, Except.bind]
+                  rw [targetFoundEq]
+                  rfl,
+                .same _⟩
+          | some declarations =>
+              rename_i sourceDeclaration targetDeclaration
+              by_cases applied :
+                  sourceDeclaration.params.size ≤ sourceValues.size
+              · have targetApplied :
+                    targetDeclaration.params.size ≤ targetValues.size := by
+                  rw [← declarations.params_eq,
+                    ← arrayRel_size_eq argumentValues]
+                  exact applied
+                let fault : RuntimeFault := .malformed
+                  s!"partial application {name} fixes {sourceValues.size} of {sourceDeclaration.params.size} parameters"
+                have sourceFaultEq : sourceFault = fault := by
+                  simp only [evalLetValue, sourceArgumentsEq,
+                    Bind.bind, Except.bind] at sourceError
+                  rw [sourceFoundEq] at sourceError
+                  simp only at sourceError
+                  rw [if_pos applied] at sourceError
+                  change Except.error fault =
+                    Except.error sourceFault at sourceError
+                  exact (Except.error.inj sourceError).symm
+                subst sourceFault
+                have targetFaultEq :
+                    RuntimeFault.malformed
+                        s!"partial application {name} fixes {targetValues.size} of {targetDeclaration.params.size} parameters" =
+                      fault := by
+                  simp [fault, declarations.params_eq,
+                    arrayRel_size_eq argumentValues]
+                exact ⟨fault,
+                  by
+                    simp only [evalLetValue, targetArgumentsEq,
+                      Bind.bind, Except.bind]
+                    rw [targetFoundEq]
+                    simp only
+                    rw [if_pos targetApplied, targetFaultEq]
+                    rfl,
+                  .same fault⟩
+              · simp [evalLetValue, sourceArgumentsEq, sourceFoundEq,
+                  applied, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure] at sourceError
+  | reset count object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have effects := runtime.resetBoth_related sourceRoot objectValues
+            (count := count)
+          generalize sourceEffectEq :
+              reset sourceState.runtime count sourceObjectValue =
+                sourceEffect at effects
+          generalize targetEffectEq :
+              reset targetState.runtime count targetObjectValue =
+                targetEffect at effects
+          cases effects with
+          | error faults =>
+              rename_i sourceOperationFault targetOperationFault
+              have faultEq : sourceFault = sourceOperationFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceEffectEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetOperationFault,
+                by simp [evalLetValue, targetObjectEq, targetEffectEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok next =>
+              simp [evalLetValue, sourceObjectEq, sourceEffectEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | reuse token info updateHeader arguments =>
+      rcases covered with ⟨tokenMember, argumentsCovered⟩
+      have looked := lookupRelated token tokenMember
+      generalize sourceTokenEq :
+          lookupValue sourceState.env token = sourceToken at looked
+      generalize targetTokenEq :
+          lookupValue targetState.env token = targetToken at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceTokenEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetTokenEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok tokenValues =>
+          rename_i sourceTokenValue targetTokenValue
+          have evaluated := evalArgs_relOn env argumentsCovered
+          generalize sourceArgumentsEq :
+              evalArgs sourceState.env arguments = sourceArguments
+                at evaluated
+          generalize targetArgumentsEq :
+              evalArgs targetState.env arguments = targetArguments
+                at evaluated
+          cases evaluated with
+          | error fault =>
+              have faultEq : sourceFault = fault := by
+                simpa [evalLetValue, sourceTokenEq, sourceArgumentsEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨fault,
+                by simp [evalLetValue, targetTokenEq, targetArgumentsEq,
+                  Bind.bind, Except.bind],
+                .same fault⟩
+          | ok argumentValues =>
+              rename_i sourceValues targetValues
+              have published := runtime.publishEvalArgs argumentsCovered
+                sourceArgumentsEq targetArgumentsEq argumentValues
+              have tokenReachable : ∀ location,
+                  sourceTokenValue = .reuseToken (some location) →
+                    Reachable sourceState.runtime.heap
+                      (runtimeRoots sourceState.runtime
+                        (sourceValues.toList ++
+                          (envRootsOn used sourceState.env ++
+                            sourceFrameRoots))) location := by
+                intro location tokenEq
+                have base : Reachable sourceState.runtime.heap
+                    (runtimeRoots sourceState.runtime
+                      (envRootsOn used sourceState.env ++ sourceFrameRoots))
+                    location := by
+                  apply ready location
+                  rw [sourceTokenEq, tokenEq]
+                exact reachable_monoRoots
+                  (runtimeRoots_monoExtra (by
+                    intro value member
+                    exact List.mem_append_right _ member))
+                  base
+              have effects := published.reuseBoth_related tokenValues
+                argumentValues tail tokenReachable
+                (info := info) (updateHeader := updateHeader)
+              generalize sourceEffectEq :
+                  reuse sourceState.runtime sourceTokenValue info
+                      updateHeader sourceValues =
+                    sourceEffect at effects
+              generalize targetEffectEq :
+                  reuse targetState.runtime targetTokenValue info
+                      updateHeader targetValues =
+                    targetEffect at effects
+              cases effects with
+              | error faults =>
+                  rename_i sourceOperationFault targetOperationFault
+                  have faultEq : sourceFault = sourceOperationFault := by
+                    simpa [evalLetValue, sourceTokenEq, sourceArgumentsEq,
+                      sourceEffectEq, Bind.bind, Except.bind]
+                      using sourceError.symm
+                  subst sourceFault
+                  exact ⟨targetOperationFault,
+                    by simp [evalLetValue, targetTokenEq, targetArgumentsEq,
+                      targetEffectEq, Bind.bind, Except.bind],
+                    faults⟩
+              | ok next =>
+                  simp [evalLetValue, sourceTokenEq, sourceArgumentsEq,
+                    sourceEffectEq, Bind.bind, Except.bind,
+                    Pure.pure, Except.pure] at sourceError
+  | box boxedType input =>
+      have looked := lookupRelated input covered
+      generalize sourceInputEq :
+          lookupValue sourceState.env input = sourceInput at looked
+      generalize targetInputEq :
+          lookupValue targetState.env input = targetInput at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceInputEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetInputEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok inputValues =>
+          rename_i sourceInputValue targetInputValue
+          have sourceLookup :
+              lookup sourceState.env input = some sourceInputValue :=
+            lookupValue_eq_ok_iff.mp sourceInputEq
+          have sourceRoot :
+              sourceInputValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have effects := runtime.boxBoth_related sourceRoot inputValues
+            (type := boxedType)
+          generalize sourceEffectEq :
+              box sourceState.runtime boxedType sourceInputValue =
+                sourceEffect at effects
+          generalize targetEffectEq :
+              box targetState.runtime boxedType targetInputValue =
+                targetEffect at effects
+          cases effects with
+          | error faults =>
+              rename_i sourceOperationFault targetOperationFault
+              have faultEq : sourceFault = sourceOperationFault := by
+                simpa [evalLetValue, sourceInputEq, sourceEffectEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetOperationFault,
+                by simp [evalLetValue, targetInputEq, targetEffectEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok next =>
+              simp [evalLetValue, sourceInputEq, sourceEffectEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | unbox object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have reads := runtime.unboxBoth_related sourceRoot objectValues
+            (type := type)
+          generalize sourceReadEq :
+              unbox sourceState.runtime type sourceObjectValue =
+                sourceRead at reads
+          generalize targetReadEq :
+              unbox targetState.runtime type targetObjectValue =
+                targetRead at reads
+          cases reads with
+          | error faults =>
+              rename_i sourceReadFault targetReadFault
+              have faultEq : sourceFault = sourceReadFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceReadEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetReadFault,
+                by simp [evalLetValue, targetObjectEq, targetReadEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok values =>
+              simp [evalLetValue, sourceObjectEq, sourceReadEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | isShared object =>
+      have looked := lookupRelated object covered
+      generalize sourceObjectEq :
+          lookupValue sourceState.env object = sourceObject at looked
+      generalize targetObjectEq :
+          lookupValue targetState.env object = targetObject at looked
+      cases looked with
+      | error fault =>
+          have faultEq : sourceFault = fault := by
+            simpa [evalLetValue, sourceObjectEq, Bind.bind, Except.bind]
+              using sourceError.symm
+          subst sourceFault
+          exact ⟨fault,
+            by simp [evalLetValue, targetObjectEq, Bind.bind, Except.bind],
+            .same fault⟩
+      | ok objectValues =>
+          rename_i sourceObjectValue targetObjectValue
+          have sourceLookup :
+              lookup sourceState.env object = some sourceObjectValue :=
+            lookupValue_eq_ok_iff.mp sourceObjectEq
+          have sourceRoot :
+              sourceObjectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots :=
+            List.mem_append_left _
+              (lookup_mem_envRootsOn covered sourceLookup)
+          have reads := runtime.isSharedBoth_related sourceRoot objectValues
+          generalize sourceReadEq :
+              isShared sourceState.runtime sourceObjectValue =
+                sourceRead at reads
+          generalize targetReadEq :
+              isShared targetState.runtime targetObjectValue =
+                targetRead at reads
+          cases reads with
+          | error faults =>
+              rename_i sourceReadFault targetReadFault
+              have faultEq : sourceFault = sourceReadFault := by
+                simpa [evalLetValue, sourceObjectEq, sourceReadEq,
+                  Bind.bind, Except.bind]
+                  using sourceError.symm
+              subst sourceFault
+              exact ⟨targetReadFault,
+                by simp [evalLetValue, targetObjectEq, targetReadEq,
+                  Bind.bind, Except.bind],
+                faults⟩
+          | ok values =>
+              simp [evalLetValue, sourceObjectEq, sourceReadEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at sourceError
+  | proj _ _ _ impossible => nomatch impossible
+  | const _ _ _ impossible => nomatch impossible
+
+/-- Terminal lets use readiness to distinguish certified source-only
+deletions, which necessarily step, from retained declarations.  A retained
+declaration can terminate only when `evalLetValue` fails; the complete
+let-value fault relation above then supplies the matching target fault. -/
+theorem SomeReachableMachineRelated.let_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (ready : ReachableMachineReadyAt fuel source target)
+    (sourceControl : source.control =
+      .code (.let declaration sourceContinuation))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  have originalControl := control
+  cases targetControl : target.control with
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code graph joins env =>
+          rename_i used
+          have codeReady := ready programs originalControl frames runtime
+            sourceControl targetControl graph
+          cases codeReady with
+          | letE graph operationReady =>
+              cases operationReady with
+              | deleted targetContinuation continuation absent
+                  deletedReady =>
+                  rcases coreStep_deletedLet_of_ready source target
+                      programs frames continuation joins env absent runtime
+                      deletedReady with
+                    ⟨nextRuntime, value, sourceStep, afterRelated⟩
+                  have sourceSame :
+                      { source with
+                        control :=
+                          .code (.let declaration sourceContinuation) } =
+                        source := by
+                    cases source
+                    simp_all
+                  rw [sourceSame] at sourceStep
+                  rw [sourceStep] at done
+                  contradiction
+              | retained targetContinuation continuation covered
+                  retainedReady =>
+                  generalize sourceEvaluated :
+                      evalLetValue source declaration = sourceResult
+                  cases sourceResult with
+                  | error sourceFault =>
+                      rcases evalLetValue_error_related programs frames env
+                          runtime covered retainedReady sourceEvaluated with
+                        ⟨targetFault, targetEvaluated, faults⟩
+                      have sourceFaultStep : coreStep source =
+                          .done (observe source (.fault sourceFault)) := by
+                        simp [coreStep, sourceControl, sourceEvaluated, fail]
+                      have targetFaultStep : coreStep target =
+                          .done (observe target (.fault targetFault)) := by
+                        simp [coreStep, targetControl, targetEvaluated, fail]
+                      exact relatedFaultRel_terminal
+                        (externals := externals) runtime faults
+                        sourceFaultStep targetFaultStep done
+                  | ok result =>
+                      rcases result with ⟨nextRuntime, action⟩
+                      cases action with
+                      | value value =>
+                          have sourceStep : coreStep source =
+                              .next { source with
+                                runtime := nextRuntime
+                                env := bind source.env
+                                  declaration.fvarId value
+                                control := .code sourceContinuation } := by
+                            simp [coreStep, sourceControl, sourceEvaluated]
+                          rw [sourceStep] at done
+                          contradiction
+                      | invokeName name arguments =>
+                          have sourceStep : coreStep source =
+                              .next { pushBindFrame
+                                  { source with runtime := nextRuntime }
+                                  declaration sourceContinuation with
+                                control := .invokeName name arguments } := by
+                            simp [coreStep, sourceControl, sourceEvaluated]
+                          rw [sourceStep] at done
+                          contradiction
+                      | invokeValue function arguments =>
+                          have sourceStep : coreStep source =
+                              .next { pushBindFrame
+                                  { source with runtime := nextRuntime }
+                                  declaration sourceContinuation with
+                                control :=
+                                  .invokeValue function arguments } := by
+                            simp [coreStep, sourceControl, sourceEvaluated]
+                          rw [sourceStep] at done
+                          contradiction
+
+/-- Join declarations are administrative source steps in both retained and
+deleted graph branches, so they cannot satisfy a terminal premise. -/
+theorem SomeReachableMachineRelated.join_terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .code (.jp declaration sourceContinuation))
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have sourceStep : coreStep source =
+      .next { source with
+        joins := (declaration.fvarId, declaration) :: source.joins
+        control := .code sourceContinuation } := by
+    simp [coreStep, sourceControl]
+  rw [sourceStep] at done
+  contradiction
+
 /-- A terminal retained return must be the related unknown-variable branch;
 a successful source lookup would instead produce an internal step. -/
 theorem SomeReachableMachineRelated.return_terminal
@@ -11185,5 +11977,100 @@ theorem SomeReachableMachineRelated.yielded_terminal
   rcases related with ⟨rho, related⟩
   exact related.yielded_terminal sourceControl targetControl
     sourceFrames targetFrames done
+
+/-- Complete terminal dispatcher for the reachable structural relation.
+Every active source control is classified by the corresponding terminal
+lemma.  Readiness is consulted only for lets and conditionally deleted
+writes; a yielded state is terminal exactly when its related frame stacks
+are both empty. -/
+theorem SomeReachableMachineRelated.terminal
+    (related : SomeReachableMachineRelated fuel source target)
+    (ready : ReachableMachineReadyAt fuel source target)
+    (done : coreStep source = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals target targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  cases sourceControl : source.control with
+  | invokeName name arguments =>
+      exact related.invokeName_terminal sourceControl done
+  | invokeValue function arguments =>
+      exact related.invokeValue_terminal sourceControl done
+  | yielded sourceValue =>
+      cases sourceFrames : source.frames with
+      | cons sourceHead sourceTail =>
+          cases sourceHead <;>
+            simp [coreStep, sourceControl, sourceFrames] at done
+      | nil =>
+          have structural := related
+          rcases structural with
+            ⟨rho, sourceControlRoots, targetControlRoots,
+              sourceFrameRoots, targetFrameRoots,
+              programs, control, frames, runtime⟩
+          cases targetControl : target.control with
+          | code targetCode =>
+              rw [sourceControl, targetControl] at control
+              cases control
+          | invokeName targetName targetArguments =>
+              rw [sourceControl, targetControl] at control
+              cases control
+          | invokeValue targetFunction targetArguments =>
+              rw [sourceControl, targetControl] at control
+              cases control
+          | yielded targetValue =>
+              rw [sourceControl, targetControl] at control
+              cases control
+              cases targetFrames : target.frames with
+              | cons targetHead targetTail =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames
+              | nil =>
+                  exact related.yielded_terminal sourceControl targetControl
+                    sourceFrames targetFrames done
+  | code sourceCode =>
+      cases sourceCode with
+      | «let» declaration sourceContinuation =>
+          exact related.let_terminal ready sourceControl done
+      | jp declaration sourceContinuation =>
+          exact related.join_terminal sourceControl done
+      | cases caseInfo =>
+          cases caseInfo with
+          | mk typeName resultType discr alternatives =>
+              exact related.cases_terminal sourceControl done
+      | jmp join arguments =>
+          exact related.jump_terminal sourceControl done
+      | «fun» _ _ impossible =>
+          nomatch impossible
+      | «return» result =>
+          exact related.return_terminal sourceControl done
+      | unreach type =>
+          exact related.unreach_terminal sourceControl done
+      | setTag object tag sourceContinuation =>
+          exact related.setTag_terminal sourceControl done
+      | inc object amount check persistent sourceContinuation =>
+          exact related.increment_terminal sourceControl done
+      | dec object amount check persistent objects sourceContinuation =>
+          exact related.decrement_terminal sourceControl done
+      | del object sourceContinuation =>
+          exact related.delete_terminal sourceControl done
+      | oset object index field sourceContinuation =>
+          exact related.objectSet_terminal ready sourceControl done
+      | uset object index field sourceContinuation =>
+          exact related.uSizeSet_terminal ready sourceControl done
+      | sset object width offset field type sourceContinuation =>
+          exact related.scalarSet_terminal ready sourceControl done
+
+/-- The structural relation paired with any invariant satisfying the exposed
+readiness, external, and stability laws is a full observation-relational
+stuttering simulation. -/
+theorem ReachableMachineRelatedWith.simulation
+    {invariant : MachineState → MachineState → Prop}
+    (laws : ReachableInvariantLaws externals fuel invariant) :
+    RelationalStutteringSimulation externals ObservationRel
+      (ReachableMachineRelatedWith fuel invariant) where
+  terminal related done :=
+    related.structural.terminal
+      (laws.ready related.structural related.invariant) done
+  advance related step :=
+    ReachableMachineRelatedWith.advance laws related step
 
 end Fir.LeanIR.Passes.ElimDead
