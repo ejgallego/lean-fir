@@ -3665,6 +3665,48 @@ theorem resetStep_outOfBounds_of_refines
           simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- A unique constructor reset preserves any recursively reached mapped-child
+fault through the concrete host boundary. Erased-child `expectedObject` is
+excluded until the shared reset ownership contract is aligned; release-fuel
+exhaustion remains target-classified. -/
+theorem resetStep_unique_fault_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {object : ConstructorObject} {count : Nat}
+    {fault : RuntimeFault}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (countFits : count ≤ object.objectFields.size)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (notExpectedObject : fault ≠ .expectedObject)
+    (semanticFailure :
+      reset runtime count (.object (.heap location)) = .error fault) :
+    ∃ failure,
+      resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+          trap (clearFailure initial) (.runtime failure.toTrap) ∧
+        ConcreteErrorSourceRel witness failure fault := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨failure, concrete, failureRelated⟩ :=
+                runtimeRelated.heap.resetObject_unique_fault_refines mapped
+                  found live ordinary unique constructor countFits notFuel
+                  notExpectedObject semanticFailure
+              refine ⟨failure, ?_, failureRelated⟩
+              simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+                descriptorsEq, concrete, ConcreteError.toTrap]
+
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

@@ -3122,6 +3122,22 @@ relation excludes `expectedObject`, while delete's stricter `.object`
 relation excludes tagged operands entirely. No shared semantic contract or
 executable ABI changed.
 
+W6.6dc closes recursively mapped child faults for unique-constructor reset.
+A public checked ownership-fold theorem threads every successful earlier
+child through related protocol heaps, preserves the first non-fuel mapped
+fault, and prevents later children from running. Reset temporarily rebinds
+the cleared parent descriptor while traversing that prefix, then projects the
+fault back to the unchanged location witness; because both reset runtimes are
+pure `Except` computations, a failure traps from the original related store
+and never writes the reuse-token local or enters the continuation. The heap,
+Talos-host, and compiler/adaptor terminal theorems are all general in the
+exact mapped child fault. Their explicit `expectedObject` exclusion exposed
+`FIR-BUG-wasm-none-reset-erased-child-release`: erased constructor slots are
+ABI-admissible, but FIR reset's `decValueOnce` faults while concrete checked
+decrement skips physical zero. The proof does not weaken either runtime;
+nonunique fallback decrement and release-fuel target-safety remain next. No
+shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

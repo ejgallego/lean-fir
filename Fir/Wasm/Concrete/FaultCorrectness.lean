@@ -1,5 +1,6 @@
 import Fir.Wasm.Concrete.ExternalCorrectness
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
+import Fir.Wasm.Concrete.ResetReuseCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -53,6 +54,30 @@ theorem ConcreteErrorSourceRel.toTrap
   | source fault => exact ⟨.runtime fault, rfl, .runtime fault⟩
   | sourceAddress addressRelated =>
       exact ⟨.address _, rfl, .address addressRelated⟩
+
+/-- Reset's temporary constructor-descriptor shadow does not change the
+location identity carried by a source-classified fault. -/
+theorem ConcreteErrorSourceRel.of_rebindConstructor
+    {witness : RefinementWitness} {failure : ConcreteError}
+    {fault : RuntimeFault} {address : Word32}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    (related :
+      ConcreteErrorSourceRel
+        (witness.rebindConstructor address info fieldKinds) failure fault) :
+    ConcreteErrorSourceRel witness failure fault := by
+  cases related with
+  | source fault => exact .source fault
+  | sourceAddress addressRelated =>
+      cases addressRelated with
+      | deadObject heapRelated =>
+          cases heapRelated with
+          | mapped found =>
+              exact .sourceAddress (.deadObject (.mapped (by simpa using found)))
+      | referenceCountUnderflow heapRelated =>
+          cases heapRelated with
+          | mapped found =>
+              exact .sourceAddress
+                (.referenceCountUnderflow (.mapped (by simpa using found)))
 
 /-- Ordered ownership slots preserve the first recursively reached source
 fault. Any successful prefix of child releases advances both related heaps;
@@ -765,6 +790,290 @@ theorem LiveHeapRel.decrementReferenceOnce_fault_refines
   exact ⟨failure, by
     unfold decrementReferenceOnce
     exact concretePublic, faultRelated⟩
+
+/-- An ABI-admissible ownership slot carries either an object reference or
+the erased marker. Scalar and reuse-token lanes cannot inhabit constructor
+ownership fields. -/
+theorem OwnershipValueRel.object_or_erased
+    {witness : RefinementWitness} {word : Word32} {value : Value}
+    (related : OwnershipValueRel witness word value) :
+    (∃ reference, value = .object reference) ∨ value = .erased := by
+  cases related with
+  | intro kind admissible valueRelated =>
+      cases valueRelated with
+      | object heapRelated => exact .inl ⟨_, rfl⟩
+      | tagged taggedRelated => exact .inl ⟨_, rfl⟩
+      | tobject objectRelated => exact .inl ⟨_, rfl⟩
+      | erased => exact .inr rfl
+      | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
+          simp [AbiKind.isObjectField] at admissible
+
+/-- Ordered reset slots preserve the first fault through public checked
+decrement. Successful children advance both heaps; the first failing child
+determines the exact source-classified error and prevents the suffix from
+running. -/
+theorem OwnershipValuesRel.foldlM_public_fault_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {words : List Word32} {values : List Value}
+    {fault : RuntimeFault}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (notExpectedObject : fault ≠ .expectedObject)
+    (semanticOperation :
+      values.foldlM (init := runtime) (fun next value =>
+        Fir.LeanIR.Impure.decValueOnce next value true) = .error fault) :
+    ∃ failure,
+      words.foldlM (init := state) (fun next child =>
+        decrementReferenceOnce next child true witness.closureDescriptors) =
+          .error failure ∧
+      ConcreteErrorSourceRel witness failure fault := by
+  induction related generalizing state runtime fault with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation
+      contradiction
+  | @cons word value words values head tail ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation ⊢
+      rcases head.releaseStep heap (state.heapCursor / headerBytes + 1)
+          witness.closureDescriptors with heapStep | noOpStep
+      · obtain ⟨location, valueEq, mapped⟩ := heapStep
+        subst value
+        simp only [Fir.LeanIR.Impure.decValueOnce] at semanticOperation
+        cases childEq : Fir.LeanIR.Impure.decLocation runtime location with
+        | error childFault =>
+            rw [childEq] at semanticOperation
+            have faultEq : childFault = fault :=
+              Except.error.inj semanticOperation
+            subst childFault
+            obtain ⟨failure, concreteHead, faultRelated⟩ :=
+              heap.decrementReferenceOnce_fault_refines mapped true notFuel
+                childEq
+            exact ⟨failure, by rw [concreteHead], faultRelated⟩
+        | ok nextRuntime =>
+            rw [childEq] at semanticOperation
+            obtain ⟨nextState, concreteHead, nextHeap⟩ :=
+              heap.decrementReferenceOnce_refines mapped true childEq
+            obtain ⟨failure, concreteTail, faultRelated⟩ :=
+              ih nextHeap notFuel notExpectedObject semanticOperation
+            refine ⟨failure, ?_, faultRelated⟩
+            rw [concreteHead]
+            exact concreteTail
+      · obtain ⟨notHeap, concreteFuelNoOp⟩ := noOpStep
+        rcases head.object_or_erased with ⟨reference, valueEq⟩ | valueEq
+        · subst value
+          cases reference with
+          | heap location => exact False.elim (notHeap location rfl)
+          | tagged payload =>
+              have semanticHead :
+                  Fir.LeanIR.Impure.decValueOnce runtime
+                      (.object (.tagged payload)) true =
+                    .ok runtime := by
+                rfl
+              rw [semanticHead] at semanticOperation
+              obtain ⟨failure, concreteTail, faultRelated⟩ :=
+                ih heap notFuel notExpectedObject semanticOperation
+              have concreteHead :
+                  decrementReferenceOnce state word true
+                      witness.closureDescriptors =
+                    .ok state := by
+                unfold decrementReferenceOnce
+                exact concreteFuelNoOp
+              refine ⟨failure, ?_, faultRelated⟩
+              rw [concreteHead]
+              exact concreteTail
+        · subst value
+          have faultEq : fault = .expectedObject := by
+            have errorEq :
+                (Except.error .expectedObject :
+                    Except RuntimeFault RuntimeState) =
+                  .error fault := by
+              simpa [Fir.LeanIR.Impure.decValueOnce] using semanticOperation
+            exact (Except.error.inj errorEq).symm
+          exact False.elim (notExpectedObject faultEq)
+
+/-- A unique ordinary constructor reset preserves the first recursively
+reached child-release fault. The protocol descriptor is needed only while
+relating the cleared parent and child traversal; the reported fault is
+projected back to the original location witness because reset commits no heap
+state on error. -/
+theorem LiveHeapRel.resetObject_unique_fault_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {object : ConstructorObject} {count : Nat}
+    {fault : RuntimeFault}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (countFits : count ≤ object.objectFields.size)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (notExpectedObject : fault ≠ .expectedObject)
+    (semanticOperation :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error fault) :
+    ∃ failure,
+      resetObject state count address witness.closureDescriptors =
+          .error failure ∧
+      ConcreteErrorSourceRel witness failure fault := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  cases targetRelated with
+  | @constructor info fieldKinds semantic header _ descriptor objectEq
+      objectRelated headerRead headerKind refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      injection objectEq with semanticEq
+      subst semantic
+      let replacement : HeapCell :=
+        { cell with object := .ctor (resetProtocolObject object count) }
+      obtain ⟨middleRuntime, semanticSet, _, _, _, _⟩ :=
+        setCell_spec_of_find runtime location cell replacement found
+      have semanticFold :
+          (object.objectFields.extract 0 count).foldlM
+              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              middleRuntime = .error fault := by
+        unfold Fir.LeanIR.Impure.reset at semanticOperation
+        simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+          at semanticOperation
+        rw [if_neg (by simp [ordinary, unique])] at semanticOperation
+        rw [constructor] at semanticOperation
+        simp only at semanticOperation
+        rw [if_neg (Nat.not_lt.mpr countFits)] at semanticOperation
+        have semanticOperation' : (do
+            let next ← setCell runtime location replacement
+            let next ← (object.objectFields.extract 0 count).foldlM
+              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              next
+            return (next, Value.reuseToken (some location))) =
+              .error fault := by
+          simpa only [replacement, resetProtocolObject, live, Bind.bind,
+            Except.bind] using semanticOperation
+        rw [semanticSet] at semanticOperation'
+        simp only [Bind.bind, Except.bind] at semanticOperation'
+        cases foldEq :
+            (object.objectFields.extract 0 count).foldlM
+              (fun next value =>
+                Fir.LeanIR.Impure.decValueOnce next value true)
+              middleRuntime with
+        | error childFault =>
+            rw [foldEq] at semanticOperation'
+            have childFaultEq : childFault = fault :=
+              Except.error.inj semanticOperation'
+            subst childFault
+            rfl
+        | ok finalRuntime =>
+            rw [foldEq] at semanticOperation'
+            contradiction
+      obtain ⟨words, ownedRead, ownershipRelated⟩ :=
+        objectRelated.readOwnedPrefix count countFits
+      have fieldsBeforeFrontier :
+          objectFieldAddress address.value count ≤ state.heapCursor := by
+        have aligned := align8_ge
+          (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+            info.ssize)
+        have activeExtent := objectRelated.extent
+        have countFitsInfo : count ≤ info.size := by
+          rw [← objectRelated.semanticObjectFields]
+          exact countFits
+        simp [objectFieldAddress, ConstructorLayout.ofInfo, target] at aligned activeExtent ⊢
+        omega
+      have fieldsInBounds :
+          objectFieldAddress address.value (0 + count) ≤ state.memory.size := by
+        simp only [Nat.zero_add]
+        exact Nat.le_trans fieldsBeforeFrontier
+          related.frontier.cursorInBounds
+      obtain ⟨fieldMemory, fieldWrite, _⟩ :=
+        writeObjectFields_spec state.memory address.value 0
+          (List.replicate count taggedZero) (by simpa using fieldsInBounds)
+      obtain ⟨protocolRuntime, protocolSet, protocolHeap⟩ :=
+        LiveHeapRel.writeObjectFields_resetPrefix state fieldMemory witness
+          runtime location address cell header info fieldKinds object count
+          related mapped found descriptor constructor objectRelated headerRead
+          headerKind refCount persistent cellLive countFits fieldWrite
+      have protocolRuntimeEq : protocolRuntime = middleRuntime := by
+        exact Except.ok.inj (protocolSet.symm.trans semanticSet)
+      subst protocolRuntime
+      have semanticFoldList :
+          (object.objectFields.extract 0 count).toList.foldlM
+              (init := middleRuntime)
+              (fun next value =>
+                Fir.LeanIR.Impure.decValueOnce next value true) =
+            .error fault := by
+        simpa only [Array.foldlM_toList] using semanticFold
+      have protocolOwnership :=
+        ownershipRelated.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)
+      obtain ⟨failure, concreteFold, faultRelated⟩ :=
+        protocolOwnership.foldlM_public_fault_refines protocolHeap notFuel
+          notExpectedObject semanticFoldList
+      obtain ⟨addressHeap, _, _, _, _, _⟩ :=
+        MemoryState.PrefixExtension.readLiveHeader_facts state address header
+          headerRead
+      obtain ⟨objectHeader, objectHeaderRead, _, _, _, objectCount, _, _⟩ :=
+        objectRelated.header
+      rw [headerRead] at objectHeaderRead
+      have objectHeaderEq := Except.ok.inj objectHeaderRead
+      subst objectHeader
+      have headerOrdinary : header.persistent = false :=
+        persistent.trans ordinary
+      have headerOne : header.refCount = 1 := by
+        apply UInt32.toNat.inj
+        simpa [unique] using refCount
+      have notPromoted : header.isPromotedTag = false := by
+        have different :
+            (ObjectKind.constructor == ObjectKind.natural) = false := by decide
+        simp [Header.isPromotedTag, headerKind, different]
+      have countFitsInfo : count ≤ info.size := by
+        rw [← objectRelated.semanticObjectFields]
+        exact countFits
+      have headerKindCheck :
+          (header.kind == ObjectKind.constructor) = true := by
+        rw [headerKind]
+        decide
+      have concreteFoldOriginal :
+          words.foldlM
+              (init := ({ state with memory := fieldMemory } : MemoryState))
+              (fun next child => decrementReferenceOnce next child true
+                witness.closureDescriptors) =
+            .error failure := by
+        simpa [RefinementWitness.rebindConstructor] using concreteFold
+      have concreteReset :
+          resetObject state count address witness.closureDescriptors =
+            .error failure := by
+        unfold resetObject
+        rw [addressHeap, headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted, headerOrdinary, headerOne])]
+        rw [if_pos headerKindCheck]
+        rw [objectCount, if_neg (Nat.not_lt.mpr countFitsInfo)]
+        rw [ownedRead, fieldWrite]
+        simp only
+        rw [concreteFoldOriginal]
+      exact ⟨failure, concreteReset,
+        faultRelated.of_rebindConstructor⟩
+  | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | natural descriptor objectEq headerRead headerKind marker extent
+      limbsFit decoded refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | integer descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | string descriptor objectEq objectRelated refCount persistent cellLive =>
+      rw [constructor] at objectEq
+      contradiction
+  | closure closureRelated =>
+      obtain ⟨function, arity, captures, closureEq⟩ := closureRelated.objectEq
+      rw [constructor] at closureEq
+      contradiction
 
 /-- Repeated public decrement preserves the first source-classified fault.
 Every successful earlier repetition advances the related heaps; the failing

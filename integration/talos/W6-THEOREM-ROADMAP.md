@@ -184,6 +184,17 @@ and every positive unchecked decrement faults on its first repetition, for
 both immediate and promoted physical tag representations. Their Talos and
 compiler/adaptor leaves preserve exact `expectedHeapReference` and make the
 continuation unreachable. Zero decrement remains the intentional empty fold.
+Unique-constructor reset now reuses the public recursive decrement boundary:
+the cleared-prefix ownership relation advances through successful children,
+the first mapped child fault retains its exact address/location relation, and
+the pure reset/host computations discard the intermediate protocol heap on
+error. The Talos and compiler/adaptor leaves therefore trap from the original
+related store before writing the reuse-token local. The theorem excludes
+`expectedObject` because erased is an admitted ownership slot but FIR reset
+currently faults where concrete checked decrement skips physical zero; this
+shared-contract discrepancy is tracked by
+`FIR-BUG-wasm-none-reset-erased-child-release`. Reset's nonunique fallback
+decrement and release-fuel target-safety exclusion remain.
 
 The public endpoint is now explicit:
 
