@@ -3629,6 +3629,82 @@ theorem resetStep_unique_of_refines
   simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
     ← descriptorsEq, concreteReset, replaceHeap]
 
+/-- A stale nonempty reuse token preserves the exact address/location
+dead-object fault after host argument decoding and the aligned arity gate. -/
+theorem reuseStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (address, fields))
+    (tokenRelated :
+      ValueRel witness .reuseToken (.word32 address)
+        (.reuseToken (some location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size) :
+    reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject address)))) ∧
+      reuse runtime (.reuseToken (some location)) info updateHeader
+          semanticFields =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject address)) (.deadObject location) := by
+  cases tokenRelated with
+  | reuseSome heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.reuseObject_deadObject heapRelated found dead info
+          updateHeader fields.toArray semanticFields arity semanticArity
+      refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+      simp [reuseStep, argsLength, decoded, concrete, clearFailure,
+        ConcreteError.toTrap]
+
+/-- A live nonconstructor behind a nonempty reuse token produces the exact
+source-classified fault before retained-capacity checks or any heap write. -/
+theorem reuseStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (address, fields))
+    (tokenRelated :
+      ValueRel witness .reuseToken (.word32 address)
+        (.reuseToken (some location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (notConstructor : ∀ object, cell.object ≠ .ctor object)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size) :
+    reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      reuse runtime (.reuseToken (some location)) info updateHeader
+          semanticFields =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  cases tokenRelated with
+  | reuseSome heapRelated =>
+      obtain ⟨concrete, semantic⟩ :=
+        runtimeRelated.heap.reuseObject_expectedConstructor_refines
+          heapRelated found live notConstructor info updateHeader fields.toArray
+          semanticFields arity semanticArity
+      refine ⟨?_, semantic, .source .expectedConstructor⟩
+      simp [reuseStep, argsLength, decoded, concrete, clearFailure,
+        ConcreteError.toTrap]
+
 /-- Empty-token reuse of an empty constructor follows the tagged allocation
 path. The returned immediate or promoted word is widened only as permitted by
 the compiler-selected constructor result kind. -/

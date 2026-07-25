@@ -149,6 +149,11 @@ Reset likewise supplies exact terminal instances for stale mapped objects and
 for live, nonpersistent, uniquely owned nonconstructors. Those ownership
 premises are part of the theorem boundary because shared or persistent cells
 take reset's decrement fallback before the constructor-kind check.
+Nonempty reuse supplies exact terminal instances for stale mapped tokens and
+live mapped nonconstructors after the aligned field-arity gate. The admitted
+reuse-token relation and compiler-selected arity exclude its earlier token
+shape and malformed-arity faults; retained allocation capacity remains a
+separate target-totality obligation.
 
 The public endpoint is now explicit:
 

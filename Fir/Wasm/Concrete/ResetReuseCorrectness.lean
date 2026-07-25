@@ -2014,6 +2014,181 @@ theorem LiveHeapRel.resetObject_refines_unique
       rw [constructor] at closureEq
       contradiction
 
+/-- Reuse rejects a canonical released token at the common live-header gate
+after the statically aligned field-arity check. -/
+theorem DeadCellRel.reuseObject_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (info : LCNF.CtorInfo)
+    (updateHeader : Bool) (fields : Array Word32)
+    (arity : fields.size = info.size) :
+    reuseObject state address info updateHeader fields =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  have addressNeZero : address ≠ Word32.zero := by
+    intro equal
+    subst address
+    change ObjectWordClass.sentinel = ObjectWordClass.heap at addressHeap
+    contradiction
+  have addressValueNeZero : address.value ≠ 0 := by
+    intro equal
+    have sentinel : address.classify = .sentinel := by
+      simp [Word32.classify, equal]
+    rw [sentinel] at addressHeap
+    contradiction
+  have addressZeroCheck : (address == Word32.zero) = false := by
+    change (address.value == 0) = false
+    simp [addressValueNeZero]
+  unfold reuseObject
+  rw [if_neg (by simp [addressZeroCheck])]
+  rw [addressHeap]
+  simp only
+  rw [if_pos arity]
+  rw [related.readLiveHeader_eq]
+  rfl
+
+/-- Stale semantic and concrete nonempty reuse tokens agree on the exact
+address-related dead-object fault. The arity premises expose the earlier
+static gate in both runtimes. -/
+theorem LiveHeapRel.reuseObject_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (info : LCNF.CtorInfo)
+    (updateHeader : Bool) (fields : Array Word32)
+    (semanticFields : Array Value)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size) :
+    reuseObject state address info updateHeader fields =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  have semantic :
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .error (.deadObject location) := by
+    unfold Fir.LeanIR.Impure.reuse
+    simp only
+    have arityCheck : (semanticFields.size != info.size) = false := by
+      simp [semanticArity]
+    rw [arityCheck]
+    simp [getLiveCell, found, dead]
+    rfl
+  exact ⟨deadRelated.reuseObject_eq info updateHeader fields arity, semantic⟩
+
+/-- A live nonconstructor behind a nonempty reuse token reaches the
+constructor-kind gate in both runtimes. Token shape and field arity are
+separate earlier gates and therefore explicit premises. -/
+theorem LiveHeapRel.reuseObject_expectedConstructor_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (notConstructor : ∀ object, cell.object ≠ .ctor object)
+    (info : LCNF.CtorInfo) (updateHeader : Bool)
+    (fields : Array Word32) (semanticFields : Array Value)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size) :
+    reuseObject state address info updateHeader fields =
+        .error (.source .expectedConstructor) ∧
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .error .expectedConstructor := by
+  have failOfHeader (header : Header)
+      (headerRead : state.readLiveHeader address = .ok header)
+      (headerKind : header.kind ≠ .constructor) :
+      reuseObject state address info updateHeader fields =
+        .error (.source .expectedConstructor) := by
+    have addressHeap :=
+      (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+        headerRead).1
+    have addressNeZero : address ≠ Word32.zero := by
+      intro equal
+      subst address
+      change ObjectWordClass.sentinel = ObjectWordClass.heap at addressHeap
+      contradiction
+    have addressValueNeZero : address.value ≠ 0 := by
+      intro equal
+      have sentinel : address.classify = .sentinel := by
+        simp [Word32.classify, equal]
+      rw [sentinel] at addressHeap
+      contradiction
+    have addressZeroCheck : (address == Word32.zero) = false := by
+      change (address.value == 0) = false
+      simp [addressValueNeZero]
+    unfold reuseObject
+    rw [if_neg (by simp [addressZeroCheck])]
+    rw [addressHeap]
+    simp only
+    rw [if_pos arity]
+    rw [headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    cases kindEq : header.kind <;> simp_all <;> rfl
+  have mappedLookup :
+      witness.locations.lookup? location = some address := by
+    cases mapped with
+    | mapped found => exact found
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mappedLookup
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  have concrete :
+      reuseObject state address info updateHeader fields =
+        .error (.source .expectedConstructor) := by
+    cases targetRelated with
+    | constructor descriptor objectEq objectRelated headerRead headerKind
+        refCount persistent cellLive =>
+        exact False.elim (notConstructor _ objectEq)
+    | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+        exact failOfHeader _ headerRead (by simp [headerKind])
+    | integer descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+    | string descriptor objectEq objectRelated refCount persistent cellLive =>
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+    | closure closureRelated =>
+        cases closureRelated with
+        | closure objectEq objectRelated headerRead headerKind descriptorLookup
+            fixedCount extent refCount persistent cellLive =>
+            exact failOfHeader _ headerRead (by simp [headerKind])
+  have semantic :
+      Fir.LeanIR.Impure.reuse runtime (.reuseToken (some location)) info
+          updateHeader semanticFields =
+        .error .expectedConstructor := by
+    unfold Fir.LeanIR.Impure.reuse
+    simp only
+    have arityCheck : (semanticFields.size != info.size) = false := by
+      simp [semanticArity]
+    rw [arityCheck]
+    simp only [Bool.false_eq_true, ↓reduceIte, Bind.bind, Except.bind]
+    have liveCell : getLiveCell runtime location = .ok cell := by
+      simp [getLiveCell, found, live]
+    rw [liveCell]
+    simp only
+    cases objectEq : cell.object with
+    | ctor object => exact False.elim (notConstructor object objectEq)
+    | closure function arity fixed => rfl
+    | boxed type value => rfl
+    | string value => rfl
+    | natural value => rfl
+    | integer value => rfl
+    | byteArray value => rfl
+    | «opaque» typeName => rfl
+  exact ⟨concrete, semantic⟩
+
 /-- Consuming an empty reuse token for an empty-layout constructor preserves
 the semantic tagged-constructor representation. The concrete word may be a
 direct immediate or a fresh promoted tag; `encodeTagged_liveHeapRel` supplies

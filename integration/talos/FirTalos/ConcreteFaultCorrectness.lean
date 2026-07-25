@@ -673,6 +673,70 @@ theorem concreteFaultLeaf_external_sourceFailure
     hGets hImp hSat hi hContract hParams (operationStep.trans trapped)
     (by simpa [ConcreteFunctionFaultPost] using post)
 
+/-- Generic terminal T4 leaf for an arbitrary-arity, result-producing host
+call whose argument prefix consists of generated local loads. The host trap
+preempts the result-local write and continuation. -/
+theorem concreteFaultLeaf_hostLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {indices : List Nat}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {targetRest : Wasm.Program}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    {failure : ConcreteError}
+    {fault : RuntimeFault}
+    (sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv code)
+        (FaultObservation sourceRuntime fault))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code
+        (indices.map Wasm.Instruction.localGet ++
+          .call id :: .localSet resultIndex :: targetRest))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hGets : List.Forall₂
+      (fun index value => locals.get index = some value) indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (hParams : imp.params.length = physicalArgs.length)
+    (operation :
+      step initial physicalArgs =
+        trap (clearFailure initial) (.runtime failure.toTrap))
+    (failureRelated : ConcreteErrorSourceRel witness failure fault) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv code
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime fault := by
+  obtain ⟨final, message, trapped, post⟩ :=
+    refinedFaultPost_of_runtimeFailure initialRelated.1 failureRelated
+  refine ⟨sourceFault, adapted, initialRelated, ?_⟩
+  simpa using wp_effect_localGets_of_trap
+    (step := step)
+    (rest := .localSet resultIndex :: targetRest)
+    (indices := indices) (physicalArgs := physicalArgs) (tail := [])
+    hGets hImp hSat hi hContract hParams (operation.trans trapped)
+    (by simpa [ConcreteFunctionFaultPost] using post)
+
 /-- Generic terminal T4 leaf for a unary, result-producing concrete host
 operation. It centralizes compiler/adaptor composition and Talos trap
 propagation; operation-specific leaves supply only the source error, concrete
@@ -2196,6 +2260,323 @@ theorem concreteFaultLeaf_reset_expectedConstructor
     evaluated valueCompiled valueAdapted resultFound continuationAdapted
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
+
+/-- Compiler/adaptor terminal boundary for an arbitrary represented failure
+of a generated nonempty reuse call. Operation-specific wrappers provide the
+exact source/concrete equations and their error relation. -/
+theorem concreteFaultLeaf_reuse_of_refines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {tokenId : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool}
+    {args : Array (LCNF.Arg .impure)}
+    {fvarIds : List Lean.FVarId}
+    {indices : List Nat}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value}
+    {semanticFields : Array Value}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultIndex : Nat}
+    {location : Location}
+    {targetRest : Wasm.Program}
+    {failure : ConcreteError}
+    {fault : RuntimeFault}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok ((tokenId :: fvarIds).map Fir.Wasm.Instruction.localGet ++
+          [.call (.runtime
+            (.reuse info updateHeader fieldKinds resultKind))]))
+    (argumentsFound : List.Forall₂
+      (fun fvarId index =>
+        findFVar? (functionBindings sourceFunction) fvarId = some index)
+      (tokenId :: fvarIds) indices)
+    (callFound :
+      callIndex? sourceModule
+        (.runtime (.reuse info updateHeader fieldKinds resultKind)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (tokenLookup :
+      lookup sourceEnv tokenId = some (.reuseToken (some location)))
+    (argumentsEvaluated :
+      evalArgs sourceEnv args = .ok semanticFields)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? =
+      some (reuseContract info updateHeader fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (semantic :
+      reuse sourceRuntime (.reuseToken (some location)) info updateHeader
+          semanticFields =
+        .error fault)
+    (operation :
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        trap (clearFailure initial) (.runtime failure.toTrap))
+    (failureRelated : ConcreteErrorSourceRel witness failure fault) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime fault := by
+  have argumentsAdapted := FirTalos.Correctness.instructions_localGets
+    (sourceModule := sourceModule) (sourceFunction := sourceFunction)
+    (labels := labels) (found := by
+      simpa [functionBindings] using argumentsFound)
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          ((tokenId :: fvarIds).map Fir.Wasm.Instruction.localGet ++
+            [.call (.runtime
+              (.reuse info updateHeader fieldKinds resultKind))]) =
+        .ok (indices.map Wasm.Instruction.localGet ++ [.call id]) := by
+    rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+    simp [instructions, instruction, callFound]
+  have adaptedBase :=
+    codeAdapted_let valueCompiled valueAdapted resultFound continuationAdapted
+  have adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation)
+        (indices.map Wasm.Instruction.localGet ++
+          .call id :: .localSet resultIndex :: targetRest) := by
+    simpa only [List.append_assoc, List.singleton_append] using adaptedBase
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error fault := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState]
+    have tokenLookupValue :
+        lookupValue sourceEnv tokenId =
+          .ok (.reuseToken (some location)) := by
+      simp [lookupValue, tokenLookup]
+    rw [tokenLookupValue, argumentsEvaluated]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        reuse sourceRuntime (.reuseToken (some location)) info updateHeader
+          semanticFields) =
+      .error fault
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_hostLet
+    (step := reuseStep info updateHeader fieldKinds resultKind)
+    (failure := failure)
+    (sourceLetFault_execEvaluates evaluated) adapted initialRelated hGets
+    hImp hSat hi hContract hParams operation failureRelated
+
+/-- A generated reuse of a stale mapped nonempty token preserves the exact
+address-related dead-object fault and cannot write its result local. -/
+theorem concreteFaultLeaf_reuse_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {tokenId : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool}
+    {args : Array (LCNF.Arg .impure)}
+    {fvarIds : List Lean.FVarId}
+    {indices : List Nat}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value}
+    {fields : List Word32}
+    {semanticFields : Array Value}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultIndex : Nat}
+    {address : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok ((tokenId :: fvarIds).map Fir.Wasm.Instruction.localGet ++
+          [.call (.runtime
+            (.reuse info updateHeader fieldKinds resultKind))]))
+    (argumentsFound : List.Forall₂
+      (fun fvarId index =>
+        findFVar? (functionBindings sourceFunction) fvarId = some index)
+      (tokenId :: fvarIds) indices)
+    (callFound :
+      callIndex? sourceModule
+        (.runtime (.reuse info updateHeader fieldKinds resultKind)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (tokenLookup :
+      lookup sourceEnv tokenId = some (.reuseToken (some location)))
+    (argumentsEvaluated :
+      evalArgs sourceEnv args = .ok semanticFields)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (address, fields))
+    (tokenRelated :
+      ValueRel witness .reuseToken (.word32 address)
+        (.reuseToken (some location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? =
+      some (reuseContract info updateHeader fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    reuseStep_deadObject_of_refines initialRelated.1 argsLength decoded
+      tokenRelated found dead arity semanticArity
+  exact concreteFaultLeaf_reuse_of_refines
+    (failure := .sourceAddress (.deadObject address))
+    valueEq valueCompiled argumentsFound callFound resultFound
+    continuationAdapted tokenLookup argumentsEvaluated initialRelated hGets
+    hImp hSat hi hContract hParams semantic operation failureRelated
+
+/-- A generated reuse of a live mapped nonconstructor preserves exact
+`expectedConstructor` and traps before retained-capacity checks, result-local
+write, or continuation. -/
+theorem concreteFaultLeaf_reuse_expectedConstructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {tokenId : Lean.FVarId}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool}
+    {args : Array (LCNF.Arg .impure)}
+    {fvarIds : List Lean.FVarId}
+    {indices : List Nat}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value}
+    {fields : List Word32}
+    {semanticFields : Array Value}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultIndex : Nat}
+    {address : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok ((tokenId :: fvarIds).map Fir.Wasm.Instruction.localGet ++
+          [.call (.runtime
+            (.reuse info updateHeader fieldKinds resultKind))]))
+    (argumentsFound : List.Forall₂
+      (fun fvarId index =>
+        findFVar? (functionBindings sourceFunction) fvarId = some index)
+      (tokenId :: fvarIds) indices)
+    (callFound :
+      callIndex? sourceModule
+        (.runtime (.reuse info updateHeader fieldKinds resultKind)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (tokenLookup :
+      lookup sourceEnv tokenId = some (.reuseToken (some location)))
+    (argumentsEvaluated :
+      evalArgs sourceEnv args = .ok semanticFields)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hGets : List.Forall₂
+      (fun index physical => locals.get index = some physical)
+      indices physicalArgs)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (address, fields))
+    (tokenRelated :
+      ValueRel witness .reuseToken (.word32 address)
+        (.reuseToken (some location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (notConstructor : ∀ object, cell.object ≠ .ctor object)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract : hostSpec.contracts[id]? =
+      some (reuseContract info updateHeader fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (indices.map Wasm.Instruction.localGet ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime .expectedConstructor := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    reuseStep_expectedConstructor_of_refines initialRelated.1 argsLength
+      decoded tokenRelated found live notConstructor arity semanticArity
+  exact concreteFaultLeaf_reuse_of_refines
+    (failure := .source .expectedConstructor)
+    valueEq valueCompiled argumentsFound callFound resultFound
+    continuationAdapted tokenLookup argumentsEvaluated initialRelated hGets
+    hImp hSat hi hContract hParams semantic operation failureRelated
 
 /-- An object-slot mutation of a related nonconstructor faults at the common
 header gate before bounds, padding, old-field decoding, or any heap write. -/

@@ -73,7 +73,7 @@ the premise that derives its operation equation remains to be packaged.
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
 | reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object and unique-nonconstructor terminal leaves complete; `.tobject` excludes `expectedObject`; bounds, decrement/child leaves, and release-fuel exclusion remain |
-| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | operand/arity gates exclude two cases; dead/constructor leaves remain; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
+| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
 | exact external call | arbitrary `RuntimeFault` returned by the installed implementation | arbitrary-arity terminal leaf complete |
@@ -100,10 +100,9 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package the dead-object and constructor-kind leaves for reuse; its admitted
-   token and static arity gates exclude `expectedReuseToken` and malformed
-   arity.
-2. Add the address-related underflow leaf and prove its precedence over
+1. Add reset's exact object-field-bounds leaf after the live, unique
+   constructor gate.
+2. Add the address-related ownership-underflow leaf and prove its precedence over
    recursive release.
 3. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.

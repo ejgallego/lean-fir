@@ -3053,6 +3053,19 @@ The admitted `.tobject` operand relation excludes `expectedObject`; bounds
 and recursive child-release faults remain separate leaves. No shared semantic
 contract or executable ABI changed.
 
+W6.6cw closes reuse's two admitted structured-fault branches and adds the
+arbitrary-arity result-call trap combinator needed to package them. After
+generated token/field local loads and the statically aligned field-arity gate,
+a stale mapped nonempty token preserves exact address-related `deadObject`;
+a live mapped nonconstructor preserves exact `expectedConstructor` before
+retained-capacity checks or heap writes. Both compiler/adaptor leaves prove
+the generated result-local write and continuation unreachable. The admitted
+reuse-token relation excludes `expectedReuseToken`, and the compiler-selected
+arity excludes malformed arity. The retained-allocation-capacity mismatch
+remains the separate T4S issue
+`FIR-BUG-wasm-none-reuse-capacity-semantic-gap`. No shared semantic contract
+or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
