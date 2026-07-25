@@ -1792,6 +1792,207 @@ theorem concreteFaultLeaf_scalarProjection_expectedConstructor
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
 
+/-- Typed unboxing of a stale mapped object faults at the generated unary host
+call before the destination local is written or the continuation begins. -/
+theorem concreteFaultLeaf_unbox_deadObject
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {kind : BoxedScalarKind}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = kind.semanticType)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.unbox kind.abiKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.unbox kind.abiKind)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (dead : cell.live = false)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (unboxContract kind))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime (.deadObject location) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    unboxStep_deadObject_of_refines kind initialRelated.1 objectRelated found
+      dead
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.unbox kind.abiKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error (.deadObject location) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    rw [resultTypeEq]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        unbox sourceRuntime kind.semanticType (.object (.heap location))) =
+      .error (.deadObject location)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := unboxStep kind)
+    (failure := .sourceAddress (.deadObject objectWord))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
+/-- Typed unboxing of a related live non-box object preserves the exact
+`expectedScalar` fault through the compiler/adaptor prefix and concrete host;
+the destination-local write and continuation remain unreachable. -/
+theorem concreteFaultLeaf_unbox_expectedScalar
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {kind : BoxedScalarKind}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex : Nat}
+    {objectWord : Word32}
+    {sourceObject : Value}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = kind.semanticType)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.unbox kind.abiKind))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.unbox kind.abiKind)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (unboxFailed :
+      unbox sourceRuntime kind.semanticType sourceObject =
+        .error .expectedScalar)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (unboxContract kind))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime .expectedScalar := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    unboxStep_expectedScalar_of_refines kind initialRelated.1 objectRelated
+      unboxFailed
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.unbox kind.abiKind))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error .expectedScalar := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    rw [resultTypeEq]
+    change ((fun value : Value =>
+      (sourceRuntime, LetAction.value value)) <$>
+        unbox sourceRuntime kind.semanticType sourceObject) =
+      .error .expectedScalar
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := unboxStep kind)
+    (failure := .source .expectedScalar)
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
 /-- An object-slot mutation of a related nonconstructor faults at the common
 header gate before bounds, padding, old-field decoding, or any heap write. -/
 theorem concreteFaultLeaf_objectSet_expectedConstructor

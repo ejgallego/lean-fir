@@ -626,4 +626,149 @@ theorem LiveHeapRel.readBoxedScalar_tagged_refines
       rw [promoted.decoded]
       rfl
 
+/-- A released mapped object is rejected before the concrete boxed-kind
+decoder inspects its header metadata. -/
+theorem DeadCellRel.readBoxedScalar_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (kind : BoxedScalarKind) :
+    readBoxedScalar state kind address =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  unfold readBoxedScalar
+  rw [addressHeap]
+  simp only
+  rw [related.readLiveHeader_eq]
+  rfl
+
+/-- Stale semantic and concrete heap references agree at the typed unbox
+boundary, retaining the witness-related physical address/source location pair.
+-/
+theorem LiveHeapRel.readBoxedScalar_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (kind : BoxedScalarKind) :
+    readBoxedScalar state kind address =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.unbox runtime kind.semanticType
+          (.object (.heap location)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.readBoxedScalar_eq kind, by
+    simp [Fir.LeanIR.Impure.unbox, getLiveCell, found, dead]
+    rfl⟩
+
+/-- A representation-polymorphic object rejected by FIR as a non-scalar is
+rejected by the concrete typed decoder with the same source fault. Tagged
+representations and live boxes are eliminated by the source failure premise;
+every represented live non-box heap shape fails after the common live-header
+read. -/
+theorem LiveHeapRel.readBoxedScalar_expectedScalar_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {value : Value} (kind : BoxedScalarKind)
+    (related : LiveHeapRel state witness runtime)
+    (valueRelated : ValueRel witness .tobject (.word32 word) value)
+    (unboxFailed :
+      Fir.LeanIR.Impure.unbox runtime kind.semanticType value =
+        .error .expectedScalar) :
+    readBoxedScalar state kind word =
+      .error (.source .expectedScalar) := by
+  have failOfHeader (header : Header)
+      (headerRead : state.readLiveHeader word = .ok header)
+      (notBoxed : header.kind ≠ .boxed)
+      (notPromoted : header.isPromotedTag = false) :
+      readBoxedScalar state kind word =
+        .error (.source .expectedScalar) := by
+    have heap :=
+      (MemoryState.PrefixExtension.readLiveHeader_facts state word header
+        headerRead).1
+    unfold readBoxedScalar
+    rw [heap]
+    simp only [headerRead, Bind.bind, Except.bind, liftMemory]
+    have boxedFalse : (header.kind == .boxed) = false := by
+      cases kindEq : header.kind
+      case boxed => contradiction
+      all_goals native_decide
+    rw [boxedFalse]
+    have promotedFalse :
+        (header.kind == ObjectKind.natural && header.persistent &&
+          header.aux0 == promotedTagMarker) = false := by
+      simpa [Header.isPromotedTag] using notPromoted
+    simp [promotedFalse]
+    rfl
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          obtain ⟨_, semantic, _⟩ :=
+            related.readBoxedScalar_tagged_refines taggedRelated kind
+          rw [unboxFailed] at semantic
+          contradiction
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨cell, found, cellRelation⟩ :=
+                related.concreteToSemantic _ _ mapped
+              have live : cell.live = true := by
+                cases liveEq : cell.live with
+                | false =>
+                    simp [Fir.LeanIR.Impure.unbox, getLiveCell, found, liveEq]
+                      at unboxFailed
+                    simp only [Bind.bind, Except.bind] at unboxFailed
+                    have faultEq := Except.error.inj unboxFailed
+                    cases faultEq
+                | true => rfl
+              have liveRelated := cellRelation.live_of_eq_true live
+              cases liveRelated with
+              | constructor descriptor objectEq objectRelated headerRead
+                  headerKind refCount persistent cellLive =>
+                  have different :
+                      (ObjectKind.constructor == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ headerRead (by simp [headerKind])
+                    (by simp [Header.isPromotedTag, headerKind, different])
+              | boxed descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  simp [Fir.LeanIR.Impure.unbox, getLiveCell, found, live]
+                    at unboxFailed
+                  simp only [Bind.bind, Except.bind] at unboxFailed
+                  rw [objectEq] at unboxFailed
+                  contradiction
+              | natural descriptor objectEq headerRead headerKind marker extent
+                  limbsFit decoded refCount persistent cellLive =>
+                  exact failOfHeader _ headerRead (by simp [headerKind])
+                    (by simp [Header.isPromotedTag, headerKind, marker,
+                      bigNaturalMarker, promotedTagMarker])
+              | integer descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.integer == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | string descriptor objectEq objectRelated refCount persistent
+                  cellLive =>
+                  have different :
+                      (ObjectKind.string == ObjectKind.natural) = false := by
+                    decide
+                  exact failOfHeader _ objectRelated.headerRead
+                    (by simp [objectRelated.headerKind])
+                    (by simp [Header.isPromotedTag, objectRelated.headerKind,
+                      different])
+              | closure closureRelated =>
+                  cases closureRelated with
+                  | closure objectEq objectRelated headerRead headerKind
+                      descriptorLookup fixedCount extent refCount persistent
+                      cellLive =>
+                      have different :
+                          (ObjectKind.closure == ObjectKind.natural) = false := by
+                        decide
+                      exact failOfHeader _ headerRead (by simp [headerKind])
+                        (by simp [Header.isPromotedTag, headerKind, different])
+
 end Fir.Wasm.Concrete

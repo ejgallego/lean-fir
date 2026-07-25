@@ -1536,6 +1536,63 @@ theorem unboxStep_of_refines
           Word32.ofUInt32_ofNat_value, concreteRead], rfl, ?_⟩
       exact physicalOfLane_related valueRelated
 
+/-- A stale mapped object faults at the common live-header gate before the
+typed unbox decoder inspects boxed metadata or produces a result lane. -/
+theorem unboxStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} (kind : BoxedScalarKind)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    unboxStep kind initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      unbox runtime kind.semanticType (.object (.heap location)) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.readBoxedScalar_deadObject heapRelated found
+              dead kind
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [unboxStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
+/-- A related live non-box object rejected by FIR at typed unboxing produces
+the exact source-classified concrete trap. Supported `BoxedScalarKind` values
+exclude the unknown-type semantic fault, while tagged operands and live boxes
+are eliminated by the source failure premise. -/
+theorem unboxStep_expectedScalar_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {value : Value}
+    (kind : BoxedScalarKind)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) value)
+    (unboxFailed :
+      unbox runtime kind.semanticType value = .error .expectedScalar) :
+    unboxStep kind initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedScalar : ConcreteError).toTrap)) ∧
+      unbox runtime kind.semanticType value = .error .expectedScalar ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedScalar) .expectedScalar := by
+  have concrete :=
+    runtimeRelated.heap.readBoxedScalar_expectedScalar_refines kind
+      valueRelated unboxFailed
+  refine ⟨?_, unboxFailed, .source .expectedScalar⟩
+  simp [unboxStep, clearFailure, Word32.ofUInt32_ofNat_value, concrete,
+    ConcreteError.toTrap]
+
 /-- Concrete trampoline metadata test. It reads only the closure header and
 returns the direct i32 Boolean consumed by generated `if` control flow. -/
 def closureMatchesStep (function : Lean.Name) (arity fixed : Nat)

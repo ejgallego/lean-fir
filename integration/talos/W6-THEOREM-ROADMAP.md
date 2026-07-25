@@ -141,6 +141,10 @@ The relation is `ConcreteErrorSourceRel`. The proof must retain operation and
 precedence information for source faults, including stale-object, bounds,
 source-classified malformed requests, and external failures. A target trap
 without the related structured source error does not satisfy this theorem.
+Typed unboxing now supplies both reachable terminal instances: stale mapped
+objects preserve their related physical/source address in `deadObject`, while
+live represented non-box objects preserve `expectedScalar`. The admitted
+`.tobject` and `BoxedScalarKind` gates exclude its other source fault forms.
 
 The public endpoint is now explicit:
 

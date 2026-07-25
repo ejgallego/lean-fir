@@ -3028,6 +3028,18 @@ by its address-related leaf; missing-alternative `invalidCases` remains the
 separate structured-unreachable blocker. No shared semantic contract or
 executable ABI changed.
 
+W6.6cu closes the reachable typed-unbox structured-fault family.
+`LiveHeapRel.readBoxedScalar_deadObject` proves that a stale mapped heap
+operand faults at the common live-header gate while preserving its related
+physical/source address. `LiveHeapRel.readBoxedScalar_expectedScalar_refines`
+eliminates tagged values and genuine live boxes from the source-failure
+premise, then proves exact rejection for every represented live non-box heap
+shape. The Talos host equations and compiler/adaptor terminal leaves retain
+the unchanged source runtime and make the generated result-local write and
+continuation unreachable. The admitted `.tobject` relation excludes
+`expectedObject`, while `BoxedScalarKind` excludes unknown-type malformed
+requests. No shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
