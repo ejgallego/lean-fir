@@ -12073,4 +12073,56 @@ theorem ReachableMachineRelatedWith.simulation
   advance related step :=
     ReachableMachineRelatedWith.advance laws related step
 
+/-- Compiler-facing value and observation relation for the reachable-runtime
+proof.  Canonical entry states have empty heaps, so their admissible values
+are precisely those related by the empty address renaming. -/
+def reachablePhaseSimulation (externals : ExternalSpec) :
+    PhaseSimulation .impure .impure
+      (Impure.semantics externals) (Impure.semantics externals) where
+  valueRel := ValueRel emptyAddressRenaming
+  observationRel := ObservationRel
+
+/-- Entry obligation for the semantic invariant hidden inside
+`ReachableMachineRelatedWith`.  It is stated for pointwise-related source and
+target arguments so the final theorem has the standard `LoweringCorrect`
+shape, even though `elimDeadVars` is a same-phase pass. -/
+def ReachableInitialInvariantOn
+    (invariant : MachineState → MachineState → Prop)
+    (source target : ImpureProgram) (entries : Array Name) : Prop :=
+  ∀ entry, entry ∈ entries → ∀ sourceArguments targetArguments,
+    ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments →
+    invariant
+      (initialState source entry sourceArguments)
+      (initialState target entry targetArguments)
+
+/-- Program-level forward correctness for a transparent `elimDeadVars` graph.
+The operational proof is complete: clients supply program relatedness plus
+the compiler well-formedness invariant's initial, readiness, external, and
+stability laws. -/
+theorem reachableProgram_loweringCorrect
+    {invariant : MachineState → MachineState → Prop}
+    (programs : ProgramRelated (ShadowCodeRelated fuel) source target)
+    (laws : ReachableInvariantLaws externals fuel invariant)
+    (initialInvariant : ReachableInitialInvariantOn invariant
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  intro entry member sourceArguments targetArguments arguments
+    sourceObservation sourceEvaluation
+  have initialStructural : SomeReachableMachineRelated fuel
+      (initialState source entry sourceArguments)
+      (initialState target entry targetArguments) :=
+    initialState_someReachableMachineRelated programs arguments
+  have initialRelated : ReachableMachineRelatedWith fuel invariant
+      (initialState source entry sourceArguments)
+      (initialState target entry targetArguments) := {
+    structural := initialStructural
+    invariant := initialInvariant entry member sourceArguments
+      targetArguments arguments
+  }
+  exact (ReachableMachineRelatedWith.simulation laws).evaluatesState
+    initialRelated sourceEvaluation
+
 end Fir.LeanIR.Passes.ElimDead
