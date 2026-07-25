@@ -82,6 +82,232 @@ inductive CodeBindersAvoidName (forbidden : FVarId) :
         CodeBindersAvoidName forbidden continuation) :
       CodeBindersAvoidName forbidden (.del object continuation)
 
+/- Transparent proof-relevant counterpart of FIR's opaque
+`ImpureHygiene.codeBinders`. -/
+mutual
+
+  inductive CodeBinderList :
+      LCNF.Code .impure → List FVarId → Prop where
+    | letE
+        (continuation : CodeBinderList rest restBinders) :
+        CodeBinderList (.let declaration rest)
+          (declaration.fvarId :: restBinders)
+    | join
+        (body : CodeBinderList declaration.value bodyBinders)
+        (continuation : CodeBinderList rest restBinders) :
+        CodeBinderList (.jp declaration rest)
+          (declaration.fvarId ::
+            (paramIds declaration.params ++ bodyBinders ++ restBinders))
+    | cases
+        (alternatives : AltBinderList caseInfo.alts.toList binders) :
+        CodeBinderList (.cases caseInfo) binders
+    | jump : CodeBinderList (.jmp target arguments) []
+    | ret : CodeBinderList (.return result) []
+    | unreachable : CodeBinderList (.unreach type) []
+    | objectSet
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList (.oset object index field rest) binders
+    | usizeSet
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList (.uset object index field rest) binders
+    | scalarSet
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList
+          (.sset object width offset field type rest) binders
+    | tagSet
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList (.setTag object tag rest) binders
+    | increment
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList
+          (.inc object amount check persistent rest) binders
+    | decrement
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList
+          (.dec object amount check persistent objects rest) binders
+    | delete
+        (continuation : CodeBinderList rest binders) :
+        CodeBinderList (.del object rest) binders
+
+  inductive AltBinderList :
+      List (LCNF.Alt .impure) → List FVarId → Prop where
+    | nil : AltBinderList [] []
+    | ctor
+        (body : CodeBinderList code bodyBinders)
+        (rest : AltBinderList alternatives restBinders) :
+        AltBinderList (.ctorAlt info code :: alternatives)
+          (bodyBinders ++ restBinders)
+    | default
+        (body : CodeBinderList code bodyBinders)
+        (rest : AltBinderList alternatives restBinders) :
+        AltBinderList (.default code :: alternatives)
+          (bodyBinders ++ restBinders)
+
+end
+
+def BinderNamesAvoid (forbidden : FVarId)
+    (binders : List FVarId) : Prop :=
+  ∀ binder, binder ∈ binders → forbidden.name ≠ binder.name
+
+def BinderNamesUnique (binders : List FVarId) : Prop :=
+  binders.Pairwise (fun left right => left.name ≠ right.name)
+
+/-- Declaration-body ownership is an exact transparent binder enumeration
+plus global runtime-name uniqueness. -/
+structure CodeBinderOwnership (code : LCNF.Code .impure) where
+  binders : List FVarId
+  listing : CodeBinderList code binders
+  unique : BinderNamesUnique binders
+
+theorem binderNamesAvoid_of_not_mem
+    (absent : forbidden ∉ binders) :
+    BinderNamesAvoid forbidden binders := by
+  intro binder member sameName
+  apply absent
+  have sameId : forbidden = binder := by
+    cases forbidden
+    cases binder
+    simp_all
+  exact sameId ▸ member
+
+private theorem codeAvoidance_caseAlts_sizeOf_lt
+    (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem codeAvoidance_funDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure)
+    (continuation : LCNF.Code .impure) :
+    sizeOf declaration.value <
+      sizeOf (LCNF.Code.jp declaration continuation) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
+private theorem codeAvoidance_altCode_sizeOf_lt_cons
+    (alternative : LCNF.Alt .impure)
+    (rest : List (LCNF.Alt .impure)) :
+    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
+  cases alternative with
+  | ctorAlt info code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | default code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | alt _ _ _ impossible => nomatch impossible
+
+mutual
+
+  /-- List-level exclusion can be pushed back through the transparent binder
+  enumeration to every structural binder occurrence. -/
+  theorem CodeBinderList.avoids
+      (listing : CodeBinderList code binders)
+      (namesAvoid : BinderNamesAvoid forbidden binders) :
+      CodeBindersAvoidName forbidden code := by
+    cases listing with
+    | letE continuation =>
+        exact .letE
+          (namesAvoid _ (by simp))
+          (CodeBinderList.avoids continuation
+            (fun binder member => namesAvoid binder (by simp [member])))
+    | join body continuation =>
+        exact .join
+          (namesAvoid _ (by simp))
+          (by
+            intro param member
+            apply namesAvoid param.fvarId
+            simp only [List.mem_cons, List.mem_append]
+            apply Or.inr
+            apply Or.inl
+            apply Or.inl
+            unfold paramIds
+            exact List.mem_map.mpr ⟨param, member, rfl⟩)
+          (CodeBinderList.avoids body
+            (fun binder member => namesAvoid binder (by simp [member])))
+          (CodeBinderList.avoids continuation
+            (fun binder member => namesAvoid binder (by simp [member])))
+    | cases alternatives =>
+        exact .cases (AltBinderList.avoids alternatives namesAvoid)
+    | jump => exact .jump
+    | ret => exact .ret
+    | unreachable => exact .unreachable
+    | objectSet continuation =>
+        exact .objectSet (CodeBinderList.avoids continuation namesAvoid)
+    | usizeSet continuation =>
+        exact .usizeSet (CodeBinderList.avoids continuation namesAvoid)
+    | scalarSet continuation =>
+        exact .scalarSet (CodeBinderList.avoids continuation namesAvoid)
+    | tagSet continuation =>
+        exact .tagSet (CodeBinderList.avoids continuation namesAvoid)
+    | increment continuation =>
+        exact .increment (CodeBinderList.avoids continuation namesAvoid)
+    | decrement continuation =>
+        exact .decrement (CodeBinderList.avoids continuation namesAvoid)
+    | delete continuation =>
+        exact .delete (CodeBinderList.avoids continuation namesAvoid)
+
+  termination_by sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply codeAvoidance_caseAlts_sizeOf_lt
+      | apply codeAvoidance_funDeclValue_sizeOf_lt
+
+  theorem AltBinderList.avoids
+      (listing : AltBinderList alternatives binders)
+      (namesAvoid : BinderNamesAvoid forbidden binders) :
+      ∀ alternative, alternative ∈ alternatives →
+        CodeBindersAvoidName forbidden alternative.getCode := by
+    intro alternative member
+    cases listing with
+    | nil => simp at member
+    | ctor body rest =>
+        simp only [List.mem_cons] at member
+        rcases member with rfl | member
+        · exact CodeBinderList.avoids body
+            (fun binder binderMember =>
+              namesAvoid binder (by simp [binderMember]))
+        · exact AltBinderList.avoids rest
+            (fun binder binderMember =>
+              namesAvoid binder (by simp [binderMember]))
+            alternative member
+    | default body rest =>
+        simp only [List.mem_cons] at member
+        rcases member with rfl | member
+        · exact CodeBinderList.avoids body
+            (fun binder binderMember =>
+              namesAvoid binder (by simp [binderMember]))
+        · exact AltBinderList.avoids rest
+            (fun binder binderMember =>
+              namesAvoid binder (by simp [binderMember]))
+            alternative member
+
+  termination_by sizeOf alternatives
+  decreasing_by
+    all_goals subst_vars
+    all_goals first
+      | apply codeAvoidance_altCode_sizeOf_lt_cons
+      | (simp_wf; omega)
+
+end
+
+theorem CodeBinderList.avoids_of_not_mem
+    (listing : CodeBinderList code binders)
+    (absent : forbidden ∉ binders) :
+    CodeBindersAvoidName forbidden code :=
+  listing.avoids (binderNamesAvoid_of_not_mem absent)
+
+theorem CodeBinderOwnership.avoids_of_not_mem
+    (ownership : CodeBinderOwnership code)
+    (absent : forbidden ∉ ownership.binders) :
+    CodeBindersAvoidName forbidden code :=
+  ownership.listing.avoids_of_not_mem absent
+
 theorem fvarId_ne_of_freshForScope
     (fresh : FreshForScope forbidden scope)
     (inScope : scope.contains candidate = true) :
@@ -197,37 +423,6 @@ theorem letValueAvoids_of_scoped
       simp only [letValueScoped, Bool.and_eq_true] at inScope
       exact fvarId_ne_of_freshForScope fresh inScope.2
   | proj _ _ _ impossible | const _ _ _ impossible => nomatch impossible
-
-private theorem codeAvoidance_caseAlts_sizeOf_lt
-    (cases : LCNF.Cases .impure) :
-    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
-  rcases cases with ⟨typeName, resultType, discr, alts⟩
-  rcases alts with ⟨alts⟩
-  simp [LCNF.Cases.alts]
-  omega
-
-private theorem codeAvoidance_funDeclValue_sizeOf_lt
-    (declaration : LCNF.FunDecl .impure)
-    (continuation : LCNF.Code .impure) :
-    sizeOf declaration.value <
-      sizeOf (LCNF.Code.jp declaration continuation) := by
-  cases declaration
-  simp_wf
-  simp only [LCNF.FunDecl.value]
-  omega
-
-private theorem codeAvoidance_altCode_sizeOf_lt_cons
-    (alternative : LCNF.Alt .impure)
-    (rest : List (LCNF.Alt .impure)) :
-    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
-  cases alternative with
-  | ctorAlt info code =>
-      simp [LCNF.Alt.getCode]
-      omega
-  | default code =>
-      simp [LCNF.Alt.getCode]
-      omega
-  | alt _ _ _ impossible => nomatch impossible
 
 mutual
 
