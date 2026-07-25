@@ -81,6 +81,83 @@ theorem collectArgs_subset
     UsedSubset used (collectArgs used arguments) :=
   collectArgList_subset used arguments.toList
 
+/-- A collected argument avoids an identifier when it cannot insert that
+identifier into the backwards liveness set. -/
+def ArgAvoids (forbidden : FVarId) : LCNF.Arg .impure → Prop
+  | .erased => True
+  | .fvar fvarId => fvarId ≠ forbidden
+  | .type _ impossible => nomatch impossible
+
+def ArgsAvoid (forbidden : FVarId)
+    (arguments : Array (LCNF.Arg .impure)) : Prop :=
+  ∀ argument, argument ∈ arguments.toList → ArgAvoids forbidden argument
+
+/-- Precisely the runtime identifiers that `collectLetValue` may insert,
+presented negatively for freshness proofs. -/
+def LetValueAvoids (forbidden : FVarId) :
+    LCNF.LetValue .impure → Prop
+  | .lit _ | .erased => True
+  | .fvar fvarId arguments =>
+      fvarId ≠ forbidden ∧ ArgsAvoid forbidden arguments
+  | .ctor _ arguments | .fap _ arguments | .pap _ arguments =>
+      ArgsAvoid forbidden arguments
+  | .oproj _ fvarId | .uproj _ fvarId | .sproj _ _ fvarId
+  | .reset _ fvarId | .box _ fvarId | .unbox fvarId | .isShared fvarId =>
+      fvarId ≠ forbidden
+  | .reuse fvarId _ _ arguments =>
+      fvarId ≠ forbidden ∧ ArgsAvoid forbidden arguments
+  | .proj _ _ _ impossible | .const _ _ _ impossible => nomatch impossible
+
+theorem collectArg_preserves_absent
+    (absent : used.contains forbidden = false)
+    (avoids : ArgAvoids forbidden argument) :
+    (collectArg used argument).contains forbidden = false := by
+  cases argument with
+  | erased => exact absent
+  | fvar fvarId =>
+      change fvarId ≠ forbidden at avoids
+      simp [collectArg, avoids, absent]
+  | type _ impossible => nomatch impossible
+
+theorem collectArgList_preserves_absent
+    (absent : used.contains forbidden = false)
+    (avoids : ∀ argument, argument ∈ arguments →
+      ArgAvoids forbidden argument) :
+    (collectArgList used arguments).contains forbidden = false := by
+  induction arguments generalizing used with
+  | nil => exact absent
+  | cons argument rest ih =>
+      apply ih
+      · exact collectArg_preserves_absent absent
+          (avoids argument List.mem_cons_self)
+      · intro candidate member
+        exact avoids candidate (List.mem_cons_of_mem argument member)
+
+theorem collectArgs_preserves_absent
+    (absent : used.contains forbidden = false)
+    (avoids : ArgsAvoid forbidden arguments) :
+    (collectArgs used arguments).contains forbidden = false :=
+  collectArgList_preserves_absent absent avoids
+
+theorem collectLetValue_preserves_absent
+    (absent : used.contains forbidden = false)
+    (avoids : LetValueAvoids forbidden value) :
+    (collectLetValue used value).contains forbidden = false := by
+  cases value with
+  | lit _ | erased => exact absent
+  | fvar fvarId arguments | reuse fvarId _ _ arguments =>
+      exact collectArgs_preserves_absent
+        (collectArg_preserves_absent (argument := LCNF.Arg.fvar fvarId)
+          absent avoids.1)
+        avoids.2
+  | ctor _ arguments | fap _ arguments | pap _ arguments =>
+      exact collectArgs_preserves_absent absent avoids
+  | oproj _ fvarId | uproj _ fvarId | sproj _ _ fvarId
+  | reset _ fvarId | box _ fvarId | unbox fvarId | isShared fvarId =>
+      exact collectArg_preserves_absent
+        (argument := LCNF.Arg.fvar fvarId) absent avoids
+  | proj _ _ _ impossible | const _ _ _ impossible => nomatch impossible
+
 def ArgCovered (used : UsedLocals) : LCNF.Arg .impure → Prop
   | .erased => True
   | .fvar fvarId => used.contains fvarId = true
