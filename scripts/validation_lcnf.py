@@ -461,7 +461,11 @@ def positive_int_diagnostic(record: dict | None, key: str) -> tuple[bool, int | 
 
 
 def coverage_report(
-    descriptors: list[dict], results: dict[str, dict], selected: list[str]
+    descriptors: list[dict],
+    results: dict[str, dict],
+    selected: list[str],
+    *,
+    backend: str = "lcnf",
 ) -> tuple[dict, list[ValidationFinding]]:
     """Build deterministic static and executed LCNF and external coverage."""
     descriptor_by_id = {descriptor["id"]: descriptor for descriptor in descriptors}
@@ -910,7 +914,7 @@ def coverage_report(
             interpreter_steps.append(steps)
 
         def audit_finding(message: str) -> None:
-            findings.append(ValidationFinding("audit", message, "lcnf", case_id))
+            findings.append(ValidationFinding("audit", message, backend, case_id))
 
         if missing_static:
             audit_finding(
@@ -1250,7 +1254,7 @@ def coverage_report(
 
     report = {
         "version": PROTOCOL_VERSION,
-        "backend": "lcnf",
+        "backend": backend,
         "caseCount": len(cases),
         "summary": {
             "static": {

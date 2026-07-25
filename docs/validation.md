@@ -3,7 +3,10 @@
 FIR validates its executable semantics against Lean programs compiled by the
 normal native backend.  The native executable is the source-language oracle;
 the first candidate is FIR's interpreter for the final impure LCNF emitted for
-the same declarations.
+the same declarations. A separate direct-LCNF tier compares native Lean
+semantics with validation-owned final-impure programs for machine transitions
+that the current source compiler does not emit. Direct cases supplement the
+source corpus; they are never presented as compiler-output coverage.
 
 ```text
 Lean source case
@@ -22,6 +25,12 @@ Run the complete native/LCNF/real-V8 corpus triangle with:
 
 ```sh
 make validate-v8
+```
+
+Run the machine-only direct-LCNF corpus with:
+
+```sh
+make validate-direct-lcnf
 ```
 
 Individual cases and tagged groups can be selected directly:
@@ -84,7 +93,10 @@ invokes that captured path directly; it no longer uses `lake exe`, which could
 silently rebuild after capture.  LCNF validation binds the resolved Lean
 engine, `FirValidationLCNF.lean`, and the consumed
 `Fir/Validation/LCNF.olean`, then verifies all captured backend tool files
-before and after execution.  External adapters likewise bind the exact
+before and after execution. The direct tier binds separate
+`fir-direct-native` and `fir-direct-lcnf` executables, so its oracle and
+candidate process evidence remain distinct even though both consume the same
+explicit case registry. External adapters likewise bind the exact
 PATH-resolved engine and every config-relative runner argument.  The current
 LCNF module hash relies on Lean's
 embedded import fingerprints for its transitive closure; inventorying every
@@ -200,7 +212,8 @@ are reported data and do not by themselves make the comparison command fail;
 failure means that one of the two evidence graphs was structurally invalid.
 
 `make validate` performs this verification immediately after the normal
-native–LCNF matrix run. `make validate-v8` does the same for the three-way
+native–LCNF matrix run. `make validate-direct-lcnf` verifies its direct
+native/LCNF matrix, and `make validate-v8` does the same for the three-way
 native/LCNF/V8 matrix.
 
 The verifier strictly checks schema, names and paths, every retained byte,
@@ -230,7 +243,8 @@ immutable manifest preserves multiple executions with the same run identity.
 
 CI can check the requested graph into a strict, versioned plan instead of
 assembling flags.  `make validate` uses
-`validation-plans/native-lcnf.json`, while `make validate-v8` uses
+`validation-plans/native-lcnf.json`, `make validate-direct-lcnf` uses
+`validation-plans/direct-lcnf.json`, and `make validate-v8` uses
 `validation-plans/native-lcnf-v8-scalars.json`. The latter preserves an
 explicit compiler-admission fence while running each of native, LCNF, and V8
 once and retaining all three directed consistency edges. A later plan can add
@@ -239,6 +253,7 @@ Talos without changing this comparison model:
 ```json
 {
   "version": 2,
+  "corpusBackend": "native",
   "providerConfigs": ["../validation-providers/lean-wasm-semantic.json"],
   "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
   "pairs": [
@@ -251,17 +266,20 @@ Talos without changing this comparison model:
 ```
 
 Adapter-config paths are resolved relative to the plan file, not the invoking
-shell.  Unknown fields, protocol-version drift, duplicate paths or pairs,
+shell. `corpusBackend` selects the registered backend whose executable owns
+manifest discovery and defaults to `native`; the direct plan selects
+`direct-native`. Unknown fields, protocol-version drift, duplicate paths or pairs,
 self-comparisons, malformed backend names, and an empty graph are rejected.
 `--plan` is exclusive with the pair/adapter flags; `--case`, `--tag`,
 `--out-dir`, and `--no-build` remain valid runtime controls.
 
-The driver discovers the corpus from the native executable, then composes named
-backend adapters and optional build-only product providers. Each adapter owns
+The driver discovers the corpus from the plan-selected manifest backend
+(`native` by default), then composes named backend adapters and optional
+build-only product providers. Each adapter owns
 its execution strategy and optional backend-specific audit; a build may belong
 to that adapter or to one shared provider. The shared driver owns protocol
 result domains, result artifacts, semantic comparison, and the comparison artifact.
-Native therefore remains the corpus and source-semantics provider without
+Native therefore remains the default corpus and source-semantics provider without
 forcing a future V8 or Talos adapter to imitate native's one-process-per-case
 execution strategy.
 
@@ -272,6 +290,8 @@ The implementation preserves that boundary at the module level:
   external commands;
 - `scripts/validation_lcnf.py` imports the generic layer and owns LCNF execution,
   diagnostics, and form/external coverage policy;
+- `scripts/validation_direct_lcnf.py` registers the two direct-case protocol
+  executables while reusing the same LCNF manifest and coverage policy;
 - `scripts/validate_interpreters.py` is the thin FIR CLI, native corpus/execution
   adapter, and built-in adapter registry.
 
@@ -926,12 +946,17 @@ artifact's `lcnf-forms` inventory. Per-case
 `requiredAdministrativeStepKinds` obligations turn selected administrative
 transitions into regression checks; the aggregate report retains their union,
 missing count, and every recognized kind not observed by the selected corpus.
-The Lean corpus guards currently require all five administrative kinds emitted
+The source-corpus guards currently require all five administrative kinds emitted
 by source-generated LCNF: named and value invocation plus yielded bind, cache,
 and final-result control. `admin:yield-apply` remains recognized and reported,
 but is not claimed as source coverage: current compiler output normalizes the
 curried and function-valued-declaration probes into arity-respecting calls, so
-neither reaches the machine's over-application frame.
+neither reaches the machine's over-application frame. The separate
+`machine-yield-apply` direct case invokes a one-parameter declaration with two
+values, then applies the extra value to the returned closure. Its 14 classified
+steps contain exactly one `admin:yield-apply`; its result, exact seven-form
+trace, and per-form multiplicities are compared with the corresponding native
+curried Lean application.
 The manifest's optional
 `requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
 obligations. The harness requires count telemetry for every LCNF result,
@@ -1060,6 +1085,10 @@ a packed byte array, maximum `USize`, and maximum `UInt32`. Independent
 projections force the same compiler-produced constructor through object,
 `USize`, and scalar storage paths, including absolute fixed-slot `uset`/`uproj`
 coordinates after the three-object prefix.
+
+The direct-LCNF corpus currently has one deliberately non-compiler-generated
+case for the interpreter apply frame. Its distinct provenance suite and plan
+prevent machine-only evidence from inflating source-compiler coverage.
 
 Four adjacent-`USize` mutation fixtures use a two-object, two-`USize`,
 one-scalar layout. Unique paths update absolute slots 2 and 3 while returning

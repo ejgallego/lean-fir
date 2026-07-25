@@ -8,3 +8,11 @@ name = "Fir"
 [[lean_exe]]
 name = "fir-native-oracle"
 root = "FirValidationNative"
+
+[[lean_exe]]
+name = "fir-direct-native"
+root = "FirValidationDirectNative"
+
+[[lean_exe]]
+name = "fir-direct-lcnf"
+root = "FirValidationDirectLCNF"

@@ -1,4 +1,4 @@
-.PHONY: build examples inspect validate validate-v8 bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
+.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -15,6 +15,13 @@ validate:
 	python3 scripts/test_validate_interpreters.py
 	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
 	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json
+
+validate-direct-lcnf:
+	python3 scripts/validate_interpreters.py \
+		--plan validation-plans/direct-lcnf.json \
+		--out-dir _build/validation-direct-lcnf
+	python3 scripts/validate_interpreters.py \
+		--verify-matrix _build/validation-direct-lcnf/matrix.json
 
 validate-v8:
 	python3 scripts/validate_interpreters.py \
@@ -35,7 +42,7 @@ bug-cards:
 trusted-assumptions:
 	python3 scripts/validate_trusted_assumptions.py
 
-check: build examples validate validate-v8 bug-cards trusted-assumptions no-placeholders
+check: build examples validate validate-direct-lcnf validate-v8 bug-cards trusted-assumptions no-placeholders
 
 beam:
 	lean-beam sync Fir/LeanIR.lean
@@ -47,9 +54,12 @@ beam:
 	lean-beam sync Fir/Validation/Protocol.lean
 	lean-beam sync Fir/Validation/Corpus.lean
 	lean-beam sync Fir/Validation/LCNF.lean
+	lean-beam sync Fir/Validation/DirectLCNF.lean
 	lean-beam sync Fir/Validation.lean
 	lean-beam sync FirValidationNative.lean
 	lean-beam sync FirValidationLCNF.lean
+	lean-beam sync FirValidationDirectNative.lean
+	lean-beam sync FirValidationDirectLCNF.lean
 	lean-beam sync FirValidationWasm.lean
 	lean-beam sync Fir/Wasm/Examples.lean
 	lean-beam sync Inspect

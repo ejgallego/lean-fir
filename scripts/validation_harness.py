@@ -5352,6 +5352,7 @@ class ValidationPlan:
     adapter_configs: tuple[Path, ...]
     pairs: tuple[tuple[str, str], ...]
     provider_configs: tuple[Path, ...] = ()
+    corpus_backend: str = "native"
 
 
 @dataclass(frozen=True)
@@ -5359,6 +5360,7 @@ class ValidationPlanDeclaration:
     adapter_configs: tuple[str, ...]
     pairs: tuple[tuple[str, str], ...]
     provider_configs: tuple[str, ...] = ()
+    corpus_backend: str = "native"
 
 
 def validation_plan_declaration_from_config(
@@ -5373,7 +5375,7 @@ def validation_plan_declaration_from_config(
     if not isinstance(value, dict):
         raise ValidationError(f"validation plan {path}: expected a JSON object")
     required = {"version", "adapterConfigs", "pairs"}
-    optional = {"providerConfigs"}
+    optional = {"providerConfigs", "corpusBackend"}
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
     if missing:
@@ -5419,6 +5421,11 @@ def validation_plan_declaration_from_config(
             f"validation plan {path}: duplicate providerConfigs"
         )
 
+    corpus_backend = validate_backend_name(
+        value.get("corpusBackend", "native"),
+        f"validation plan {path} corpusBackend",
+    )
+
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValidationError(
@@ -5443,7 +5450,10 @@ def validation_plan_declaration_from_config(
             f"validation plan {path}: duplicate comparison pairs"
         )
     return ValidationPlanDeclaration(
-        tuple(raw_configs), tuple(pairs), tuple(raw_provider_configs)
+        tuple(raw_configs),
+        tuple(pairs),
+        tuple(raw_provider_configs),
+        corpus_backend,
     )
 
 
@@ -5474,7 +5484,10 @@ def validation_plan_from_config(
             f"validation plan {path}: duplicate providerConfigs"
         )
     return ValidationPlan(
-        adapter_configs, declaration.pairs, provider_configs
+        adapter_configs,
+        declaration.pairs,
+        provider_configs,
+        declaration.corpus_backend,
     )
 
 

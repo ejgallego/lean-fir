@@ -90,6 +90,10 @@ from validation_lcnf import (
     prepare_manifest as prepare_lcnf_manifest,
     write_coverage_artifact,
 )
+from validation_direct_lcnf import (
+    DIRECT_LCNF_ADAPTER,
+    DIRECT_NATIVE_ADAPTER,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +216,8 @@ NATIVE_ADAPTER = NativeAdapter()
 BACKEND_ADAPTERS: dict[str, BackendAdapter] = {
     "native": NATIVE_ADAPTER,
     "lcnf": LcnfAdapter(),
+    "direct-native": DIRECT_NATIVE_ADAPTER,
+    "direct-lcnf": DIRECT_LCNF_ADAPTER,
 }
 
 
@@ -220,8 +226,13 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
     return prepare_lcnf_manifest(parse_manifest_from_output(output, command))
 
 
-def corpus_manifest() -> list[dict]:
-    return NATIVE_ADAPTER.manifest()
+def corpus_manifest(adapter: BackendAdapter = NATIVE_ADAPTER) -> list[dict]:
+    manifest = getattr(adapter, "manifest", None)
+    if not callable(manifest):
+        raise ValidationError(
+            f"validation corpus backend {adapter.name} does not provide a manifest"
+        )
+    return manifest()
 
 
 def parse_pair_spec(specification: str) -> tuple[str, str]:
@@ -262,6 +273,10 @@ def main() -> int:
         "--candidate",
         default=None,
         help="single-pair candidate when --pair is absent",
+    )
+    parser.add_argument(
+        "--corpus-backend",
+        help="manifest-owning backend; defaults to native",
     )
     parser.add_argument(
         "--pair",
@@ -330,6 +345,7 @@ def main() -> int:
             or args.no_build
             or args.reference
             or args.candidate
+            or args.corpus_backend
             or args.pair
             or args.adapter_config
             or args.provider_config
@@ -386,10 +402,12 @@ def main() -> int:
             or args.provider_config
             or args.reference
             or args.candidate
+            or args.corpus_backend
         ):
             raise ValidationError(
                 "--plan cannot be combined with --pair, --adapter-config, "
-                "--provider-config, --reference, or --candidate"
+                "--provider-config, --reference, --candidate, or "
+                "--corpus-backend"
             )
         plan_input = validation_input_from_file(
             "validation-plan", args.plan, ROOT
@@ -397,9 +415,11 @@ def main() -> int:
         provenance_inputs.append(plan_input)
         plan = validation_plan_from_config(args.plan, plan_input.content)
         pair_names = list(plan.pairs)
+        corpus_backend_name = plan.corpus_backend
         adapter_config_paths = list(plan.adapter_configs)
         provider_config_paths = list(plan.provider_configs)
     else:
+        corpus_backend_name = args.corpus_backend or "native"
         pair_names = (
             [parse_pair_spec(specification) for specification in args.pair]
             if args.pair
@@ -455,6 +475,11 @@ def main() -> int:
             f"{', '.join(unknown_backends)}; registered: "
             f"{', '.join(sorted(adapters))}"
         )
+    if corpus_backend_name not in adapters:
+        raise ValidationError(
+            f"unknown validation corpus backend: {corpus_backend_name}; "
+            f"registered: {', '.join(sorted(adapters))}"
+        )
     pairs = [
         (adapters[reference], adapters[candidate])
         for reference, candidate in pair_names
@@ -478,10 +503,11 @@ def main() -> int:
         raise ValidationError(
             "unused product provider(s): " + ", ".join(unused_providers)
         )
-    adapters["native"].build(
+    corpus_adapter = adapters[corpus_backend_name]
+    corpus_adapter.build(
         BuildContext(ROOT, args.out_dir, args.no_build)
     )
-    descriptors = corpus_manifest()
+    descriptors = corpus_manifest(corpus_adapter)
     for adapter in participating_adapters.values():
         descriptors = adapter.prepare_manifest(descriptors)
     selected = select_cases(descriptors, args.cases, args.tag)
@@ -514,7 +540,7 @@ def main() -> int:
     adapters_to_build = {
         adapter.name: adapter
         for adapter in participating_adapters.values()
-        if adapter.name != "native"
+        if adapter.name != corpus_backend_name
     }
     for adapter in adapters_to_build.values():
         adapter.build(build_context)

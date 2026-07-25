@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "corpusBackend": "direct-native",
+  "adapterConfigs": [],
+  "pairs": [
+    {
+      "reference": "direct-native",
+      "candidate": "direct-lcnf"
+    }
+  ]
+}

@@ -414,6 +414,26 @@ class HarnessTests(unittest.TestCase):
         self.assertIs(harness.LcnfAdapter, lcnf.LcnfAdapter)
         self.assertIs(harness.coverage_report, lcnf.coverage_report)
 
+    def test_corpus_manifest_comes_from_the_selected_backend(self) -> None:
+        expected = [descriptor("case")]
+
+        class ManifestAdapter:
+            name = "fixture-corpus"
+
+            def manifest(self) -> list[dict]:
+                return expected
+
+        self.assertIs(harness.corpus_manifest(ManifestAdapter()), expected)
+
+        class NoManifestAdapter:
+            name = "no-manifest"
+
+        with self.assertRaisesRegex(
+            harness.ValidationError,
+            "validation corpus backend no-manifest does not provide a manifest",
+        ):
+            harness.corpus_manifest(NoManifestAdapter())
+
     def test_generic_manifest_preserves_but_does_not_require_lcnf_extension(self) -> None:
         item = descriptor(
             "case",
@@ -4243,6 +4263,7 @@ class HarnessTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 2,
+                        "corpusBackend": "direct-native",
                         "adapterConfigs": [
                             "../adapters/v8.json",
                             "../adapters/talos.json",
@@ -4271,6 +4292,7 @@ class HarnessTests(unittest.TestCase):
                 declaration.adapter_configs,
                 ("../adapters/v8.json", "../adapters/talos.json"),
             )
+            self.assertEqual(declaration.corpus_backend, "direct-native")
             self.assertEqual(
                 declaration.pairs,
                 (
@@ -4287,6 +4309,7 @@ class HarnessTests(unittest.TestCase):
                     (root / "adapters" / "talos.json").resolve(),
                 ),
             )
+            self.assertEqual(plan.corpus_backend, "direct-native")
             self.assertEqual(
                 plan.pairs,
                 (
@@ -7061,6 +7084,37 @@ class HarnessTests(unittest.TestCase):
             summary["administrativeStepCount"], len(step_trace) - 1
         )
         self.assertEqual(summary["unobservedAdministrativeKinds"], [])
+
+    def test_lcnf_coverage_retains_custom_backend_identity(self) -> None:
+        manifest = [
+            descriptor(
+                "case",
+                forms=["return"],
+                required_administrative_step_kinds=["admin:yield-apply"],
+            )
+        ]
+        results = {
+            "case": with_form_diagnostics(
+                success("case", "direct-lcnf"),
+                static="return",
+                executed="return",
+                executed_step_trace='["form:return"]',
+                steps="1",
+            )
+        }
+        report, failures = lcnf.coverage_report(
+            manifest,
+            results,
+            ["case"],
+            backend="direct-lcnf",
+        )
+        self.assertEqual(report["backend"], "direct-lcnf")
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].backend, "direct-lcnf")
+        self.assertEqual(
+            failures[0].message,
+            "missing required administrative step kinds: admin:yield-apply",
+        )
 
     def test_administrative_step_kind_obligations_are_enforced(self) -> None:
         manifest = [
