@@ -9,7 +9,7 @@ pass: elimDeadVars
 discovered-by: proof
 first-seen: 2026-07-25
 reproduction: Fir/LeanIR/Passes/ElimDeadProgram.lean#ShadowCodeGraph.mono
-regression: Fir/LeanIR/Passes/ElimDeadMachineRel.lean#ReachableMachineReadyAt
+regression: Fir/LeanIR/Passes/ElimDeadMachineRel.lean#ReachableControlReadyAt
 ---
 
 # Summary
@@ -129,7 +129,9 @@ none
 Fixed in two parts.  `ShadowLetResidual.deleted` retains a deletion-local
 continuation graph, its subset relation to the exposed graph, and the local
 binder nonmembership proof.  `ReachableMachineReadyAt` now existentially
-bundles readiness with the exact renaming, roots, graph, environment, frame,
-and runtime witnesses it certifies.  Operational advance and terminal proofs
-consume that aligned bundle, so an unrelated monotone enlargement can no
-longer impose a spurious binder-absence obligation.
+bundles the exact renaming, roots, frame, and runtime witnesses it certifies.
+Its `ReachableControlReadyAt.code` member in turn bundles one exact graph,
+join environment, ordinary environment, and graph-indexed readiness
+certificate.  Operational advance and terminal proofs eliminate that aligned
+control bundle directly, so an unrelated monotone enlargement can no longer
+impose a spurious binder-absence obligation.

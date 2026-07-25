@@ -4876,19 +4876,60 @@ theorem ReachableCodeReadyAt.deletedLet_of_runtimeNeutral
     ReachableCodeReadyAt fuel used state roots graph :=
   .deletedLet_of_ready graph deleted absent neutral.deletedLetReadyAt
 
-/-- Readiness for an arbitrary related control.  Invocation and yielded
-controls impose no local operation premise; code controls expose the exact
-graph and complete source runtime roots used by deletion certificates. -/
-def ReachableControlReadyAt (fuel : Nat) (sourceState : MachineState)
-    (sourceFrameRoots : List Value) (sourceControl targetControl : Control) :
-    Prop :=
-  ∀ {used sourceCode targetCode},
-    sourceControl = .code sourceCode →
-    targetControl = .code targetCode →
-    (graph : ShadowCodeGraph fuel used sourceCode targetCode) →
-      ReachableCodeReadyAt fuel used sourceState
+/-- An exact related-control witness bundled with the operational readiness
+of its own graph.  Invocation and yielded controls impose no local premise.
+The code constructor exposes one graph and its complete source runtime roots,
+so a different monotone enlargement for the same code values cannot challenge
+the certificate. -/
+inductive ReachableControlReadyAt (fuel : Nat) (rho : AddressRenaming)
+    (sourceState targetState : MachineState)
+    (sourceFrameRoots : List Value) :
+    Control → Control → List Value → List Value → Prop where
+  | code
+      (graph : ShadowCodeGraph fuel used sourceCode targetCode)
+      (joins : ShadowJoinEnvRelated fuel used
+        sourceState.joins targetState.joins)
+      (env : EnvRelOn rho used sourceState.env targetState.env)
+      (ready : ReachableCodeReadyAt fuel used sourceState
         (runtimeRoots sourceState.runtime
-          (envRootsOn used sourceState.env ++ sourceFrameRoots)) graph
+          (envRootsOn used sourceState.env ++ sourceFrameRoots)) graph) :
+      ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+        (.code sourceCode) (.code targetCode)
+        (envRootsOn used sourceState.env) (envRootsOn used targetState.env)
+  | yielded (value : ValueRel rho sourceValue targetValue) :
+      ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+        (.yielded sourceValue) (.yielded targetValue)
+        [sourceValue] [targetValue]
+  | invokeName (name : Name)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+        (.invokeName name sourceArguments)
+        (.invokeName name targetArguments)
+        sourceArguments.toList targetArguments.toList
+  | invokeValue
+      (function : ValueRel rho sourceFunction targetFunction)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+        (.invokeValue sourceFunction sourceArguments)
+        (.invokeValue targetFunction targetArguments)
+        (sourceFunction :: sourceArguments.toList)
+        (targetFunction :: targetArguments.toList)
+
+theorem ReachableControlReadyAt.related
+    (ready : ReachableControlReadyAt fuel rho sourceState targetState
+      sourceFrameRoots sourceControl targetControl
+      sourceControlRoots targetControlRoots) :
+    ReachableControlRelated fuel rho
+      sourceState.env sourceState.joins sourceControl
+      targetState.env targetState.joins targetControl
+      sourceControlRoots targetControlRoots := by
+  cases ready with
+  | code graph joins env _ => exact .code graph joins env
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
 
 /-- Pair-level form used by the eventual simulation laws.  Readiness is
 bundled existentially with the same renaming, roots, graph, environments, and
@@ -4900,22 +4941,14 @@ def ReachableMachineReadyAt (fuel : Nat) (source target : MachineState) :
     Prop :=
   ∃ rho sourceControlRoots targetControlRoots
       sourceFrameRoots targetFrameRoots,
-    ∃ _programs :
-      ProgramRelated (ShadowCodeRelated fuel) source.program target.program,
-    ∃ _control :
-      ReachableControlRelated fuel rho
-      source.env source.joins source.control
-      target.env target.joins target.control
-      sourceControlRoots targetControlRoots,
-    ∃ _frames :
-      ReachableFramesRelated fuel rho source.frames target.frames
-        sourceFrameRoots targetFrameRoots,
-    ∃ _runtime :
-      ShadowRuntimeRel rho source.runtime target.runtime
+    ProgramRelated (ShadowCodeRelated fuel) source.program target.program ∧
+    ReachableControlReadyAt fuel rho source target sourceFrameRoots
+      source.control target.control sourceControlRoots targetControlRoots ∧
+    ReachableFramesRelated fuel rho source.frames target.frames
+      sourceFrameRoots targetFrameRoots ∧
+    ShadowRuntimeRel rho source.runtime target.runtime
         (sourceControlRoots ++ sourceFrameRoots)
-        (targetControlRoots ++ targetFrameRoots),
-    ReachableControlReadyAt fuel source sourceFrameRoots
-      source.control target.control
+        (targetControlRoots ++ targetFrameRoots)
 
 /-- Structural reachability plus a separately maintained semantic invariant.
 The invariant will supply active readiness and be preserved across the
@@ -10767,15 +10800,12 @@ theorem SomeReachableMachineRelated.matchCodeStep_of_ready
       NonLockstep.Reaches externals target targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
   rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
-    controlReady⟩
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
   cases targetControl : target.control with
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
-      | code graph joins env =>
-          have codeReady := controlReady
-            sourceControl targetControl graph
+      | code graph joins env codeReady =>
           have sourceSame :
               { source with control := .code sourceCode } = source := by
             cases source
@@ -11607,8 +11637,7 @@ theorem SomeReachableMachineRelated.let_terminal
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
   rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
-    controlReady⟩
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -11622,10 +11651,8 @@ theorem SomeReachableMachineRelated.let_terminal
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
-      | code graph joins env =>
+      | code graph joins env codeReady =>
           rename_i used
-          have codeReady := controlReady
-            sourceControl targetControl graph
           cases codeReady with
           | letE graph operationReady =>
               cases operationReady with
@@ -12496,8 +12523,7 @@ theorem SomeReachableMachineRelated.objectSet_terminal
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
   rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
-    controlReady⟩
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12511,10 +12537,8 @@ theorem SomeReachableMachineRelated.objectSet_terminal
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
-      | code graph joins env =>
+      | code graph joins env codeReady =>
           rename_i used
-          have codeReady := controlReady
-            sourceControl targetControl graph
           cases codeReady with
           | objectSet graph operationReady =>
               cases operationReady with
@@ -12743,8 +12767,7 @@ theorem SomeReachableMachineRelated.uSizeSet_terminal
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
   rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
-    controlReady⟩
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12758,10 +12781,8 @@ theorem SomeReachableMachineRelated.uSizeSet_terminal
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
-      | code graph joins env =>
+      | code graph joins env codeReady =>
           rename_i used
-          have codeReady := controlReady
-            sourceControl targetControl graph
           cases codeReady with
           | usizeSet graph operationReady =>
               cases operationReady with
@@ -12964,8 +12985,7 @@ theorem SomeReachableMachineRelated.scalarSet_terminal
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
   rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
-    controlReady⟩
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12979,10 +12999,8 @@ theorem SomeReachableMachineRelated.scalarSet_terminal
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
-      | code graph joins env =>
+      | code graph joins env codeReady =>
           rename_i used
-          have codeReady := controlReady
-            sourceControl targetControl graph
           cases codeReady with
           | scalarSet graph operationReady =>
               cases operationReady with
