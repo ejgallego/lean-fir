@@ -82,6 +82,37 @@ inductive CodeBindersAvoidName (forbidden : FVarId) :
         CodeBindersAvoidName forbidden continuation) :
       CodeBindersAvoidName forbidden (.del object continuation)
 
+private theorem codeAvoidance_caseAlts_sizeOf_lt
+    (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem codeAvoidance_funDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure)
+    (continuation : LCNF.Code .impure) :
+    sizeOf declaration.value <
+      sizeOf (LCNF.Code.jp declaration continuation) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
+private theorem codeAvoidance_altCode_sizeOf_lt_cons
+    (alternative : LCNF.Alt .impure)
+    (rest : List (LCNF.Alt .impure)) :
+    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
+  cases alternative with
+  | ctorAlt info code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | default code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | alt _ _ _ impossible => nomatch impossible
+
 /- Transparent proof-relevant counterpart of FIR's opaque
 `ImpureHygiene.codeBinders`. -/
 mutual
@@ -145,6 +176,249 @@ mutual
 
 end
 
+/- Total transparent binder enumeration for a code tree.  The order matches
+Lean 4.32's opaque `ImpureHygiene.codeBinders`: declaration binder, join
+parameters, join body, then continuation. -/
+mutual
+
+  def codeBinderIds : LCNF.Code .impure → List FVarId
+    | .let declaration continuation =>
+        declaration.fvarId :: codeBinderIds continuation
+    | .jp declaration continuation =>
+        declaration.fvarId ::
+          (paramIds declaration.params ++ codeBinderIds declaration.value ++
+            codeBinderIds continuation)
+    | .cases caseInfo => altListBinderIds caseInfo.alts.toList
+    | .jmp _ _ | .return _ | .unreach _ => []
+    | .oset _ _ _ continuation
+    | .uset _ _ _ continuation
+    | .sset _ _ _ _ _ continuation
+    | .setTag _ _ continuation
+    | .inc _ _ _ _ continuation
+    | .dec _ _ _ _ _ continuation
+    | .del _ continuation =>
+        codeBinderIds continuation
+    | .fun _ _ impossible => nomatch impossible
+
+  termination_by code => sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply codeAvoidance_caseAlts_sizeOf_lt
+      | apply codeAvoidance_funDeclValue_sizeOf_lt
+
+  def altListBinderIds :
+      List (LCNF.Alt .impure) → List FVarId
+    | [] => []
+    | alternative :: rest =>
+        codeBinderIds alternative.getCode ++ altListBinderIds rest
+
+  termination_by alternatives => sizeOf alternatives
+  decreasing_by
+    all_goals first
+      | apply codeAvoidance_altCode_sizeOf_lt_cons
+      | (simp_wf; omega)
+
+end
+
+/- The canonical code enumeration carries its transparent listing witness. -/
+mutual
+
+  theorem CodeBinderList.canonicalExists (code : LCNF.Code .impure) :
+      Nonempty (CodeBinderList code (codeBinderIds code)) := by
+    cases code with
+    | «let» declaration continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.letE continuationListing⟩
+    | jp declaration continuation =>
+        rcases CodeBinderList.canonicalExists declaration.value with
+          ⟨bodyListing⟩
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.join bodyListing continuationListing⟩
+    | cases caseInfo =>
+        rcases AltBinderList.canonicalExists caseInfo.alts.toList with
+          ⟨alternativesListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.cases alternativesListing⟩
+    | jmp target arguments =>
+        exact ⟨by
+          simpa [codeBinderIds] using
+            (CodeBinderList.jump :
+              CodeBinderList (.jmp target arguments) [])⟩
+    | «return» result =>
+        exact ⟨by
+          simpa [codeBinderIds] using
+            (CodeBinderList.ret :
+              CodeBinderList (.return result) [])⟩
+    | unreach type =>
+        exact ⟨by
+          simpa [codeBinderIds] using
+            (CodeBinderList.unreachable :
+              CodeBinderList (.unreach type) [])⟩
+    | oset object index field continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.objectSet continuationListing⟩
+    | uset object index field continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.usizeSet continuationListing⟩
+    | sset object width offset field type continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.scalarSet continuationListing⟩
+    | setTag object tag continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.tagSet continuationListing⟩
+    | inc object amount check persistent continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.increment continuationListing⟩
+    | dec object amount check persistent objects continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.decrement continuationListing⟩
+    | del object continuation =>
+        rcases CodeBinderList.canonicalExists continuation with
+          ⟨continuationListing⟩
+        exact ⟨by
+          simpa [codeBinderIds] using
+            CodeBinderList.delete continuationListing⟩
+    | «fun» _ _ impossible => nomatch impossible
+
+  termination_by sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply codeAvoidance_caseAlts_sizeOf_lt
+      | apply codeAvoidance_funDeclValue_sizeOf_lt
+
+  theorem AltBinderList.canonicalExists
+      (alternatives : List (LCNF.Alt .impure)) :
+      Nonempty
+        (AltBinderList alternatives (altListBinderIds alternatives)) := by
+    cases alternatives with
+    | nil =>
+        exact ⟨by
+          simpa [altListBinderIds] using
+            (AltBinderList.nil : AltBinderList [] [])⟩
+    | cons alternative rest =>
+        cases alternative with
+        | ctorAlt info code =>
+            rcases CodeBinderList.canonicalExists code with
+              ⟨bodyListing⟩
+            rcases AltBinderList.canonicalExists rest with
+              ⟨restListing⟩
+            exact ⟨by
+              simpa [altListBinderIds, LCNF.Alt.getCode] using
+                AltBinderList.ctor bodyListing restListing⟩
+        | default code =>
+            rcases CodeBinderList.canonicalExists code with
+              ⟨bodyListing⟩
+            rcases AltBinderList.canonicalExists rest with
+              ⟨restListing⟩
+            exact ⟨by
+              simpa [altListBinderIds, LCNF.Alt.getCode] using
+                AltBinderList.default bodyListing restListing⟩
+        | alt _ _ _ impossible => nomatch impossible
+
+  termination_by sizeOf alternatives
+  decreasing_by
+    all_goals first
+      | apply codeAvoidance_altCode_sizeOf_lt_cons
+      | (simp_wf; omega)
+
+end
+
+/- The transparent listing relation is functional: every witness enumerates
+exactly the canonical binder list. -/
+mutual
+
+  theorem CodeBinderList.binders_eq
+      (listing : CodeBinderList code binders) :
+      binders = codeBinderIds code := by
+    cases listing with
+    | letE continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | join body continuation =>
+        rw [body.binders_eq, continuation.binders_eq]
+        simp [codeBinderIds]
+    | cases alternatives =>
+        rw [alternatives.binders_eq]
+        simp [codeBinderIds]
+    | jump => simp [codeBinderIds]
+    | ret => simp [codeBinderIds]
+    | unreachable => simp [codeBinderIds]
+    | objectSet continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | usizeSet continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | scalarSet continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | tagSet continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | increment continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | decrement continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+    | delete continuation =>
+        rw [continuation.binders_eq]
+        simp [codeBinderIds]
+
+  termination_by sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply codeAvoidance_caseAlts_sizeOf_lt
+      | apply codeAvoidance_funDeclValue_sizeOf_lt
+
+  theorem AltBinderList.binders_eq
+      (listing : AltBinderList alternatives binders) :
+      binders = altListBinderIds alternatives := by
+    cases listing with
+    | nil => simp [altListBinderIds]
+    | ctor body rest =>
+        rw [body.binders_eq, rest.binders_eq]
+        simp [altListBinderIds, LCNF.Alt.getCode]
+    | default body rest =>
+        rw [body.binders_eq, rest.binders_eq]
+        simp [altListBinderIds, LCNF.Alt.getCode]
+
+  termination_by sizeOf alternatives
+  decreasing_by
+    all_goals first
+      | apply codeAvoidance_altCode_sizeOf_lt_cons
+      | (simp_wf; omega)
+
+end
+
 def BinderNamesAvoid (forbidden : FVarId)
     (binders : List FVarId) : Prop :=
   ∀ binder, binder ∈ binders → forbidden.name ≠ binder.name
@@ -158,6 +432,20 @@ structure CodeBinderOwnership (code : LCNF.Code .impure) where
   binders : List FVarId
   listing : CodeBinderList code binders
   unique : BinderNamesUnique binders
+
+/-- Canonical ownership requires only the global uniqueness proof; an exact
+transparent binder-enumeration witness always exists. -/
+theorem CodeBinderOwnership.canonicalExists
+    (unique : BinderNamesUnique (codeBinderIds code)) :
+    Nonempty (CodeBinderOwnership code) := by
+  rcases CodeBinderList.canonicalExists code with ⟨listing⟩
+  exact ⟨⟨codeBinderIds code, listing, unique⟩⟩
+
+theorem CodeBinderOwnership.canonicalUnique
+    (ownership : CodeBinderOwnership code) :
+    BinderNamesUnique (codeBinderIds code) := by
+  rw [← ownership.listing.binders_eq]
+  exact ownership.unique
 
 /-- Global name uniqueness restricts to the left side of a structural binder
 list decomposition. -/
@@ -272,37 +560,6 @@ theorem binderNamesAvoid_of_not_mem
     cases binder
     simp_all
   exact sameId ▸ member
-
-private theorem codeAvoidance_caseAlts_sizeOf_lt
-    (cases : LCNF.Cases .impure) :
-    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
-  rcases cases with ⟨typeName, resultType, discr, alts⟩
-  rcases alts with ⟨alts⟩
-  simp [LCNF.Cases.alts]
-  omega
-
-private theorem codeAvoidance_funDeclValue_sizeOf_lt
-    (declaration : LCNF.FunDecl .impure)
-    (continuation : LCNF.Code .impure) :
-    sizeOf declaration.value <
-      sizeOf (LCNF.Code.jp declaration continuation) := by
-  cases declaration
-  simp_wf
-  simp only [LCNF.FunDecl.value]
-  omega
-
-private theorem codeAvoidance_altCode_sizeOf_lt_cons
-    (alternative : LCNF.Alt .impure)
-    (rest : List (LCNF.Alt .impure)) :
-    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
-  cases alternative with
-  | ctorAlt info code =>
-      simp [LCNF.Alt.getCode]
-      omega
-  | default code =>
-      simp [LCNF.Alt.getCode]
-      omega
-  | alt _ _ _ impossible => nomatch impossible
 
 mutual
 
