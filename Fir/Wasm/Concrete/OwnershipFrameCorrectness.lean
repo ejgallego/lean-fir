@@ -1642,6 +1642,109 @@ theorem LiveHeapRel.decrementReference_deadObject
     List.foldlM_cons, Bind.bind, Except.bind]
   rw [semanticOnce]
 
+/-- A positive-fuel decrement of a represented live, ordinary, zero-count
+cell reaches the exact physical underflow boundary before reading ownership
+metadata or traversing children. -/
+theorem LiveCellRel.decrementReferenceOnceFuel_underflow_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false) (zero : cell.rc = 0)
+    (fuel : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+      .error (.sourceAddress (.referenceCountUnderflow address)) := by
+  obtain ⟨header, headerRead, _, notPromoted, headerPersistentRel,
+      headerRefCountRel⟩ := related.ownershipHeader
+  have headerOrdinary : header.persistent = false :=
+    headerPersistentRel.trans ordinary
+  have headerZero : header.refCount = 0 := by
+    apply UInt32.toNat.inj
+    simpa [zero] using headerRefCountRel
+  have heap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  simp only [decrementReferenceOnceFuel]
+  rw [heap, headerRead]
+  simp only [Bind.bind, Except.bind, liftMemory]
+  rw [if_neg (by simp [notPromoted])]
+  rw [if_neg (by simp [headerOrdinary])]
+  rw [if_pos (by simp [headerZero])]
+  rfl
+
+/-- The public one-step decrement inherits the exact represented-cell
+underflow boundary from its positive cursor-derived fuel budget. -/
+theorem LiveCellRel.decrementReferenceOnce_underflow_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false) (zero : cell.rc = 0)
+    (check : Bool) (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReferenceOnce state address check descriptors =
+      .error (.sourceAddress (.referenceCountUnderflow address)) := by
+  unfold decrementReferenceOnce
+  exact related.decrementReferenceOnceFuel_underflow_eq ordinary zero _ check
+    descriptors
+
+/-- A positive semantic release budget selects the matching source underflow
+before any owned child can be visited. -/
+theorem LiveCellRel.decLocationFuel_underflow_eq
+    {state : MemoryState} {witness : RefinementWitness}
+    {address : Word32} {cell : HeapCell}
+    (related : LiveCellRel state witness address cell)
+    (ordinary : cell.persistent = false) (zero : cell.rc = 0)
+    (runtime : RuntimeState) (location : Location)
+    (found : findCell? runtime.heap location = some cell) (fuel : Nat) :
+    Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+      .error (.referenceCountUnderflow location) := by
+  simp only [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found,
+    related.live_eq_true, ↓reduceIte, Bind.bind, Except.bind]
+  rw [if_neg (by simp [ordinary])]
+  rw [if_pos zero]
+  rfl
+
+/-- Every positive repeated decrement of a mapped live, ordinary, zero-count
+cell has the same exact concrete/source underflow; the first failing step
+prevents header writes and recursive ownership release. -/
+theorem LiveHeapRel.decrementReference_underflow
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (zero : cell.rc = 0) (amount : Nat) (check : Bool)
+    (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReference state address (amount + 1) check descriptors =
+        .error (.sourceAddress (.referenceCountUnderflow address)) ∧
+      Fir.LeanIR.Impure.decValue runtime (.object (.heap location))
+          (amount + 1) check =
+        .error (.referenceCountUnderflow location) := by
+  have mappedLookup :
+      witness.locations.lookup? location = some address := by
+    cases mapped with
+    | mapped found => exact found
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mappedLookup
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  have concreteOnce :=
+    targetRelated.decrementReferenceOnce_underflow_eq ordinary zero check
+      descriptors
+  have semanticOnce :=
+    targetRelated.decLocationFuel_underflow_eq ordinary zero runtime location
+      found runtime.heap.length
+  constructor
+  · simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+      Bind.bind, Except.bind]
+    rw [concreteOnce]
+  · simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
+      List.foldlM_cons, Bind.bind, Except.bind,
+      Fir.LeanIR.Impure.decValueOnce, Fir.LeanIR.Impure.decLocation]
+    rw [semanticOnce]
+
 /-- A represented persistent cell makes the concrete increment operation an
 exact no-op, independently of the requested count. -/
 theorem LiveCellRel.incrementReference_persistent_eq

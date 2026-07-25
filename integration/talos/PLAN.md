@@ -3077,6 +3077,18 @@ cleared, any child is released, the reuse-token local is written, or the
 continuation begins. Recursive child-release faults remain the next reset
 family. No shared semantic contract or executable ABI changed.
 
+W6.6cy closes the direct ownership-underflow branch. The existing uniform
+ownership-header theorem reduces every represented live heap shape to one
+non-promoted header whose persistent bit and reference count exactly match the
+semantic cell. For a mapped live, nonpersistent, zero-count cell, every
+positive decrement therefore produces the same address-related
+`referenceCountUnderflow` before reading ownership metadata or traversing
+children. The Talos host equation and compiler/adaptor terminal leaf preserve
+that fault through the generated unary call and prove that no header write,
+child release, or continuation instruction executes. Faults reached after
+releasing a count-one parent remain the next recursive-ownership slice. No
+shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -3692,6 +3692,86 @@ theorem concreteFaultLeaf_decrement_deadObject
     sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
     operation failureRelated
 
+/-- A positive decrement of a mapped live, ordinary, zero-count object traps
+with the exact related underflow before any header write, child release, or
+continuation instruction can execute. -/
+theorem concreteFaultLeaf_decrement_underflow
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.dec objectId (amount + 1) check false objectFields? continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (zero : cell.rc = 0)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (decrementContract (amount + 1) check objectFields?))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.dec objectId (amount + 1) check false objectFields? continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime
+        (.referenceCountUnderflow location) := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    decrementStep_underflow_of_refines
+      (amount := amount) (check := check) (objectFields? := objectFields?)
+      initialRelated.1 objectRelated found live ordinary zero
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.dec objectId (amount + 1) check false objectFields? continuation))
+        (FaultObservation sourceRuntime
+          (.referenceCountUnderflow location)) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := decrementStep (amount + 1) check objectFields?)
+    (failure := .sourceAddress
+      (.referenceCountUnderflow objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
 /-- Repeating explicit deletion on a stale object preserves the exact related
 address/location fault and cannot enter the continuation. -/
 theorem concreteFaultLeaf_delete_deadObject

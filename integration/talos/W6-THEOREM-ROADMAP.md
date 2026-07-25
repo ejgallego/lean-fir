@@ -158,6 +158,13 @@ Reset's remaining pre-release branch is also exact: a live, nonpersistent,
 uniquely owned constructor with `objectFields.size < count` preserves the
 complete `objectFieldOutOfBounds count size` payload and traps before clearing
 fields or decrementing children.
+Direct ownership underflow is exact as well: every represented mapped live,
+nonpersistent cell with reference count zero exposes a matching non-promoted
+physical header, and any positive decrement preserves
+`referenceCountUnderflow` at the related word/location. The generated unary
+call traps before a header write, ownership-metadata read, recursive child
+release, or continuation. Faults reached after a count-one parent has been
+released remain the separate recursive-child obligation.
 
 The public endpoint is now explicit:
 

@@ -3292,6 +3292,44 @@ theorem decrementStep_deadObject_of_refines
           simp [decrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- A positive decrement of a mapped live, ordinary, zero-count object
+reaches the exact related underflow fault before ownership metadata or
+recursive children are inspected. -/
+theorem decrementStep_underflow_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (zero : cell.rc = 0) :
+    decrementStep (amount + 1) check objectFields? initial
+        [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime
+            (.source
+              (.address (.referenceCountUnderflow word)))) ∧
+      decValue runtime (.object (.heap location)) (amount + 1) check =
+        .error (.referenceCountUnderflow location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.referenceCountUnderflow word))
+        (.referenceCountUnderflow location) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.decrementReference_underflow heapRelated found
+              live ordinary zero amount check initial.host.closureDescriptors
+          refine ⟨?_, semantic,
+            .sourceAddress (.referenceCountUnderflow heapRelated)⟩
+          simp [decrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Successful semantic deletion is heap-only for both the ordinary-object
 transition and the erased failed-reset no-op. -/
 theorem deleteValue_heapOnly
