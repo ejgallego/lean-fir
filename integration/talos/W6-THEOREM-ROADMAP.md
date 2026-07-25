@@ -165,6 +165,11 @@ physical header, and any positive decrement preserves
 call traps before a header write, ownership-metadata read, recursive child
 release, or continuation. Faults reached after a count-one parent has been
 released remain the separate recursive-child obligation.
+The ordered ownership-fold core now handles that obligation's inner loop:
+successful earlier child releases advance both related heaps, the first
+failing child retains its exact `ConcreteErrorSourceRel`, and later children
+are unreachable. Constructor/closure parent-release and generated terminal
+packaging remain to connect this reusable fold theorem to T4.
 
 The public endpoint is now explicit:
 

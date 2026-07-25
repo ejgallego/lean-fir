@@ -3089,6 +3089,15 @@ child release, or continuation instruction executes. Faults reached after
 releasing a count-one parent remain the next recursive-ownership slice. No
 shared semantic contract or executable ABI changed.
 
+W6.6cz adds the reusable recursive ownership-fault fold. Given paired ordered
+concrete words and semantic values, any successful prefix of child releases
+advances both heaps under `LiveHeapRel`; the first failing mapped child then
+determines an exact `ConcreteErrorSourceRel`, and the remaining suffix is not
+executed. Non-owning erased, tagged, and scalar slots stay paired no-ops. This
+is the inner induction shared by constructor and closure release faults;
+parent-release and generated terminal packaging remain the next slice. No
+shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

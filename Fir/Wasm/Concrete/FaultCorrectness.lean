@@ -1,4 +1,5 @@
 import Fir.Wasm.Concrete.ExternalCorrectness
+import Fir.Wasm.Concrete.OwnershipFrameCorrectness
 
 namespace Fir.Wasm.Concrete
 
@@ -52,6 +53,99 @@ theorem ConcreteErrorSourceRel.toTrap
   | source fault => exact ⟨.runtime fault, rfl, .runtime fault⟩
   | sourceAddress addressRelated =>
       exact ⟨.address _, rfl, .address addressRelated⟩
+
+/-- Ordered ownership slots preserve the first recursively reached source
+fault. Any successful prefix of child releases advances both related heaps;
+the failing child then determines the exact concrete error and semantic fault,
+and no later child is visited. -/
+theorem OwnershipValuesRel.foldlM_fault_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {words : List Word32} {values : List Value} {fuel : Nat}
+    {descriptors : ClosureDescriptorTable} {fault : RuntimeFault}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (recurseSuccess : ∀ {before : MemoryState}
+        {semantic nextSemantic : RuntimeState}
+        {location : Location} {address : Word32},
+      LiveHeapRel before witness semantic →
+      witness.locations.lookup? location = some address →
+      Fir.LeanIR.Impure.decLocationFuel fuel semantic location =
+        .ok nextSemantic →
+      ∃ after,
+        decrementReferenceOnceFuel fuel before address true descriptors =
+            .ok after ∧
+          LiveHeapRel after witness nextSemantic)
+    (recurseFault : ∀ {before : MemoryState} {semantic : RuntimeState}
+        {location : Location} {address : Word32} {childFault : RuntimeFault},
+      LiveHeapRel before witness semantic →
+      witness.locations.lookup? location = some address →
+      Fir.LeanIR.Impure.decLocationFuel fuel semantic location =
+        .error childFault →
+      ∃ failure,
+        decrementReferenceOnceFuel fuel before address true descriptors =
+            .error failure ∧
+          ConcreteErrorSourceRel witness failure childFault)
+    (semanticOperation :
+      values.foldlM (init := runtime) (fun next value =>
+        match value with
+        | .object (.heap child) =>
+            Fir.LeanIR.Impure.decLocationFuel fuel next child
+        | _ => .ok next) = .error fault) :
+    ∃ failure,
+      words.foldlM (init := state) (fun next child =>
+        decrementReferenceOnceFuel fuel next child true descriptors) =
+          .error failure ∧
+      ConcreteErrorSourceRel witness failure fault := by
+  induction related generalizing state runtime fault with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation
+      contradiction
+  | @cons word value words values head tail ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation ⊢
+      rcases head.releaseStep heap fuel descriptors with heapStep | noOpStep
+      · obtain ⟨location, valueEq, mapped⟩ := heapStep
+        subst value
+        simp only at semanticOperation
+        cases childEq :
+            Fir.LeanIR.Impure.decLocationFuel fuel runtime location with
+        | error childFault =>
+            rw [childEq] at semanticOperation
+            have faultEq : childFault = fault :=
+              Except.error.inj semanticOperation
+            subst fault
+            obtain ⟨failure, concreteHead, faultRelated⟩ :=
+              recurseFault heap mapped childEq
+            exact ⟨failure, by rw [concreteHead], faultRelated⟩
+        | ok nextRuntime =>
+            rw [childEq] at semanticOperation
+            obtain ⟨nextState, concreteHead, nextHeap⟩ :=
+              recurseSuccess heap mapped childEq
+            obtain ⟨failure, concreteTail, faultRelated⟩ :=
+              ih nextHeap semanticOperation
+            refine ⟨failure, ?_, faultRelated⟩
+            rw [concreteHead]
+            exact concreteTail
+      · obtain ⟨notHeap, concreteHead⟩ := noOpStep
+        have semanticHead :
+            (match value with
+            | .object (.heap child) =>
+                Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+            | _ => .ok runtime) = .ok runtime := by
+          cases value with
+          | object reference =>
+              cases reference with
+              | heap location => exact False.elim (notHeap location rfl)
+              | tagged payload => rfl
+          | usize usize => rfl
+          | scalar scalar => rfl
+          | erased => rfl
+          | reuseToken location => rfl
+        rw [semanticHead] at semanticOperation
+        obtain ⟨failure, concreteTail, faultRelated⟩ :=
+          ih heap semanticOperation
+        refine ⟨failure, ?_, faultRelated⟩
+        rw [concreteHead]
+        exact concreteTail
 
 theorem ConcreteExternalImpl.invoke_error
     {implementation : ConcreteExternalImpl}
