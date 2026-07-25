@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-elimDead-widened-liveness-witness
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: e64abaf
@@ -9,7 +9,7 @@ pass: elimDeadVars
 discovered-by: proof
 first-seen: 2026-07-25
 reproduction: Fir/LeanIR/Passes/ElimDeadProgram.lean#ShadowCodeGraph.mono
-regression: Fir/LeanIR/Passes/ElimDeadProgram.lean#ShadowLetResidual.localGraph_of_wasDeleted
+regression: Fir/LeanIR/Passes/ElimDeadMachineRel.lean#ReachableMachineReadyAt
 ---
 
 # Summary
@@ -97,11 +97,11 @@ interface.
 
 ## Semantic impact
 
-The issue blocks deriving hereditary entry readiness from
-`WellFormedAt .impure`, and therefore blocks closing the whole-program
-correctness theorem.  It does not demonstrate a Lean compiler
-miscompilation; it demonstrates that FIR's current proof relation admits
-strictly more liveness witnesses than the compiler traversal produces.
+Before the repair, the issue blocked deriving hereditary entry readiness from
+`WellFormedAt .impure`, and therefore blocked closing the whole-program
+correctness theorem.  It did not demonstrate a Lean compiler
+miscompilation; it demonstrated that FIR's proof relation admitted strictly
+more liveness witnesses than the compiler traversal produced.
 
 ## Classification and triage
 
@@ -126,8 +126,10 @@ none
 
 ## Resolution and regression
 
-Partially repaired: `ShadowLetResidual.deleted` now retains a deletion-local
+Fixed in two parts.  `ShadowLetResidual.deleted` retains a deletion-local
 continuation graph, its subset relation to the exposed graph, and the local
-binder nonmembership proof.
-`ShadowLetResidual.localGraph_of_wasDeleted` is the proof-level regression
-boundary.  The aligned machine-readiness repair remains unresolved.
+binder nonmembership proof.  `ReachableMachineReadyAt` now existentially
+bundles readiness with the exact renaming, roots, graph, environment, frame,
+and runtime witnesses it certifies.  Operational advance and terminal proofs
+consume that aligned bundle, so an unrelated monotone enlargement can no
+longer impose a spurious binder-absence obligation.

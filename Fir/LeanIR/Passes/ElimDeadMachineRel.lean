@@ -4890,23 +4890,30 @@ def ReachableControlReadyAt (fuel : Nat) (sourceState : MachineState)
         (runtimeRoots sourceState.runtime
           (envRootsOn used sourceState.env ++ sourceFrameRoots)) graph
 
-/-- Pair-level form used by the eventual simulation laws.  It is universal
-over the proof-valued root witnesses hidden by `ReachableMachineRelated`, so
-readiness cannot depend on choosing a more convenient decomposition. -/
+/-- Pair-level form used by the eventual simulation laws.  Readiness is
+bundled existentially with the same renaming, roots, graph, environments, and
+runtime relation that it certifies.  This alignment is essential: the
+transparent graph is monotone in its exposed liveness index, while a deleted
+let's binder-absence fact belongs to the traversal witness actually selected
+for the machine pair, not to every arbitrary enlargement of that witness. -/
 def ReachableMachineReadyAt (fuel : Nat) (source target : MachineState) :
     Prop :=
-  ∀ {rho sourceControlRoots targetControlRoots
-      sourceFrameRoots targetFrameRoots},
-    ProgramRelated (ShadowCodeRelated fuel) source.program target.program →
-    ReachableControlRelated fuel rho
+  ∃ rho sourceControlRoots targetControlRoots
+      sourceFrameRoots targetFrameRoots,
+    ∃ _programs :
+      ProgramRelated (ShadowCodeRelated fuel) source.program target.program,
+    ∃ _control :
+      ReachableControlRelated fuel rho
       source.env source.joins source.control
       target.env target.joins target.control
-      sourceControlRoots targetControlRoots →
-    ReachableFramesRelated fuel rho source.frames target.frames
-      sourceFrameRoots targetFrameRoots →
-    ShadowRuntimeRel rho source.runtime target.runtime
-      (sourceControlRoots ++ sourceFrameRoots)
-      (targetControlRoots ++ targetFrameRoots) →
+      sourceControlRoots targetControlRoots,
+    ∃ _frames :
+      ReachableFramesRelated fuel rho source.frames target.frames
+        sourceFrameRoots targetFrameRoots,
+    ∃ _runtime :
+      ShadowRuntimeRel rho source.runtime target.runtime
+        (sourceControlRoots ++ sourceFrameRoots)
+        (targetControlRoots ++ targetFrameRoots),
     ReachableControlReadyAt fuel source sourceFrameRoots
       source.control target.control
 
@@ -10752,22 +10759,22 @@ theorem match_codeStep_of_ready
 renaming, specialize pair readiness to the exposed graph, and delegate the
 operational work to `match_codeStep_of_ready`. -/
 theorem SomeReachableMachineRelated.matchCodeStep_of_ready
-    (related : SomeReachableMachineRelated fuel source target)
+    (_related : SomeReachableMachineRelated fuel source target)
     (ready : ReachableMachineReadyAt fuel source target)
     (sourceControl : source.control = .code sourceCode)
     (step : Step externals source sourceAfter) :
     ∃ targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       SomeReachableMachineRelated fuel sourceAfter targetAfter := by
-  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
-  have originalControl := control
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
+    controlReady⟩
   cases targetControl : target.control with
   | code targetCode =>
       rw [sourceControl, targetControl] at control
       cases control with
       | code graph joins env =>
-          have codeReady := ready programs originalControl frames runtime
+          have codeReady := controlReady
             sourceControl targetControl graph
           have sourceSame :
               { source with control := .code sourceCode } = source := by
@@ -11591,7 +11598,7 @@ deletions, which necessarily step, from retained declarations.  A retained
 declaration can terminate only when `evalLetValue` fails; the complete
 let-value fault relation above then supplies the matching target fault. -/
 theorem SomeReachableMachineRelated.let_terminal
-    (related : SomeReachableMachineRelated fuel source target)
+    (_related : SomeReachableMachineRelated fuel source target)
     (ready : ReachableMachineReadyAt fuel source target)
     (sourceControl : source.control =
       .code (.let declaration sourceContinuation))
@@ -11599,9 +11606,9 @@ theorem SomeReachableMachineRelated.let_terminal
     ∃ targetObservation,
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
-  have originalControl := control
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
+    controlReady⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -11617,7 +11624,7 @@ theorem SomeReachableMachineRelated.let_terminal
       cases control with
       | code graph joins env =>
           rename_i used
-          have codeReady := ready programs originalControl frames runtime
+          have codeReady := controlReady
             sourceControl targetControl graph
           cases codeReady with
           | letE graph operationReady =>
@@ -12480,7 +12487,7 @@ theorem SomeReachableMachineRelated.delete_terminal
 writes, which must step, from retained writes whose lookup, bounds, and
 heap-mutation faults are transported to the target. -/
 theorem SomeReachableMachineRelated.objectSet_terminal
-    (related : SomeReachableMachineRelated fuel source target)
+    (_related : SomeReachableMachineRelated fuel source target)
     (ready : ReachableMachineReadyAt fuel source target)
     (sourceControl : source.control =
       .code (.oset object index field sourceContinuation))
@@ -12488,9 +12495,9 @@ theorem SomeReachableMachineRelated.objectSet_terminal
     ∃ targetObservation,
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
-  have originalControl := control
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
+    controlReady⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12506,7 +12513,7 @@ theorem SomeReachableMachineRelated.objectSet_terminal
       cases control with
       | code graph joins env =>
           rename_i used
-          have codeReady := ready programs originalControl frames runtime
+          have codeReady := controlReady
             sourceControl targetControl graph
           cases codeReady with
           | objectSet graph operationReady =>
@@ -12727,7 +12734,7 @@ theorem SomeReachableMachineRelated.objectSet_terminal
 /-- Terminal absolute `usize` writes use readiness to reject certified
 deleted writes and transport every retained lookup or runtime fault. -/
 theorem SomeReachableMachineRelated.uSizeSet_terminal
-    (related : SomeReachableMachineRelated fuel source target)
+    (_related : SomeReachableMachineRelated fuel source target)
     (ready : ReachableMachineReadyAt fuel source target)
     (sourceControl : source.control =
       .code (.uset object index field sourceContinuation))
@@ -12735,9 +12742,9 @@ theorem SomeReachableMachineRelated.uSizeSet_terminal
     ∃ targetObservation,
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
-  have originalControl := control
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
+    controlReady⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12753,7 +12760,7 @@ theorem SomeReachableMachineRelated.uSizeSet_terminal
       cases control with
       | code graph joins env =>
           rename_i used
-          have codeReady := ready programs originalControl frames runtime
+          have codeReady := controlReady
             sourceControl targetControl graph
           cases codeReady with
           | usizeSet graph operationReady =>
@@ -12948,7 +12955,7 @@ theorem SomeReachableMachineRelated.uSizeSet_terminal
 /-- Terminal packed-scalar writes use readiness to reject certified deleted
 writes and transport every retained lookup or runtime fault. -/
 theorem SomeReachableMachineRelated.scalarSet_terminal
-    (related : SomeReachableMachineRelated fuel source target)
+    (_related : SomeReachableMachineRelated fuel source target)
     (ready : ReachableMachineReadyAt fuel source target)
     (sourceControl : source.control =
       .code (.sset object width offset field type sourceContinuation))
@@ -12956,9 +12963,9 @@ theorem SomeReachableMachineRelated.scalarSet_terminal
     ∃ targetObservation,
       EvaluatesState externals target targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
-    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
-  have originalControl := control
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime,
+    controlReady⟩
   cases targetControl : target.control with
   | yielded targetValue =>
       rw [sourceControl, targetControl] at control
@@ -12974,7 +12981,7 @@ theorem SomeReachableMachineRelated.scalarSet_terminal
       cases control with
       | code graph joins env =>
           rename_i used
-          have codeReady := ready programs originalControl frames runtime
+          have codeReady := controlReady
             sourceControl targetControl graph
           cases codeReady with
           | scalarSet graph operationReady =>
