@@ -806,6 +806,231 @@ theorem pushParams_sourceScope
       (paramIds params).reverse ++ index.sourceScope := by
   exact pushParamList_sourceScope index params.toList
 
+/-- The original variable scope embeds into the scope extended by one value
+binder. -/
+theorem scopeSubset_pushVar_sourceScope
+    (index : ScopeIndex) (fvarId : FVarId) :
+    ScopeSubset index.sourceScope (index.pushVar fvarId).sourceScope := by
+  simpa [ScopeIndex.pushVar] using
+    (scopeSubset_cons_right
+      (scope := index.sourceScope) (fvarId := fvarId))
+
+/-- The original join scope embeds into the scope extended by one join
+binder. -/
+theorem scopeSubset_pushJoin_sourceJoins
+    (index : ScopeIndex) (fvarId : FVarId) :
+    ScopeSubset index.sourceJoins (index.pushJoin fvarId).sourceJoins := by
+  simpa [ScopeIndex.pushJoin] using
+    (scopeSubset_cons_right
+      (scope := index.sourceJoins) (fvarId := fvarId))
+
+theorem scopeSubset_pushParamList_sourceScope
+    (index : ScopeIndex) (params : List (LCNF.Param .impure)) :
+    ScopeSubset index.sourceScope
+      (index.pushParamList params).sourceScope := by
+  induction params generalizing index with
+  | nil =>
+      intro candidate member
+      exact member
+  | cons param rest ih =>
+      exact scopeSubset_trans
+        (scopeSubset_pushVar_sourceScope index param.fvarId)
+        (ih (index := index.pushVar param.fvarId))
+
+theorem scopeSubset_pushParams_sourceScope
+    (index : ScopeIndex) (params : Array (LCNF.Param .impure)) :
+    ScopeSubset index.sourceScope
+      (index.pushParams params).sourceScope :=
+  scopeSubset_pushParamList_sourceScope index params.toList
+
+/-- Every checked parameter is fresh for the lexical scopes visible before
+the whole parameter list was pushed. -/
+theorem scopedParamsWellFormed_memberFreshForOuter
+    (wellFormed : ScopedParamsWellFormed index params)
+    (member : parameter ∈ params) :
+    FreshForScope parameter.fvarId index.sourceScope ∧
+      FreshForScope parameter.fvarId index.sourceJoins := by
+  induction wellFormed with
+  | nil => simp at member
+  | cons variableFresh joinFresh tail ih =>
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨variableFresh, joinFresh⟩
+      · have child := ih member
+        exact
+          ⟨freshForScope_of_subset child.1
+              (by
+                simpa [ScopeIndex.pushVar] using
+                  (scopeSubset_cons_right :
+                    ScopeSubset _ (_ :: _))),
+            by simpa [ScopeIndex.pushVar] using child.2⟩
+
+mutual
+
+  /-- Structural binder enumeration plus checked scoping makes every binder
+  fresh for both namespaces visible at the root of its containing subtree. -/
+  theorem CodeBinderList.memberFreshForRoot
+      (listing : CodeBinderList code binders)
+      (wellFormed : ScopedCodeWellFormedTree index code)
+      (member : forbidden ∈ binders) :
+      FreshForScope forbidden index.sourceScope ∧
+        FreshForScope forbidden index.sourceJoins := by
+    cases listing with
+    | letE continuationListing =>
+        cases wellFormed with
+        | letE valueScoped variableFresh joinFresh runtimeTypes continuation =>
+            simp only [List.mem_cons] at member
+            rcases member with rfl | member
+            · exact ⟨variableFresh, joinFresh⟩
+            · have child :=
+                CodeBinderList.memberFreshForRoot continuationListing
+                  continuation member
+              exact
+                ⟨freshForScope_of_subset child.1
+                    (by
+                      simpa [ScopeIndex.pushVar] using
+                        (scopeSubset_cons_right :
+                          ScopeSubset _ (_ :: _))),
+                  by simpa [ScopeIndex.pushVar] using child.2⟩
+    | join bodyListing continuationListing =>
+        cases wellFormed with
+        | @jp fvarId index params bodyCode rest binderName type
+            binderFresh paramsFresh bodyTree continuation =>
+            simp only [List.mem_cons, List.mem_append] at member
+            rcases member with
+              rfl | ((parameterMember | bodyMember) | continuationMember)
+            · exact ⟨binderFresh.variables, binderFresh.joins⟩
+            · unfold paramIds at parameterMember
+              have paramIdMember :
+                  forbidden ∈
+                    params.toList.map (fun param => param.fvarId) := by
+                simpa [LCNF.FunDecl.params] using parameterMember
+              obtain ⟨parameter, parameterInParams, parameterEq⟩ :=
+                List.mem_map.mp paramIdMember
+              subst forbidden
+              exact scopedParamsWellFormed_memberFreshForOuter
+                paramsFresh parameterInParams
+            · have child :=
+                CodeBinderList.memberFreshForRoot bodyListing bodyTree
+                  bodyMember
+              exact
+                ⟨freshForScope_of_subset child.1
+                    (scopeSubset_pushParams_sourceScope index _),
+                  by simpa [pushParams_sourceJoins] using child.2⟩
+            · have child :=
+                CodeBinderList.memberFreshForRoot continuationListing
+                  continuation continuationMember
+              exact
+                ⟨by simpa [ScopeIndex.pushJoin] using child.1,
+                  freshForScope_of_subset child.2
+                    (by
+                      simpa [ScopeIndex.pushJoin] using
+                        (scopeSubset_cons_right :
+                          ScopeSubset _ (_ :: _)))⟩
+    | cases alternativesListing =>
+        cases wellFormed with
+        | cases discrScoped normalization alternatives =>
+            exact AltBinderList.memberFreshForRoot alternativesListing
+              alternatives member
+    | jump => simp at member
+    | ret => simp at member
+    | unreachable => simp at member
+    | objectSet continuationListing =>
+        cases wellFormed with
+        | oset objectScoped fieldScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | usizeSet continuationListing =>
+        cases wellFormed with
+        | uset objectScoped fieldScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | scalarSet continuationListing =>
+        cases wellFormed with
+        | sset objectScoped fieldScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | tagSet continuationListing =>
+        cases wellFormed with
+        | setTag objectScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | increment continuationListing =>
+        cases wellFormed with
+        | inc objectScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | decrement continuationListing =>
+        cases wellFormed with
+        | dec objectScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+    | delete continuationListing =>
+        cases wellFormed with
+        | del objectScoped continuation =>
+            exact CodeBinderList.memberFreshForRoot continuationListing
+              continuation member
+
+  termination_by sizeOf code
+  decreasing_by
+    all_goals simp_all <;> try omega
+    all_goals first
+      | apply codeAvoidance_caseAlts_sizeOf_lt
+      | apply codeAvoidance_funDeclValue_sizeOf_lt
+
+  theorem AltBinderList.memberFreshForRoot
+      (listing : AltBinderList alternatives binders)
+      (wellFormed : ScopedCodeWellFormedAlts index alternatives)
+      (member : forbidden ∈ binders) :
+      FreshForScope forbidden index.sourceScope ∧
+        FreshForScope forbidden index.sourceJoins := by
+    cases listing with
+    | nil => simp at member
+    | ctor bodyListing restListing =>
+        cases wellFormed with
+        | ctor body rest =>
+            simp only [List.mem_append] at member
+            rcases member with bodyMember | restMember
+            · exact CodeBinderList.memberFreshForRoot bodyListing body
+                bodyMember
+            · exact AltBinderList.memberFreshForRoot restListing rest
+                restMember
+    | default bodyListing restListing =>
+        cases wellFormed with
+        | default body rest =>
+            simp only [List.mem_append] at member
+            rcases member with bodyMember | restMember
+            · exact CodeBinderList.memberFreshForRoot bodyListing body
+                bodyMember
+            · exact AltBinderList.memberFreshForRoot restListing rest
+                restMember
+
+  termination_by sizeOf alternatives
+  decreasing_by
+    all_goals subst_vars
+    all_goals first
+      | apply codeAvoidance_altCode_sizeOf_lt_cons
+      | (simp_wf; omega)
+
+end
+
+theorem CodeBinderOwnership.memberFreshForRoot
+    (ownership : CodeBinderOwnership code)
+    (wellFormed : ScopedCodeWellFormedTree index code)
+    (member : forbidden ∈ ownership.binders) :
+    FreshForScope forbidden index.sourceScope ∧
+      FreshForScope forbidden index.sourceJoins :=
+  ownership.listing.memberFreshForRoot wellFormed member
+
+/-- Compiler-facing canonical spelling of structural binder freshness. -/
+theorem codeBinderIds_memberFreshForRoot
+    (wellFormed : ScopedCodeWellFormedTree index code)
+    (member : forbidden ∈ codeBinderIds code) :
+    FreshForScope forbidden index.sourceScope ∧
+      FreshForScope forbidden index.sourceJoins := by
+  rcases CodeBinderList.canonicalExists code with ⟨listing⟩
+  exact listing.memberFreshForRoot wellFormed member
+
 /-- A body binder from a declaration-wide unique enumeration is fresh for
 the declaration's initial parameter scope. -/
 theorem freshForInitialParameterScope_of_declUnique
