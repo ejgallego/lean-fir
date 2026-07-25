@@ -3772,6 +3772,87 @@ theorem concreteFaultLeaf_decrement_underflow
     sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
     operation failureRelated
 
+/-- General mapped-heap decrement fault leaf. It covers direct and recursively
+reached dead-object or underflow failures after any successful ownership
+prefix; only semantic release-fuel exhaustion remains outside T4 because its
+concrete counterpart is target-classified. -/
+theorem concreteFaultLeaf_decrement_fault
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {fault : RuntimeFault}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.dec objectId amount check false objectFields? continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (semanticFailure :
+      decValue sourceRuntime (.object (.heap location)) amount check =
+        .error fault)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (decrementContract amount check objectFields?))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.dec objectId amount check false objectFields? continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime fault := by
+  obtain ⟨failure, operation, failureRelated⟩ :=
+    decrementStep_fault_of_refines initialRelated.1 objectRelated
+      descriptorsEq notFuel semanticFailure
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.dec objectId amount check false objectFields? continuation))
+        (FaultObservation sourceRuntime fault) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := decrementStep amount check objectFields?)
+    (failure := failure)
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
 /-- Repeating explicit deletion on a stale object preserves the exact related
 address/location fault and cannot enter the continuation. -/
 theorem concreteFaultLeaf_delete_deadObject

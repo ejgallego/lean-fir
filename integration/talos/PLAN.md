@@ -3098,6 +3098,19 @@ is the inner induction shared by constructor and closure release faults;
 parent-release and generated terminal packaging remain the next slice. No
 shared semantic contract or executable ABI changed.
 
+W6.6da closes mapped recursive decrement faults. A complete same-fuel
+induction relates stale cells, direct underflow, count-one constructor and
+closure parent release, and the first failing child after arbitrary successful
+ownership prefixes. Non-fuel concrete errors are proved monotone when the
+cursor-derived runtime supplies more recursion budget; repeated decrements
+likewise preserve the first fault after successful earlier repetitions. The
+public Talos theorem and compiler/adaptor leaf retain the exact
+`ConcreteErrorSourceRel`, explicit closure-descriptor identity, unchanged
+observable failure state, and unreachable continuation. Release-fuel
+exhaustion remains target-classified T4S work; unchecked tagged operand faults
+and reset's child-release wrapper remain separate T4 leaves. No shared semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

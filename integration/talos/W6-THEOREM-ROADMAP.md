@@ -170,6 +170,15 @@ successful earlier child releases advance both related heaps, the first
 failing child retains its exact `ConcreteErrorSourceRel`, and later children
 are unreachable. Constructor/closure parent-release and generated terminal
 packaging remain to connect this reusable fold theorem to T4.
+Mapped-heap decrement now completes that connection. A same-fuel induction
+handles stale cells, direct underflow, constructor and closure parent release,
+and arbitrary recursive children. A separate non-fuel error monotonicity
+theorem lifts the result to the larger cursor-derived concrete budget, and a
+repetition induction preserves the first fault after successful earlier
+decrements. The Talos and compiler/adaptor leaf retain exact
+`ConcreteErrorSourceRel` with explicit closure-descriptor identity. Unchecked
+tagged operands and release-fuel exclusion remain separate obligations, as do
+reset's own child-release effects.
 
 The public endpoint is now explicit:
 

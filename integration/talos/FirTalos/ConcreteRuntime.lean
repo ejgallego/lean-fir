@@ -3330,6 +3330,45 @@ theorem decrementStep_underflow_of_refines
           simp [decrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- Every admitted mapped-heap decrement fault, including one reached through
+recursive constructor or closure release, crosses the Talos host as its exact
+source-classified concrete error. Semantic release-fuel exhaustion remains
+excluded because the concrete runtime classifies it as a target-safety fault. -/
+theorem decrementStep_fault_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {amount : Nat} {check : Bool} {objectFields? : Option Nat}
+    {fault : RuntimeFault}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (semanticFailure :
+      decValue runtime (.object (.heap location)) amount check =
+        .error fault) :
+    ∃ failure,
+      decrementStep amount check objectFields? initial
+          [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial) (.runtime failure.toTrap) ∧
+      ConcreteErrorSourceRel witness failure fault := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨failure, concrete, failureRelated⟩ :=
+                runtimeRelated.heap.decrementReference_fault_refines mapped
+                  check notFuel semanticFailure
+              refine ⟨failure, ?_, failureRelated⟩
+              simp [decrementStep, clearFailure,
+                Word32.ofUInt32_ofNat_value, descriptorsEq, concrete,
+                ConcreteError.toTrap]
+
 /-- Successful semantic deletion is heap-only for both the ordinary-object
 transition and the erased failed-reset no-op. -/
 theorem deleteValue_heapOnly
