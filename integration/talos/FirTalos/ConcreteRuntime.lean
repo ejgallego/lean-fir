@@ -3465,6 +3465,45 @@ theorem resetStep_expectedConstructor_of_refines
           simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- A related live, ordinary, uniquely owned constructor with an oversized
+reset prefix preserves the exact object-field-bounds fault before mutation or
+child release. -/
+theorem resetStep_outOfBounds_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {object : ConstructorObject} (count : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (outOfBounds : object.objectFields.size < count) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime
+            ((.source
+              (.objectFieldOutOfBounds count object.objectFields.size) :
+                ConcreteError).toTrap)) ∧
+      reset runtime count (.object (.heap location)) =
+        .error (.objectFieldOutOfBounds count object.objectFields.size) ∧
+      ConcreteErrorSourceRel witness
+        (.source (.objectFieldOutOfBounds count object.objectFields.size))
+        (.objectFieldOutOfBounds count object.objectFields.size) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.resetObject_outOfBounds_refines heapRelated
+              found live ordinary unique constructor count outOfBounds
+              initial.host.closureDescriptors
+          refine ⟨?_, semantic,
+            .source (.objectFieldOutOfBounds count object.objectFields.size)⟩
+          simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

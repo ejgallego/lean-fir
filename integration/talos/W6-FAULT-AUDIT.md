@@ -72,7 +72,7 @@ the premise that derives its operation equation remains to be packaged.
 | increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | stale leaves complete; exact underflow relation exists; underflow/recursive leaves and release-fuel exclusion remain |
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
-| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object and unique-nonconstructor terminal leaves complete; `.tobject` excludes `expectedObject`; bounds, decrement/child leaves, and release-fuel exclusion remain |
+| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, and unique-constructor bounds terminal leaves complete; `.tobject` excludes `expectedObject`; decrement/child leaves and release-fuel exclusion remain |
 | reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
@@ -100,13 +100,11 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Add reset's exact object-field-bounds leaf after the live, unique
-   constructor gate.
-2. Add the address-related ownership-underflow leaf and prove its precedence over
+1. Add the address-related ownership-underflow leaf and prove its precedence over
    recursive release.
-3. Resolve the structured `unreachable` transport as an isolated semantic
+2. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.
-4. Decide the clean retained-capacity invariant for reset/reuse and make the
+3. Decide the clean retained-capacity invariant for reset/reuse and make the
    validator or semantic contract establish it.
-5. State and prove T4S per operation, including explicit wasm32 allocation
+4. State and prove T4S per operation, including explicit wasm32 allocation
    capacity, then compose it syntax-directly alongside T2/T4.

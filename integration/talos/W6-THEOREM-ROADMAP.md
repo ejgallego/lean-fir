@@ -154,6 +154,10 @@ live mapped nonconstructors after the aligned field-arity gate. The admitted
 reuse-token relation and compiler-selected arity exclude its earlier token
 shape and malformed-arity faults; retained allocation capacity remains a
 separate target-totality obligation.
+Reset's remaining pre-release branch is also exact: a live, nonpersistent,
+uniquely owned constructor with `objectFields.size < count` preserves the
+complete `objectFieldOutOfBounds count size` payload and traps before clearing
+fields or decrementing children.
 
 The public endpoint is now explicit:
 

@@ -1744,6 +1744,108 @@ theorem LiveHeapRel.resetObject_expectedConstructor_refines
     | «opaque» typeName => rfl
   exact ⟨concrete, semantic⟩
 
+/-- A live, ordinary, uniquely owned constructor with an oversized reset
+prefix reaches the bounds gate in both runtimes. No field is cleared and no
+child ownership is released on this branch. -/
+theorem LiveHeapRel.resetObject_outOfBounds_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    {object : ConstructorObject}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (count : Nat) (outOfBounds : object.objectFields.size < count)
+    (descriptors : ClosureDescriptorTable) :
+    resetObject state count address descriptors =
+        .error
+          (.source (.objectFieldOutOfBounds count object.objectFields.size)) ∧
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error (.objectFieldOutOfBounds count object.objectFields.size) := by
+  have mappedLookup :
+      witness.locations.lookup? location = some address := by
+    cases mapped with
+    | mapped found => exact found
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mappedLookup
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  have concrete :
+      resetObject state count address descriptors =
+        .error
+          (.source (.objectFieldOutOfBounds count object.objectFields.size)) := by
+    cases targetRelated with
+    | @constructor info fieldKinds semantic header _ descriptor objectEq
+        objectRelated headerRead headerKind refCount persistent cellLive =>
+        rw [constructor] at objectEq
+        injection objectEq with semanticEq
+        subst semantic
+        have addressHeap :=
+          (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+            headerRead).1
+        have headerOrdinary : header.persistent = false :=
+          persistent.trans ordinary
+        have headerOne : header.refCount = 1 := by
+          apply UInt32.toNat.inj
+          simpa [unique] using refCount
+        have notPromoted : header.isPromotedTag = false := by
+          have different :
+              (ObjectKind.constructor == ObjectKind.natural) = false := by
+            decide
+          simp [Header.isPromotedTag, headerKind, different]
+        obtain ⟨objectHeader, objectHeaderRead, _, _, _, objectCount, _, _⟩ :=
+          objectRelated.header
+        rw [headerRead] at objectHeaderRead
+        have objectHeaderEq := Except.ok.inj objectHeaderRead
+        subst objectHeader
+        have outOfBoundsInfo : info.size < count := by
+          rw [← objectRelated.semanticObjectFields]
+          exact outOfBounds
+        have headerKindCheck :
+            (header.kind == ObjectKind.constructor) = true := by
+          rw [headerKind]
+          decide
+        unfold resetObject
+        rw [addressHeap, headerRead]
+        simp only [Bind.bind, Except.bind, liftMemory]
+        rw [if_neg (by simp [notPromoted, headerOrdinary, headerOne])]
+        rw [if_pos headerKindCheck]
+        rw [objectCount, if_pos outOfBoundsInfo]
+        rw [objectRelated.semanticObjectFields]
+        rfl
+    | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+        rw [constructor] at objectEq
+        contradiction
+    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+        rw [constructor] at objectEq
+        contradiction
+    | integer descriptor objectEq objectRelated refCount persistent cellLive =>
+        rw [constructor] at objectEq
+        contradiction
+    | string descriptor objectEq objectRelated refCount persistent cellLive =>
+        rw [constructor] at objectEq
+        contradiction
+    | closure closureRelated =>
+        obtain ⟨function, arity, captures, closureEq⟩ :=
+          closureRelated.objectEq
+        rw [constructor] at closureEq
+        contradiction
+  have semantic :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error (.objectFieldOutOfBounds count object.objectFields.size) := by
+    unfold Fir.LeanIR.Impure.reset
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+    rw [if_neg (by simp [ordinary, unique])]
+    rw [constructor]
+    simp only
+    rw [if_pos outOfBounds]
+    rfl
+  exact ⟨concrete, semantic⟩
+
 /-- The tagged reset equation agrees with FIR and returns the related empty
 reuse token. -/
 theorem LiveHeapRel.resetObject_refines_tagged

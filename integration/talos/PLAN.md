@@ -3066,6 +3066,17 @@ remains the separate T4S issue
 `FIR-BUG-wasm-none-reuse-capacity-semantic-gap`. No shared semantic contract
 or executable ABI changed.
 
+W6.6cx closes reset's exact object-field-bounds branch. The theorem boundary
+states the operation's precedence directly: the operand is a mapped live
+constructor, nonpersistent, uniquely owned, and its semantic object-field
+count is smaller than the requested reset prefix. Constructor layout
+refinement identifies that count with the concrete header count, so both
+runtimes produce the same `objectFieldOutOfBounds count size` payload. The
+Talos and compiler/adaptor leaves prove the trap occurs before any field is
+cleared, any child is released, the reuse-token local is written, or the
+continuation begins. Recursive child-release faults remain the next reset
+family. No shared semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

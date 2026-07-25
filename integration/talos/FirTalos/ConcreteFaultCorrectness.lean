@@ -2261,6 +2261,115 @@ theorem concreteFaultLeaf_reset_expectedConstructor
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
 
+/-- An oversized reset prefix on a live, ordinary, uniquely owned constructor
+preserves the exact bounds fault before field clearing, child release,
+destination-local write, or continuation. -/
+theorem concreteFaultLeaf_reset_outOfBounds
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {count : Nat}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {object : ConstructorObject}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .reset count objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.reset count))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.reset count)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1)
+    (constructor : cell.object = .ctor object)
+    (outOfBounds : object.objectFields.size < count)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (resetContract count))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime
+        (.objectFieldOutOfBounds count object.objectFields.size) := by
+  obtain ⟨operation, semantic, failureRelated⟩ :=
+    resetStep_outOfBounds_of_refines count initialRelated.1 objectRelated found
+      live ordinary unique constructor outOfBounds
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.reset count))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error
+          (.objectFieldOutOfBounds count object.objectFields.size) := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change (do
+      let (runtime, token) ←
+        reset sourceRuntime count (.object (.heap location))
+      return (runtime, LetAction.value token)) =
+      .error (.objectFieldOutOfBounds count object.objectFields.size)
+    rw [semantic]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := resetStep count)
+    (failure :=
+      .source (.objectFieldOutOfBounds count object.objectFields.size))
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
 /-- Compiler/adaptor terminal boundary for an arbitrary represented failure
 of a generated nonempty reuse call. Operation-specific wrappers provide the
 exact source/concrete equations and their error relation. -/
