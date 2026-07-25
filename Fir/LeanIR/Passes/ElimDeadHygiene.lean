@@ -738,4 +738,51 @@ theorem shadowCode_preserves_absent_of_wellFormed
       joinsFresh binders)
     result
 
+/-- Processing a subtree cannot introduce the name of a binder owned by a
+later sibling segment. -/
+theorem shadowCode_preserves_absent_of_binder_owned_to_right
+    (wellFormed : ScopedCodeWellFormedTree index source)
+    (variablesFresh :
+      FreshForScope forbidden index.sourceScope)
+    (joinsFresh :
+      FreshForScope forbidden index.sourceJoins)
+    (listing : CodeBinderList source leftBinders)
+    (unique : BinderNamesUnique (leftBinders ++ rightBinders))
+    (member : forbidden ∈ rightBinders)
+    (absent : initial.contains forbidden = false)
+    (result : shadowCode? fuel initial source = some output) :
+    output.2.contains forbidden = false :=
+  shadowCode_preserves_absent_of_wellFormed wellFormed variablesFresh
+    joinsFresh
+    (listing.avoids_binder_owned_to_right unique member)
+    absent result
+
+/-- Processing the later alternatives cannot introduce the name of a binder
+owned by an earlier alternative segment.  This is the exact widening fact
+needed when all alternative graphs share the final liveness set. -/
+theorem shadowAltList_preserves_absent_of_binder_owned_to_left
+    (wellFormed :
+      ScopedCodeWellFormedAlts index alternatives)
+    (variablesFresh :
+      FreshForScope forbidden index.sourceScope)
+    (joinsFresh :
+      FreshForScope forbidden index.sourceJoins)
+    (listing : AltBinderList alternatives rightBinders)
+    (unique : BinderNamesUnique (leftBinders ++ rightBinders))
+    (member : forbidden ∈ leftBinders)
+    (absent : initial.contains forbidden = false)
+    (result :
+      shadowAltList? (shadowCode? fuel) initial alternatives =
+        some (transformed, final)) :
+    final.contains forbidden = false := by
+  apply shadowAltList_preserves_absent
+    (transformCode := shadowCode? fuel)
+    (fun current source target final currentAbsent sourceAvoids sourceResult =>
+      shadowCode_preserves_absent currentAbsent sourceAvoids sourceResult)
+    initial alternatives transformed final absent
+  · exact ScopedCodeWellFormedAlts.codeAvoids wellFormed
+      variablesFresh joinsFresh
+      (listing.avoids_binder_owned_to_left unique member)
+  · exact result
+
 end Fir.LeanIR.Passes.ElimDead
