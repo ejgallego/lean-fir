@@ -4950,6 +4950,42 @@ def ReachableMachineReadyAt (fuel : Nat) (source target : MachineState) :
         (sourceControlRoots ++ sourceFrameRoots)
         (targetControlRoots ++ targetFrameRoots)
 
+/-- Forgetting operational readiness recovers the structural machine
+relation carried by the same exact graph, roots, and address renaming. -/
+theorem ReachableMachineReadyAt.related
+    (ready : ReachableMachineReadyAt fuel source target) :
+    SomeReachableMachineRelated fuel source target := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control.related, frames,
+    runtime⟩
+
+/-- Canonical entry states are immediately ready.  Their invocation controls
+need no local operation certificate; program relatedness, related arguments,
+empty frame stacks, and the empty-runtime relation supply the aligned bundle
+directly.  Hereditary readiness remains the separate preservation goal. -/
+theorem initialState_reachableMachineReadyAt
+    (programs : ProgramRelated (ShadowCodeRelated fuel) sourceProgram
+      targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    ReachableMachineReadyAt fuel
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) := by
+  refine ⟨emptyAddressRenaming, sourceArguments.toList,
+    targetArguments.toList, [], [], ?_, ?_, ?_, ?_⟩
+  · simpa [initialState] using programs
+  · simpa [initialState] using
+      ReachableControlReadyAt.invokeName
+        (sourceState := initialState sourceProgram entry sourceArguments)
+        (targetState := initialState targetProgram entry targetArguments)
+        (sourceFrameRoots := []) entry arguments
+  · simpa [initialState] using
+      (ReachableFramesRelated.nil :
+        ReachableFramesRelated fuel emptyAddressRenaming [] [] [] [])
+  · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
 /-- Structural reachability plus a separately maintained semantic invariant.
 The invariant will supply active readiness and be preserved across the
 finite paths chosen by the non-lockstep simulation. -/
