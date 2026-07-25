@@ -87,7 +87,7 @@ inductive CodeBindersAvoidName (forbidden : FVarId) :
 mutual
 
   inductive CodeBinderList :
-      LCNF.Code .impure → List FVarId → Prop where
+      LCNF.Code .impure → List FVarId → Type where
     | letE
         (continuation : CodeBinderList rest restBinders) :
         CodeBinderList (.let declaration rest)
@@ -130,7 +130,7 @@ mutual
         CodeBinderList (.del object rest) binders
 
   inductive AltBinderList :
-      List (LCNF.Alt .impure) → List FVarId → Prop where
+      List (LCNF.Alt .impure) → List FVarId → Type where
     | nil : AltBinderList [] []
     | ctor
         (body : CodeBinderList code bodyBinders)
@@ -158,6 +158,109 @@ structure CodeBinderOwnership (code : LCNF.Code .impure) where
   binders : List FVarId
   listing : CodeBinderList code binders
   unique : BinderNamesUnique binders
+
+/-- Global name uniqueness restricts to the left side of a structural binder
+list decomposition. -/
+theorem BinderNamesUnique.left_of_append
+    (unique : BinderNamesUnique (left ++ right)) :
+    BinderNamesUnique left :=
+  (List.pairwise_append.mp unique).1
+
+/-- Global name uniqueness restricts to the right side of a structural binder
+list decomposition. -/
+theorem BinderNamesUnique.right_of_append
+    (unique : BinderNamesUnique (left ++ right)) :
+    BinderNamesUnique right :=
+  (List.pairwise_append.mp unique).2.1
+
+/-- A binder owned by the left subtree is excluded from every binder owned by
+the right subtree. -/
+theorem BinderNamesUnique.right_avoids_of_mem_left
+    (unique : BinderNamesUnique (left ++ right))
+    (member : forbidden ∈ left) :
+    BinderNamesAvoid forbidden right := by
+  intro binder binderMember
+  exact unique.rel_of_mem_append member binderMember
+
+/-- A binder owned by the right subtree is excluded from every binder owned by
+the left subtree.  This is the reverse traversal direction needed when
+backwards liveness has already visited the right subtree. -/
+theorem BinderNamesUnique.left_avoids_of_mem_right
+    (unique : BinderNamesUnique (left ++ right))
+    (member : forbidden ∈ right) :
+    BinderNamesAvoid forbidden left := by
+  intro binder binderMember
+  exact Ne.symm (unique.rel_of_mem_append binderMember member)
+
+/-- The head binder of a structural enumeration is excluded from its tail. -/
+theorem BinderNamesUnique.tail_avoids_head
+    (unique : BinderNamesUnique (head :: tail)) :
+    BinderNamesAvoid head tail := by
+  intro binder member
+  exact List.rel_of_pairwise_cons unique member
+
+/-- Global name uniqueness restricts to the tail of a structural binder
+enumeration. -/
+theorem BinderNamesUnique.tail_unique
+    (unique : BinderNamesUnique (head :: tail)) :
+    BinderNamesUnique tail :=
+  List.Pairwise.of_cons unique
+
+/-- A listed alternative inherits exact, unique ownership from the enclosing
+alternative list. -/
+theorem AltBinderList.ownership_of_mem
+    (listing : AltBinderList alternatives binders)
+    (unique : BinderNamesUnique binders)
+    (member : alternative ∈ alternatives) :
+    Nonempty (CodeBinderOwnership alternative.getCode) := by
+  cases listing with
+  | nil => simp at member
+  | ctor body rest =>
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨⟨_, body, unique.left_of_append⟩⟩
+      · exact rest.ownership_of_mem unique.right_of_append member
+  | default body rest =>
+      simp only [List.mem_cons] at member
+      rcases member with rfl | member
+      · exact ⟨⟨_, body, unique.left_of_append⟩⟩
+      · exact rest.ownership_of_mem unique.right_of_append member
+
+/-- A let continuation inherits ownership from its containing code tree. -/
+def CodeBinderOwnership.letContinuation
+    (ownership :
+      CodeBinderOwnership (.let declaration continuation)) :
+    CodeBinderOwnership continuation := by
+  rcases ownership with ⟨binders, listing, unique⟩
+  cases listing with
+  | letE continuationListing =>
+      exact ⟨_, continuationListing, unique.tail_unique⟩
+
+/-- A join body and its continuation inherit ownership from their containing
+code tree. -/
+def CodeBinderOwnership.joinChildren
+    (ownership :
+      CodeBinderOwnership (.jp declaration continuation)) :
+    CodeBinderOwnership declaration.value ×
+      CodeBinderOwnership continuation := by
+  rcases ownership with ⟨binders, listing, unique⟩
+  cases listing with
+  | join bodyListing continuationListing =>
+      have tailUnique := unique.tail_unique
+      have prefixUnique := tailUnique.left_of_append
+      exact
+        ⟨⟨_, bodyListing, prefixUnique.right_of_append⟩,
+          ⟨_, continuationListing, tailUnique.right_of_append⟩⟩
+
+/-- Every case alternative inherits ownership from the enclosing case tree. -/
+theorem CodeBinderOwnership.caseAlternative
+    (ownership : CodeBinderOwnership (.cases caseInfo))
+    (member : alternative ∈ caseInfo.alts.toList) :
+    Nonempty (CodeBinderOwnership alternative.getCode) := by
+  rcases ownership with ⟨binders, listing, unique⟩
+  cases listing with
+  | cases alternatives =>
+      exact alternatives.ownership_of_mem unique member
 
 theorem binderNamesAvoid_of_not_mem
     (absent : forbidden ∉ binders) :
@@ -307,6 +410,33 @@ theorem CodeBinderOwnership.avoids_of_not_mem
     (absent : forbidden ∉ ownership.binders) :
     CodeBindersAvoidName forbidden code :=
   ownership.listing.avoids_of_not_mem absent
+
+/-- A subtree structurally avoids a binder owned by a later sibling segment. -/
+theorem CodeBinderList.avoids_binder_owned_to_right
+    (listing : CodeBinderList code leftBinders)
+    (unique : BinderNamesUnique (leftBinders ++ rightBinders))
+    (member : forbidden ∈ rightBinders) :
+    CodeBindersAvoidName forbidden code :=
+  listing.avoids (unique.left_avoids_of_mem_right member)
+
+/-- A subtree structurally avoids a binder owned by an earlier sibling
+segment. -/
+theorem CodeBinderList.avoids_binder_owned_to_left
+    (listing : CodeBinderList code rightBinders)
+    (unique : BinderNamesUnique (leftBinders ++ rightBinders))
+    (member : forbidden ∈ leftBinders) :
+    CodeBindersAvoidName forbidden code :=
+  listing.avoids (unique.right_avoids_of_mem_left member)
+
+/-- Every later alternative structurally avoids a binder owned by the current
+alternative. -/
+theorem AltBinderList.avoids_binder_owned_to_left
+    (listing : AltBinderList alternatives rightBinders)
+    (unique : BinderNamesUnique (leftBinders ++ rightBinders))
+    (member : forbidden ∈ leftBinders) :
+    ∀ alternative, alternative ∈ alternatives →
+      CodeBindersAvoidName forbidden alternative.getCode :=
+  listing.avoids (unique.right_avoids_of_mem_left member)
 
 theorem fvarId_ne_of_freshForScope
     (fresh : FreshForScope forbidden scope)
