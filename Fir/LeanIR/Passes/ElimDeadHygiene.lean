@@ -834,6 +834,66 @@ theorem freshForInitialJoinScope
   intro candidate inScope
   simp [ScopeIndex.empty] at inScope
 
+/-- The only extra declaration premise introduced by the elimDead proof is
+transparent global binder uniqueness.  All lexical, normalization, and
+runtime-type facts remain those already checked by FIR. -/
+structure DeclElimDeadWellFormed
+    (declaration : LCNF.Decl .impure) : Prop where
+  checked : DeclWellFormed declaration
+  transparentUnique : DeclCodeBinderNamesUnique declaration
+
+/-- Proof-facing declaration data consumed by hereditary liveness. -/
+def DeclElimDeadCertificate
+    (declaration : LCNF.Decl .impure) : Prop :=
+  match declaration.value with
+  | .extern _ => True
+  | .code code =>
+      ScopedParamsWellFormed ScopeIndex.empty
+          declaration.params.toList ∧
+        ScopedCodeWellFormedTree
+          (ScopeIndex.empty.pushParams declaration.params) code ∧
+        BinderNamesUnique
+          (paramIds declaration.params ++ codeBinderIds code)
+
+theorem DeclElimDeadWellFormed.certificate
+    (wellFormed : DeclElimDeadWellFormed declaration) :
+    DeclElimDeadCertificate declaration := by
+  cases declaration with
+  | mk signature value recursive inlineAttr =>
+      cases value with
+      | extern metadata => trivial
+      | code code =>
+          have checked := wellFormed.checked.localCheck
+          simp only [declScopedCheck, Bool.and_eq_true] at checked
+          exact
+            ⟨ScopedParamsWellFormed.ofCheck checked.1,
+              ScopedCodeWellFormedTree.ofCheck checked.2
+                wellFormed.checked.normalization
+                wellFormed.checked.canonical,
+              wellFormed.transparentUnique⟩
+
+def ProgramTransparentBinderNamesUnique
+    (program : ImpureProgram) : Prop :=
+  ∀ declaration, declaration ∈ program.decls.toList →
+    DeclCodeBinderNamesUnique declaration
+
+/-- Compiler-facing whole-program premise.  The transparent uniqueness field
+is deliberately separate until the opaque `ImpureHygiene.codeBinders`
+interface is repaired. -/
+structure ProgramElimDeadWellFormed
+    (program : ImpureProgram) : Prop where
+  checked : ProgramWellFormed program
+  transparentUnique : ProgramTransparentBinderNamesUnique program
+
+theorem ProgramElimDeadWellFormed.declaration
+    (wellFormed : ProgramElimDeadWellFormed program)
+    {declaration : LCNF.Decl .impure}
+    (member : declaration ∈ program.decls.toList) :
+    DeclElimDeadWellFormed declaration := {
+  checked := wellFormed.checked.declaration member
+  transparentUnique := wellFormed.transparentUnique declaration member
+}
+
 theorem argAvoids_of_scoped
     (fresh : FreshForScope forbidden scope)
     (inScope : argScoped scope argument = true) :
