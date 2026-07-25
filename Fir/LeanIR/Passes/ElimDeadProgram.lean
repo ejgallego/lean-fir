@@ -341,9 +341,66 @@ inductive ShadowLetResidual (fuel : Nat) (used : UsedLocals)
         (.let declaration targetContinuation)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
-        sourceContinuation targetContinuation) :
+        sourceContinuation targetContinuation)
+      {safe : safeToElim declaration.value = true} :
       ShadowLetResidual fuel used declaration sourceContinuation
         targetContinuation
+
+/-- Whether a let residual is the source-only branch of the transparent
+traversal.  The branch carries the audited `safeToElim` decision as an
+implicit constructor field, so consumers can recover the compiler fact
+without unfolding `shadowCode?`. -/
+inductive ShadowLetResidual.WasDeleted
+    (fuel : Nat) (used : UsedLocals)
+    (declaration : LCNF.LetDecl .impure)
+    (sourceContinuation : LCNF.Code .impure) :
+    {target : LCNF.Code .impure} →
+      ShadowLetResidual fuel used declaration sourceContinuation target →
+        Prop where
+  | intro (targetContinuation : LCNF.Code .impure)
+      (continuation : ShadowCodeGraph fuel used
+        sourceContinuation targetContinuation)
+      {safe : safeToElim declaration.value = true} :
+      ShadowLetResidual.WasDeleted fuel used declaration sourceContinuation
+        (.deleted targetContinuation continuation (safe := safe))
+
+theorem ShadowLetResidual.safeToElim_of_wasDeleted
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted) :
+    safeToElim declaration.value = true := by
+  cases deleted
+  assumption
+
+/-- Static boundary exposed by the actual Lean 4.32 deletion decision: every
+deleted let is locally value-producing, except possibly the known nullary
+full-application case. -/
+theorem ShadowLetResidual.local_or_nullaryFap_of_wasDeleted
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted) :
+    locallyValueProducingSafeToElim declaration.value = true ∨
+      ∃ name arguments,
+        declaration.value = .fap name arguments ∧
+          arguments.isEmpty = true :=
+  safeToElim_local_or_nullaryFap declaration.value
+    (residual.safeToElim_of_wasDeleted deleted)
+
+/-- Excluding precisely the nullary-full-application discrepancy turns the
+compiler's deleted-let decision into the syntax-only premise expected by the
+local operational readiness family. -/
+theorem ShadowLetResidual.locallyValueProducing_of_wasDeleted
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted)
+    (notNullaryFap : ¬ ∃ name arguments,
+      declaration.value = .fap name arguments ∧
+        arguments.isEmpty = true) :
+    locallyValueProducingSafeToElim declaration.value = true := by
+  rcases residual.local_or_nullaryFap_of_wasDeleted deleted with
+    localSafe | nullaryFap
+  · exact localSafe
+  · exact (notNullaryFap nullaryFap).elim
 
 /-- Inversion of a transparent shadow edge at a let node.  This theorem is
 purely syntactic; the deleted branch deliberately leaves runtime neutrality
@@ -377,8 +434,12 @@ theorem ShadowCodeGraph.letResidual
                 declaration.value).mono subset
           · simp [shadowCode?, continuationResult, keep] at result
             rcases result with ⟨rfl, rfl⟩
+            have safe : safeToElim declaration.value = true := by
+              cases safeResult : safeToElim declaration.value <;>
+                simp_all
             exact .deleted targetContinuation ⟨nextFuel, initial,
               continuationUsed, continuationBound, continuationResult, subset⟩
+              (safe := safe)
 
 /-- Semantic readiness is indexed by the actual residual edge.  Retained lets
 need no extra premise.  Deleted lets must be runtime-neutral for the current
@@ -400,10 +461,11 @@ inductive ShadowLetReadyAt (fuel : Nat) (used : UsedLocals)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {safe : safeToElim declaration.value = true}
       (absent : used.contains declaration.fvarId = false)
       (neutral : RuntimeNeutralAt state declaration) :
       ShadowLetReadyAt fuel used declaration sourceContinuation state
-        (.deleted targetContinuation continuation)
+        (.deleted targetContinuation continuation (safe := safe))
 
 /-- Case alternatives keep their tag/default metadata and relate only their
 recursively transformed code bodies. -/

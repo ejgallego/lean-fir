@@ -4653,10 +4653,11 @@ inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {safe : safeToElim declaration.value = true}
       (absent : used.contains declaration.fvarId = false)
       (ready : DeletedLetReadyAt state roots declaration) :
       ReachableLetReadyAt fuel used declaration sourceContinuation state roots
-        (.deleted targetContinuation continuation)
+        (.deleted targetContinuation continuation (safe := safe))
 
 /-- Reachable-runtime readiness for a conditionally deleted object write. -/
 inductive ReachableObjectSetReadyAt (fuel : Nat) (used : UsedLocals)
