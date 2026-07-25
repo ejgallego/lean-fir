@@ -4619,6 +4619,15 @@ inductive DeletedLetReadyAt (state : MachineState) (roots : List Value) :
         fvarId, binderName, type,
         value := .reuse token info updateHeader arguments }
 
+/-- The generic semantic neutrality kernel embeds directly into reachable
+deleted-let readiness.  The roots index is irrelevant in this subfamily
+because evaluation neither allocates nor changes ownership. -/
+theorem RuntimeNeutralAt.deletedLetReadyAt
+    (neutral : RuntimeNeutralAt state declaration) :
+    DeletedLetReadyAt state roots declaration := by
+  rcases neutral with ⟨value, evaluated⟩
+  exact .runtimeNeutral declaration value evaluated
+
 /-- Additional ownership readiness for a retained let.  Most retained values
 need only liveness coverage.  A concrete reuse token is different: it is a
 heap capability rather than an ordinary object root, so its source cell must
@@ -4658,6 +4667,25 @@ inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
       (ready : DeletedLetReadyAt state roots declaration) :
       ReachableLetReadyAt fuel used declaration sourceContinuation state roots
         (.deleted targetContinuation continuation (safe := safe))
+
+/-- First static-analysis-to-operation bridge.  Once the transparent graph
+identifies the source-only residual, binder absence and runtime neutrality
+construct its complete reachable readiness certificate.  Allocation and
+ownership-changing shapes deliberately use their dedicated constructors
+instead. -/
+theorem ReachableLetReadyAt.of_wasDeleted_runtimeNeutral
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted)
+    (absent : used.contains declaration.fvarId = false)
+    (neutral : RuntimeNeutralAt state declaration) :
+    ReachableLetReadyAt fuel used declaration sourceContinuation state roots
+      residual := by
+  have safe := residual.safeToElim_of_wasDeleted deleted
+  cases deleted with
+  | intro continuation =>
+      exact .deleted target continuation (safe := safe) absent
+        neutral.deletedLetReadyAt
 
 /-- Reachable-runtime readiness for a conditionally deleted object write. -/
 inductive ReachableObjectSetReadyAt (fuel : Nat) (used : UsedLocals)
@@ -4795,6 +4823,20 @@ inductive ReachableCodeReadyAt (fuel : Nat) (used : UsedLocals)
       (ready : ReachableScalarSetReadyAt fuel used object width offset field
         type continuation state roots graph.scalarSetResidual) :
       ReachableCodeReadyAt fuel used state roots graph
+
+/-- Code-level form of the runtime-neutral bridge.  This is the constructor
+needed by an entry invariant when the active transparent edge deletes a
+runtime-neutral let. -/
+theorem ReachableCodeReadyAt.deletedLet_of_runtimeNeutral
+    (graph : ShadowCodeGraph fuel used
+      (.let declaration sourceContinuation) target)
+    (deleted : graph.letResidual.WasDeleted)
+    (absent : used.contains declaration.fvarId = false)
+    (neutral : RuntimeNeutralAt state declaration) :
+    ReachableCodeReadyAt fuel used state roots graph :=
+  .letE graph
+    (ReachableLetReadyAt.of_wasDeleted_runtimeNeutral graph.letResidual
+      deleted absent neutral)
 
 /-- Readiness for an arbitrary related control.  Invocation and yielded
 controls impose no local operation premise; code controls expose the exact
