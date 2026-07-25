@@ -179,6 +179,11 @@ decrements. The Talos and compiler/adaptor leaf retain exact
 `ConcreteErrorSourceRel` with explicit closure-descriptor identity. Unchecked
 tagged operands and release-fuel exclusion remain separate obligations, as do
 reset's own child-release effects.
+The tagged obligation is now closed: unchecked increment faults immediately,
+and every positive unchecked decrement faults on its first repetition, for
+both immediate and promoted physical tag representations. Their Talos and
+compiler/adaptor leaves preserve exact `expectedHeapReference` and make the
+continuation unreachable. Zero decrement remains the intentional empty fold.
 
 The public endpoint is now explicit:
 

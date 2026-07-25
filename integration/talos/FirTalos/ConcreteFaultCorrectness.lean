@@ -3617,6 +3617,75 @@ theorem concreteFaultLeaf_increment_deadObject
     sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
     operation failureRelated
 
+/-- An unchecked increment of a related tagged object traps with
+`expectedHeapReference` before count arithmetic, a header read, or the
+continuation. -/
+theorem concreteFaultLeaf_increment_tagged_unchecked
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {payload : UInt64}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.inc objectId amount false false continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.tagged payload)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.tagged payload)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (incrementContract amount false))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.inc objectId amount false false continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedHeapReference := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    incrementStep_tagged_unchecked_of_refines (amount := amount)
+      initialRelated.1 objectRelated
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.inc objectId amount false false continuation))
+        (FaultObservation sourceRuntime .expectedHeapReference) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := incrementStep amount false)
+    (failure := .source .expectedHeapReference)
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
 /-- A positive stale nonpersistent decrement faults on its first header read,
 before recursive ownership release can begin. -/
 theorem concreteFaultLeaf_decrement_deadObject
@@ -3769,6 +3838,78 @@ theorem concreteFaultLeaf_decrement_underflow
     (step := decrementStep (amount + 1) check objectFields?)
     (failure := .sourceAddress
       (.referenceCountUnderflow objectWord))
+    sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
+    operation failureRelated
+
+/-- Every positive unchecked decrement of a related tagged object traps
+with `expectedHeapReference` on its first repetition, before recursive release
+or the continuation. -/
+theorem concreteFaultLeaf_decrement_tagged_unchecked
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {amount : Nat}
+    {objectFields? : Option Nat}
+    {continuation : LCNF.Code .impure}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex : Nat}
+    {objectWord : Word32}
+    {payload : UInt64}
+    {targetRest : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.dec objectId (amount + 1) false false objectFields? continuation)
+        ([.localGet objectIndex, .call id] ++ targetRest))
+    (objectLookup :
+      lookupValue sourceEnv objectId =
+        .ok (.object (.tagged payload)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.tagged payload)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? =
+        some (decrementContract (amount + 1) false objectFields?))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv
+      (.dec objectId (amount + 1) false false objectFields? continuation)
+      ([.localGet objectIndex, .call id] ++ targetRest)
+      initial locals witness sourceRuntime .expectedHeapReference := by
+  obtain ⟨operation, semanticFailure, failureRelated⟩ :=
+    decrementStep_tagged_unchecked_of_refines
+      (amount := amount) (objectFields? := objectFields?)
+      initialRelated.1 objectRelated
+  have sourceFault :
+      ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.dec objectId (amount + 1) false false objectFields? continuation))
+        (FaultObservation sourceRuntime .expectedHeapReference) := by
+    apply sourceCodeFault_execEvaluates
+    simp [executeStep, coreStep, sourceCodeState, objectLookup,
+      semanticFailure, fail, observe, FaultObservation]
+  exact concreteFaultLeaf_unaryHostEffect
+    (step := decrementStep (amount + 1) false objectFields?)
+    (failure := .source .expectedHeapReference)
     sourceFault adapted initialRelated hObject hImp hSat hi hContract hParams
     operation failureRelated
 

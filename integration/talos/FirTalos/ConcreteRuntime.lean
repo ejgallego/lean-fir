@@ -3166,6 +3166,35 @@ theorem incrementStep_deadObject_of_refines
           simp [incrementStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/-- An unchecked increment of either physical tagged representation preserves
+the source `expectedHeapReference` fault through the concrete Talos host. -/
+theorem incrementStep_tagged_unchecked_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {payload : UInt64}
+    {amount : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.tagged payload))) :
+    incrementStep amount false initial
+        [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.runtime .expectedHeapReference))) ∧
+      incValue runtime (.object (.tagged payload)) amount false =
+        .error .expectedHeapReference ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedHeapReference) .expectedHeapReference := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          have concrete :=
+            runtimeRelated.heap.incrementReference_tagged taggedRelated amount
+              false
+          refine ⟨?_, rfl, .source .expectedHeapReference⟩
+          simp [incrementStep, clearFailure,
+            Word32.ofUInt32_ofNat_value, concrete, ConcreteError.toTrap]
+
 /-- Repeating a checked decrement on an immediate or promoted tag remains a
 concrete no-op. -/
 theorem decrementReference_tagged_checked
@@ -3192,6 +3221,61 @@ theorem decValue_tagged_checked
       simp only [decValue, List.replicate_succ, List.foldlM_cons,
         Bind.bind, Except.bind, decValueOnce]
       exact ih
+
+/-- Every positive unchecked decrement of either tagged representation stops
+at its first one-step ownership check. -/
+theorem decrementReference_tagged_unchecked
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {payload : UInt64} {word : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (tagged : TaggedReferenceRel witness word payload)
+    (amount : Nat) (descriptors : ClosureDescriptorTable := #[]) :
+    decrementReference state word (amount + 1) false descriptors =
+      .error (.source .expectedHeapReference) := by
+  simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+    Bind.bind, Except.bind]
+  rw [related.decrementReferenceOnce_tagged tagged false descriptors]
+  rfl
+
+/-- FIR selects the same first-step fault for every positive unchecked tagged
+decrement. -/
+theorem decValue_tagged_unchecked
+    (runtime : RuntimeState) (payload : UInt64) (amount : Nat) :
+    decValue runtime (.object (.tagged payload)) (amount + 1) false =
+      .error .expectedHeapReference := by
+  simp only [decValue, List.replicate_succ, List.foldlM_cons, Bind.bind,
+    Except.bind, decValueOnce]
+  rfl
+
+/-- A positive unchecked tagged decrement crosses the Talos boundary as the
+exact source-classified `expectedHeapReference` trap. -/
+theorem decrementStep_tagged_unchecked_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {payload : UInt64}
+    {amount : Nat} {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.tagged payload))) :
+    decrementStep (amount + 1) false objectFields? initial
+        [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.runtime .expectedHeapReference))) ∧
+      decValue runtime (.object (.tagged payload)) (amount + 1) false =
+        .error .expectedHeapReference ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedHeapReference) .expectedHeapReference := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          have concrete :=
+            decrementReference_tagged_unchecked runtimeRelated.heap taggedRelated
+              amount initial.host.closureDescriptors
+          refine ⟨?_, decValue_tagged_unchecked runtime payload amount,
+            .source .expectedHeapReference⟩
+          simp [decrementStep, clearFailure,
+            Word32.ofUInt32_ofNat_value, concrete, ConcreteError.toTrap]
 
 /-- Successful concrete decrement refines the exact semantic operation.
 Ordinary objects may recursively release ownership trees for either check bit;

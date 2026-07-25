@@ -3111,6 +3111,17 @@ exhaustion remains target-classified T4S work; unchecked tagged operand faults
 and reset's child-release wrapper remain separate T4 leaves. No shared semantic
 contract or executable ABI changed.
 
+W6.6db closes unchecked tagged ownership faults. Both immediate and promoted
+physical tags already share one refinement theorem: checked ownership is a
+no-op, while unchecked ownership produces `expectedHeapReference`. The new
+Talos equations and compiler/adaptor terminal leaves cover arbitrary
+increment amounts and every positive decrement amount, whose first repetition
+faults before any header access, recursive release, or continuation. A
+zero-amount decrement remains the specified empty fold. The `.tobject`
+relation excludes `expectedObject`, while delete's stricter `.object`
+relation excludes tagged operands entirely. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -69,7 +69,7 @@ the premise that derives its operation equation remains to be packaged.
 | object and `USize` mutation | `expectedConstructor`, `deadObject`, bounds | all exact terminal leaves complete |
 | packed-scalar mutation and tag mutation | `expectedConstructor`, `deadObject` | all exact terminal leaves complete for every supported integer width |
 | `isShared` | `expectedObject`, `deadObject` | dead leaf complete; the ABI relation excludes `expectedObject` for an admitted related operand |
-| increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | mapped stale, direct underflow, and arbitrary-depth recursive decrement leaves complete after any successful child/repetition prefix; unchecked tagged `expectedHeapReference` packaging and release-fuel exclusion remain |
+| increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | mapped stale, direct underflow, arbitrary-depth recursive decrement, and unchecked tagged increment/positive-decrement leaves complete; ABI relations exclude the other operand-shape cases; release-fuel exclusion remains |
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
 | reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, and unique-constructor bounds terminal leaves complete; `.tobject` excludes `expectedObject`; decrement/child leaves and release-fuel exclusion remain |
@@ -100,8 +100,7 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Close the unchecked tagged ownership `expectedHeapReference` leaves, then
-   use the recursive fold boundary for reset child-release faults.
+1. Use the recursive fold boundary for reset child-release faults.
 2. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.
 3. Decide the clean retained-capacity invariant for reset/reuse and make the
