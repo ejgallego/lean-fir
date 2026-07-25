@@ -3401,6 +3401,70 @@ theorem deleteStep_deadObject_of_refines
       simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
         concrete, ConcreteError.toTrap]
 
+/-- Reset of a stale mapped object faults at the common live-header gate and
+preserves the exact address/location relation. -/
+theorem resetStep_deadObject_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} (count : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime (.source (.address (.deadObject word)))) ∧
+      reset runtime count (.object (.heap location)) =
+        .error (.deadObject location) ∧
+      ConcreteErrorSourceRel witness
+        (.sourceAddress (.deadObject word)) (.deadObject location) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.resetObject_deadObject heapRelated found dead
+              count initial.host.closureDescriptors
+          refine ⟨?_, semantic, .sourceAddress (.deadObject heapRelated)⟩
+          simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
+/-- A related live, ordinary, uniquely owned nonconstructor reaches reset's
+constructor-kind gate before bounds or child release and produces the exact
+source-classified trap. -/
+theorem resetStep_expectedConstructor_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} (count : Nat)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1)
+    (notConstructor : ∀ object, cell.object ≠ .ctor object) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+        trap (clearFailure initial)
+          (.runtime ((.source .expectedConstructor : ConcreteError).toTrap)) ∧
+      reset runtime count (.object (.heap location)) =
+        .error .expectedConstructor ∧
+      ConcreteErrorSourceRel witness
+        (.source .expectedConstructor) .expectedConstructor := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          obtain ⟨concrete, semantic⟩ :=
+            runtimeRelated.heap.resetObject_expectedConstructor_refines
+              heapRelated found live ordinary unique notConstructor count
+              initial.host.closureDescriptors
+          refine ⟨?_, semantic, .source .expectedConstructor⟩
+          simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+            concrete, ConcreteError.toTrap]
+
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

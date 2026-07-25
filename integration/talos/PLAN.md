@@ -3040,6 +3040,19 @@ continuation unreachable. The admitted `.tobject` relation excludes
 `expectedObject`, while `BoxedScalarKind` excludes unknown-type malformed
 requests. No shared semantic contract or executable ABI changed.
 
+W6.6cv closes reset's two pre-bounds structured-fault branches. A canonical
+released allocation fails at the live-header gate with the exact related
+physical/source `deadObject` address. A live, nonpersistent, uniquely owned
+nonconstructor passes reset's ownership fallback test and then fails the
+constructor-kind gate with exact `expectedConstructor`; stating those
+conditions explicitly preserves the operation's precedence, because shared
+or persistent objects decrement and return an empty token instead. The Talos
+host equations and compiler/adaptor terminal leaves prove both generated
+unary calls trap before the reuse-token local write or continuation.
+The admitted `.tobject` operand relation excludes `expectedObject`; bounds
+and recursive child-release faults remain separate leaves. No shared semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

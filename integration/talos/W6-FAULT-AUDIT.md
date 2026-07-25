@@ -72,7 +72,7 @@ the premise that derives its operation equation remains to be packaged.
 | increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | stale leaves complete; exact underflow relation exists; underflow/recursive leaves and release-fuel exclusion remain |
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
-| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | concrete classification is exact or address-related; terminal leaves and release-fuel exclusion remain |
+| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object and unique-nonconstructor terminal leaves complete; `.tobject` excludes `expectedObject`; bounds, decrement/child leaves, and release-fuel exclusion remain |
 | reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | operand/arity gates exclude two cases; dead/constructor leaves remain; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
@@ -100,8 +100,9 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package the remaining exact-source constructor-kind leaves for reset and
-   reuse readers using the common checked-header theorem.
+1. Package the dead-object and constructor-kind leaves for reuse; its admitted
+   token and static arity gates exclude `expectedReuseToken` and malformed
+   arity.
 2. Add the address-related underflow leaf and prove its precedence over
    recursive release.
 3. Resolve the structured `unreachable` transport as an isolated semantic

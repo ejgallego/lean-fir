@@ -145,6 +145,10 @@ Typed unboxing now supplies both reachable terminal instances: stale mapped
 objects preserve their related physical/source address in `deadObject`, while
 live represented non-box objects preserve `expectedScalar`. The admitted
 `.tobject` and `BoxedScalarKind` gates exclude its other source fault forms.
+Reset likewise supplies exact terminal instances for stale mapped objects and
+for live, nonpersistent, uniquely owned nonconstructors. Those ownership
+premises are part of the theorem boundary because shared or persistent cells
+take reset's decrement fallback before the constructor-kind check.
 
 The public endpoint is now explicit:
 

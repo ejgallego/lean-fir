@@ -1596,6 +1596,154 @@ theorem LiveHeapRel.resetObject_tagged
       rw [releaseNoop]
       rfl
 
+/-- Reset rejects a canonical released allocation at the common live-header
+gate, before ownership, constructor-kind, bounds, or child-release work. -/
+theorem DeadCellRel.resetObject_eq
+    {state : MemoryState} {address : Word32}
+    (related : DeadCellRel state address) (count : Nat)
+    (descriptors : ClosureDescriptorTable) :
+    resetObject state count address descriptors =
+      .error (.sourceAddress (.deadObject address)) := by
+  obtain ⟨_, _, addressHeap, _, _, _, _, _, _, _, _, _, _, _⟩ :=
+    related.header
+  unfold resetObject
+  rw [addressHeap]
+  simp only
+  rw [related.readLiveHeader_eq]
+  rfl
+
+/-- Stale semantic and concrete reset operands agree on the exact
+address-related dead-object fault. -/
+theorem LiveHeapRel.resetObject_deadObject
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) (count : Nat)
+    (descriptors : ClosureDescriptorTable) :
+    resetObject state count address descriptors =
+        .error (.sourceAddress (.deadObject address)) ∧
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error (.deadObject location) := by
+  have deadRelated := related.deadCellRel mapped found dead
+  exact ⟨deadRelated.resetObject_eq count descriptors, by
+    simp [Fir.LeanIR.Impure.reset, getLiveCell, found, dead]
+    rfl⟩
+
+/-- A live, ordinary, uniquely owned nonconstructor reaches reset's
+constructor-kind gate in both runtimes. These premises state the exact
+precedence boundary: shared/persistent objects take the decrement fallback,
+while dead objects fail at the earlier live-header read. -/
+theorem LiveHeapRel.resetObject_expectedConstructor_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {address : Word32} {location : Location} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : HeapReferenceRel witness address location)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1)
+    (notConstructor : ∀ object, cell.object ≠ .ctor object)
+    (count : Nat) (descriptors : ClosureDescriptorTable) :
+    resetObject state count address descriptors =
+        .error (.source .expectedConstructor) ∧
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error .expectedConstructor := by
+  have failOfHeader (header : Header)
+      (headerRead : state.readLiveHeader address = .ok header)
+      (headerKind : header.kind ≠ .constructor)
+      (notPromoted : header.isPromotedTag = false)
+      (refCount : header.refCount.toNat = cell.rc)
+      (persistent : header.persistent = cell.persistent) :
+      resetObject state count address descriptors =
+        .error (.source .expectedConstructor) := by
+    have addressHeap :=
+      (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+        headerRead).1
+    have headerOne : header.refCount = 1 := by
+      apply UInt32.toNat.inj
+      simpa [unique] using refCount
+    have headerOrdinary : header.persistent = false :=
+      persistent.trans ordinary
+    unfold resetObject
+    rw [addressHeap, headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_neg (by simp [notPromoted, headerOrdinary, headerOne])]
+    cases kindEq : header.kind <;> simp_all <;> rfl
+  have mappedLookup :
+      witness.locations.lookup? location = some address := by
+    cases mapped with
+    | mapped found => exact found
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mappedLookup
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  have concrete :
+      resetObject state count address descriptors =
+        .error (.source .expectedConstructor) := by
+    cases targetRelated with
+    | constructor descriptor objectEq objectRelated headerRead headerKind
+        refCount persistent cellLive =>
+        exact False.elim (notConstructor _ objectEq)
+    | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
+        have different :
+            (ObjectKind.boxed == ObjectKind.natural) = false := by
+          decide
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+          (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
+          refCount persistent
+    | natural descriptor objectEq headerRead headerKind marker extent limbsFit
+        decoded refCount persistent cellLive =>
+        exact failOfHeader _ headerRead (by simp [headerKind])
+          (by simp [Header.isPromotedTag, headerKind, marker,
+            bigNaturalMarker, promotedTagMarker])
+          refCount persistent
+    | integer descriptor objectEq objectRelated refCount persistent cellLive =>
+        have different :
+            (ObjectKind.integer == ObjectKind.natural) = false := by
+          decide
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+          (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
+          refCount persistent
+    | string descriptor objectEq objectRelated refCount persistent cellLive =>
+        have different :
+            (ObjectKind.string == ObjectKind.natural) = false := by
+          decide
+        exact failOfHeader _ objectRelated.headerRead
+          (by simp [objectRelated.headerKind])
+          (by simp [Header.isPromotedTag, objectRelated.headerKind, different])
+          refCount persistent
+    | closure closureRelated =>
+        cases closureRelated with
+        | closure objectEq objectRelated headerRead headerKind descriptorLookup
+            fixedCount extent refCount persistent cellLive =>
+            have different :
+                (ObjectKind.closure == ObjectKind.natural) = false := by
+              decide
+            exact failOfHeader _ headerRead (by simp [headerKind])
+              (by simp [Header.isPromotedTag, headerKind, different])
+              refCount persistent
+  have semantic :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error .expectedConstructor := by
+    unfold Fir.LeanIR.Impure.reset
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+    rw [if_neg (by simp [ordinary, unique])]
+    cases objectEq : cell.object with
+    | ctor object => exact False.elim (notConstructor object objectEq)
+    | closure function arity fixed => rfl
+    | boxed type value => rfl
+    | string value => rfl
+    | natural value => rfl
+    | integer value => rfl
+    | byteArray value => rfl
+    | «opaque» typeName => rfl
+  exact ⟨concrete, semantic⟩
+
 /-- The tagged reset equation agrees with FIR and returns the related empty
 reuse token. -/
 theorem LiveHeapRel.resetObject_refines_tagged
