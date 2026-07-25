@@ -5,6 +5,10 @@ namespace Fir.LeanIR.Passes.ElimDead
 
 open Lean
 open Lean.Compiler
+open Fir.LeanIR.ImpureHygiene
+open Fir.LeanIR.Passes.AlphaEqv
+open Fir.LeanIR.Passes.SimpCaseScopedBridge
+open Fir.LeanIR.Passes.SimpCaseWellFormed
 
 /-!
 Proof-relevant exact graphs for the transparent `elimDeadVars` traversal.
@@ -512,6 +516,658 @@ def ExactShadowCodeGraph.view
               rcases result with ⟨rfl, rfl⟩
               exact .delete ⟨continuationResult⟩
       | «fun» _ _ impossible => nomatch impossible
+
+/-- Every listed binder that is absent from one liveness set remains absent
+from another.  This is the contravariant transport used when backwards
+liveness moves from a child result to the result of its containing node. -/
+def BinderAbsenceTransfers (binders : List FVarId)
+    (sourceUsed targetUsed : UsedLocals) : Prop :=
+  ∀ forbidden, forbidden ∈ binders →
+    sourceUsed.contains forbidden = false →
+      targetUsed.contains forbidden = false
+
+theorem BinderAbsenceTransfers.refl
+    (binders : List FVarId) (used : UsedLocals) :
+    BinderAbsenceTransfers binders used used :=
+  fun _ _ absent => absent
+
+theorem BinderAbsenceTransfers.trans
+    (first : BinderAbsenceTransfers binders sourceUsed middle)
+    (second : BinderAbsenceTransfers binders middle targetUsed) :
+    BinderAbsenceTransfers binders sourceUsed targetUsed :=
+  fun forbidden member absent => second forbidden member
+    (first forbidden member absent)
+
+theorem BinderAbsenceTransfers.mono
+    (transfer : BinderAbsenceTransfers larger sourceUsed targetUsed)
+    (subset : ∀ forbidden, forbidden ∈ smaller → forbidden ∈ larger) :
+    BinderAbsenceTransfers smaller sourceUsed targetUsed :=
+  fun forbidden member => transfer forbidden (subset forbidden member)
+
+mutual
+
+  /-- Hereditary static readiness for a proof-relevant exact traversal.
+  Every deleted value or join binder is absent from `ambient`, and the same
+  certificate recursively covers every child run selected by the exact
+  compiler branch view. -/
+  inductive ExactShadowCodeBinderReady (ambient : UsedLocals) :
+      {initial : UsedLocals} → {fuel : Nat} → {final : UsedLocals} →
+        {source target : LCNF.Code .impure} →
+          ExactShadowCodeView initial fuel final source target → Prop where
+    | letRetained
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.letRetained continuation keep)
+    | letDeleted
+        (declaration : LCNF.LetDecl .impure)
+        (ambientAbsent :
+          ambient.contains declaration.fvarId = false)
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.letDeleted continuation absent safe)
+    | joinRetained
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view)
+        (bodyReady :
+          ExactShadowCodeBinderReady ambient body.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.joinRetained continuation live body)
+    | joinDeleted
+        (ambientAbsent : ambient.contains fvarId = false)
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.joinDeleted continuation absent)
+    | cases
+        (alternativesReady :
+          ExactShadowAltListBinderReady ambient alternatives.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.cases alternatives)
+    | jump :
+        ExactShadowCodeBinderReady ambient ExactShadowCodeView.jump
+    | return :
+        ExactShadowCodeBinderReady ambient ExactShadowCodeView.return
+    | unreachable :
+        ExactShadowCodeBinderReady ambient ExactShadowCodeView.unreachable
+    | objectSetRetained
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.objectSetRetained continuation live)
+    | objectSetDeleted
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.objectSetDeleted continuation absent)
+    | usizeSetRetained
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.usizeSetRetained continuation live)
+    | usizeSetDeleted
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.usizeSetDeleted continuation absent)
+    | scalarSetRetained
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.scalarSetRetained continuation live)
+    | scalarSetDeleted
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.scalarSetDeleted continuation absent)
+    | tagSet
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.tagSet continuation)
+    | increment
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.increment continuation)
+    | decrement
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.decrement continuation)
+    | delete
+        (continuationReady :
+          ExactShadowCodeBinderReady ambient
+            continuation.toGraph.view) :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.delete continuation)
+
+  /-- Alternative-list counterpart of `ExactShadowCodeBinderReady`. -/
+  inductive ExactShadowAltListBinderReady (ambient : UsedLocals) :
+      {fuel : Nat} → {initial final : UsedLocals} →
+        {source target : List (LCNF.Alt .impure)} →
+          ExactShadowAltListView fuel initial final source target → Prop where
+    | nil :
+        ExactShadowAltListBinderReady ambient ExactShadowAltListView.nil
+    | ctor
+        (bodyReady :
+          ExactShadowCodeBinderReady ambient body.toGraph.view)
+        (restReady :
+          ExactShadowAltListBinderReady ambient rest.view) :
+        ExactShadowAltListBinderReady ambient
+          (ExactShadowAltListView.ctor body rest)
+    | default
+        (bodyReady :
+          ExactShadowCodeBinderReady ambient body.toGraph.view)
+        (restReady :
+          ExactShadowAltListBinderReady ambient rest.view) :
+        ExactShadowAltListBinderReady ambient
+          (ExactShadowAltListView.default body rest)
+
+end
+
+private theorem paramBindersAvoid_of_binderNamesAvoid
+    {params : Array (LCNF.Param .impure)}
+    (avoids : BinderNamesAvoid forbidden (paramIds params)) :
+    ParamBindersAvoidName forbidden params.toList := by
+  intro parameter member
+  apply avoids parameter.fvarId
+  unfold paramIds
+  exact List.mem_map.mpr ⟨parameter, member, rfl⟩
+
+private theorem insert_preserves_absent_of_scoped
+    {scope : List FVarId} {forbidden inserted : FVarId}
+    {used : UsedLocals}
+    (fresh : FreshForScope forbidden scope)
+    (inScope : scope.contains inserted = true)
+    (absent : used.contains forbidden = false) :
+    (used.insert inserted).contains forbidden = false := by
+  simpa [collectArg] using
+    (collectArg_preserves_absent
+      (argument := LCNF.Arg.fvar inserted) absent
+      (fvarId_ne_of_freshForScope fresh inScope))
+
+private theorem binderReady_caseAlts_sizeOf_lt
+    (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alternatives⟩
+  rcases alternatives with ⟨alternatives⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem binderReady_altCode_sizeOf_lt_cons
+    (alternative : LCNF.Alt .impure)
+    (rest : List (LCNF.Alt .impure)) :
+    sizeOf alternative.getCode < sizeOf (alternative :: rest) := by
+  cases alternative with
+  | ctorAlt info code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | default code =>
+      simp [LCNF.Alt.getCode]
+      omega
+  | alt _ _ _ impossible => nomatch impossible
+
+set_option maxRecDepth 2048 in
+mutual
+
+  /-- Checked scoping, exact structural ownership, and global binder-name
+  uniqueness construct hereditary deletion readiness for one exact code
+  view.  `transfer` relates the view's exact final liveness set to the
+  ambient set at which the certificate will be consumed. -/
+  theorem ExactShadowCodeView.binderReady
+      (view : ExactShadowCodeView initial fuel final source target)
+      (wellFormed : ScopedCodeWellFormedTree index source)
+      (listing : CodeBinderList source binders)
+      (unique : BinderNamesUnique binders)
+      (transfer : BinderAbsenceTransfers binders final ambient) :
+      ExactShadowCodeBinderReady ambient view := by
+    cases view with
+    | @letRetained nextFuel continuationUsed sourceContinuation
+        targetContinuation declaration continuation keep =>
+        cases listing with
+        | @letE _ restBinders _ continuationListing =>
+            cases wellFormed with
+            | letE valueScoped variableFresh joinFresh runtimeTypes
+                continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers restBinders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden (by simp [member])
+                  apply collectLetValue_preserves_absent absent
+                  apply letValueAvoids_of_scoped
+                  · have childFresh :=
+                      continuationListing.memberFreshForRoot
+                        continuationTree member
+                    exact freshForScope_of_subset childFresh.1
+                      (scopeSubset_pushVar_sourceScope _ _)
+                  · exact valueScoped
+                exact .letRetained
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique.tail_unique childTransfer)
+    | @letDeleted nextFuel continuationUsed sourceContinuation
+        targetContinuation declaration continuation absent safe =>
+        cases listing with
+        | @letE _ restBinders _ continuationListing =>
+            cases wellFormed with
+            | letE valueScoped variableFresh joinFresh runtimeTypes
+                continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers restBinders final ambient := by
+                  intro forbidden member absent
+                  exact transfer forbidden
+                    (List.mem_cons_of_mem _ member) absent
+                exact .letDeleted _
+                  (transfer _ (by simp) absent)
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique.tail_unique childTransfer)
+    | @joinRetained nextFuel continuationUsed sourceContinuation
+        targetContinuation fvarId bodyUsed sourceBody targetBody binderName
+        params type continuation live body =>
+        cases listing with
+        | @join bodyBinders _ restBinders _ bodyListing
+            continuationListing =>
+            cases wellFormed with
+            | @jp _ _ _ _ _ _ _ binderFresh paramsFresh bodyTree
+                continuationTree =>
+                have tailUnique := unique.tail_unique
+                have normalizedTailUnique :
+                    BinderNamesUnique
+                      (paramIds params ++ (bodyBinders ++ restBinders)) := by
+                  simpa [LCNF.FunDecl.params, List.append_assoc] using
+                    tailUnique
+                have bodyContinuationUnique :
+                    BinderNamesUnique (bodyBinders ++ restBinders) := by
+                  exact BinderNamesUnique.right_of_append
+                    (left := paramIds params) normalizedTailUnique
+                have bodyTransfer :
+                    BinderAbsenceTransfers bodyBinders final ambient := by
+                  intro forbidden member absent
+                  exact transfer forbidden (by simp [member]) absent
+                have continuationTransfer :
+                    BinderAbsenceTransfers restBinders
+                      continuationUsed ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden (by simp [member])
+                  have continuationFresh :=
+                    continuationListing.memberFreshForRoot
+                      continuationTree member
+                  have variablesFresh :
+                      FreshForScope forbidden
+                        (index.pushParams params).sourceScope := by
+                    apply freshForScope_pushParams
+                    · simpa [ScopeIndex.pushJoin] using
+                        continuationFresh.1
+                    · apply paramBindersAvoid_of_binderNamesAvoid
+                      exact normalizedTailUnique.left_avoids_of_mem_right
+                        (show forbidden ∈ bodyBinders ++ restBinders by
+                          simp [member])
+                  have joinsFresh :
+                      FreshForScope forbidden
+                        (index.pushParams params).sourceJoins := by
+                    rw [pushParams_sourceJoins]
+                    exact freshForScope_of_subset continuationFresh.2
+                      (scopeSubset_pushJoin_sourceJoins index fvarId)
+                  exact
+                    shadowCode_preserves_absent_of_binder_owned_to_right
+                      bodyTree variablesFresh joinsFresh bodyListing
+                      bodyContinuationUnique member absent body.result
+                exact .joinRetained
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing
+                    bodyContinuationUnique.right_of_append
+                    continuationTransfer)
+                  (ExactShadowCodeView.binderReady body.toGraph.view bodyTree
+                    bodyListing bodyContinuationUnique.left_of_append
+                    bodyTransfer)
+    | @joinDeleted nextFuel continuationUsed sourceContinuation
+        targetContinuation fvarId binderName params type sourceBody
+        continuation absent =>
+        cases listing with
+        | @join bodyBinders _ restBinders _ bodyListing
+            continuationListing =>
+            cases wellFormed with
+            | @jp _ _ _ _ _ _ _ binderFresh paramsFresh bodyTree
+                continuationTree =>
+                have continuationUnique :
+                    BinderNamesUnique restBinders :=
+                  unique.tail_unique.right_of_append
+                have childTransfer :
+                    BinderAbsenceTransfers restBinders final ambient := by
+                  intro forbidden member absent
+                  exact transfer forbidden (by simp [member]) absent
+                exact .joinDeleted
+                  (transfer _
+                    (by
+                      exact
+                        (List.mem_cons_self :
+                          fvarId ∈ fvarId :: _))
+                    absent)
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing continuationUnique childTransfer)
+    | @cases nextFuel beforeDiscr targetAlternatives discr typeName
+        resultType sourceAlternatives alternatives =>
+        cases listing with
+        | cases alternativesListing =>
+            cases wellFormed with
+            | cases discrScoped normalization alternativesTree =>
+                have alternativesTransfer :
+                    BinderAbsenceTransfers binders beforeDiscr ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (alternativesListing.memberFreshForRoot
+                      alternativesTree member).1
+                    discrScoped absent
+                exact .cases
+                  (ExactShadowAltListView.binderReady alternatives.view
+                    alternativesTree alternativesListing unique
+                    alternativesTransfer)
+    | jump =>
+        cases listing
+        exact .jump
+    | «return» =>
+        cases listing
+        exact .return
+    | unreachable =>
+        cases listing
+        exact .unreachable
+    | @objectSetRetained nextFuel continuationUsed sourceContinuation
+        targetContinuation object field fieldIndex continuation live =>
+        cases listing with
+        | objectSet continuationListing =>
+            cases wellFormed with
+            | oset objectScoped fieldScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact collectArg_preserves_absent absent
+                    (argAvoids_of_scoped
+                      (continuationListing.memberFreshForRoot
+                        continuationTree member).1
+                      fieldScoped)
+                exact .objectSetRetained
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | objectSetDeleted continuation absent =>
+        cases listing with
+        | objectSet continuationListing =>
+            cases wellFormed with
+            | oset objectScoped fieldScoped continuationTree =>
+                exact .objectSetDeleted
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique transfer)
+    | @usizeSetRetained nextFuel continuationUsed sourceContinuation
+        targetContinuation object field fieldIndex continuation live =>
+        cases listing with
+        | usizeSet continuationListing =>
+            cases wellFormed with
+            | uset objectScoped fieldScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    fieldScoped absent
+                exact .usizeSetRetained
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | usizeSetDeleted continuation absent =>
+        cases listing with
+        | usizeSet continuationListing =>
+            cases wellFormed with
+            | uset objectScoped fieldScoped continuationTree =>
+                exact .usizeSetDeleted
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique transfer)
+    | @scalarSetRetained nextFuel continuationUsed sourceContinuation
+        targetContinuation object field width offset type continuation live =>
+        cases listing with
+        | scalarSet continuationListing =>
+            cases wellFormed with
+            | sset objectScoped fieldScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    fieldScoped absent
+                exact .scalarSetRetained
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | scalarSetDeleted continuation absent =>
+        cases listing with
+        | scalarSet continuationListing =>
+            cases wellFormed with
+            | sset objectScoped fieldScoped continuationTree =>
+                exact .scalarSetDeleted
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique transfer)
+    | @tagSet nextFuel continuationUsed sourceContinuation
+        targetContinuation object tag continuation =>
+        cases listing with
+        | tagSet continuationListing =>
+            cases wellFormed with
+            | setTag objectScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    objectScoped absent
+                exact .tagSet
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | @increment nextFuel continuationUsed sourceContinuation
+        targetContinuation object amount check persistent continuation =>
+        cases listing with
+        | increment continuationListing =>
+            cases wellFormed with
+            | inc objectScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    objectScoped absent
+                exact .increment
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | @decrement nextFuel continuationUsed sourceContinuation
+        targetContinuation object amount check persistent objects
+        continuation =>
+        cases listing with
+        | decrement continuationListing =>
+            cases wellFormed with
+            | dec objectScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    objectScoped absent
+                exact .decrement
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+    | @delete nextFuel continuationUsed sourceContinuation
+        targetContinuation object continuation =>
+        cases listing with
+        | delete continuationListing =>
+            cases wellFormed with
+            | del objectScoped continuationTree =>
+                have childTransfer :
+                    BinderAbsenceTransfers binders continuationUsed
+                      ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden member
+                  exact insert_preserves_absent_of_scoped
+                    (continuationListing.memberFreshForRoot
+                      continuationTree member).1
+                    objectScoped absent
+                exact .delete
+                  (ExactShadowCodeView.binderReady
+                    continuation.toGraph.view continuationTree
+                    continuationListing unique childTransfer)
+
+  termination_by sizeOf source
+  decreasing_by
+    all_goals subst_vars
+    all_goals first
+      | simpa only [LCNF.Cases.alts] using
+          (binderReady_caseAlts_sizeOf_lt
+            (LCNF.Cases.mk _ _ _ _))
+      | (simp_wf <;> try omega)
+
+  theorem ExactShadowAltListView.binderReady
+      (view :
+        ExactShadowAltListView fuel initial final source target)
+      (wellFormed : ScopedCodeWellFormedAlts index source)
+      (listing : AltBinderList source binders)
+      (unique : BinderNamesUnique binders)
+      (transfer : BinderAbsenceTransfers binders final ambient) :
+      ExactShadowAltListBinderReady ambient view := by
+    cases view with
+    | nil =>
+        cases listing
+        exact .nil
+    | @ctor middle sourceBody targetBody _ sourceRest targetRest info body
+        rest =>
+        cases listing with
+        | @ctor _ bodyBinders _ restBinders _ bodyListing restListing =>
+            cases wellFormed with
+            | ctor bodyTree restTree =>
+                have bodyTransfer :
+                    BinderAbsenceTransfers bodyBinders middle ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden (by simp [member])
+                  have fresh :=
+                    bodyListing.memberFreshForRoot bodyTree member
+                  exact
+                    shadowAltList_preserves_absent_of_binder_owned_to_left
+                      restTree fresh.1 fresh.2 restListing unique member
+                      absent rest.result
+                have restTransfer :
+                    BinderAbsenceTransfers restBinders final ambient :=
+                  transfer.mono
+                    (fun forbidden member => by simp [member])
+                exact .ctor
+                  (ExactShadowCodeView.binderReady body.toGraph.view
+                    bodyTree bodyListing unique.left_of_append
+                    bodyTransfer)
+                  (ExactShadowAltListView.binderReady rest.view restTree
+                    restListing unique.right_of_append restTransfer)
+    | @default middle sourceBody targetBody _ sourceRest targetRest body
+        rest =>
+        cases listing with
+        | @default _ bodyBinders _ restBinders bodyListing restListing =>
+            cases wellFormed with
+            | default bodyTree restTree =>
+                have bodyTransfer :
+                    BinderAbsenceTransfers bodyBinders middle ambient := by
+                  intro forbidden member absent
+                  apply transfer forbidden (by simp [member])
+                  have fresh :=
+                    bodyListing.memberFreshForRoot bodyTree member
+                  exact
+                    shadowAltList_preserves_absent_of_binder_owned_to_left
+                      restTree fresh.1 fresh.2 restListing unique member
+                      absent rest.result
+                have restTransfer :
+                    BinderAbsenceTransfers restBinders final ambient :=
+                  transfer.mono
+                    (fun forbidden member => by simp [member])
+                exact .default
+                  (ExactShadowCodeView.binderReady body.toGraph.view
+                    bodyTree bodyListing unique.left_of_append
+                    bodyTransfer)
+                  (ExactShadowAltListView.binderReady rest.view restTree
+                    restListing unique.right_of_append restTransfer)
+
+  termination_by sizeOf source
+  decreasing_by
+    all_goals subst_vars
+    all_goals first
+      | exact binderReady_altCode_sizeOf_lt_cons _ _
+      | (simp_wf <;> try omega)
+
+end
+
+/-- Root-level hereditary readiness from an explicit transparent binder
+enumeration.  At the root the ambient liveness set is the exact final set, so
+the transfer obligation is reflexive. -/
+theorem ExactShadowCodeGraph.binderReady_of_listing
+    (exact : ExactShadowCodeGraph fuel final source target)
+    (wellFormed : ScopedCodeWellFormedTree index source)
+    (listing : CodeBinderList source binders)
+    (unique : BinderNamesUnique binders) :
+    ExactShadowCodeBinderReady final exact.view :=
+  ExactShadowCodeView.binderReady exact.view wellFormed listing unique
+    (BinderAbsenceTransfers.refl binders final)
+
+/-- Ownership-packaged spelling for downstream semantic proofs. -/
+theorem ExactShadowCodeGraph.binderReady
+    (exact : ExactShadowCodeGraph fuel final source target)
+    (wellFormed : ScopedCodeWellFormedTree index source)
+    (ownership : CodeBinderOwnership source) :
+    ExactShadowCodeBinderReady final exact.view :=
+  exact.binderReady_of_listing wellFormed ownership.listing
+    ownership.unique
+
+/-- Compiler-facing canonical spelling: checked scoping plus uniqueness of
+the transparent `codeBinderIds` enumeration suffices for hereditary
+readiness of every exact deletion branch. -/
+theorem ExactShadowCodeGraph.binderReady_of_canonical
+    (exact : ExactShadowCodeGraph fuel final source target)
+    (wellFormed : ScopedCodeWellFormedTree index source)
+    (unique : BinderNamesUnique (codeBinderIds source)) :
+    ExactShadowCodeBinderReady final exact.view := by
+  rcases CodeBinderList.canonicalExists source with ⟨listing⟩
+  exact exact.binderReady_of_listing wellFormed listing unique
 
 /-- Transparent replay of the let deletion decision at an exact traversal
 seed.  `true` means the continuation succeeded, the binder was absent, and
