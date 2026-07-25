@@ -951,12 +951,16 @@ by source-generated LCNF: named and value invocation plus yielded bind, cache,
 and final-result control. `admin:yield-apply` remains recognized and reported,
 but is not claimed as source coverage: current compiler output normalizes the
 curried and function-valued-declaration probes into arity-respecting calls, so
-neither reaches the machine's over-application frame. The separate
-`machine-yield-apply` direct case invokes a one-parameter declaration with two
-values, then applies the extra value to the returned closure. Its 14 classified
-steps contain exactly one `admin:yield-apply`; its result, exact seven-form
-trace, and per-form multiplicities are compared with the corresponding native
-curried Lean application.
+neither reaches the machine's over-application frame. Two direct cases pin both
+routes into that apply frame.
+`machine-yield-apply` invokes a one-parameter declaration by name with two
+values, then applies the extra value to the returned closure.
+`machine-closure-yield-apply` first constructs a closure for that declaration,
+then performs the same over-application through `.fvar` and
+`admin:invoke-value`. Their 14- and 15-step traces each contain exactly one
+`admin:yield-apply`; both results, exact form traces, and per-form
+multiplicities are compared with the corresponding native curried Lean
+application.
 The manifest's optional
 `requiredExecutedLcnfFormCounts` records `{form, minimum, maximum}`
 obligations. The harness requires count telemetry for every LCNF result,

@@ -61,6 +61,10 @@ private def returnIdentity (_captured : Nat) : Nat → Nat :=
 private def nativeYieldApply : Nat :=
   returnIdentity 42 7
 
+private def nativeClosureYieldApply : Nat :=
+  let closure := returnIdentity
+  closure 42 7
+
 private def identityDecl : LCNF.Decl .impure :=
   decl `directIdentity #[param z] (.code (.return z))
 
@@ -87,6 +91,23 @@ private def yieldApplyProgram : ImpureProgram := {
 private def yieldApplyFormTrace : Array String :=
   #["lit", "lit", "fap", "pap", "return", "return", "return"]
 
+private def closureYieldApplyMainCode : LCNF.Code .impure :=
+  .let (letDecl c (.pap `returnsIdentity #[])) <|
+  .let (letDecl x (.lit (.nat 42))) <|
+  .let (letDecl y (.lit (.nat 7))) <|
+  .let (letDecl r (.fvar c #[.fvar x, .fvar y])) <|
+  .return r
+
+private def closureYieldApplyProgram : ImpureProgram := {
+  decls := #[
+    identityDecl,
+    returnsIdentityDecl,
+    decl `directClosureMain #[] (.code closureYieldApplyMainCode)
+  ] }
+
+private def closureYieldApplyFormTrace : Array String :=
+  #["pap", "lit", "lit", "fvar", "pap", "return", "return", "return"]
+
 def cases : Array Case := #[
   { validationCase := {
       id := "machine-yield-apply"
@@ -110,8 +131,33 @@ def cases : Array Case := #[
         note := "Exercise the interpreter apply frame against native curried application"
       }
     }
-    program := yieldApplyProgram }
+    program := yieldApplyProgram },
+  { validationCase := {
+      id := "machine-closure-yield-apply"
+      entry := `directClosureMain
+      resultSchema := .nat
+      native := fun _ => .nat nativeClosureYieldApply
+      tags := #["direct-lcnf", "machine", "overapplication", "function-value"]
+      requiredLcnfForms := #["fvar", "lit", "pap", "return"]
+      requiredExecutedLcnfForms := #["fvar", "lit", "pap", "return"]
+      requiredExecutedLcnfFormCounts := #[
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "pap", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 3, maximum := some 3 }
+      ]
+      requiredExecutedLcnfFormTrace := some closureYieldApplyFormTrace
+      requiredAdministrativeStepKinds := #["admin:invoke-value", "admin:yield-apply"]
+      provenance := {
+        suite := "fir-direct-lcnf"
+        path := "Fir/Validation/DirectLCNF.lean"
+        note := "Enter the interpreter apply frame through a closure value and compare with native"
+      }
+    }
+    program := closureYieldApplyProgram }
 ]
+
+#guard cases.size == 2
 
 #guard cases.all fun directCase =>
   directCase.validationCase.requiredAdministrativeStepKinds.contains
