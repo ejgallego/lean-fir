@@ -158,6 +158,356 @@ theorem collectLetValue_preserves_absent
         (argument := LCNF.Arg.fvar fvarId) absent avoids
   | proj _ _ _ impossible | const _ _ _ impossible => nomatch impossible
 
+/-- Negative occurrence certificate for every runtime identifier that the
+backwards traversal may collect from a code tree.  Binder declarations and
+erased type metadata do not occur here because `shadowCode?` never inserts
+them merely by visiting their nodes. -/
+inductive CodeAvoids (forbidden : FVarId) :
+    LCNF.Code .impure → Prop where
+  | letE
+      (valueAvoids : LetValueAvoids forbidden declaration.value)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.let declaration continuation)
+  | join
+      (bodyAvoids : CodeAvoids forbidden declaration.value)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.jp declaration continuation)
+  | cases
+      (discrAvoids : caseInfo.discr ≠ forbidden)
+      (alternativesAvoid : ∀ alternative,
+        alternative ∈ caseInfo.alts.toList →
+          CodeAvoids forbidden alternative.getCode) :
+      CodeAvoids forbidden (.cases caseInfo)
+  | jump
+      (targetAvoids : target ≠ forbidden)
+      (argumentsAvoid : ArgsAvoid forbidden arguments) :
+      CodeAvoids forbidden (.jmp target arguments)
+  | ret (resultAvoids : result ≠ forbidden) :
+      CodeAvoids forbidden (.return result)
+  | unreachable (type : Expr) :
+      CodeAvoids forbidden (.unreach type)
+  | objectSet
+      (objectAvoids : object ≠ forbidden)
+      (fieldAvoids : ArgAvoids forbidden field)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.oset object index field continuation)
+  | usizeSet
+      (objectAvoids : object ≠ forbidden)
+      (fieldAvoids : field ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.uset object index field continuation)
+  | scalarSet
+      (objectAvoids : object ≠ forbidden)
+      (fieldAvoids : field ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden
+        (.sset object width offset field type continuation)
+  | tagSet
+      (objectAvoids : object ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.setTag object tag continuation)
+  | increment
+      (objectAvoids : object ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden
+        (.inc object amount check persistent continuation)
+  | decrement
+      (objectAvoids : object ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden
+        (.dec object amount check persistent objects continuation)
+  | delete
+      (objectAvoids : object ≠ forbidden)
+      (continuationAvoids : CodeAvoids forbidden continuation) :
+      CodeAvoids forbidden (.del object continuation)
+
+def AltListAvoids (forbidden : FVarId)
+    (alternatives : List (LCNF.Alt .impure)) : Prop :=
+  ∀ alternative, alternative ∈ alternatives →
+    CodeAvoids forbidden alternative.getCode
+
+/-- The transparent alternative loop cannot introduce a forbidden identifier
+when neither its seed nor any source alternative can introduce it. -/
+theorem shadowAltList_preserves_absent
+    (transformCode : UsedLocals → LCNF.Code .impure → Option ShadowResult)
+    (transformPreserves : ∀ (initial : UsedLocals)
+        (source target : LCNF.Code .impure) (final : UsedLocals),
+      initial.contains forbidden = false →
+      CodeAvoids forbidden source →
+      transformCode initial source = some (target, final) →
+        final.contains forbidden = false)
+    (initial : UsedLocals) (alternatives : List (LCNF.Alt .impure))
+    (transformed : List (LCNF.Alt .impure)) (final : UsedLocals)
+    (absent : initial.contains forbidden = false)
+    (avoids : AltListAvoids forbidden alternatives)
+    (result : shadowAltList? transformCode initial alternatives =
+      some (transformed, final)) :
+    final.contains forbidden = false := by
+  induction alternatives generalizing initial transformed final with
+  | nil =>
+      simp only [shadowAltList?] at result
+      rcases result with ⟨rfl, rfl⟩
+      exact absent
+  | cons alternative rest ih =>
+      cases bodyResult : transformCode initial alternative.getCode with
+      | none => simp [shadowAltList?, bodyResult] at result
+      | some bodyPair =>
+          obtain ⟨body, middle⟩ := bodyPair
+          cases restResult : shadowAltList? transformCode middle rest with
+          | none => simp [shadowAltList?, bodyResult, restResult] at result
+          | some restPair =>
+              obtain ⟨transformedRest, finalUsed⟩ := restPair
+              have pairEq :
+                  (updateAltCode alternative body :: transformedRest,
+                    finalUsed) = (transformed, final) := by
+                simpa [shadowAltList?, bodyResult, restResult] using result
+              have finalEq := congrArg Prod.snd pairEq
+              change finalUsed = final at finalEq
+              subst final
+              apply ih middle transformedRest finalUsed
+              · exact transformPreserves initial alternative.getCode
+                  body middle absent
+                  (avoids alternative List.mem_cons_self) bodyResult
+              · intro candidate member
+                exact avoids candidate
+                  (List.mem_cons_of_mem alternative member)
+              · exact restResult
+
+/-- Backwards liveness preserves nonmembership for every identifier avoided
+by the entire source tree.  The theorem is deliberately stated for every
+successful fuel-bounded traversal, so later graph decompositions can use it
+without depending on a particular fuel witness. -/
+theorem shadowCode_preserves_absent
+    (absent : initial.contains forbidden = false)
+    (avoids : CodeAvoids forbidden source)
+    (result : shadowCode? fuel initial source = some output) :
+    output.2.contains forbidden = false := by
+  induction fuel generalizing initial source output with
+  | zero =>
+      cases source with
+      | jmp target arguments =>
+          cases avoids with
+          | jump targetAvoids argumentsAvoid =>
+              simp [shadowCode?] at result
+              subst output
+              apply collectArgs_preserves_absent
+              · simp [targetAvoids, absent]
+              · exact argumentsAvoid
+      | «return» value =>
+          cases avoids with
+          | ret resultAvoids =>
+              simp [shadowCode?] at result
+              subst output
+              simp [resultAvoids, absent]
+      | unreach type =>
+          simp [shadowCode?] at result
+          subst output
+          exact absent
+      | «let» _ _ | jp _ _ | «cases» _ | oset _ _ _ _ | uset _ _ _ _
+      | sset _ _ _ _ _ _ | setTag _ _ _ | inc _ _ _ _ _
+      | dec _ _ _ _ _ _ | del _ _ | «fun» _ _ _ =>
+          simp [shadowCode?] at result
+  | succ remaining ih =>
+      cases source with
+      | «let» declaration continuation =>
+          cases avoids with
+          | letE valueAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  by_cases keep :
+                      declaration.fvarId ∈ continuationOutput.2 ∨
+                        safeToElim declaration.value = false
+                  · simp [shadowCode?, continuationResult, keep] at result
+                    subst output
+                    exact collectLetValue_preserves_absent
+                      continuationAbsent valueAvoids
+                  · simp [shadowCode?, continuationResult, keep] at result
+                    subst output
+                    exact continuationAbsent
+      | jp declaration continuation =>
+          cases declaration with
+          | mk fvarId binderName params type body =>
+              cases avoids with
+              | join bodyAvoids continuationAvoids =>
+                  cases continuationResult :
+                      shadowCode? remaining initial continuation with
+                  | none => simp [shadowCode?, continuationResult] at result
+                  | some continuationOutput =>
+                      have continuationAbsent :=
+                        ih absent continuationAvoids continuationResult
+                      by_cases keep :
+                          continuationOutput.2.contains fvarId = true
+                      · cases bodyResult :
+                            shadowCode? remaining continuationOutput.2 body with
+                        | none =>
+                            have keepProp : fvarId ∈ continuationOutput.2 := keep
+                            simp [shadowCode?, continuationResult, keepProp,
+                              bodyResult] at result
+                        | some bodyOutput =>
+                            have bodyAbsent :=
+                              ih continuationAbsent bodyAvoids bodyResult
+                            have keepProp : fvarId ∈ continuationOutput.2 := keep
+                            simp [shadowCode?, continuationResult, keepProp,
+                              bodyResult] at result
+                            subst output
+                            exact bodyAbsent
+                      · have keepProp : ¬fvarId ∈ continuationOutput.2 := keep
+                        simp [shadowCode?, continuationResult, keepProp] at result
+                        subst output
+                        exact continuationAbsent
+      | «cases» caseInfo =>
+          cases caseInfo with
+          | mk typeName resultType discr alternatives =>
+              cases avoids with
+              | cases discrAvoids alternativesAvoid =>
+                  cases alternativesResult :
+                      shadowAltList? (shadowCode? remaining) initial
+                        alternatives.toList with
+                  | none => simp [shadowCode?, alternativesResult] at result
+                  | some alternativesOutput =>
+                      obtain ⟨transformed, beforeDiscr⟩ := alternativesOutput
+                      have beforeDiscrAbsent :=
+                        shadowAltList_preserves_absent
+                          (shadowCode? remaining)
+                          (fun seed before after final seedAbsent codeAvoids
+                              transformedBody =>
+                            ih seedAbsent codeAvoids transformedBody)
+                          initial alternatives.toList transformed beforeDiscr
+                          absent alternativesAvoid alternativesResult
+                      simp [shadowCode?, alternativesResult] at result
+                      subst output
+                      change discr ≠ forbidden at discrAvoids
+                      simp [discrAvoids, beforeDiscrAbsent]
+      | jmp target arguments =>
+          cases avoids with
+          | jump targetAvoids argumentsAvoid =>
+              simp [shadowCode?] at result
+              subst output
+              apply collectArgs_preserves_absent
+              · simp [targetAvoids, absent]
+              · exact argumentsAvoid
+      | «return» value =>
+          cases avoids with
+          | ret resultAvoids =>
+              simp [shadowCode?] at result
+              subst output
+              simp [resultAvoids, absent]
+      | unreach type =>
+          simp [shadowCode?] at result
+          subst output
+          exact absent
+      | oset object index field continuation =>
+          cases avoids with
+          | objectSet _ fieldAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  by_cases keep :
+                      continuationOutput.2.contains object = true
+                  · have keepProp : object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    exact collectArg_preserves_absent continuationAbsent
+                      fieldAvoids
+                  · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    exact continuationAbsent
+      | uset object index field continuation =>
+          cases avoids with
+          | usizeSet _ fieldAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  by_cases keep :
+                      continuationOutput.2.contains object = true
+                  · have keepProp : object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    simp [fieldAvoids, continuationAbsent]
+                  · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    exact continuationAbsent
+      | sset object width offset field type continuation =>
+          cases avoids with
+          | scalarSet _ fieldAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  by_cases keep :
+                      continuationOutput.2.contains object = true
+                  · have keepProp : object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    simp [fieldAvoids, continuationAbsent]
+                  · have keepProp : ¬object ∈ continuationOutput.2 := keep
+                    simp [shadowCode?, continuationResult, keepProp] at result
+                    subst output
+                    exact continuationAbsent
+      | setTag object tag continuation =>
+          cases avoids with
+          | tagSet objectAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  simp [shadowCode?, continuationResult] at result
+                  subst output
+                  simp [objectAvoids, continuationAbsent]
+      | inc object amount check persistent continuation =>
+          cases avoids with
+          | increment objectAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  simp [shadowCode?, continuationResult] at result
+                  subst output
+                  simp [objectAvoids, continuationAbsent]
+      | dec object amount check persistent objects continuation =>
+          cases avoids with
+          | decrement objectAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  simp [shadowCode?, continuationResult] at result
+                  subst output
+                  simp [objectAvoids, continuationAbsent]
+      | del object continuation =>
+          cases avoids with
+          | delete objectAvoids continuationAvoids =>
+              cases continuationResult :
+                  shadowCode? remaining initial continuation with
+              | none => simp [shadowCode?, continuationResult] at result
+              | some continuationOutput =>
+                  have continuationAbsent :=
+                    ih absent continuationAvoids continuationResult
+                  simp [shadowCode?, continuationResult] at result
+                  subst output
+                  simp [objectAvoids, continuationAbsent]
+      | «fun» _ _ impossible => nomatch impossible
+
 def ArgCovered (used : UsedLocals) : LCNF.Arg .impure → Prop
   | .erased => True
   | .fvar fvarId => used.contains fvarId = true
