@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import validate_interpreters as harness
+import validation_coverage_index as coverage_index
 import validation_harness as core
 import validation_lcnf as lcnf
 
@@ -7853,6 +7854,287 @@ class HarnessTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(harness.ValidationError, "duplicate diagnostic"):
             harness.diagnostics(duplicate)
+
+
+class CoverageIndexTests(unittest.TestCase):
+    @staticmethod
+    def matrix(
+        case_ids: list[str],
+        backends: list[str],
+        pairs: list[tuple[str, str]],
+    ) -> dict:
+        return {
+            "version": 2,
+            "identity": {
+                "algorithm": "sha256",
+                "run": "1" * 64,
+                "selection": "2" * 64,
+            },
+            "backends": backends,
+            "selectedCases": case_ids,
+            "pairs": [
+                {
+                    "reference": reference,
+                    "candidate": candidate,
+                    "artifact": f"evidence/{reference}-{candidate}",
+                    "sha256": "3" * 64,
+                    "comparedCases": len(case_ids),
+                    "equalCases": len(case_ids),
+                    "findingCount": 0,
+                }
+                for reference, candidate in pairs
+            ],
+            "coverage": {
+                "findingCount": 0,
+                "backends": [
+                    {
+                        "backend": backend,
+                        "selectedCaseCount": len(case_ids),
+                        "resultCaseCount": len(case_ids),
+                        "successfulCaseCount": len(case_ids),
+                        "comparisonCount": len(case_ids),
+                        "equalComparisonCount": len(case_ids),
+                        "findingCount": 0,
+                    }
+                    for backend in backends
+                ],
+                "providers": [],
+                "consumers": [],
+            },
+        }
+
+    @staticmethod
+    def machine_report(
+        backend: str,
+        case_ids: list[str],
+        *,
+        form: str = "return",
+        administrative_kind: str = "admin:yield-done",
+        unobserved_kinds: list[str] | None = None,
+    ) -> dict:
+        case_count = len(case_ids)
+        return {
+            "version": 2,
+            "backend": backend,
+            "caseCount": case_count,
+            "cases": [{"caseId": case_id} for case_id in case_ids],
+            "summary": {
+                "static": {
+                    "observedForms": [form],
+                    "requiredForms": [form],
+                    "missingObligationCount": 0,
+                },
+                "executed": {
+                    "casesWithDiagnostics": case_count,
+                    "casesWithRequirements": case_count,
+                    "observedForms": [form],
+                    "requiredForms": [form],
+                    "missingObligationCount": 0,
+                    "totalInterpreterSteps": case_count * 2,
+                    "formCounts": {
+                        "casesWithValidDiagnostics": case_count,
+                        "observed": [{"form": form, "count": case_count}],
+                        "requiredMinimums": [
+                            {"form": form, "minimum": case_count}
+                        ],
+                        "unsatisfiedObligationCount": 0,
+                    },
+                    "formTrace": {
+                        "casesWithValidDiagnostics": case_count,
+                        "mismatchedObligationCount": 0,
+                    },
+                    "stepTrace": {
+                        "casesWithValidDiagnostics": case_count,
+                        "casesWithCompleteCoverage": case_count,
+                        "administrativeKinds": [
+                            {
+                                "kind": administrative_kind,
+                                "count": case_count,
+                            }
+                        ],
+                        "requiredAdministrativeKinds": [administrative_kind],
+                        "unobservedAdministrativeKinds": (
+                            unobserved_kinds or []
+                        ),
+                        "missingAdministrativeObligationCount": 0,
+                        "unclassifiedStepCount": 0,
+                    },
+                },
+                "externals": {
+                    "static": {
+                        "observedNames": [],
+                        "requiredNames": [],
+                        "missingObligationCount": 0,
+                    },
+                    "executed": {
+                        "observedNames": [],
+                        "requiredNames": [],
+                        "missingObligationCount": 0,
+                        "counts": {
+                            "casesWithValidDiagnostics": case_count,
+                            "observed": [],
+                            "requiredMinimums": [],
+                            "unsatisfiedObligationCount": 0,
+                        },
+                        "trace": {
+                            "casesWithValidDiagnostics": case_count,
+                            "mismatchedObligationCount": 0,
+                        },
+                    },
+                },
+            },
+        }
+
+    def test_machine_coverage_requires_the_matrix_case_domain(self) -> None:
+        matrix = self.matrix(["a"], ["native", "lcnf"], [("native", "lcnf")])
+        report = self.machine_report("lcnf", ["b"])
+        with self.assertRaisesRegex(
+            core.ValidationError, "case domain disagrees"
+        ):
+            coverage_index.machine_coverage_summary(report, matrix, "fixture")
+
+    def test_machine_coverage_aggregate_closes_cross_tier_admin_gap(self) -> None:
+        source_matrix = self.matrix(
+            ["source"], ["native", "lcnf"], [("native", "lcnf")]
+        )
+        direct_matrix = self.matrix(
+            ["direct"],
+            ["direct-native", "direct-lcnf"],
+            [("direct-native", "direct-lcnf")],
+        )
+        source = coverage_index.machine_coverage_summary(
+            self.machine_report(
+                "lcnf",
+                ["source"],
+                administrative_kind="admin:yield-done",
+                unobserved_kinds=["admin:yield-apply"],
+            ),
+            source_matrix,
+            "source",
+        )
+        direct = coverage_index.machine_coverage_summary(
+            self.machine_report(
+                "direct-lcnf",
+                ["direct"],
+                administrative_kind="admin:yield-apply",
+            ),
+            direct_matrix,
+            "direct",
+        )
+        aggregate = coverage_index.aggregate_machine_coverage([source, direct])
+        self.assertEqual(aggregate["caseCount"], 2)
+        self.assertEqual(
+            aggregate["steps"]["observedAdministrativeKinds"],
+            [
+                {"kind": "admin:yield-apply", "count": 1},
+                {"kind": "admin:yield-done", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            aggregate["steps"]["unobservedAdministrativeKinds"], []
+        )
+        self.assertTrue(aggregate["complete"])
+
+    def test_index_is_deterministic_and_verifies_current_inputs(self) -> None:
+        matrix = self.matrix(["case"], ["native", "lcnf"], [("native", "lcnf")])
+        machine = self.machine_report("lcnf", ["case"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build" / "source"
+            plan_dir.mkdir()
+            build_dir.mkdir(parents=True)
+            matrix_path = build_dir / "matrix.json"
+            coverage_path = build_dir / "coverage.json"
+            matrix_path.write_bytes(json_bytes(matrix))
+            coverage_path.write_bytes(json_bytes(machine))
+            plan = {
+                "version": 2,
+                "tiers": [
+                    {
+                        "id": "source",
+                        "kind": "source-compiled",
+                        "matrix": "../_build/source/matrix.json",
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"}
+                        ],
+                        "machineCoverage": "../_build/source/coverage.json",
+                    }
+                ],
+            }
+            plan_path = plan_dir / "coverage-index.json"
+            plan_path.write_bytes(json_bytes(plan))
+            with mock.patch.object(
+                coverage_index,
+                "verify_matrix_artifact",
+                return_value=matrix,
+            ):
+                first = coverage_index.build_coverage_index(plan_path, root)
+                second = coverage_index.build_coverage_index(plan_path, root)
+                self.assertEqual(first, second)
+                index_path = root / "_build" / "index.json"
+                coverage_index.write_coverage_index(index_path, first)
+                self.assertEqual(
+                    coverage_index.verify_coverage_index(index_path, root),
+                    first,
+                )
+        self.assertEqual(first["summary"]["comparisonCount"], 1)
+        self.assertEqual(first["summary"]["machine"]["caseCount"], 1)
+        self.assertTrue(first["summary"]["complete"])
+
+    def test_index_rejects_a_pair_absent_from_the_matrix(self) -> None:
+        matrix = self.matrix(["case"], ["native", "lcnf"], [("native", "lcnf")])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build"
+            plan_dir.mkdir()
+            build_dir.mkdir()
+            matrix_path = build_dir / "matrix.json"
+            matrix_path.write_bytes(json_bytes(matrix))
+            plan = {
+                "version": 2,
+                "tiers": [
+                    {
+                        "id": "source",
+                        "kind": "source-compiled",
+                        "matrix": "../_build/matrix.json",
+                        "pairs": [
+                            {"reference": "lcnf", "candidate": "native"}
+                        ],
+                        "machineCoverage": None,
+                    }
+                ],
+            }
+            plan_path = plan_dir / "coverage-index.json"
+            plan_path.write_bytes(json_bytes(plan))
+            with mock.patch.object(
+                coverage_index,
+                "verify_matrix_artifact",
+                return_value=matrix,
+            ), self.assertRaisesRegex(
+                core.ValidationError, "selects pairs absent"
+            ):
+                coverage_index.build_coverage_index(plan_path, root)
+
+    def test_index_identity_detects_tampering(self) -> None:
+        report = {
+            "version": 2,
+            "identity": {"algorithm": "sha256", "index": "0" * 64},
+            "plan": {
+                "name": "validation-plans/coverage-index.json",
+                "sha256": "1" * 64,
+            },
+            "tiers": [],
+            "summary": {},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "index.json"
+            path.write_bytes(json_bytes(report))
+            with self.assertRaisesRegex(
+                core.ValidationError, "identity does not match"
+            ):
+                coverage_index.verify_coverage_index(path, Path(directory))
 
 
 if __name__ == "__main__":

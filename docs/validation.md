@@ -33,6 +33,12 @@ Run the machine-only direct-LCNF corpus with:
 make validate-direct-lcnf
 ```
 
+Compose and verify all three tiers in one coverage index with:
+
+```sh
+make validate-coverage-index
+```
+
 Individual cases and tagged groups can be selected directly:
 
 ```sh
@@ -214,7 +220,8 @@ failure means that one of the two evidence graphs was structurally invalid.
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run. `make validate-direct-lcnf` verifies its direct
 native/LCNF matrix, and `make validate-v8` does the same for the three-way
-native/LCNF/V8 matrix.
+native/LCNF/V8 matrix. `make validate-coverage-index` runs those producers,
+then writes and verifies `_build/validation-coverage/index.json`.
 
 The verifier strictly checks schema, names and paths, every retained byte,
 ordering and uniqueness, stdout/stderr pairing, summary counts, and both
@@ -273,6 +280,32 @@ self-comparisons, malformed backend names, and an empty graph are rejected.
 `--plan` is exclusive with the pair/adapter flags; `--case`, `--tag`,
 `--out-dir`, and `--no-build` remain valid runtime controls.
 
+`validation-plans/coverage-index.json` is a second, composition-only plan. Each
+tier names one already-produced matrix, selects the directed comparisons that
+belong to that tier, and optionally attaches one backend-specific machine
+coverage report. The current index keeps three claims separate:
+
+- `source-lcnf` validates compiler-produced final-impure LCNF against native;
+- `direct-lcnf-machine` covers explicit machine programs without claiming that
+  the source compiler emitted them;
+- `wasm-v8` validates the real V8 engine against both native and LCNF results.
+
+Only the first two tiers attach LCNF machine telemetry. The V8 matrix contains
+the source native–LCNF edge for triangular consistency, but the index selects
+only its two V8 edges, so neither semantic comparisons nor interpreter form
+counts are silently double-counted. A future compiler-produced Wasm plan can
+replace or extend the `wasm-engine` tier by configuration; the indexer does not
+compile Wasm or impose work on the compiler track.
+
+The indexer structurally verifies every source matrix, checks that selected
+pairs and optional coverage case domains agree, and content-addresses the plan,
+matrices, and machine reports. Its summary reports both per-tier and unique
+case counts, equal semantic comparisons, the union and summed counts of static
+and executed LCNF forms, all observed administrative transitions, external
+dispatches, interpreter steps, and any obligation or telemetry failures.
+`--verify-index` recomputes the identity and rebuilds the index from its current
+inputs.
+
 The driver discovers the corpus from the plan-selected manifest backend
 (`native` by default), then composes named backend adapters and optional
 build-only product providers. Each adapter owns
@@ -292,6 +325,8 @@ The implementation preserves that boundary at the module level:
   diagnostics, and form/external coverage policy;
 - `scripts/validation_direct_lcnf.py` registers the two direct-case protocol
   executables while reusing the same LCNF manifest and coverage policy;
+- `scripts/validation_coverage_index.py` verifies and composes completed
+  matrices and optional machine reports into distinct semantic tiers;
 - `scripts/validate_interpreters.py` is the thin FIR CLI, native corpus/execution
   adapter, and built-in adapter registry.
 

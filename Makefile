@@ -1,4 +1,4 @@
-.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
+.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-coverage-index bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -30,6 +30,13 @@ validate-v8:
 	python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json
 
+validate-coverage-index: validate validate-direct-lcnf validate-v8
+	python3 scripts/validation_coverage_index.py \
+		--plan validation-plans/coverage-index.json \
+		--out _build/validation-coverage/index.json
+	python3 scripts/validation_coverage_index.py \
+		--verify-index _build/validation-coverage/index.json
+
 no-placeholders:
 	@if rg -n "sorry|admit" Fir docs Inspect FirValidation*.lean; then \
 		echo "Found proof placeholders"; \
@@ -42,7 +49,7 @@ bug-cards:
 trusted-assumptions:
 	python3 scripts/validate_trusted_assumptions.py
 
-check: build examples validate validate-direct-lcnf validate-v8 bug-cards trusted-assumptions no-placeholders
+check: build examples validate-coverage-index bug-cards trusted-assumptions no-placeholders
 
 beam:
 	lean-beam sync Fir/LeanIR.lean

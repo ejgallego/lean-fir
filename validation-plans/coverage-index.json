@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "tiers": [
+    {
+      "id": "source-lcnf",
+      "kind": "source-compiled",
+      "matrix": "../_build/validation/matrix.json",
+      "pairs": [
+        {
+          "reference": "native",
+          "candidate": "lcnf"
+        }
+      ],
+      "machineCoverage": "../_build/validation/lcnf/coverage.json"
+    },
+    {
+      "id": "direct-lcnf-machine",
+      "kind": "direct-machine",
+      "matrix": "../_build/validation-direct-lcnf/matrix.json",
+      "pairs": [
+        {
+          "reference": "direct-native",
+          "candidate": "direct-lcnf"
+        }
+      ],
+      "machineCoverage": "../_build/validation-direct-lcnf/direct-lcnf/coverage.json"
+    },
+    {
+      "id": "wasm-v8",
+      "kind": "wasm-engine",
+      "matrix": "../_build/validation-v8/matrix.json",
+      "pairs": [
+        {
+          "reference": "native",
+          "candidate": "v8"
+        },
+        {
+          "reference": "lcnf",
+          "candidate": "v8"
+        }
+      ],
+      "machineCoverage": null
+    }
+  ]
+}
