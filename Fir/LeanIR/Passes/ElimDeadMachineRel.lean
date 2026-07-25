@@ -4668,6 +4668,22 @@ inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
       ReachableLetReadyAt fuel used declaration sourceContinuation state roots
         (.deleted targetContinuation continuation (safe := safe))
 
+/-- Generic bridge from the graph's source-only branch to operational
+readiness.  All operation-specific reasoning is concentrated in
+`DeletedLetReadyAt`; graph inversion and binder absence are handled once. -/
+theorem ReachableLetReadyAt.of_wasDeleted
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted)
+    (absent : used.contains declaration.fvarId = false)
+    (ready : DeletedLetReadyAt state roots declaration) :
+    ReachableLetReadyAt fuel used declaration sourceContinuation state roots
+      residual := by
+  have safe := residual.safeToElim_of_wasDeleted deleted
+  cases deleted with
+  | intro continuation =>
+      exact .deleted target continuation (safe := safe) absent ready
+
 /-- First static-analysis-to-operation bridge.  Once the transparent graph
 identifies the source-only residual, binder absence and runtime neutrality
 construct its complete reachable readiness certificate.  Allocation and
@@ -4681,11 +4697,7 @@ theorem ReachableLetReadyAt.of_wasDeleted_runtimeNeutral
     (neutral : RuntimeNeutralAt state declaration) :
     ReachableLetReadyAt fuel used declaration sourceContinuation state roots
       residual := by
-  have safe := residual.safeToElim_of_wasDeleted deleted
-  cases deleted with
-  | intro continuation =>
-      exact .deleted target continuation (safe := safe) absent
-        neutral.deletedLetReadyAt
+  exact .of_wasDeleted residual deleted absent neutral.deletedLetReadyAt
 
 /-- Reachable-runtime readiness for a conditionally deleted object write. -/
 inductive ReachableObjectSetReadyAt (fuel : Nat) (used : UsedLocals)
@@ -4824,6 +4836,19 @@ inductive ReachableCodeReadyAt (fuel : Nat) (used : UsedLocals)
         type continuation state roots graph.scalarSetResidual) :
       ReachableCodeReadyAt fuel used state roots graph
 
+/-- Generic code-level constructor for every deleted let whose
+operation-specific readiness certificate is available. -/
+theorem ReachableCodeReadyAt.deletedLet_of_ready
+    (graph : ShadowCodeGraph fuel used
+      (.let declaration sourceContinuation) target)
+    (deleted : graph.letResidual.WasDeleted)
+    (absent : used.contains declaration.fvarId = false)
+    (ready : DeletedLetReadyAt state roots declaration) :
+    ReachableCodeReadyAt fuel used state roots graph :=
+  .letE graph
+    (ReachableLetReadyAt.of_wasDeleted graph.letResidual
+      deleted absent ready)
+
 /-- Code-level form of the runtime-neutral bridge.  This is the constructor
 needed by an entry invariant when the active transparent edge deletes a
 runtime-neutral let. -/
@@ -4834,9 +4859,7 @@ theorem ReachableCodeReadyAt.deletedLet_of_runtimeNeutral
     (absent : used.contains declaration.fvarId = false)
     (neutral : RuntimeNeutralAt state declaration) :
     ReachableCodeReadyAt fuel used state roots graph :=
-  .letE graph
-    (ReachableLetReadyAt.of_wasDeleted_runtimeNeutral graph.letResidual
-      deleted absent neutral)
+  .deletedLet_of_ready graph deleted absent neutral.deletedLetReadyAt
 
 /-- Readiness for an arbitrary related control.  Invocation and yielded
 controls impose no local operation premise; code controls expose the exact
