@@ -342,6 +342,12 @@ inductive ShadowLetResidual (fuel : Nat) (used : UsedLocals)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {localUsed : UsedLocals}
+      {localContinuation : ShadowCodeGraph fuel localUsed
+        sourceContinuation targetContinuation}
+      {localSubset : UsedSubset localUsed used}
+      {localAbsent :
+        localUsed.contains declaration.fvarId = false}
       {safe : safeToElim declaration.value = true} :
       ShadowLetResidual fuel used declaration sourceContinuation
         targetContinuation
@@ -360,9 +366,18 @@ inductive ShadowLetResidual.WasDeleted
   | intro (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {localUsed : UsedLocals}
+      {localContinuation : ShadowCodeGraph fuel localUsed
+        sourceContinuation targetContinuation}
+      {localSubset : UsedSubset localUsed used}
+      {localAbsent :
+        localUsed.contains declaration.fvarId = false}
       {safe : safeToElim declaration.value = true} :
       ShadowLetResidual.WasDeleted fuel used declaration sourceContinuation
-        (.deleted targetContinuation continuation (safe := safe))
+        (.deleted targetContinuation continuation
+          (localContinuation := localContinuation)
+          (localSubset := localSubset) (localAbsent := localAbsent)
+          (safe := safe))
 
 theorem ShadowLetResidual.safeToElim_of_wasDeleted
     (residual :
@@ -371,6 +386,21 @@ theorem ShadowLetResidual.safeToElim_of_wasDeleted
     safeToElim declaration.value = true := by
   cases deleted
   assumption
+
+/-- Recover the deletion-local continuation graph retained by the audited
+traversal.  Unlike the exposed graph index, `localUsed` has not been enlarged
+for an enclosing join or alternative and therefore still records the
+decision-time binder absence. -/
+theorem ShadowLetResidual.localGraph_of_wasDeleted
+    (residual :
+      ShadowLetResidual fuel used declaration sourceContinuation target)
+    (deleted : residual.WasDeleted) :
+    ∃ localUsed,
+      ShadowCodeGraph fuel localUsed sourceContinuation target ∧
+      UsedSubset localUsed used ∧
+      localUsed.contains declaration.fvarId = false := by
+  cases deleted
+  exact ⟨_, by assumption, by assumption, by assumption⟩
 
 /-- Static boundary exposed by the actual Lean 4.32 deletion decision: every
 deleted let is locally value-producing, except possibly the known nullary
@@ -434,11 +464,23 @@ theorem ShadowCodeGraph.letResidual
                 declaration.value).mono subset
           · simp [shadowCode?, continuationResult, keep] at result
             rcases result with ⟨rfl, rfl⟩
+            have localAbsent :
+                continuationUsed.contains declaration.fvarId = false := by
+              cases memberEq :
+                  continuationUsed.contains declaration.fvarId <;>
+                simp_all
+            have localContinuation :
+                ShadowCodeGraph fuel continuationUsed sourceContinuation
+                  targetContinuation :=
+              ⟨nextFuel, initial, continuationUsed, continuationBound,
+                continuationResult, .refl continuationUsed⟩
             have safe : safeToElim declaration.value = true := by
               cases safeResult : safeToElim declaration.value <;>
                 simp_all
             exact .deleted targetContinuation ⟨nextFuel, initial,
               continuationUsed, continuationBound, continuationResult, subset⟩
+              (localContinuation := localContinuation)
+              (localSubset := subset) (localAbsent := localAbsent)
               (safe := safe)
 
 /-- Semantic readiness is indexed by the actual residual edge.  Retained lets
@@ -461,11 +503,20 @@ inductive ShadowLetReadyAt (fuel : Nat) (used : UsedLocals)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {localUsed : UsedLocals}
+      {localContinuation : ShadowCodeGraph fuel localUsed
+        sourceContinuation targetContinuation}
+      {localSubset : UsedSubset localUsed used}
+      {localAbsent :
+        localUsed.contains declaration.fvarId = false}
       {safe : safeToElim declaration.value = true}
       (absent : used.contains declaration.fvarId = false)
       (neutral : RuntimeNeutralAt state declaration) :
       ShadowLetReadyAt fuel used declaration sourceContinuation state
-        (.deleted targetContinuation continuation (safe := safe))
+        (.deleted targetContinuation continuation
+          (localContinuation := localContinuation)
+          (localSubset := localSubset) (localAbsent := localAbsent)
+          (safe := safe))
 
 /-- Case alternatives keep their tag/default metadata and relate only their
 recursively transformed code bodies. -/

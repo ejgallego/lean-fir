@@ -4662,11 +4662,20 @@ inductive ReachableLetReadyAt (fuel : Nat) (used : UsedLocals)
   | deleted (targetContinuation : LCNF.Code .impure)
       (continuation : ShadowCodeGraph fuel used
         sourceContinuation targetContinuation)
+      {localUsed : UsedLocals}
+      {localContinuation : ShadowCodeGraph fuel localUsed
+        sourceContinuation targetContinuation}
+      {localSubset : UsedSubset localUsed used}
+      {localAbsent :
+        localUsed.contains declaration.fvarId = false}
       {safe : safeToElim declaration.value = true}
       (absent : used.contains declaration.fvarId = false)
       (ready : DeletedLetReadyAt state roots declaration) :
       ReachableLetReadyAt fuel used declaration sourceContinuation state roots
-        (.deleted targetContinuation continuation (safe := safe))
+        (.deleted targetContinuation continuation
+          (localContinuation := localContinuation)
+          (localSubset := localSubset) (localAbsent := localAbsent)
+          (safe := safe))
 
 /-- Generic bridge from the graph's source-only branch to operational
 readiness.  All operation-specific reasoning is concentrated in
@@ -4680,9 +4689,15 @@ theorem ReachableLetReadyAt.of_wasDeleted
     ReachableLetReadyAt fuel used declaration sourceContinuation state roots
       residual := by
   have safe := residual.safeToElim_of_wasDeleted deleted
+  obtain ⟨localUsed, localContinuation, localSubset, localAbsent⟩ :=
+    residual.localGraph_of_wasDeleted deleted
   cases deleted with
   | intro continuation =>
-      exact .deleted target continuation (safe := safe) absent ready
+      exact .deleted target continuation
+        (localUsed := localUsed)
+        (localContinuation := localContinuation)
+        (localSubset := localSubset) (localAbsent := localAbsent)
+        (safe := safe) absent ready
 
 /-- First static-analysis-to-operation bridge.  Once the transparent graph
 identifies the source-only residual, binder absence and runtime neutrality
