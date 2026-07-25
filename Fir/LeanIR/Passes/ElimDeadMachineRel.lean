@@ -4872,6 +4872,34 @@ structure ReachableCompilerInvariantLaws (externals : ExternalSpec)
     SomeReachableMachineRelated fuel sourceAfter targetAfter →
       invariant sourceAfter targetAfter
 
+/-- Canonical hereditary compiler invariant: every structurally related pair
+of future states reachable from the current pair has an operationally ready
+active control.  This turns preservation into path composition and leaves
+entry admissibility as the sole compiler-specific proof obligation. -/
+def ReachablyReady (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeReachableMachineRelated fuel sourceAfter targetAfter →
+      ReachableMachineReadyAt fuel sourceAfter targetAfter
+
+theorem reachablyReadyCompilerLaws :
+    ReachableCompilerInvariantLaws externals fuel
+      (ReachablyReady externals fuel) where
+  ready := by
+    intro source target structural hereditary
+    exact hereditary source target
+      (NonLockstep.reaches_refl source)
+      (NonLockstep.reaches_refl target) structural
+  stable := by
+    intro sourceBefore targetBefore sourceAfter targetAfter hereditary
+      beforeStructural sourcePath targetPath afterStructural
+    intro sourceFuture targetFuture sourceTail targetTail futureStructural
+    exact hereditary sourceFuture targetFuture
+      (sourcePath.trans sourceTail) (targetPath.trans targetTail)
+      futureStructural
+
 /-- Laws expected from compiler well-formedness and ownership analysis.  In
 particular, `ready` makes the nullary-FAP discrepancy an explicit unprovable
 obligation rather than an assumption inside the operational proof. -/
@@ -13345,5 +13373,19 @@ theorem reachableProgram_loweringCorrect_of_compiler
       (reachablePhaseSimulation externals) source target entries :=
   reachableProgram_loweringCorrect programs
     (compiler.withExternalCompatibility compatible) initialInvariant
+
+/-- Final reduction to entry admissibility: once foreign responses satisfy
+the relational contract, whole-program correctness follows from hereditary
+readiness of the transformed entry states. -/
+theorem reachableProgram_loweringCorrect_reachablyReady
+    (programs : ProgramRelated (ShadowCodeRelated fuel) source target)
+    (compatible : ReachableExternalSpecCompatible externals fuel)
+    (initialReady : ReachableInitialInvariantOn
+      (ReachablyReady externals fuel) source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  reachableProgram_loweringCorrect_of_compiler programs
+    reachablyReadyCompilerLaws compatible initialReady
 
 end Fir.LeanIR.Passes.ElimDead
