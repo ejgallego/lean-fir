@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-elimDead-prop-residual-branch-ambiguity
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: e64abaf
@@ -9,7 +9,7 @@ pass: elimDeadVars
 discovered-by: proof
 first-seen: 2026-07-25
 reproduction: Fir/LeanIR/Passes/ElimDeadHygieneGraph.lean#exactShadowCodeGraph_deletedLet_absent
-regression: none
+regression: Fir/LeanIR/Passes/ElimDeadHygieneGraph.lean#ExactShadowCodeGraph.headBinderReady
 ---
 
 # Summary
@@ -100,7 +100,9 @@ branch selection proof-relevant.
 
 ## Workaround
 
-none
+No workaround remains. Correctness code now consumes a proof-relevant exact
+run and transparent Boolean branch replay instead of trying to recover branch
+provenance from the older `Prop`-valued residual classifier.
 
 ## Upstream tracking
 
@@ -108,6 +110,11 @@ none
 
 ## Resolution and regression
 
-Unresolved. Replace or supplement the proof-valued residual classifier with
-a proof-relevant exact-run branch view, then prove that forgetting it yields
-the existing monotone graph relation.
+Fixed in `e95b58a`. `ExactShadowCodeGraph` retains the exact traversal seed and
+successful `shadowCode?` result in `Type`; `shadowLetWasDeleted` and
+`shadowJoinWasDeleted` transparently replay the branch decisions. The
+`deletedLet_absent`, `deletedJoin_absent`, and `headBinderReady` theorems now
+recover exact decision-time absence before `toShadowCodeGraph` forgets the
+witness into the existing monotone relation. The older `Prop` classifier
+remains available for operational compatibility, but correctness no longer
+uses it to identify a computational branch.
