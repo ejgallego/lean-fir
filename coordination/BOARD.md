@@ -15,31 +15,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Lane snapshot
 
-Snapshot base: validation release candidate `bc688b6`, based on `main` at
-`9cb483f`.
+Snapshot base: `main` at `3b82b0b`.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/wasm-lanes` | active | Coordinate erased-reset consumers and independent W6/W7 handoffs | `RESET-ERASED-RELEASE` remains a consumer barrier |
-| Lean pass proof | pass-proof owner | `proof/simpcase` | active | `elimDead` provenance checkpoint `9f24a07`; adapt reset simulation to `releaseResetField` | Consumes `RESET-ERASED-RELEASE` |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | blocked | Concrete reuse-capacity and erased-reset refinements through `e12e55e` | `make talos-check` waits for the proof-owned reset simulation repair |
-| W7 generation | generation owner | `wasm/generation` | active | Resident allocator and styled `prettyM` artifact committed at `cdfad5c`; acceptance handoff under review | New resident helper signatures queue a later W6 proof handoff |
-| Validation | validation owner | `validation/interpreter-corpus` | released | Native-oracle erased reset/reuse fixture and coverage floor at `bc688b6` | Consumes and differentially checks `RESET-ERASED-RELEASE` |
+| Integration | integration owner | `integration/wasm-lanes` | active | Close the W7 generation handoff, keep W6 independent, and reconcile proof-worktree ownership | No shared contract is blocking a lane |
+| Lean pass proof | pass-proof owner | `proof/simpcase` | blocked | Compiler-derived binder-readiness endpoint is drafted in `ElimDeadMachineRel.lean`, but the uncommitted draft appeared alongside another owner's checkpoint | Ownership must be reconciled before proof edits, checks, or handoff continue |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Preserve mapped header capacity through leaf, fuel-indexed, recursive, and public ownership release | Consumes the released erased-reset contract; independent of W7 allocator and validation schemas |
+| W7 generation | generation owner | `wasm/generation` | active | Resident allocator and styled `prettyM` artifact rebased as `b93bf4d`; artifact gate and post-`3b82b0b` checks are in progress | New resident helper signatures queue a later W6 T5 bridge |
+| Validation | validation owner | `validation/interpreter-corpus` | released | Mixed erased/owned reset release is observable through native and interpreter sharing state at `3b82b0b` | Differentially checks the released reset contract; no new shared contract |
 
 ## Resident-helper bridge
 
 | Helper or artifact | Generation commit | Contract base | State | Proof owner | Artifact digest |
 |---|---|---|---|---|---|
 | Existing resident helper set through closure matching | landed on `main` | recorded in Talos plan | generation-ready | W6 owner | recorded by individual manifests |
-| Resident allocator and styled `prettyM` package | `cdfad5c` | `9cb483f` | staged | W6 owner after generation handoff | pending checked handoff |
+| Resident allocator and styled `prettyM` package | `b93bf4d` | `d2df075` | staged | W6 owner at the later T5 bridge | pending checked handoff |
 
 ## Contract queue
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
-| `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | active | `373b0a9` | Reset treats erased ownership slots as no-ops; validation is released, W6 is adapted, and the pass-proof reset simulation remains |
-| `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | active | `cdfad5c` | Generation checkpoint exists; exact artifact checks, digest, and concrete-host proof handoff remain |
+| `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
+| `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | active | `b93bf4d` | Generation checkpoint is rebased through W6; exact artifact checks, digest, and post-validation-base handoff remain |
 
 ## Update format
 
