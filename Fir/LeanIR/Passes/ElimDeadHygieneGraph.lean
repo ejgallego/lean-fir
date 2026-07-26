@@ -61,6 +61,15 @@ def ExactShadowCodeRun.toGraph
     ExactShadowCodeGraph fuel final source target :=
   ⟨initial, run.result⟩
 
+/-- Forget a child exact run into any enclosing operational fuel/liveness
+index justified by the two monotonicity bounds. -/
+theorem ExactShadowCodeRun.toShadowCodeGraphAt
+    (run : ExactShadowCodeRun fuel initial final source target)
+    (fuelBound : fuel ≤ outerFuel)
+    (usedBound : UsedSubset final ambient) :
+    ShadowCodeGraph outerFuel ambient source target :=
+  ⟨fuel, initial, final, fuelBound, run.result, usedBound⟩
+
 /-- One transparent alternative-list layer.  The head body starts at the
 list's seed, and the exact tail starts at the head body's final liveness set,
 matching the compiler's left-to-right threading order. -/
@@ -266,6 +275,96 @@ inductive ExactShadowCodeView (initial : UsedLocals) :
         (continuationUsed.insert object)
         (.del object sourceContinuation)
         (.del object targetContinuation)
+
+/-- Reconstruct the canonical exact graph from a proof-relevant branch view.
+This is the inverse direction needed by semantic consumers: after inspecting
+the branch in `Type`, they can forget it to the operational graph without
+asking a proof-irrelevant residual which branch occurred. -/
+def ExactShadowCodeView.toGraph
+    (view : ExactShadowCodeView initial fuel final source target) :
+    ExactShadowCodeGraph fuel final source target := by
+  cases view with
+  | letRetained continuation keep =>
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, keep]⟩
+  | @letDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation declaration continuation absent safe =>
+      have notMember :
+          ¬declaration.fvarId ∈ final := by
+        simpa using absent
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, notMember, safe]⟩
+  | @joinRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId bodyUsed sourceBody targetBody binderName
+      params type continuation live body =>
+      have member : fvarId ∈ continuationUsed := by
+        simpa using live
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, member, body.result]⟩
+  | @joinDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId binderName params type sourceBody
+      continuation absent =>
+      have notMember : ¬fvarId ∈ final := by
+        simpa using absent
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, notMember]⟩
+  | cases alternatives =>
+      exact ⟨initial, by
+        simp [shadowCode?, alternatives.result]⟩
+  | jump =>
+      exact ⟨initial, by cases fuel <;> simp [shadowCode?]⟩
+  | «return» =>
+      exact ⟨initial, by cases fuel <;> simp [shadowCode?]⟩
+  | unreachable =>
+      exact ⟨initial, by cases fuel <;> simp [shadowCode?]⟩
+  | @objectSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object field fieldIndex continuation live =>
+      have member : object ∈ continuationUsed := by
+        simpa using live
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, member]⟩
+  | @objectSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object field fieldIndex continuation absent =>
+      have notMember : ¬object ∈ final := by
+        simpa using absent
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, notMember]⟩
+  | @usizeSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object field fieldIndex continuation live =>
+      have member : object ∈ continuationUsed := by
+        simpa using live
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, member]⟩
+  | @usizeSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object field fieldIndex continuation absent =>
+      have notMember : ¬object ∈ final := by
+        simpa using absent
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, notMember]⟩
+  | @scalarSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object field width offset type continuation live =>
+      have member : object ∈ continuationUsed := by
+        simpa using live
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, member]⟩
+  | @scalarSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object field width offset type continuation absent =>
+      have notMember : ¬object ∈ final := by
+        simpa using absent
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result, notMember]⟩
+  | tagSet continuation =>
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result]⟩
+  | increment continuation =>
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result]⟩
+  | decrement continuation =>
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result]⟩
+  | delete continuation =>
+      exact ⟨initial, by
+        simp [shadowCode?, continuation.result]⟩
 
 /-- Compute the unique one-layer proof-relevant view of an exact successful
 run.  This definition is intentionally a transparent replay of
@@ -544,6 +643,7 @@ theorem BinderAbsenceTransfers.mono
     BinderAbsenceTransfers smaller sourceUsed targetUsed :=
   fun forbidden member => transfer forbidden (subset forbidden member)
 
+set_option autoImplicit false in
 mutual
 
   /-- Hereditary static readiness for a proof-relevant exact traversal.
@@ -555,122 +655,297 @@ mutual
         {source target : LCNF.Code .impure} →
           ExactShadowCodeView initial fuel final source target → Prop where
     | letRetained
+        {initial continuationUsed : UsedLocals}
+        {nextFuel : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {declaration : LCNF.LetDecl .impure}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {keep :
+          declaration.fvarId ∈ continuationUsed ∨
+            safeToElim declaration.value = false}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
           (ExactShadowCodeView.letRetained continuation keep)
     | letDeleted
-        (declaration : LCNF.LetDecl .impure)
+        {initial continuationUsed : UsedLocals}
+        {nextFuel : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {declaration : LCNF.LetDecl .impure}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {absent :
+          continuationUsed.contains declaration.fvarId = false}
+        {safe : safeToElim declaration.value = true}
         (ambientAbsent :
           ambient.contains declaration.fvarId = false)
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.letDeleted continuation absent safe)
+          (ExactShadowCodeView.letDeleted
+            (declaration := declaration) continuation absent safe)
     | joinRetained
+        {initial continuationUsed bodyUsed : UsedLocals}
+        {nextFuel : Nat}
+        {sourceContinuation targetContinuation sourceBody targetBody :
+          LCNF.Code .impure}
+        {fvarId : FVarId} {binderName : Name}
+        {params : Array (LCNF.Param .impure)} {type : Expr}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {live : continuationUsed.contains fvarId = true}
+        {body :
+          ExactShadowCodeRun nextFuel continuationUsed bodyUsed
+            sourceBody targetBody}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view)
         (bodyReady :
           ExactShadowCodeBinderReady ambient body.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.joinRetained continuation live body)
+          (ExactShadowCodeView.joinRetained
+            (binderName := binderName) (params := params) (type := type)
+            continuation live body)
     | joinDeleted
+        {initial continuationUsed : UsedLocals}
+        {nextFuel : Nat}
+        {sourceContinuation targetContinuation sourceBody :
+          LCNF.Code .impure}
+        {fvarId : FVarId} {binderName : Name}
+        {params : Array (LCNF.Param .impure)} {type : Expr}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {absent : continuationUsed.contains fvarId = false}
         (ambientAbsent : ambient.contains fvarId = false)
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.joinDeleted continuation absent)
+          (ExactShadowCodeView.joinDeleted
+            (binderName := binderName) (params := params) (type := type)
+            (sourceBody := sourceBody) continuation absent)
     | cases
+        {initial beforeDiscr : UsedLocals}
+        {nextFuel : Nat}
+        {sourceAlternatives : Array (LCNF.Alt .impure)}
+        {targetAlternatives : List (LCNF.Alt .impure)}
+        {discr : FVarId} {typeName : Name} {resultType : Expr}
+        {alternatives :
+          ExactShadowAltListRun nextFuel initial beforeDiscr
+            sourceAlternatives.toList targetAlternatives}
         (alternativesReady :
           ExactShadowAltListBinderReady ambient alternatives.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.cases alternatives)
-    | jump :
-        ExactShadowCodeBinderReady ambient ExactShadowCodeView.jump
-    | return :
-        ExactShadowCodeBinderReady ambient ExactShadowCodeView.return
-    | unreachable :
-        ExactShadowCodeBinderReady ambient ExactShadowCodeView.unreachable
+          (ExactShadowCodeView.cases
+            (discr := discr) (typeName := typeName)
+            (resultType := resultType) alternatives)
+    | jump
+        {initial : UsedLocals} {fuel : Nat}
+        {join : FVarId} {arguments : Array (LCNF.Arg .impure)} :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.jump
+            (initial := initial) (fuel := fuel)
+            (join := join) (arguments := arguments))
+    | return
+        {initial : UsedLocals} {fuel : Nat} {result : FVarId} :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.return
+            (initial := initial) (fuel := fuel) (result := result))
+    | unreachable
+        {initial : UsedLocals} {fuel : Nat} {type : Expr} :
+        ExactShadowCodeBinderReady ambient
+          (ExactShadowCodeView.unreachable
+            (initial := initial) (fuel := fuel) (type := type))
     | objectSetRetained
+        {initial continuationUsed : UsedLocals}
+        {nextFuel index : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId} {field : LCNF.Arg .impure}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {live : continuationUsed.contains object = true}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.objectSetRetained continuation live)
+          (ExactShadowCodeView.objectSetRetained
+            (index := index) (field := field) continuation live)
     | objectSetDeleted
+        {initial continuationUsed : UsedLocals}
+        {nextFuel index : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId} {field : LCNF.Arg .impure}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {absent : continuationUsed.contains object = false}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.objectSetDeleted continuation absent)
+          (ExactShadowCodeView.objectSetDeleted
+            (index := index) (field := field) continuation absent)
     | usizeSetRetained
+        {initial continuationUsed : UsedLocals}
+        {nextFuel index : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object field : FVarId}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {live : continuationUsed.contains object = true}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.usizeSetRetained continuation live)
+          (ExactShadowCodeView.usizeSetRetained
+            (index := index) (field := field) continuation live)
     | usizeSetDeleted
+        {initial continuationUsed : UsedLocals}
+        {nextFuel index : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object field : FVarId}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {absent : continuationUsed.contains object = false}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.usizeSetDeleted continuation absent)
+          (ExactShadowCodeView.usizeSetDeleted
+            (index := index) (field := field) continuation absent)
     | scalarSetRetained
+        {initial continuationUsed : UsedLocals}
+        {nextFuel width offset : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object field : FVarId} {type : Expr}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {live : continuationUsed.contains object = true}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.scalarSetRetained continuation live)
+          (ExactShadowCodeView.scalarSetRetained
+            (field := field) (width := width) (offset := offset)
+            (type := type) continuation live)
     | scalarSetDeleted
+        {initial continuationUsed : UsedLocals}
+        {nextFuel width offset : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object field : FVarId} {type : Expr}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
+        {absent : continuationUsed.contains object = false}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.scalarSetDeleted continuation absent)
+          (ExactShadowCodeView.scalarSetDeleted
+            (field := field) (width := width) (offset := offset)
+            (type := type) continuation absent)
     | tagSet
+        {initial continuationUsed : UsedLocals}
+        {nextFuel tag : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.tagSet continuation)
+          (ExactShadowCodeView.tagSet
+            (object := object) (tag := tag) continuation)
     | increment
+        {initial continuationUsed : UsedLocals}
+        {nextFuel amount : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId} {check persistent : Bool}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.increment continuation)
+          (ExactShadowCodeView.increment
+            (object := object) (amount := amount)
+            (check := check) (persistent := persistent) continuation)
     | decrement
+        {initial continuationUsed : UsedLocals}
+        {nextFuel amount : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId} {check persistent : Bool}
+        {objects : Option Nat}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.decrement continuation)
+          (ExactShadowCodeView.decrement
+            (object := object) (amount := amount)
+            (check := check) (persistent := persistent)
+            (objects := objects) continuation)
     | delete
+        {initial continuationUsed : UsedLocals}
+        {nextFuel : Nat}
+        {sourceContinuation targetContinuation : LCNF.Code .impure}
+        {object : FVarId}
+        {continuation :
+          ExactShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation}
         (continuationReady :
           ExactShadowCodeBinderReady ambient
             continuation.toGraph.view) :
         ExactShadowCodeBinderReady ambient
-          (ExactShadowCodeView.delete continuation)
+          (ExactShadowCodeView.delete (object := object) continuation)
 
   /-- Alternative-list counterpart of `ExactShadowCodeBinderReady`. -/
   inductive ExactShadowAltListBinderReady (ambient : UsedLocals) :
       {fuel : Nat} → {initial final : UsedLocals} →
         {source target : List (LCNF.Alt .impure)} →
           ExactShadowAltListView fuel initial final source target → Prop where
-    | nil :
+    | nil
+        {fuel : Nat} {initial : UsedLocals} :
         ExactShadowAltListBinderReady ambient ExactShadowAltListView.nil
     | ctor
+        {fuel : Nat} {initial middle final : UsedLocals}
+        {sourceBody targetBody : LCNF.Code .impure}
+        {sourceRest targetRest : List (LCNF.Alt .impure)}
+        {info : LCNF.CtorInfo}
+        {body :
+          ExactShadowCodeRun fuel initial middle sourceBody targetBody}
+        {rest :
+          ExactShadowAltListRun fuel middle final sourceRest targetRest}
         (bodyReady :
           ExactShadowCodeBinderReady ambient body.toGraph.view)
         (restReady :
           ExactShadowAltListBinderReady ambient rest.view) :
         ExactShadowAltListBinderReady ambient
-          (ExactShadowAltListView.ctor body rest)
+          (ExactShadowAltListView.ctor (info := info) body rest)
     | default
+        {fuel : Nat} {initial middle final : UsedLocals}
+        {sourceBody targetBody : LCNF.Code .impure}
+        {sourceRest targetRest : List (LCNF.Alt .impure)}
+        {body :
+          ExactShadowCodeRun fuel initial middle sourceBody targetBody}
+        {rest :
+          ExactShadowAltListRun fuel middle final sourceRest targetRest}
         (bodyReady :
           ExactShadowCodeBinderReady ambient body.toGraph.view)
         (restReady :
@@ -679,6 +954,47 @@ mutual
           (ExactShadowAltListView.default body rest)
 
 end
+
+/-- A deleted-let readiness certificate records absence for the binder in the
+exact view itself.  This projection is also a kernel regression guard against
+accidentally indexing the certificate by an unrelated declaration. -/
+theorem ExactShadowCodeBinderReady.letDeleted_ambientAbsent
+    {ambient initial continuationUsed : UsedLocals}
+    {nextFuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {declaration : LCNF.LetDecl .impure}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains declaration.fvarId = false}
+    {safe : safeToElim declaration.value = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted continuation absent safe)) :
+    ambient.contains declaration.fvarId = false := by
+  cases ready with
+  | letDeleted ambientAbsent _ => exact ambientAbsent
+
+/-- Join-point counterpart of `letDeleted_ambientAbsent`: the projected
+absence is tied to the join binder named by the exact deleted branch. -/
+theorem ExactShadowCodeBinderReady.joinDeleted_ambientAbsent
+    {ambient initial continuationUsed : UsedLocals}
+    {nextFuel : Nat}
+    {sourceContinuation targetContinuation sourceBody : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinDeleted
+          (binderName := binderName) (params := params) (type := type)
+          (sourceBody := sourceBody) continuation absent)) :
+    ambient.contains fvarId = false := by
+  cases ready with
+  | joinDeleted ambientAbsent _ => exact ambientAbsent
 
 private theorem paramBindersAvoid_of_binderNamesAvoid
     {params : Array (LCNF.Param .impure)}
@@ -773,7 +1089,7 @@ mutual
                   intro forbidden member absent
                   exact transfer forbidden
                     (List.mem_cons_of_mem _ member) absent
-                exact .letDeleted _
+                exact .letDeleted (absent := absent) (safe := safe)
                   (transfer _ (by simp) absent)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
@@ -830,6 +1146,7 @@ mutual
                       bodyTree variablesFresh joinsFresh bodyListing
                       bodyContinuationUnique member absent body.result
                 exact .joinRetained
+                  (binderName := binderName) (params := params) (type := type)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing
@@ -854,7 +1171,7 @@ mutual
                     BinderAbsenceTransfers restBinders final ambient := by
                   intro forbidden member absent
                   exact transfer forbidden (by simp [member]) absent
-                exact .joinDeleted
+                exact .joinDeleted (absent := absent)
                   (transfer _
                     (by
                       exact
@@ -878,19 +1195,23 @@ mutual
                     (alternativesListing.memberFreshForRoot
                       alternativesTree member).1
                     discrScoped absent
-                exact .cases
+                exact .cases (discr := discr) (typeName := typeName)
+                  (resultType := resultType)
                   (ExactShadowAltListView.binderReady alternatives.view
                     alternativesTree alternativesListing unique
                     alternativesTransfer)
-    | jump =>
+    | @jump terminalFuel join arguments =>
         cases listing
-        exact .jump
-    | «return» =>
+        exact .jump (initial := initial) (fuel := fuel)
+          (join := join) (arguments := arguments)
+    | @«return» terminalFuel result =>
         cases listing
-        exact .return
-    | unreachable =>
+        exact .return (initial := initial) (fuel := fuel)
+          (result := result)
+    | @unreachable terminalFuel type =>
         cases listing
-        exact .unreachable
+        exact .unreachable (initial := initial) (fuel := fuel)
+          (type := type)
     | @objectSetRetained nextFuel continuationUsed sourceContinuation
         targetContinuation object field fieldIndex continuation live =>
         cases listing with
@@ -908,15 +1229,18 @@ mutual
                         continuationTree member).1
                       fieldScoped)
                 exact .objectSetRetained
+                  (index := fieldIndex) (field := field)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
-    | objectSetDeleted continuation absent =>
+    | @objectSetDeleted nextFuel continuationUsed sourceContinuation
+        targetContinuation object objectIndex field continuation absent =>
         cases listing with
         | objectSet continuationListing =>
             cases wellFormed with
             | oset objectScoped fieldScoped continuationTree =>
                 exact .objectSetDeleted
+                  (index := objectIndex) (field := field)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique transfer)
@@ -936,15 +1260,18 @@ mutual
                       continuationTree member).1
                     fieldScoped absent
                 exact .usizeSetRetained
+                  (index := fieldIndex) (field := field)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
-    | usizeSetDeleted continuation absent =>
+    | @usizeSetDeleted nextFuel continuationUsed sourceContinuation
+        targetContinuation object objectIndex field continuation absent =>
         cases listing with
         | usizeSet continuationListing =>
             cases wellFormed with
             | uset objectScoped fieldScoped continuationTree =>
                 exact .usizeSetDeleted
+                  (index := objectIndex) (field := field)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique transfer)
@@ -964,15 +1291,21 @@ mutual
                       continuationTree member).1
                     fieldScoped absent
                 exact .scalarSetRetained
+                  (field := field) (width := width) (offset := offset)
+                  (type := type)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
-    | scalarSetDeleted continuation absent =>
+    | @scalarSetDeleted nextFuel continuationUsed sourceContinuation
+        targetContinuation object width offset field type continuation
+        absent =>
         cases listing with
         | scalarSet continuationListing =>
             cases wellFormed with
             | sset objectScoped fieldScoped continuationTree =>
                 exact .scalarSetDeleted
+                  (field := field) (width := width) (offset := offset)
+                  (type := type)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique transfer)
@@ -991,7 +1324,7 @@ mutual
                     (continuationListing.memberFreshForRoot
                       continuationTree member).1
                     objectScoped absent
-                exact .tagSet
+                exact .tagSet (object := object) (tag := tag)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
@@ -1011,6 +1344,8 @@ mutual
                       continuationTree member).1
                     objectScoped absent
                 exact .increment
+                  (object := object) (amount := amount)
+                  (check := check) (persistent := persistent)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
@@ -1031,6 +1366,9 @@ mutual
                       continuationTree member).1
                     objectScoped absent
                 exact .decrement
+                  (object := object) (amount := amount)
+                  (check := check) (persistent := persistent)
+                  (objects := objects)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
@@ -1049,7 +1387,7 @@ mutual
                     (continuationListing.memberFreshForRoot
                       continuationTree member).1
                     objectScoped absent
-                exact .delete
+                exact .delete (object := object)
                   (ExactShadowCodeView.binderReady
                     continuation.toGraph.view continuationTree
                     continuationListing unique childTransfer)
@@ -1074,7 +1412,7 @@ mutual
     cases view with
     | nil =>
         cases listing
-        exact .nil
+        exact .nil (fuel := fuel) (initial := initial)
     | @ctor middle sourceBody targetBody _ sourceRest targetRest info body
         rest =>
         cases listing with
@@ -1095,7 +1433,7 @@ mutual
                     BinderAbsenceTransfers restBinders final ambient :=
                   transfer.mono
                     (fun forbidden member => by simp [member])
-                exact .ctor
+                exact .ctor (info := info)
                   (ExactShadowCodeView.binderReady body.toGraph.view
                     bodyTree bodyListing unique.left_of_append
                     bodyTransfer)

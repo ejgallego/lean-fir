@@ -1,4 +1,4 @@
-import Fir.LeanIR.Passes.ElimDeadProgram
+import Fir.LeanIR.Passes.ElimDeadHygieneGraph
 
 namespace Fir.LeanIR.Passes.ElimDead
 
@@ -7,6 +7,7 @@ open Lean.Compiler
 open Fir.LeanIR
 open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.SimpCaseWellFormed
 open Fir.LeanIR.Passes.NonLockstep.Structural
 
 /-!
@@ -4875,6 +4876,492 @@ theorem ReachableCodeReadyAt.deletedLet_of_runtimeNeutral
     (neutral : RuntimeNeutralAt state declaration) :
     ReachableCodeReadyAt fuel used state roots graph :=
   .deletedLet_of_ready graph deleted absent neutral.deletedLetReadyAt
+
+/-- The exact branch families whose active machine edge needs a genuinely
+dynamic evaluation or ownership premise. -/
+inductive ExactShadowRuntimeDecision where
+  | retainedLet
+  | deletedLet
+  | deletedObjectSet
+  | deletedUSizeSet
+  | deletedScalarSet
+  | static
+
+/-- Erase a proof-relevant exact view to its active dynamic branch class. -/
+def ExactShadowCodeView.runtimeDecision
+    (view : ExactShadowCodeView initial fuel final source target) :
+    ExactShadowRuntimeDecision :=
+  match view with
+  | .letRetained _ _ => .retainedLet
+  | .letDeleted _ _ _ => .deletedLet
+  | .objectSetDeleted _ _ => .deletedObjectSet
+  | .usizeSetDeleted _ _ => .deletedUSizeSet
+  | .scalarSetDeleted _ _ => .deletedScalarSet
+  | _ => .static
+
+/-- Dynamic, operation-specific obligations at one proof-relevant exact
+compiler edge.  The exact view chooses the applicable branch, while the
+source syntax supplies its operation operands.  Liveness coverage and
+deleted-binder absence are deliberately absent: those come from
+`ExactShadowCodeBinderReady`. -/
+def ExactShadowCodeRuntimeReadyAt
+    (state : MachineState) (roots : List Value)
+    {initial : UsedLocals} {fuel : Nat} {final : UsedLocals}
+    {source target : LCNF.Code .impure}
+    (view : ExactShadowCodeView initial fuel final source target) : Prop :=
+  match source, view.runtimeDecision with
+  | .let declaration _, .retainedLet =>
+      RetainedLetReadyAt state roots declaration.value
+  | .let declaration _, .deletedLet =>
+      DeletedLetReadyAt state roots declaration
+  | .oset object index field _, .deletedObjectSet =>
+      DeletedObjectSetReadyAt state roots object index field
+  | .uset object index field _, .deletedUSizeSet =>
+      DeletedUSizeSetReadyAt state roots object index field
+  | .sset object _ _ field _ _, .deletedScalarSet =>
+      DeletedScalarSetReadyAt state roots object field
+  | _, _ => True
+
+/-- Exact branch provenance plus hereditary binder absence discharges every
+static premise of the reachable machine edge.  The remaining
+`ExactShadowCodeRuntimeReadyAt` argument is intentionally limited to genuine
+runtime evaluation/ownership facts. -/
+theorem ExactShadowCodeView.reachableCodeReadyAt
+    (view : ExactShadowCodeView initial fuel final source target)
+    (subset : UsedSubset final ambient)
+    (static : ExactShadowCodeBinderReady ambient view)
+    (runtimeReady : ExactShadowCodeRuntimeReadyAt state roots view) :
+    ReachableCodeReadyAt fuel ambient state roots
+      (view.toGraph.toShadowCodeGraph.mono subset) := by
+  cases static with
+  | @letRetained initial continuationUsed nextFuel sourceContinuation
+      targetContinuation declaration continuation keep
+      continuationStatic =>
+          have ready :
+              RetainedLetReadyAt state roots declaration.value := by
+            simpa [ExactShadowCodeRuntimeReadyAt,
+              ExactShadowCodeView.runtimeDecision] using runtimeReady
+          exact by
+              let graph :=
+                (ExactShadowCodeView.letRetained continuation keep).toGraph
+                  |>.toShadowCodeGraph
+                  |>.mono subset
+              have continuationSubset :
+                  UsedSubset continuationUsed ambient :=
+                (collectLetValue_subset continuationUsed declaration.value).trans
+                  subset
+              let continuationGraph :=
+                continuation.toShadowCodeGraphAt
+                  (Nat.le_succ nextFuel) continuationSubset
+              have covered :
+                  LetValueCovered ambient declaration.value :=
+                (collectLetValue_covers continuationUsed declaration.value).mono
+                  subset
+              let residual :
+                  ShadowLetResidual (nextFuel + 1) ambient declaration
+                    sourceContinuation (.let declaration targetContinuation) :=
+                .retained targetContinuation continuationGraph covered
+              have edgeReady :
+                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                    sourceContinuation state roots residual :=
+                .retained targetContinuation continuationGraph covered ready
+              have aligned :
+                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                    sourceContinuation state roots graph.letResidual := by
+                rw [show graph.letResidual = residual from
+                  Subsingleton.elim _ _]
+                exact edgeReady
+              exact .letE graph aligned
+  | @letDeleted initial continuationUsed nextFuel sourceContinuation
+      targetContinuation declaration continuation absent safe ambientAbsent
+      continuationStatic =>
+          have ready : DeletedLetReadyAt state roots declaration := by
+            simpa [ExactShadowCodeRuntimeReadyAt,
+              ExactShadowCodeView.runtimeDecision] using runtimeReady
+          exact by
+              let graph :=
+                (ExactShadowCodeView.letDeleted continuation absent safe).toGraph
+                  |>.toShadowCodeGraph
+                  |>.mono subset
+              let continuationGraph :=
+                continuation.toShadowCodeGraphAt
+                  (Nat.le_succ nextFuel) subset
+              let localContinuation :=
+                continuation.toShadowCodeGraphAt
+                  (Nat.le_succ nextFuel) (UsedSubset.refl final)
+              let residual :
+                  ShadowLetResidual (nextFuel + 1) ambient declaration
+                    sourceContinuation target :=
+                .deleted target continuationGraph
+                  (localContinuation := localContinuation)
+                  (localSubset := subset) (localAbsent := absent)
+                  (safe := safe)
+              have edgeReady :
+                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                    sourceContinuation state roots residual :=
+                .deleted target continuationGraph
+                  (localContinuation := localContinuation)
+                  (localSubset := subset) (localAbsent := absent)
+                  (safe := safe) ambientAbsent ready
+              have aligned :
+                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                    sourceContinuation state roots graph.letResidual := by
+                rw [show graph.letResidual = residual from
+                  Subsingleton.elim _ _]
+                exact edgeReady
+              exact .letE graph aligned
+  | @joinRetained initial continuationUsed bodyUsed nextFuel
+      sourceContinuation targetContinuation sourceBody targetBody fvarId
+      binderName params type continuation live body continuationStatic
+      bodyStatic =>
+          let graph :=
+            (ExactShadowCodeView.joinRetained
+              (binderName := binderName) (params := params) (type := type)
+              continuation live body).toGraph
+              |>.toShadowCodeGraph
+              |>.mono subset
+          have continuationSubset :
+              UsedSubset continuationUsed ambient :=
+            (shadowCode_spec body.result).2.trans subset
+          let continuationGraph :=
+            continuation.toShadowCodeGraphAt
+              (Nat.le_succ nextFuel) continuationSubset
+          let bodyGraph :=
+            body.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+          let declarationRelated :
+              ShadowFunDeclRelated (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                (.mk fvarId binderName params type targetBody) := {
+            fvarId_eq := rfl
+            binderName_eq := rfl
+            params_eq := rfl
+            type_eq := rfl
+            value := bodyGraph
+          }
+          let residual :
+              ShadowJoinResidual (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation
+                (.jp (.mk fvarId binderName params type targetBody)
+                  targetContinuation) :=
+            .retained (.mk fvarId binderName params type targetBody)
+              targetContinuation declarationRelated continuationGraph
+          have edgeReady :
+              ShadowJoinReadyAt (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation residual :=
+            .retained (.mk fvarId binderName params type targetBody)
+              targetContinuation declarationRelated continuationGraph
+          have aligned :
+              ShadowJoinReadyAt (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation graph.joinResidual := by
+            rw [show graph.joinResidual = residual from
+              Subsingleton.elim _ _]
+            exact edgeReady
+          exact .join graph aligned
+  | @joinDeleted initial continuationUsed nextFuel sourceContinuation
+      targetContinuation sourceBody fvarId binderName params type continuation
+      absent ambientAbsent continuationStatic =>
+          let graph :=
+            (ExactShadowCodeView.joinDeleted
+              (binderName := binderName) (params := params) (type := type)
+              (sourceBody := sourceBody) continuation absent).toGraph
+              |>.toShadowCodeGraph
+              |>.mono subset
+          let continuationGraph :=
+            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+          let residual :
+              ShadowJoinResidual (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation target :=
+            .deleted target continuationGraph
+          have edgeReady :
+              ShadowJoinReadyAt (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation residual :=
+            .deleted target continuationGraph ambientAbsent
+          have aligned :
+              ShadowJoinReadyAt (nextFuel + 1) ambient
+                (.mk fvarId binderName params type sourceBody)
+                sourceContinuation graph.joinResidual := by
+            rw [show graph.joinResidual = residual from
+              Subsingleton.elim _ _]
+            exact edgeReady
+          exact .join graph aligned
+  | @cases initial beforeDiscr nextFuel sourceAlternatives
+      targetAlternatives discr typeName resultType alternatives
+      alternativesStatic =>
+      exact .cases
+        ((ExactShadowCodeView.cases
+          (discr := discr) (typeName := typeName)
+          (resultType := resultType) alternatives).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @jump initial fuel join arguments =>
+      exact .jump
+        ((ExactShadowCodeView.jump
+          (initial := initial) (fuel := fuel)
+          (join := join) (arguments := arguments)).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @«return» initial fuel result =>
+      exact .ret
+        ((ExactShadowCodeView.return
+          (initial := initial) (fuel := fuel) (result := result)).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @unreachable initial fuel type =>
+      exact .unreachable
+        ((ExactShadowCodeView.unreachable
+          (initial := initial) (fuel := fuel) (type := type)).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @objectSetRetained initial continuationUsed nextFuel index
+      sourceContinuation targetContinuation object field continuation live
+      continuationStatic =>
+      let graph :=
+        (ExactShadowCodeView.objectSetRetained
+          (index := index) (field := field) continuation live).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset
+      have growth : UsedSubset continuationUsed
+          (collectArg continuationUsed field) :=
+        collectArg_subset continuationUsed field
+      let continuationGraph :=
+        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+          (growth.trans subset)
+      have objectMember : ambient.contains object = true :=
+        subset object (growth object live)
+      have fieldCovered : ArgCovered ambient field :=
+        (argCovered_collectArg continuationUsed field).mono subset
+      let residual :
+          ShadowObjectSetResidual (nextFuel + 1) ambient object index field
+            sourceContinuation
+            (.oset object index field targetContinuation) :=
+        .retained targetContinuation continuationGraph objectMember fieldCovered
+      have edgeReady :
+          ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+            field sourceContinuation state roots residual :=
+        .retained targetContinuation continuationGraph objectMember fieldCovered
+      have aligned :
+          ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+            field sourceContinuation state roots graph.objectSetResidual := by
+        rw [show graph.objectSetResidual = residual from
+          Subsingleton.elim _ _]
+        exact edgeReady
+      exact .objectSet graph aligned
+  | @objectSetDeleted initial continuationUsed nextFuel index
+      sourceContinuation targetContinuation object field continuation absent
+      continuationStatic =>
+      have ready :
+          DeletedObjectSetReadyAt state roots object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      exact by
+          let graph :=
+            (ExactShadowCodeView.objectSetDeleted
+              (index := index) (field := field) continuation absent).toGraph
+              |>.toShadowCodeGraph
+              |>.mono subset
+          let continuationGraph :=
+            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+          let residual :
+              ShadowObjectSetResidual (nextFuel + 1) ambient object index
+                field sourceContinuation target :=
+            .deleted target continuationGraph
+          have edgeReady :
+              ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+                field sourceContinuation state roots residual :=
+            .deleted target continuationGraph ready
+          have aligned :
+              ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+                field sourceContinuation state roots
+                graph.objectSetResidual := by
+            rw [show graph.objectSetResidual = residual from
+              Subsingleton.elim _ _]
+            exact edgeReady
+          exact .objectSet graph aligned
+  | @usizeSetRetained initial continuationUsed nextFuel index
+      sourceContinuation targetContinuation object field continuation live
+      continuationStatic =>
+      let graph :=
+        (ExactShadowCodeView.usizeSetRetained
+          (index := index) (field := field) continuation live).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset
+      have growth : UsedSubset continuationUsed
+          (continuationUsed.insert field) :=
+        usedSubset_insert continuationUsed field
+      let continuationGraph :=
+        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+          (growth.trans subset)
+      have objectMember : ambient.contains object = true :=
+        subset object (growth object live)
+      have fieldMember : ambient.contains field = true :=
+        subset field (by simp)
+      let residual :
+          ShadowUSizeSetResidual (nextFuel + 1) ambient object index field
+            sourceContinuation
+            (.uset object index field targetContinuation) :=
+        .retained targetContinuation continuationGraph objectMember fieldMember
+      have edgeReady :
+          ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+            field sourceContinuation state roots residual :=
+        .retained targetContinuation continuationGraph objectMember fieldMember
+      have aligned :
+          ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+            field sourceContinuation state roots graph.usizeSetResidual := by
+        rw [show graph.usizeSetResidual = residual from
+          Subsingleton.elim _ _]
+        exact edgeReady
+      exact .usizeSet graph aligned
+  | @usizeSetDeleted initial continuationUsed nextFuel index
+      sourceContinuation targetContinuation object field continuation absent
+      continuationStatic =>
+      have ready :
+          DeletedUSizeSetReadyAt state roots object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      exact by
+          let graph :=
+            (ExactShadowCodeView.usizeSetDeleted
+              (index := index) (field := field) continuation absent).toGraph
+              |>.toShadowCodeGraph
+              |>.mono subset
+          let continuationGraph :=
+            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+          let residual :
+              ShadowUSizeSetResidual (nextFuel + 1) ambient object index
+                field sourceContinuation target :=
+            .deleted target continuationGraph
+          have edgeReady :
+              ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+                field sourceContinuation state roots residual :=
+            .deleted target continuationGraph ready
+          have aligned :
+              ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+                field sourceContinuation state roots
+                graph.usizeSetResidual := by
+            rw [show graph.usizeSetResidual = residual from
+              Subsingleton.elim _ _]
+            exact edgeReady
+          exact .usizeSet graph aligned
+  | @scalarSetRetained initial continuationUsed nextFuel width offset
+      sourceContinuation targetContinuation object field type continuation live
+      continuationStatic =>
+      let graph :=
+        (ExactShadowCodeView.scalarSetRetained
+          (field := field) (width := width) (offset := offset)
+          (type := type) continuation live).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset
+      have growth : UsedSubset continuationUsed
+          (continuationUsed.insert field) :=
+        usedSubset_insert continuationUsed field
+      let continuationGraph :=
+        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+          (growth.trans subset)
+      have objectMember : ambient.contains object = true :=
+        subset object (growth object live)
+      have fieldMember : ambient.contains field = true :=
+        subset field (by simp)
+      let residual :
+          ShadowScalarSetResidual (nextFuel + 1) ambient object width offset
+            field type sourceContinuation
+            (.sset object width offset field type targetContinuation) :=
+        .retained targetContinuation continuationGraph objectMember fieldMember
+      have edgeReady :
+          ReachableScalarSetReadyAt (nextFuel + 1) ambient object width offset
+            field type sourceContinuation state roots residual :=
+        .retained targetContinuation continuationGraph objectMember fieldMember
+      have aligned :
+          ReachableScalarSetReadyAt (nextFuel + 1) ambient object width offset
+            field type sourceContinuation state roots
+            graph.scalarSetResidual := by
+        rw [show graph.scalarSetResidual = residual from
+          Subsingleton.elim _ _]
+        exact edgeReady
+      exact .scalarSet graph aligned
+  | @scalarSetDeleted initial continuationUsed nextFuel width offset
+      sourceContinuation targetContinuation object field type continuation
+      absent continuationStatic =>
+      have ready :
+          DeletedScalarSetReadyAt state roots object field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      exact by
+          let graph :=
+            (ExactShadowCodeView.scalarSetDeleted
+              (field := field) (width := width) (offset := offset)
+              (type := type) continuation absent).toGraph
+              |>.toShadowCodeGraph
+              |>.mono subset
+          let continuationGraph :=
+            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+          let residual :
+              ShadowScalarSetResidual (nextFuel + 1) ambient object width offset
+                field type sourceContinuation target :=
+            .deleted target continuationGraph
+          have edgeReady :
+              ReachableScalarSetReadyAt (nextFuel + 1) ambient object width
+                offset field type sourceContinuation state roots residual :=
+            .deleted target continuationGraph ready
+          have aligned :
+              ReachableScalarSetReadyAt (nextFuel + 1) ambient object width
+                offset field type sourceContinuation state roots
+                graph.scalarSetResidual := by
+            rw [show graph.scalarSetResidual = residual from
+              Subsingleton.elim _ _]
+            exact edgeReady
+          exact .scalarSet graph aligned
+  | @tagSet initial continuationUsed nextFuel tag sourceContinuation
+      targetContinuation object continuation continuationStatic =>
+      exact .setTag
+        ((ExactShadowCodeView.tagSet
+          (object := object) (tag := tag) continuation).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @increment initial continuationUsed nextFuel amount sourceContinuation
+      targetContinuation object check persistent continuation
+      continuationStatic =>
+      exact .increment
+        ((ExactShadowCodeView.increment
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent) continuation).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @decrement initial continuationUsed nextFuel amount sourceContinuation
+      targetContinuation object check persistent objects continuation
+      continuationStatic =>
+      exact .decrement
+        ((ExactShadowCodeView.decrement
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent)
+          (objects := objects) continuation).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+  | @delete initial continuationUsed nextFuel sourceContinuation
+      targetContinuation object continuation continuationStatic =>
+      exact .delete
+        ((ExactShadowCodeView.delete (object := object) continuation).toGraph
+          |>.toShadowCodeGraph
+          |>.mono subset)
+
+/-- Checked scoping and canonical binder uniqueness discharge the full static
+side of exact entry readiness.  Only the operation-specific dynamic facts
+selected by the exact compiler view remain as an input. -/
+theorem ExactShadowCodeGraph.reachableCodeReadyAt_of_canonical
+    (exact : ExactShadowCodeGraph fuel final source target)
+    (wellFormed : ScopedCodeWellFormedTree index source)
+    (unique : BinderNamesUnique (codeBinderIds source))
+    (runtimeReady :
+      ExactShadowCodeRuntimeReadyAt state roots exact.view) :
+    ReachableCodeReadyAt fuel final state roots
+      (exact.view.toGraph.toShadowCodeGraph.mono
+        (UsedSubset.refl final)) :=
+  exact.view.reachableCodeReadyAt (UsedSubset.refl final)
+    (exact.binderReady_of_canonical wellFormed unique) runtimeReady
 
 /-- An exact related-control witness bundled with the operational readiness
 of its own graph.  Invocation and yielded controls impose no local premise.
