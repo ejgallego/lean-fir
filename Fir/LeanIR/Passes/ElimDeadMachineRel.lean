@@ -3101,6 +3101,240 @@ theorem initialState_someBinderReadyReachableMachineRelated
   ⟨emptyAddressRenaming,
     initialState_binderReadyReachableMachineRelated programs arguments⟩
 
+/-- Entering a fully applied internal declaration preserves the hereditary
+machine relation.  In addition to the ordinary runtime and environment
+invariants, the active body and every saved code-bearing frame retain their
+exact elimDead provenance. -/
+theorem enterInternalDecl_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (body : BinderReadyShadowCodeGraph fuel used sourceCode targetCode)
+    (sourceBinding : bindParams params
+      (sourceArguments.extract 0 params.size) = .ok sourceEnv)
+    (targetBinding : bindParams params
+      (targetArguments.extract 0 params.size) = .ok targetEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    let sourceExtraArguments :=
+      sourceArguments.extract params.size sourceArguments.size
+    let targetExtraArguments :=
+      targetArguments.extract params.size targetArguments.size
+    let sourcePreparedFrames :=
+      let frames := if sourceExtraArguments.isEmpty then sourceFrames
+        else .apply sourceExtraArguments :: sourceFrames
+      if params.isEmpty && sourceArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    let targetPreparedFrames :=
+      let frames := if targetExtraArguments.isEmpty then targetFrames
+        else .apply targetExtraArguments :: targetFrames
+      if params.isEmpty && targetArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    BinderReadyReachableMachineRelated fuel rho
+      { sourceState with
+        env := sourceEnv
+        joins := []
+        frames := sourcePreparedFrames
+        control := .code sourceCode }
+      { targetState with
+        env := targetEnv
+        joins := []
+        frames := targetPreparedFrames
+        control := .code targetCode } := by
+  dsimp only
+  have callArguments : ArrayRel (ValueRel rho)
+      (sourceArguments.extract 0 params.size)
+      (targetArguments.extract 0 params.size) :=
+    arrayRel_extract arguments 0 params.size
+  have argumentSize := arrayRel_size_eq arguments
+  have extraArguments : ArrayRel (ValueRel rho)
+      (sourceArguments.extract params.size sourceArguments.size)
+      (targetArguments.extract params.size targetArguments.size) := by
+    simpa [argumentSize] using
+      arrayRel_extract arguments params.size sourceArguments.size
+  have binding := bindParams_relOn (rho := rho) (params := params)
+    used callArguments
+  rw [sourceBinding, targetBinding] at binding
+  cases binding with
+  | ok envRelated =>
+      have preparedFrames := frames.prepareCall name params arguments
+        extraArguments
+      have sourcePartition :=
+        array_extract_partition sourceArguments params.size
+      have targetPartition :=
+        array_extract_partition targetArguments params.size
+      have sourceSubset : RootSubset
+          (envRootsOn used sourceEnv ++
+            (if (sourceArguments.extract params.size sourceArguments.size).isEmpty
+              then sourceFrameRoots
+              else (sourceArguments.extract params.size
+                sourceArguments.size).toList ++ sourceFrameRoots))
+          (sourceArguments.toList ++ sourceFrameRoots) := by
+        intro root member
+        rcases List.mem_append.mp member with boundRoot | preparedRoot
+        · apply List.mem_append_left
+          rw [← sourcePartition]
+          exact List.mem_append_left _
+            (envRootsOn_bindParams_subset sourceBinding root boundRoot)
+        · by_cases empty :
+              (sourceArguments.extract params.size
+                sourceArguments.size).isEmpty
+          · simp [empty] at preparedRoot
+            exact List.mem_append_right _ preparedRoot
+          · have preparedRoot' : root ∈
+                (sourceArguments.extract params.size
+                  sourceArguments.size).toList ++ sourceFrameRoots := by
+              simpa only [empty, Bool.false_eq_true, if_false] using
+                preparedRoot
+            rcases List.mem_append.mp preparedRoot' with
+              extraRoot | frameRoot
+            · apply List.mem_append_left
+              rw [← sourcePartition]
+              exact List.mem_append_right _ extraRoot
+            · exact List.mem_append_right _ frameRoot
+      have targetSubset : RootSubset
+          (envRootsOn used targetEnv ++
+            (if (targetArguments.extract params.size targetArguments.size).isEmpty
+              then targetFrameRoots
+              else (targetArguments.extract params.size
+                targetArguments.size).toList ++ targetFrameRoots))
+          (targetArguments.toList ++ targetFrameRoots) := by
+        intro root member
+        rcases List.mem_append.mp member with boundRoot | preparedRoot
+        · apply List.mem_append_left
+          rw [← targetPartition]
+          exact List.mem_append_left _
+            (envRootsOn_bindParams_subset targetBinding root boundRoot)
+        · by_cases empty :
+              (targetArguments.extract params.size
+                targetArguments.size).isEmpty
+          · simp [empty] at preparedRoot
+            exact List.mem_append_right _ preparedRoot
+          · have preparedRoot' : root ∈
+                (targetArguments.extract params.size
+                  targetArguments.size).toList ++ targetFrameRoots := by
+              simpa only [empty, Bool.false_eq_true, if_false] using
+                preparedRoot
+            rcases List.mem_append.mp preparedRoot' with
+              extraRoot | frameRoot
+            · apply List.mem_append_left
+              rw [← targetPartition]
+              exact List.mem_append_right _ extraRoot
+            · exact List.mem_append_right _ frameRoot
+      have nextRuntime := runtime.restrictExtra
+        (listRel_append (envRootsOn_related envRelated)
+          preparedFrames.roots)
+        sourceSubset targetSubset
+      unfold BinderReadyReachableMachineRelated
+      exact ⟨envRootsOn used sourceEnv, envRootsOn used targetEnv,
+        (if (sourceArguments.extract params.size
+            sourceArguments.size).isEmpty
+          then sourceFrameRoots
+          else (sourceArguments.extract params.size
+            sourceArguments.size).toList ++ sourceFrameRoots),
+        (if (targetArguments.extract params.size
+            targetArguments.size).isEmpty
+          then targetFrameRoots
+          else (targetArguments.extract params.size
+            targetArguments.size).toList ++ targetFrameRoots),
+        programs, .code body (.empty fuel used) envRelated,
+        preparedFrames, nextRuntime⟩
+
+/-- Hereditary program relatedness turns a successful source lookup of a
+fully applied internal declaration into matching interpreter progress whose
+destination retains exact elimDead provenance. -/
+theorem invokeDecl_foundCode_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetDeclaration targetCode sourceAfter targetAfter,
+      targetState.program.findDecl? name = some targetDeclaration ∧
+      targetDeclaration.value = .code targetCode ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho sourceAfter targetAfter := by
+  rcases binderReadyShadowProgram_findDecl_of_some programs sourceFound with
+    ⟨targetDeclaration, targetFound, declarations⟩
+  have valueRelated := declarations.value
+  generalize targetValueEq : targetDeclaration.value = targetDeclValue
+    at valueRelated
+  rw [sourceValue] at valueRelated
+  cases valueRelated with
+  | code bodyRelated =>
+      rename_i targetCode
+      rcases bodyRelated with ⟨used, body⟩
+      have callArguments : ArrayRel (ValueRel rho)
+          (sourceArguments.extract 0 sourceDeclaration.params.size)
+          (targetArguments.extract 0 sourceDeclaration.params.size) :=
+        arrayRel_extract arguments 0 sourceDeclaration.params.size
+      have binding := bindParams_relOn (rho := rho)
+        (params := sourceDeclaration.params) used callArguments
+      rw [sourceBinding] at binding
+      generalize targetBinding : bindParams sourceDeclaration.params
+          (targetArguments.extract 0 sourceDeclaration.params.size) =
+            targetBindingResult at binding
+      cases targetBindingResult with
+      | error fault => cases binding
+      | ok targetEnv =>
+          cases binding with
+          | ok _envRelated =>
+              have targetBinding' : bindParams targetDeclaration.params
+                  (targetArguments.extract 0 targetDeclaration.params.size) =
+                    .ok targetEnv := by
+                simpa [← declarations.params_eq] using targetBinding
+              have progress := invokeDecl_code_reachableRelated
+                (fuel := fuel) (rho := rho) (used := used)
+                sourceState targetState
+                (forgetBinderReadyShadowProgram programs)
+                frames.related arguments body.toShadowCodeGraph
+                declarations.params_eq sourceFound targetFound
+                sourceValue targetValueEq sourceEnough sourceBinding
+                targetBinding' runtime
+              rcases progress with
+                ⟨sourceStep, targetStep, _structuralAfter⟩
+              have hereditaryAfter :=
+                enterInternalDecl_binderReadyReachableRelated
+                  (fuel := fuel) (rho := rho) (used := used) (name := name)
+                  sourceState targetState programs frames arguments body
+                  sourceBinding targetBinding runtime
+              have hereditaryAfter' :
+                  BinderReadyReachableMachineRelated fuel rho
+                    (match invokeDecl sourceState name sourceArguments with
+                      | .next state => state
+                      | _ => sourceState)
+                    (match invokeDecl targetState name targetArguments with
+                      | .next state => state
+                      | _ => targetState) := by
+                rw [sourceStep, targetStep]
+                simpa [declarations.params_eq] using hereditaryAfter
+              rw [sourceStep, targetStep] at hereditaryAfter'
+              exact ⟨targetDeclaration, targetCode, _, _,
+                targetFound, targetValueEq, sourceStep, targetStep,
+                hereditaryAfter'⟩
+
 /-- A retained return narrows the active runtime roots from the complete live
 environment to the returned value, while keeping all saved-frame roots. -/
 theorem coreStep_return_reachableRelated
