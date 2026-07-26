@@ -4820,6 +4820,100 @@ theorem coreStep_retainedUSizeSet_reachableRelated
               sourceFrameRoots, targetFrameRoots,
               programs, .code continuation joins env, frames, nextRuntime⟩
 
+/-- Hereditary paired rule for a retained absolute-slot write. -/
+theorem coreStep_retainedUSizeSet_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (fieldMember : used.contains field = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : lookupValue sourceState.env field = .ok fieldValue)
+    (effect : setUSizeSlot sourceState.runtime objectValue index fieldValue =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetFieldValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      lookupValue targetState.env field = .ok targetFieldValue ∧
+      setUSizeSlot targetState.runtime targetObjectValue index
+          targetFieldValue = .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.uset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.uset object index field targetContinuation)) =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have sourceFieldLookup :=
+        lookupValue_eq_ok_iff.mp fieldRead
+      have fields := env field fieldMember
+      generalize targetFieldLookup :
+        lookup targetState.env field = targetFieldOption at fields
+      rw [sourceFieldLookup] at fields
+      cases fields with
+      | some fieldValues =>
+          rename_i targetFieldValue
+          have targetFieldRead :
+              lookupValue targetState.env field = .ok targetFieldValue :=
+            lookupValue_eq_ok_iff.mpr targetFieldLookup
+          have objectRoot :
+              objectValue ∈
+                envRootsOn used sourceState.env ++ sourceFrameRoots := by
+            exact List.mem_append_left _
+              (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+          rcases runtime.setUSizeSlotBoth_of_related objectRoot objectValues
+              fieldValues effect with
+            ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+          refine ⟨targetObjectValue, targetFieldValue, targetNextRuntime,
+            targetObjectRead, targetFieldRead, targetEffect, ?_⟩
+          dsimp only
+          refine ⟨?_, ?_, ?_⟩
+          · unfold withCodeControl
+            simp only [coreStep]
+            rw [objectRead, fieldRead]
+            simp only
+            rw [effect]
+          · unfold withCodeControl
+            simp only [coreStep]
+            rw [targetObjectRead, targetFieldRead]
+            simp only
+            rw [targetEffect]
+          · unfold BinderReadyReachableMachineRelated
+            exact ⟨envRootsOn used sourceState.env,
+              envRootsOn used targetState.env,
+              sourceFrameRoots, targetFrameRoots,
+              programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- A retained packed-scalar write succeeds on both related machines and
 preserves the reachable machine relation. -/
 theorem coreStep_retainedScalarSet_reachableRelated
@@ -5578,6 +5672,44 @@ theorem coreStep_deletedUSizeSet_reachableRelated
   · exact continueCode_reachableRelated sourceState targetState programs
       frames continuation joins env runtime
 
+/-- Hereditary source-only rule for an unreachable absolute-slot write. -/
+theorem coreStep_deletedUSizeSet_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (fieldRead : lookupValue sourceState.env field = .ok fieldValue)
+    (effect : setUSizeSlot sourceState.runtime objectValue index fieldValue =
+      .ok nextRuntime)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := nextRuntime
+      control := .code sourceContinuation }
+    coreStep (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) =
+        .next sourceAfter ∧
+      BinderReadyReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · unfold withCodeControl
+    simp only [coreStep]
+    rw [objectRead, fieldRead]
+    simp only
+    rw [effect]
+  · exact continueCode_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env runtime
+
 /-- Deleted scalar-field write under the same unreachable-target premise. -/
 theorem coreStep_deletedScalarSet_reachableRelated
     (sourceState targetState : MachineState)
@@ -5768,6 +5900,47 @@ theorem coreStep_deletedUSizeSet_of_ready
   exact ⟨nextRuntime,
     coreStep_deletedUSizeSet_reachableRelated sourceState targetState
       programs frames continuation joins env objectRead fieldRead effect next⟩
+
+/-- Hereditary certified rule for deleting an unreachable absolute-slot
+write. -/
+theorem coreStep_deletedUSizeSet_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.uset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, lower, bounded, unreachable⟩
+  rcases runtime.setUSizeSlotLeftUnreachable found live objectEq lower bounded
+      unreachable fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  exact ⟨nextRuntime,
+    coreStep_deletedUSizeSet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectRead fieldRead effect next⟩
 
 theorem coreStep_deletedScalarSet_of_ready
     (sourceState targetState : MachineState)
@@ -13502,6 +13675,92 @@ theorem match_retainedUSizeSetStep
                 ⟨targetPath, finalRelated⟩
               exact ⟨_, targetPath, finalRelated⟩
 
+/-- Hereditary semantic-step form of a retained absolute-slot write. -/
+theorem match_retainedUSizeSetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (fieldMember : used.contains field = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.uset object index field targetContinuation)) targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.uset object index field sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.uset object index field sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.uset object index field sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize fieldRead :
+        lookupValue sourceState.env field = fieldResult
+      cases fieldResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              fieldRead, fail]
+          exact (noStep done).elim
+      | ok fieldValue =>
+          generalize effect :
+            setUSizeSlot sourceState.runtime objectValue index fieldValue =
+              effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  fieldRead, effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases
+                  coreStep_retainedUSizeSet_binderReadyReachableRelated
+                    sourceState targetState programs frames continuation joins
+                    env objectMember fieldMember objectRead fieldRead effect
+                    runtime with
+                ⟨targetObjectValue, targetFieldValue, targetNextRuntime,
+                  targetObjectRead, targetFieldRead, targetEffect,
+                  sourceTransition, targetTransition, afterRelated⟩
+              rcases match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
 /-- Semantic-step form of a certified deleted unboxed-field write. -/
 theorem match_deletedUSizeSetStep_of_ready
     (sourceState targetState : MachineState)
@@ -13533,6 +13792,136 @@ theorem match_deletedUSizeSetStep_of_ready
       programs frames continuation joins env runtime ready with
     ⟨nextRuntime, transition, related⟩
   exact match_sourceOnlyCoreStep transition related step
+
+/-- Hereditary semantic-step form of a certified deleted absolute-slot
+write. -/
+theorem match_deletedUSizeSetStep_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_deletedUSizeSet_of_ready_binderReady
+      sourceState targetState programs frames continuation joins env runtime
+      ready with
+    ⟨nextRuntime, transition, related⟩
+  rcases match_sourceOnlyCoreStep_binderReady transition related step with
+    ⟨targetAfter, _targetEq, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated⟩
+
+/-- An exact retained absolute-slot view supplies both live locals and the
+hereditary continuation required by the paired runtime step. -/
+theorem ExactShadowCodeBinderReady.match_usizeSetRetainedStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains object = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.usizeSetRetained
+          (index := index) (field := field) continuation live))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert field) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.uset object index field targetContinuation)) targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object ((usedSubset_insert continuationUsed field) object live)
+  have fieldMember : ambient.contains field = true := by
+    apply usedBound field
+    simp
+  exact match_retainedUSizeSetStep_binderReady
+    sourceState targetState programs frames
+    (ready.usizeSetRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember fieldMember runtime step
+
+/-- An exact deleted absolute-slot view combines its hereditary continuation
+with the dynamic unreachability certificate for the source-only update. -/
+theorem ExactShadowCodeBinderReady.match_usizeSetDeletedStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains object = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.usizeSetDeleted
+          (index := index) (field := field) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedUSizeSetStep_of_ready_binderReady
+    sourceState targetState programs frames
+    (ready.usizeSetDeleted_continuationGraph fuelBound usedBound)
+    joins env runtime deletedReady step
 
 /-- Complete graph-level dispatcher for an absolute-slot write. The retained
 branch takes one target step; the deleted unreachable branch stutters. -/
