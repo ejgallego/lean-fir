@@ -7,20 +7,6 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
-/-- A concrete heap transition preserves the physical allocation extent of
-every semantic heap location already mapped by the refinement witness.
-Payload, liveness, and ownership metadata may change. -/
-def MappedHeaderCapacityTransport
-    (before after : MemoryState) (witness : RefinementWitness) : Prop :=
-  ∀ address location header,
-    witness.locations.lookup? location = some address →
-    Header.read before.memory address = .ok header →
-    address.value + headerBytes ≤ before.heapCursor →
-    ∃ nextHeader,
-      Header.read after.memory address = .ok nextHeader ∧
-      nextHeader.allocationBytes = header.allocationBytes ∧
-      address.value + headerBytes ≤ after.heapCursor
-
 /-- Explicit transition relation for the unique reset-to-reuse protocol.
 `LiveHeapRel` is required only before reset; the exact concrete and semantic
 reset equations name the temporary states without claiming that cleared
@@ -1221,7 +1207,9 @@ theorem LiveHeapRel.writeObjectFields_resetPrefix
       LiveHeapRel ({ state with memory } : MemoryState)
         (witness.rebindConstructor address info
           (resetProtocolFieldKinds fieldKinds count))
-        nextRuntime := by
+        nextRuntime ∧
+      MappedHeaderCapacityTransport state
+        ({ state with memory } : MemoryState) witness := by
   have wordEq : ∀ left right : Word32, left.value = right.value → left = right := by
     intro left right equal
     cases left
@@ -1413,10 +1401,16 @@ theorem LiveHeapRel.writeObjectFields_resetPrefix
         written
     exact (promoted.allocationFrame promotedHeaderRead frame)
       |>.rebindConstructor_other differentValue
-  exact related.setCell_rebindConstructor_of_frames info
-    (resetProtocolFieldKinds fieldKinds count) mapped found rfl finalFrontier
-      targetAfter protocolDescriptorRegion protocolDescriptorDisjoint cellFrame
-        promotedFrame
+  obtain ⟨nextRuntime, semanticSet, finalRelated⟩ :=
+    related.setCell_rebindConstructor_of_frames
+      (result := ({ state with memory } : MemoryState)) info
+      (resetProtocolFieldKinds fieldKinds count) mapped found rfl finalFrontier
+        targetAfter protocolDescriptorRegion protocolDescriptorDisjoint cellFrame
+          promotedFrame
+  have capacity :=
+    related.mappedHeaderCapacity_of_writeObjectFields descriptor rawRead rfl
+      fieldsInTarget written
+  exact ⟨nextRuntime, semanticSet, finalRelated, capacity⟩
 
 /-- Ownership correspondence composes across adjacent released prefixes. -/
 theorem OwnershipValuesRel.append
@@ -1497,13 +1491,14 @@ theorem OwnershipValuesRel.foldlM_public_refines
       words.foldlM (init := state) (fun next child =>
         decrementReferenceOnce next child true witness.closureDescriptors) =
           .ok finalState ∧
-      LiveHeapRel finalState witness finalRuntime := by
+      LiveHeapRel finalState witness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness := by
   induction related generalizing state runtime finalRuntime with
   | nil =>
       simp only [List.foldlM_nil] at semanticOperation ⊢
       have runtimeEq := Except.ok.inj semanticOperation
       subst finalRuntime
-      exact ⟨state, rfl, heap⟩
+      exact ⟨state, rfl, heap, .refl state witness⟩
   | @cons word value words values head tail ih =>
       simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation ⊢
       cases headSemantic :
@@ -1522,11 +1517,13 @@ theorem OwnershipValuesRel.foldlM_public_refines
                 .ok middleRuntime := by
               simpa [Fir.LeanIR.Impure.releaseResetField,
                 Fir.LeanIR.Impure.decValueOnce] using headSemantic
-            obtain ⟨middleState, concreteHead, middleHeap⟩ :=
-              heap.decrementReferenceOnce_refines mapped true semanticHead
-            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+            obtain ⟨middleState, concreteHead, middleHeap, capacityHead⟩ :=
+              heap.decrementReferenceOnce_refines_with_capacity mapped true
+                semanticHead
+            obtain ⟨finalState, concreteTail, finalHeap, capacityTail⟩ :=
               ih middleHeap semanticOperation
-            exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
+            exact ⟨finalState, by rw [concreteHead]; exact concreteTail,
+              finalHeap, capacityHead.trans capacityTail⟩
           · obtain ⟨notHeap, concreteFuelNoOp⟩ := noOp
             have runtimeEq : middleRuntime = runtime := by
               cases value with
@@ -1563,9 +1560,10 @@ theorem OwnershipValuesRel.foldlM_public_refines
                 .ok state := by
               unfold decrementReferenceOnce
               exact concreteFuelNoOp
-            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+            obtain ⟨finalState, concreteTail, finalHeap, capacityTail⟩ :=
               ih heap semanticOperation
-            exact ⟨finalState, by rw [concreteHead]; exact concreteTail, finalHeap⟩
+            exact ⟨finalState, by rw [concreteHead]; exact concreteTail,
+              finalHeap, capacityTail⟩
 
 /-- One saved ownership slot remains related when reset shadows the target
 constructor descriptor. -/
@@ -2027,7 +2025,8 @@ theorem LiveHeapRel.resetObject_refines_unique
       ValueRel
         (witness.rebindConstructor address info
           (resetProtocolFieldKinds fieldKinds count))
-        .reuseToken (.word32 address) (.reuseToken (some location)) := by
+        .reuseToken (.word32 address) (.reuseToken (some location)) ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -2098,7 +2097,7 @@ theorem LiveHeapRel.resetObject_refines_unique
       obtain ⟨fieldMemory, fieldWrite, fieldPost⟩ :=
         writeObjectFields_spec state.memory address.value 0
           (List.replicate count taggedZero) (by simpa using fieldsInBounds)
-      obtain ⟨protocolRuntime, protocolSet, protocolHeap⟩ :=
+      obtain ⟨protocolRuntime, protocolSet, protocolHeap, prefixCapacity⟩ :=
         LiveHeapRel.writeObjectFields_resetPrefix state fieldMemory witness runtime
           location address cell header info fieldKinds object count related mapped found
           descriptor constructor objectRelated headerRead headerKind refCount persistent
@@ -2114,8 +2113,20 @@ theorem LiveHeapRel.resetObject_refines_unique
         simpa only [Array.foldlM_toList] using semanticFold
       have protocolOwnership := ownershipRelated.rebindConstructor address info
         (resetProtocolFieldKinds fieldKinds count)
-      obtain ⟨result, concreteFold, finalHeap⟩ :=
+      obtain ⟨result, concreteFold, finalHeap, foldCapacity⟩ :=
         protocolOwnership.foldlM_public_refines protocolHeap semanticFoldList
+      have foldCapacityOriginal :
+          MappedHeaderCapacityTransport
+            ({ state with memory := fieldMemory } : MemoryState) result
+              witness := by
+        intro mappedAddress mappedLocation mappedHeader mappedBefore
+          mappedRead mappedOwned
+        exact foldCapacity mappedAddress mappedLocation mappedHeader
+          (by
+            simpa [RefinementWitness.rebindConstructor] using mappedBefore)
+          mappedRead mappedOwned
+      have capacity : MappedHeaderCapacityTransport state result witness :=
+        prefixCapacity.trans foldCapacityOriginal
       obtain ⟨addressHeap, _, _, _, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
       obtain ⟨objectHeader, objectHeaderRead, _, _, _, objectCount, _, _⟩ :=
@@ -2169,7 +2180,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         semanticReset := semanticOperation }
       exact ⟨result, info, fieldKinds, concreteReset, finalHeap, protocol,
         protocol.tokenRelated_rebindConstructor info
-          (resetProtocolFieldKinds fieldKinds count)⟩
+          (resetProtocolFieldKinds fieldKinds count), capacity⟩
   | boxed descriptor objectEq objectRelated refCount persistent cellLive =>
       rw [constructor] at objectEq
       contradiction

@@ -8,6 +8,38 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- A concrete heap transition preserves the physical allocation extent of
+every semantic heap location already mapped by the refinement witness.
+Payload, liveness, and ownership metadata may change. -/
+def MappedHeaderCapacityTransport
+    (before after : MemoryState) (witness : RefinementWitness) : Prop :=
+  ∀ address location header,
+    witness.locations.lookup? location = some address →
+    Header.read before.memory address = .ok header →
+    address.value + headerBytes ≤ before.heapCursor →
+    ∃ nextHeader,
+      Header.read after.memory address = .ok nextHeader ∧
+      nextHeader.allocationBytes = header.allocationBytes ∧
+      address.value + headerBytes ≤ after.heapCursor
+
+theorem MappedHeaderCapacityTransport.refl
+    (state : MemoryState) (witness : RefinementWitness) :
+    MappedHeaderCapacityTransport state state witness := by
+  intro address location header mapped headerRead owned
+  exact ⟨header, headerRead, rfl, owned⟩
+
+theorem MappedHeaderCapacityTransport.trans
+    {first second third : MemoryState} {witness : RefinementWitness}
+    (firstSecond : MappedHeaderCapacityTransport first second witness)
+    (secondThird : MappedHeaderCapacityTransport second third witness) :
+    MappedHeaderCapacityTransport first third witness := by
+  intro address location header mapped headerRead owned
+  obtain ⟨middleHeader, middleRead, middleExtent, middleOwned⟩ :=
+    firstSecond address location header mapped headerRead owned
+  obtain ⟨finalHeader, finalRead, finalExtent, finalOwned⟩ :=
+    secondThird address location middleHeader mapped middleRead middleOwned
+  exact ⟨finalHeader, finalRead, finalExtent.trans middleExtent, finalOwned⟩
+
 /-- A decoded concrete constructor represents one semantic constructor. The
 field clauses are indexed by the allocation-time ABI descriptor, which is the
 same metadata used by the W2 `allocCtor` host contract. -/

@@ -258,10 +258,12 @@ zero token, while a unique-reset bridge changes retained object evidence into
 same-address token evidence. The in-place reuse byte transaction now preserves
 the target's allocation word, frames all other mapped allocations through
 descriptor disjointness, and exports that transport through both the concrete
-and Talos operation theorems. Unique reset and the remaining heap-transition
-families still need transport instances, and the syntax-directed simulation
-still has to carry the strengthened state. Native unreachability losing its
-source fault is tracked separately by
+and Talos operation theorems. Unique reset now composes bounded prefix writes
+with recursive ownership-release transport and carries the retained object
+bound to the returned token. The remaining heap-transition families still
+need transport instances, and the syntax-directed simulation still has to
+carry the strengthened state. Native unreachability losing its source fault
+is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
@@ -329,11 +331,11 @@ acceptance tests pass.
    static-to-concrete operation bridge and whole-fact-map invariant are proved;
    fresh nonempty allocation and zero-token reuse supply header-capacity
    transport, in-place reuse carries mapped-header transport through the
-   validator-backed operation theorem, and unique reset has its
-   evidence-conversion boundary. Unique reset and the remaining heap operations
-   must supply transport before the syntax certificate can carry the
-   strengthened state. Structured unreachability remains the shared-contract
-   blocker.
+   validator-backed operation theorem, and unique reset carries the same
+   transport through prefix clearing and recursive child release. The
+   remaining heap operations must supply transport before the syntax
+   certificate can carry the strengthened state. Structured unreachability
+   remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

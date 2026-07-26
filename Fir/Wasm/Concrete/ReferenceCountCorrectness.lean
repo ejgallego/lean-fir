@@ -600,6 +600,103 @@ theorem OwnershipValuesRel.foldlM_refines
         | erased => rfl
         | reuseToken location => rfl
 
+/-- The recursive ownership fold also preserves every mapped allocation's
+retained header extent. Each recursive child step supplies one transport
+edge; ordered fold composition preserves the original heap's evidence. -/
+theorem OwnershipValuesRel.foldlM_refines_with_capacity
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : RuntimeState}
+    {words : List Word32} {values : List Value} {fuel : Nat}
+    {descriptors : ClosureDescriptorTable}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (recurse : ∀ {before : MemoryState} {semantic nextSemantic : RuntimeState}
+        {location : Location} {address : Word32},
+      LiveHeapRel before witness semantic →
+      witness.locations.lookup? location = some address →
+      Fir.LeanIR.Impure.decLocationFuel fuel semantic location =
+        .ok nextSemantic →
+      ∃ after,
+        decrementReferenceOnceFuel fuel before address true descriptors =
+          .ok after ∧
+        LiveHeapRel after witness nextSemantic ∧
+        MappedHeaderCapacityTransport before after witness)
+    (semanticOperation :
+      values.foldlM (init := runtime) (fun next value =>
+        match value with
+        | .object (.heap child) =>
+            Fir.LeanIR.Impure.decLocationFuel fuel next child
+        | _ => .ok next) = .ok finalRuntime) :
+    ∃ finalState,
+      words.foldlM (init := state) (fun next child =>
+        decrementReferenceOnceFuel fuel next child true descriptors) =
+          .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness := by
+  induction related generalizing state runtime finalRuntime with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation ⊢
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst finalRuntime
+      exact ⟨state, rfl, heap, .refl state witness⟩
+  | @cons word value words values head tail ih =>
+      have noOpCase
+          (concreteHead :
+            decrementReferenceOnceFuel fuel state word true descriptors =
+              .ok state)
+          (semanticHead :
+            (match value with
+            | .object (.heap child) =>
+                Fir.LeanIR.Impure.decLocationFuel fuel runtime child
+            | _ => .ok runtime) = .ok runtime) :
+          ∃ finalState,
+            (word :: words).foldlM (init := state) (fun next child =>
+              decrementReferenceOnceFuel fuel next child true descriptors) =
+                .ok finalState ∧
+            LiveHeapRel finalState witness finalRuntime ∧
+            MappedHeaderCapacityTransport state finalState witness := by
+        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+          at semanticOperation
+        rw [semanticHead] at semanticOperation
+        obtain ⟨finalState, concreteTail, finalHeap, capacityTail⟩ :=
+          ih heap semanticOperation
+        refine ⟨finalState, ?_, finalHeap, capacityTail⟩
+        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+        rw [concreteHead]
+        exact concreteTail
+      rcases head.releaseStep heap fuel descriptors with heapStep | noOpStep
+      · obtain ⟨location, valueEq, mapped⟩ := heapStep
+        subst value
+        simp only [List.foldlM_cons, Bind.bind, Except.bind]
+          at semanticOperation
+        cases childEq :
+            Fir.LeanIR.Impure.decLocationFuel fuel runtime location with
+        | error fault =>
+            rw [childEq] at semanticOperation
+            contradiction
+        | ok nextRuntime =>
+            rw [childEq] at semanticOperation
+            obtain ⟨nextState, concreteHead, nextHeap, capacityHead⟩ :=
+              recurse heap mapped childEq
+            obtain ⟨finalState, concreteTail, finalHeap, capacityTail⟩ :=
+              ih nextHeap semanticOperation
+            refine ⟨finalState, ?_, finalHeap,
+              capacityHead.trans capacityTail⟩
+            simp only [List.foldlM_cons, Bind.bind, Except.bind]
+            rw [concreteHead]
+            exact concreteTail
+      · obtain ⟨notHeap, concreteHead⟩ := noOpStep
+        apply noOpCase concreteHead
+        cases value with
+        | object reference =>
+            cases reference with
+            | heap location => exact False.elim (notHeap location rfl)
+            | tagged payload => rfl
+        | usize usize => rfl
+        | scalar scalar => rfl
+        | erased => rfl
+        | reuseToken location => rfl
+
 /-- Shared header-level postcondition for ordinary successful increments. It
 separates the common-header write from object-kind-specific payload framing. -/
 theorem incrementReference_header

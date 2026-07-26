@@ -3972,7 +3972,9 @@ theorem resetStep_unique_of_refines
         ValueRel nextWitness .reuseToken (.word32 address)
           (.reuseToken (some location)) ∧
         ResetReuseProtocolRel initial.host.runtime.heap heap witness runtime
-          nextRuntime location address cell object count := by
+          nextRuntime location address cell object count ∧
+        MappedHeaderCapacityTransport initial.host.runtime.heap heap
+          witness := by
   let replacement : HeapCell :=
     { cell with object := .ctor (resetProtocolObject object count) }
   obtain ⟨middleRuntime, semanticSet, _, _, _, _⟩ :=
@@ -4014,7 +4016,7 @@ theorem resetStep_unique_of_refines
       (Array.foldlM_runtimeAux
         (fun operation => releaseResetField_runtimeAux operation) semanticFold)
   obtain ⟨heap, info, fieldKinds, concreteReset, heapRelated, protocol,
-      tokenRelated⟩ :=
+      tokenRelated, capacity⟩ :=
     runtimeRelated.heap.resetObject_refines_unique mapped found live ordinary
       unique constructor countFits updated
   let nextWitness :=
@@ -4028,7 +4030,7 @@ theorem resetStep_unique_of_refines
     FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_transportAux
       runtimeRelated transport heapRelated aux
   refine ⟨heap, info, fieldKinds, ?_, transport, nextRelated, tokenRelated,
-    protocol⟩
+    protocol, capacity⟩
   simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
     ← descriptorsEq, concreteReset, replaceHeap]
 

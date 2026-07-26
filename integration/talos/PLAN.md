@@ -3242,6 +3242,18 @@ header-preservation instance, the empty/tagged branches, and ownership or
 mutation transitions needed by the syntax-directed state invariant. No FIR
 semantic contract or executable ABI changed.
 
+W6.6dk discharges unique reset's concrete transport. The boundary now lives
+in the common heap-refinement layer and composes across same-extent header
+writes, bounded constructor-field writes, and recursive ownership folds.
+Unique reset exposes the resulting transport through both the concrete heap
+theorem and the Talos host theorem; the validator-backed wrapper carries a
+retained constructor bound directly to the returned nonempty reuse token.
+Compatibility wrappers preserve the existing decrement theorem surface for
+clients that need only `LiveHeapRel`. The remaining transport work is the
+empty/tagged allocation branches and ownership or mutation transitions needed
+by the syntax-directed state invariant. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -517,6 +517,57 @@ theorem ReuseCapacityValueRel.retainedToken_of_reset
       exact .retainedToken tokenRelated nextHeaderRead nextHeaderOwned
         (by simpa [sameExtent] using minimum)
 
+/-- The unique-reset host theorem now closes the validator's retained-capacity
+invariant directly: the concrete reset transports every mapped header, and
+the returned nonempty token inherits the input object's exact lower bound. -/
+theorem resetStep_unique_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {object : ConstructorObject}
+    {count available : Nat} {kind : AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (capacityRelated :
+      ReuseCapacityValueRel initial.host.runtime.heap witness
+        (.retainedAtLeast available) kind (.word32 address)
+        (.object (.heap location)))
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (ordinary : cell.persistent = false)
+    (unique : cell.rc = 1) (constructor : cell.object = .ctor object)
+    (countFits : count ≤ object.objectFields.size)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken (some location))) :
+    ∃ heap info fieldKinds,
+      let nextWitness :=
+        witness.rebindConstructor address info
+          (resetProtocolFieldKinds fieldKinds count)
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat address.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        ReuseCapacityValueRel heap nextWitness (.retainedAtLeast available)
+          .reuseToken (.word32 address) (.reuseToken (some location)) ∧
+        ResetReuseProtocolRel initial.host.runtime.heap heap witness runtime
+          nextRuntime location address cell object count := by
+  obtain ⟨heap, info, fieldKinds, concreteReset, transport, nextRelated,
+      tokenRelated, protocol, capacityTransport⟩ :=
+    resetStep_unique_of_refines runtimeRelated descriptorsEq mapped found live
+      ordinary unique constructor countFits updated
+  let nextWitness :=
+    witness.rebindConstructor address info
+      (resetProtocolFieldKinds fieldKinds count)
+  have nextCapacity :
+      ReuseCapacityValueRel heap nextWitness (.retainedAtLeast available)
+        .reuseToken (.word32 address) (.reuseToken (some location)) :=
+    capacityRelated.retainedToken_of_reset capacityTransport tokenRelated
+  exact ⟨heap, info, fieldKinds, concreteReset, transport, nextRelated,
+    nextCapacity, protocol⟩
+
 /-- At reuse-token kind, definitely-empty evidence fixes both the semantic
 token and its physical word. -/
 theorem ReuseCapacityValueRel.emptyToken_eq

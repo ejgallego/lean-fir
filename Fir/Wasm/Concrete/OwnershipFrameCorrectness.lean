@@ -195,6 +195,129 @@ theorem LiveHeapRel.allocationFrame_of_writeObjectFields_other
       targetHeader otherHeader targetRead otherRead
   exact .ofWriteObjectFields resultEq targetInBounds fieldsInTarget written disjoint
 
+/-- A same-extent header update preserves the retained allocation word of
+every mapped semantic location. The target uses the updated header directly;
+descriptor disjointness frames every other mapped allocation. -/
+theorem LiveHeapRel.mappedHeaderCapacity_of_headerWrite
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor}
+    {oldHeader updatedHeader : Header} {memory : LinearMemory}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (oldRead : Header.read before.memory targetAddress = .ok oldHeader)
+    (resultEq : after = { before with memory })
+    (headerInBounds :
+      targetAddress.value + headerBytes ≤ before.memory.size)
+    (written : updatedHeader.write before.memory targetAddress = .ok memory)
+    (sameExtent :
+      updatedHeader.allocationBytes = oldHeader.allocationBytes) :
+    MappedHeaderCapacityTransport before after witness := by
+  intro address location header mapped headerRead owned
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨regionHeader, regionRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    rw [headerRead] at regionRead
+    have regionHeaderEq := Except.ok.inj regionRead
+    subst regionHeader
+    have frame := related.allocationFrame_of_headerWrite_other targetFound
+      descriptorFound different oldRead headerRead resultEq headerInBounds
+      written
+    refine ⟨header, ?_, rfl, ?_⟩
+    · rw [frame.readHeaderRaw minimum]
+      exact headerRead
+    · rw [frame.cursor]
+      exact owned
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    rw [oldRead] at headerRead
+    have headerEq := Except.ok.inj headerRead
+    subst header
+    refine ⟨updatedHeader, ?_, sameExtent, ?_⟩
+    · rw [resultEq]
+      exact Header.read_of_write_eq_ok before.memory memory targetAddress
+        updatedHeader headerInBounds written
+    · simpa [resultEq] using owned
+
+/-- A bounded constructor-field write leaves every mapped allocation header
+unchanged. The target header lies before its payload; all other headers are
+framed by descriptor disjointness. -/
+theorem LiveHeapRel.mappedHeaderCapacity_of_writeObjectFields
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor} {targetHeader : Header}
+    {fields : List Word32} {memory : LinearMemory}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (targetRead :
+      Header.read before.memory targetAddress = .ok targetHeader)
+    (resultEq : after = { before with memory })
+    (fieldsInTarget :
+      objectFieldAddress targetAddress.value fields.length ≤
+        targetAddress.value + targetHeader.allocationBytes.toNat)
+    (written :
+      writeObjectFields before.memory targetAddress.value 0 fields =
+        .ok memory) :
+    MappedHeaderCapacityTransport before after witness := by
+  obtain ⟨regionHeader, regionRead, _, _, targetExtent⟩ :=
+    related.descriptorRegion targetAddress targetDescriptor targetFound
+  rw [targetRead] at regionRead
+  have regionHeaderEq := Except.ok.inj regionRead
+  subst regionHeader
+  have targetInBounds :
+      targetAddress.value + targetHeader.allocationBytes.toNat ≤
+        before.memory.size :=
+    Nat.le_trans targetExtent related.frontier.cursorInBounds
+  have fieldsInBounds :
+      objectFieldAddress targetAddress.value (0 + fields.length) ≤
+        before.memory.size := by
+    simp only [Nat.zero_add]
+    exact Nat.le_trans fieldsInTarget targetInBounds
+  have post := writeObjectFields_post before.memory memory targetAddress.value 0
+    fields fieldsInBounds written
+  intro address location header mapped headerRead owned
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨mappedHeader, mappedRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    rw [headerRead] at mappedRead
+    have mappedHeaderEq := Except.ok.inj mappedRead
+    subst mappedHeader
+    have frame := related.allocationFrame_of_writeObjectFields_other targetFound
+      descriptorFound different targetRead headerRead resultEq fieldsInTarget
+      written
+    refine ⟨header, ?_, rfl, ?_⟩
+    · rw [frame.readHeaderRaw minimum]
+      exact headerRead
+    · rw [frame.cursor]
+      exact owned
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    rw [targetRead] at headerRead
+    have headerEq := Except.ok.inj headerRead
+    subst header
+    refine ⟨targetHeader, ?_, rfl, ?_⟩
+    · rw [resultEq]
+      rw [Header.read_of_writeObjectFields before.memory memory targetAddress
+        0 fields post]
+      exact targetRead
+    · simpa [resultEq] using owned
+
 /-- A bounded bulk object-field write preserves every descriptor's complete
 physical region and the pairwise allocation-disjointness invariant. -/
 theorem LiveHeapRel.descriptorSpatial_of_writeObjectFields
@@ -1884,7 +2007,7 @@ theorem LiveHeapRel.incrementReference_refines
 branch. The target count changes, every other allocation is framed by the
 descriptor disjointness invariant, and the semantic `setCell` update is
 reassembled into `LiveHeapRel`. -/
-theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
+theorem LiveHeapRel.decrementReferenceOnce_refines_above_one_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
@@ -1898,7 +2021,8 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
       decrementReferenceOnce state address check descriptors = .ok result ∧
       Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1996,14 +2120,37 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
       descriptorRegion descriptorDisjoint cellFrame promotedFrame
   have semanticEq := targetRelated.decValueOnce_above_one_eq ordinary runtime location
     found oneLt check
+  have capacity :=
+    related.mappedHeaderCapacity_of_headerWrite targetDescriptorFound rawRead
+      resultEq headerInBounds headerWrite sameExtent
   exact ⟨result, nextRuntime, operation, by rw [semanticEq, semanticUpdate],
-    finalRelated⟩
+    finalRelated, capacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnce_refines_above_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnce state address check descriptors = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+    related.decrementReferenceOnce_refines_above_one_with_capacity
+      (descriptors := descriptors) mapped found live ordinary oneLt check
+  exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
 /-- Whole-heap source/concrete refinement for count-one boxes and heap
 naturals. The concrete allocation becomes a canonical dead cell, every
 disjoint allocation is framed, and the semantic heap records the matching
 zero-count/dead replacement. -/
-theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
+theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
@@ -2018,7 +2165,8 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
       decrementReferenceOnce state address check descriptors = .ok result ∧
       Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -2045,13 +2193,37 @@ theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
       resultEq headerInBounds headerWrite sameExtent finalValid targetAfter
   have semanticEq := targetRelated.decValueOnce_leaf_one_eq leafCell ordinary runtime
     location found one check
+  have capacity :=
+    related.mappedHeaderCapacity_of_headerWrite targetDescriptorFound rawRead
+      resultEq headerInBounds headerWrite sameExtent
   exact ⟨result, nextRuntime, operation,
     by rw [semanticEq, show { cell with rc := 0, live := false } = replacement by rfl,
-      semanticUpdate], finalRelated⟩
+      semanticUpdate], finalRelated, capacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnce_refines_leaf_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (leafCell : NonrecursiveCell cell)
+    (ordinary : cell.persistent = false)
+    (one : cell.rc = 1) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnce state address check descriptors = .ok result ∧
+      Fir.LeanIR.Impure.decValueOnce runtime (.object (.heap location)) check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+    related.decrementReferenceOnce_refines_leaf_one_with_capacity
+      (descriptors := descriptors) mapped found live leafCell ordinary one check
+  exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
 /-- The established whole-heap above-one refinement is valid at every
 positive explicit fuel budget, not only the two public derived budgets. -/
-theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
@@ -2065,7 +2237,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
       decrementReferenceOnceFuel (fuel + 1) state address check descriptors = .ok result ∧
       Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -2075,9 +2248,10 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
   obtain ⟨header, headerRead, _, notPromoted, persistent, refCount⟩ :=
     targetRelated.ownershipHeader
   have headerOrdinary : header.persistent = false := persistent.trans ordinary
-  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated⟩ :=
-    related.decrementReferenceOnce_refines_above_one (descriptors := descriptors) mapped
-      found live ordinary oneLt check
+  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated,
+      capacity⟩ :=
+    related.decrementReferenceOnce_refines_above_one_with_capacity
+      (descriptors := descriptors) mapped found live ordinary oneLt check
   have concreteEq :=
     Fir.Wasm.Concrete.decrementReferenceOnceFuel_above_one_eq_public headerRead
       notPromoted headerOrdinary cell.rc refCount oneLt fuel check descriptors
@@ -2087,11 +2261,32 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
     targetRelated.decValueOnce_above_one_eq ordinary runtime location found oneLt check
   exact ⟨result, nextRuntime, by rw [concreteEq]; exact concretePublic, by
     rw [semanticFuelEq, ← semanticPublicEq]
-    exact semanticPublic, finalRelated⟩
+    exact semanticPublic, finalRelated, capacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_above_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (ordinary : cell.persistent = false)
+    (oneLt : 1 < cell.rc) (fuel : Nat) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+        .ok result ∧
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+    related.decrementReferenceOnceFuel_refines_above_one_with_capacity
+      (descriptors := descriptors) mapped found live ordinary oneLt fuel check
+  exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
 /-- The whole-heap box/natural leaf refinement is likewise valid for every
 positive explicit fuel budget. -/
-theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     {descriptors : ClosureDescriptorTable}
@@ -2106,16 +2301,18 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
       decrementReferenceOnceFuel (fuel + 1) state address check descriptors = .ok result ∧
       Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
   have cellEq := Option.some.inj mappedFound
   subst mappedCell
   have targetRelated := cellRelation.live_of_eq_true live
-  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated⟩ :=
-    related.decrementReferenceOnce_refines_leaf_one (descriptors := descriptors) mapped
-      found live leafCell ordinary one check
+  obtain ⟨result, nextRuntime, concretePublic, semanticPublic, finalRelated,
+      capacity⟩ :=
+    related.decrementReferenceOnce_refines_leaf_one_with_capacity
+      (descriptors := descriptors) mapped found live leafCell ordinary one check
   have concreteEq :=
     targetRelated.decrementReferenceOnceFuel_leaf_one_eq_public
       (descriptors := descriptors) leafCell ordinary one fuel check
@@ -2125,13 +2322,36 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
     targetRelated.decValueOnce_leaf_one_eq leafCell ordinary runtime location found one check
   exact ⟨result, nextRuntime, by rw [concreteEq]; exact concretePublic, by
     rw [semanticFuelEq, ← semanticPublicEq]
-    exact semanticPublic, finalRelated⟩
+    exact semanticPublic, finalRelated, capacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_leaf_one
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {descriptors : ClosureDescriptorTable}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (leafCell : NonrecursiveCell cell)
+    (ordinary : cell.persistent = false)
+    (one : cell.rc = 1) (fuel : Nat) (check : Bool) :
+    ∃ result nextRuntime,
+      decrementReferenceOnceFuel (fuel + 1) state address check descriptors =
+        .ok result ∧
+      Fir.LeanIR.Impure.decLocationFuel (fuel + 1) runtime location =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+    related.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
+      (descriptors := descriptors) mapped found live leafCell ordinary one fuel
+      check
+  exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
 /-- Complete same-fuel recursive ownership simulation for one mapped semantic
 heap location. Successful semantic execution determines every branch; the
 count-one constructor branch releases the parent first and then applies the
 paired ownership-fold theorem with the fuel induction hypothesis. -/
-theorem LiveHeapRel.decrementReferenceOnceFuel_refines
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines_with_capacity
     {fuel : Nat} {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     (related : LiveHeapRel state witness runtime)
@@ -2142,7 +2362,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
     ∃ result,
       decrementReferenceOnceFuel fuel state address check witness.closureDescriptors =
         .ok result ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   induction fuel generalizing state runtime location address nextRuntime check with
   | zero =>
       simp [Fir.LeanIR.Impure.decLocationFuel] at semanticOperation
@@ -2164,7 +2385,7 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
         exact ⟨state,
           targetRelated.decrementReferenceOnceFuel_persistent_eq persistentCase fuel check
             witness.closureDescriptors,
-          related⟩
+          related, .refl state witness⟩
       · have ordinary : cell.persistent = false := by
           cases value : cell.persistent
           · rfl
@@ -2174,13 +2395,14 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
           simp [Fir.LeanIR.Impure.decLocationFuel, getLiveCell, found, live, ordinary,
             zero, Bind.bind, Except.bind] at semanticOperation
         by_cases oneLt : 1 < cell.rc
-        · obtain ⟨result, branchRuntime, concreteBranch, semanticBranch, finalRelated⟩ :=
-          related.decrementReferenceOnceFuel_refines_above_one
-              (descriptors := witness.closureDescriptors) mapped found live ordinary oneLt
-                fuel check
+        · obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
+              finalRelated, capacity⟩ :=
+          related.decrementReferenceOnceFuel_refines_above_one_with_capacity
+            (descriptors := witness.closureDescriptors) mapped found live ordinary
+              oneLt fuel check
           have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
           subst branchRuntime
-          exact ⟨result, concreteBranch, finalRelated⟩
+          exact ⟨result, concreteBranch, finalRelated, capacity⟩
         · have one : cell.rc = 1 := by omega
           cases targetRelated with
           | @boxed kind scalar header _ descriptor objectEq objectRelated refCount
@@ -2188,48 +2410,48 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
               let leafCell : NonrecursiveCell cell :=
                 .inl (.inl (.inl ⟨kind, scalar, objectEq⟩))
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
-                  finalRelated⟩ :=
-                related.decrementReferenceOnceFuel_refines_leaf_one
+                  finalRelated, capacity⟩ :=
+                related.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
                     ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
-              exact ⟨result, concreteBranch, finalRelated⟩
+              exact ⟨result, concreteBranch, finalRelated, capacity⟩
           | @natural value header _ descriptor objectEq headerRead headerKind
                 marker extent limbsFit decoded refCount persistent cellLive =>
               let leafCell : NonrecursiveCell cell :=
                 .inl (.inl (.inr ⟨value, objectEq⟩))
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
-                  finalRelated⟩ :=
-                related.decrementReferenceOnceFuel_refines_leaf_one
+                  finalRelated, capacity⟩ :=
+                related.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
                     ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
-              exact ⟨result, concreteBranch, finalRelated⟩
+              exact ⟨result, concreteBranch, finalRelated, capacity⟩
           | @integer value header _ descriptor objectEq objectRelated refCount
                 persistent cellLive =>
               let leafCell : NonrecursiveCell cell := .inr ⟨value, objectEq⟩
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
-                  finalRelated⟩ :=
-                related.decrementReferenceOnceFuel_refines_leaf_one
+                  finalRelated, capacity⟩ :=
+                related.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
                     ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
-              exact ⟨result, concreteBranch, finalRelated⟩
+              exact ⟨result, concreteBranch, finalRelated, capacity⟩
           | @string value header _ descriptor objectEq objectRelated refCount
                 persistent cellLive =>
               let leafCell : NonrecursiveCell cell :=
                 .inl (.inr ⟨value, objectEq⟩)
               obtain ⟨result, branchRuntime, concreteBranch, semanticBranch,
-                  finalRelated⟩ :=
-                related.decrementReferenceOnceFuel_refines_leaf_one
+                  finalRelated, capacity⟩ :=
+                related.decrementReferenceOnceFuel_refines_leaf_one_with_capacity
                   (descriptors := witness.closureDescriptors) mapped found live leafCell
                     ordinary one fuel check
               have runtimeEq := Except.ok.inj (semanticBranch.symm.trans semanticOperation)
               subst branchRuntime
-              exact ⟨result, concreteBranch, finalRelated⟩
+              exact ⟨result, concreteBranch, finalRelated, capacity⟩
           | @constructor info fieldKinds semantic header _ descriptor objectEq objectRelated
                 headerRead headerKind refCount persistent cellLive =>
               obtain ⟨words, ownedRead, ownershipRelated⟩ :=
@@ -2249,6 +2471,9 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
               obtain ⟨parentRuntime, parentSemantic, parentRelated⟩ :=
                 related.setCell_of_headerWrite mapped found descriptor rawRead releasedEq
                   headerInBounds headerWrite rfl finalValid targetAfter
+              have parentCapacity :=
+                related.mappedHeaderCapacity_of_headerWrite descriptor rawRead
+                  releasedEq headerInBounds headerWrite rfl
               let releaseChild : RuntimeState → Fir.LeanIR.Impure.Value →
                   Except Fir.LeanIR.Impure.RuntimeFault RuntimeState := fun next value =>
                 match value with
@@ -2281,12 +2506,14 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   ∃ after,
                     decrementReferenceOnceFuel fuel before childAddress true
                       witness.closureDescriptors = .ok after ∧
-                    LiveHeapRel after witness nextSemantic := by
+                    LiveHeapRel after witness nextSemantic ∧
+                    MappedHeaderCapacityTransport before after witness := by
                 intro before semanticState nextSemantic childLocation childAddress
                   childRelated childMapped childOperation
                 exact ih childRelated childMapped true childOperation
-              obtain ⟨result, concreteFold, finalRelated⟩ :=
-                ownershipRelated.foldlM_refines parentRelated recurse semanticFoldList
+              obtain ⟨result, concreteFold, finalRelated, foldCapacity⟩ :=
+                ownershipRelated.foldlM_refines_with_capacity parentRelated recurse
+                  semanticFoldList
               have addressHeap :=
                 (MemoryState.PrefixExtension.readLiveHeader_facts state address header
                   headerRead).1
@@ -2317,7 +2544,8 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   simpa [readOwnedReferences, headerKind] using ownedRead
                 rw [ownedReadWithDescriptors, releasedOperation]
                 exact concreteFold
-              exact ⟨result, concreteOperation, finalRelated⟩
+              exact ⟨result, concreteOperation, finalRelated,
+                parentCapacity.trans foldCapacity⟩
           | closure closureRelated =>
               cases closureRelated with
               | @closure function arity captureKinds captures header _ objectEq objectRelated
@@ -2349,6 +2577,10 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                 obtain ⟨parentRuntime, parentSemantic, parentRelated⟩ :=
                   related.setCell_of_headerWrite mapped found objectRelated.descriptor rawRead
                     releasedEq headerInBounds headerWrite rfl finalValid targetAfter
+                have parentCapacity :=
+                  related.mappedHeaderCapacity_of_headerWrite
+                    objectRelated.descriptor rawRead releasedEq headerInBounds
+                    headerWrite rfl
                 let releaseChild : RuntimeState → Fir.LeanIR.Impure.Value →
                     Except Fir.LeanIR.Impure.RuntimeFault RuntimeState := fun next value =>
                   match value with
@@ -2388,12 +2620,14 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                     ∃ after,
                       decrementReferenceOnceFuel fuel before childAddress true
                         witness.closureDescriptors = .ok after ∧
-                      LiveHeapRel after witness nextSemantic := by
+                      LiveHeapRel after witness nextSemantic ∧
+                      MappedHeaderCapacityTransport before after witness := by
                   intro before semanticState nextSemantic childLocation childAddress
                     childRelated childMapped childOperation
                   exact ih childRelated childMapped true childOperation
-                obtain ⟨result, concreteFold, finalRelated⟩ :=
-                  ownershipRelated.foldlM_refines parentRelated recurse semanticOwnedFoldList
+                obtain ⟨result, concreteFold, finalRelated, foldCapacity⟩ :=
+                  ownershipRelated.foldlM_refines_with_capacity parentRelated
+                    recurse semanticOwnedFoldList
                 have addressHeap :=
                   (MemoryState.PrefixExtension.readLiveHeader_facts state address header
                     headerRead).1
@@ -2420,13 +2654,34 @@ theorem LiveHeapRel.decrementReferenceOnceFuel_refines
                   rw [refCount, if_neg oneLt]
                   rw [ownedRead, releasedOperation]
                   exact concreteFold
-                exact ⟨result, concreteOperation, finalRelated⟩
+                exact ⟨result, concreteOperation, finalRelated,
+                  parentCapacity.trans foldCapacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnceFuel_refines
+    {fuel : Nat} {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocationFuel fuel runtime location =
+        .ok nextRuntime) :
+    ∃ result,
+      decrementReferenceOnceFuel fuel state address check
+          witness.closureDescriptors =
+        .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, concrete, finalRelated, _⟩ :=
+    related.decrementReferenceOnceFuel_refines_with_capacity mapped check
+      semanticOperation
+  exact ⟨result, concrete, finalRelated⟩
 
 /-- The public concrete recursive decrement refines FIR's public semantic
 decrement. Related heaps guarantee that the semantic heap-length fuel fits
 inside the concrete cursor-derived budget, and concrete success is monotone
 when that budget is enlarged. -/
-theorem LiveHeapRel.decrementReferenceOnce_refines
+theorem LiveHeapRel.decrementReferenceOnce_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     (related : LiveHeapRel state witness runtime)
@@ -2435,16 +2690,37 @@ theorem LiveHeapRel.decrementReferenceOnce_refines
     (semanticOperation :
       Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime) :
     ∃ result,
-      decrementReferenceOnce state address check witness.closureDescriptors = .ok result ∧
-      LiveHeapRel result witness nextRuntime := by
+      decrementReferenceOnce state address check witness.closureDescriptors =
+        .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   unfold Fir.LeanIR.Impure.decLocation at semanticOperation
-  obtain ⟨result, concreteSemanticFuel, finalRelated⟩ :=
-    related.decrementReferenceOnceFuel_refines mapped check semanticOperation
+  obtain ⟨result, concreteSemanticFuel, finalRelated, capacity⟩ :=
+    related.decrementReferenceOnceFuel_refines_with_capacity mapped check
+      semanticOperation
   have concretePublic := decrementReferenceOnceFuel_ok_mono
     related.semanticFuel_le_concreteFuel concreteSemanticFuel
   exact ⟨result, by
     unfold decrementReferenceOnce
-    exact concretePublic, finalRelated⟩
+    exact concretePublic, finalRelated, capacity⟩
+
+theorem LiveHeapRel.decrementReferenceOnce_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime) :
+    ∃ result,
+      decrementReferenceOnce state address check witness.closureDescriptors =
+        .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, concrete, finalRelated, _⟩ :=
+    related.decrementReferenceOnce_refines_with_capacity mapped check
+      semanticOperation
+  exact ⟨result, concrete, finalRelated⟩
 
 /-- Repeating a public decrement preserves the heap relation after every
 successful semantic step. The outer checked/unchecked bit is immaterial for a
