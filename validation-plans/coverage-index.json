@@ -56,8 +56,8 @@
       },
       {
         "id": "direct-lcnf-machine",
-        "minimumCases": 2,
-        "minimumComparisons": 2,
+        "minimumCases": 3,
+        "minimumComparisons": 3,
         "requiredBackends": [
           "direct-lcnf",
           "direct-native"
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 99,
-      "minimumTierCases": 196,
-      "minimumComparisons": 293
+      "minimumUniqueCases": 100,
+      "minimumTierCases": 197,
+      "minimumComparisons": 294
     },
     "machine": {
-      "minimumCases": 99,
-      "minimumInterpreterSteps": 1687,
+      "minimumCases": 100,
+      "minimumInterpreterSteps": 1696,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -101,7 +101,9 @@
         "oproj",
         "oset",
         "pap",
+        "reset",
         "return",
+        "reuse",
         "setTag",
         "sproj",
         "sset",
@@ -126,7 +128,9 @@
         "oproj",
         "oset",
         "pap",
+        "reset",
         "return",
+        "reuse",
         "setTag",
         "sproj",
         "sset",

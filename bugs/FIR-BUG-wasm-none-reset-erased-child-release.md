@@ -95,3 +95,7 @@ resets that field, reuses the retained allocation, and reads the replacement
 value. The interpreter now returns the replacement rather than faulting with
 `expectedObject`, matching recursive semantic ownership release and the
 concrete Wasm runtime.
+
+The validation-owned `machine-reset-erased-field` case independently compares
+the exact final-impure `ctor`/`reset`/`reuse` path with a native Lean
+replacement and pins its executed form trace and multiplicities.

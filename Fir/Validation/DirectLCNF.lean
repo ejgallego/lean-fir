@@ -15,6 +15,7 @@ private def x : FVarId := ⟨`x⟩
 private def y : FVarId := ⟨`y⟩
 private def z : FVarId := ⟨`z⟩
 private def c : FVarId := ⟨`c⟩
+private def p : FVarId := ⟨`p⟩
 private def r : FVarId := ⟨`r⟩
 
 private def objType : Expr :=
@@ -65,6 +66,21 @@ private def nativeClosureYieldApply : Nat :=
   let closure := returnIdentity
   closure 42 7
 
+private structure NativeErasedOwner where
+  proof : True
+
+private structure NativePayloadOwner where
+  payload : Nat
+
+@[noinline]
+private def replaceErasedOwner (_owner : NativeErasedOwner) (payload : Nat) :
+    NativePayloadOwner :=
+  { payload }
+
+private def nativeResetErasedField : Nat :=
+  let erased : NativeErasedOwner := { proof := True.intro }
+  (replaceErasedOwner erased 72).payload
+
 private def identityDecl : LCNF.Decl .impure :=
   decl `directIdentity #[param z] (.code (.return z))
 
@@ -107,6 +123,26 @@ private def closureYieldApplyProgram : ImpureProgram := {
 
 private def closureYieldApplyFormTrace : Array String :=
   #["pap", "lit", "lit", "fvar", "pap", "return", "return", "return"]
+
+private def erasedOwnerInfo : LCNF.CtorInfo :=
+  { name := `NativeErasedOwner.mk, cidx := 0, size := 1, usize := 0, ssize := 0 }
+
+private def payloadOwnerInfo : LCNF.CtorInfo :=
+  { name := `NativePayloadOwner.mk, cidx := 0, size := 1, usize := 0, ssize := 0 }
+
+private def resetErasedFieldCode : LCNF.Code .impure :=
+  .let (letDecl p (.ctor erasedOwnerInfo #[.erased])) <|
+  .let (letDecl r (.reset 1 p)) <|
+  .let (letDecl y (.lit (.nat 72))) <|
+  .let (letDecl z (.reuse r payloadOwnerInfo true #[.fvar y])) <|
+  .let (letDecl x (.oproj 0 z)) <|
+  .return x
+
+private def resetErasedFieldProgram : ImpureProgram := {
+  decls := #[decl `directResetErasedField #[] (.code resetErasedFieldCode)] }
+
+private def resetErasedFieldFormTrace : Array String :=
+  #["ctor", "reset", "lit", "reuse", "oproj", "return"]
 
 def cases : Array Case := #[
   { validationCase := {
@@ -154,14 +190,41 @@ def cases : Array Case := #[
         note := "Enter the interpreter apply frame through a closure value and compare with native"
       }
     }
-    program := closureYieldApplyProgram }
+    program := closureYieldApplyProgram },
+  { validationCase := {
+      id := "machine-reset-erased-field"
+      entry := `directResetErasedField
+      resultSchema := .nat
+      native := fun _ => .nat nativeResetErasedField
+      tags :=
+        #["direct-lcnf", "machine", "ownership", "constructor", "reset", "reuse",
+          "erased", "boundary"]
+      requiredLcnfForms := #["ctor", "reset", "lit", "reuse", "oproj", "return"]
+      requiredExecutedLcnfForms :=
+        #["ctor", "reset", "lit", "reuse", "oproj", "return"]
+      requiredExecutedLcnfFormCounts := #[
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "reset", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "reuse", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }
+      ]
+      requiredExecutedLcnfFormTrace := some resetErasedFieldFormTrace
+      provenance := {
+        suite := "fir-direct-lcnf"
+        path := "Fir/Validation/DirectLCNF.lean"
+        note :=
+          "Reset an erased ownership slot, reuse its storage, and compare with native replacement"
+      }
+    }
+    program := resetErasedFieldProgram }
 ]
 
-#guard cases.size == 2
+#guard cases.size == 3
 
 #guard cases.all fun directCase =>
-  directCase.validationCase.requiredAdministrativeStepKinds.contains
-    "admin:yield-apply"
+  directCase.validationCase.requiredExecutedLcnfFormTrace.isSome
 
 def findCase? (id : String) : Option Case :=
   cases.find? (·.validationCase.id == id)
