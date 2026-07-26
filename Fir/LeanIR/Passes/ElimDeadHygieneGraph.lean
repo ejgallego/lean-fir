@@ -2326,6 +2326,63 @@ theorem ExactShadowCodeBinderReady.usizeSetDeleted_continuationGraph
     (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
     usedBound continuationReady
 
+/-- A retained packed-scalar write widens its child liveness by the written
+local while preserving hereditary continuation provenance. -/
+theorem ExactShadowCodeBinderReady.scalarSetRetained_continuationGraph
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel outerFuel width offset : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains object = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.scalarSetRetained
+          (width := width) (offset := offset) (field := field)
+          (type := type) continuation live))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset (continuationUsed.insert field) ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    ((usedSubset_insert continuationUsed field).trans usedBound)
+    continuationReady
+
+/-- A deleted packed-scalar write selects its unchanged child liveness and
+retains the child's hereditary provenance directly. -/
+theorem ExactShadowCodeBinderReady.scalarSetDeleted_continuationGraph
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel outerFuel width offset : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains object = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.scalarSetDeleted
+          (width := width) (offset := offset) (field := field)
+          (type := type) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset continuationUsed ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    usedBound continuationReady
+
 /-- An exact tag update widens only the operand liveness; its recursively
 transformed continuation retains hereditary provenance under the parent
 bounds. -/
