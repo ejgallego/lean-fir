@@ -11188,6 +11188,153 @@ theorem match_retainedJoinStep
   exact ⟨_, match_internalCoreSteps sourceTransition targetTransition
     related step⟩
 
+/-- Hereditary retained-join rule.  Both installed declaration bodies and the
+selected continuation keep their exact compiler provenance. -/
+theorem coreStep_retainedJoin_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (declaration : BinderReadyShadowFunDeclRelated fuel used
+      sourceDeclaration targetDeclaration)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      joins := (sourceDeclaration.fvarId, sourceDeclaration) ::
+        sourceState.joins
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with
+      joins := (targetDeclaration.fvarId, targetDeclaration) ::
+        targetState.joins
+      control := .code targetContinuation }
+    coreStep { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) } =
+        .next sourceAfter ∧
+      coreStep { targetState with
+        control := .code (.jp targetDeclaration targetContinuation) } =
+        .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨envRootsOn used sourceState.env,
+    envRootsOn used targetState.env,
+    sourceFrameRoots, targetFrameRoots,
+    programs,
+    .code continuation
+      (joins.consBothOfKeys declaration.fvarId_eq declaration) env,
+    frames, runtime⟩
+
+/-- Semantic-step form of the hereditary retained-join rule. -/
+theorem match_retainedJoinStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (declaration : BinderReadyShadowFunDeclRelated fuel used
+      sourceDeclaration targetDeclaration)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.jp targetDeclaration targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_retainedJoin_binderReadyReachableRelated
+      sourceState targetState programs frames declaration continuation joins
+      env runtime with
+    ⟨sourceTransition, targetTransition, related⟩
+  exact ⟨_, match_internalCoreSteps_binderReady
+    sourceTransition targetTransition related step⟩
+
+/-- An exact retained-join view projects both hereditary children: its body
+becomes the new related join entry and its continuation becomes active after
+the matched administrative steps. -/
+theorem ExactShadowCodeBinderReady.match_retainedJoinStep
+    {initial continuationUsed bodyUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation sourceBody targetBody :
+      LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains fvarId = true}
+    {body :
+      ExactShadowCodeRun nextFuel continuationUsed bodyUsed
+        sourceBody targetBody}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinRetained
+          (binderName := binderName) (params := params) (type := type)
+          continuation live body))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset bodyUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code
+            (.jp (.mk fvarId binderName params type targetBody)
+              targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let declaration :
+      BinderReadyShadowFunDeclRelated fuel ambient
+        (.mk fvarId binderName params type sourceBody)
+        (.mk fvarId binderName params type targetBody) := {
+    fvarId_eq := rfl
+    binderName_eq := rfl
+    params_eq := rfl
+    type_eq := rfl
+    value := ready.joinRetained_bodyGraph fuelBound usedBound
+  }
+  exact match_retainedJoinStep_binderReady
+    sourceState targetState programs frames declaration
+    (ready.joinRetained_continuationGraph fuelBound usedBound)
+    joins env runtime step
+
 /-- Any semantic step from related retained returns is matched by one target
 return step.  A missing source lookup is terminal and therefore cannot have
 supplied the `Step` premise. -/
@@ -11560,6 +11707,126 @@ theorem match_deletedJoinStep
     sourceState targetState programs frames continuation joins env absent
       runtime
   exact match_sourceOnlyCoreStep progress.1 progress.2 step
+
+/-- Hereditary deleted-join rule.  The source-only entry is unobservable at
+the continuation's liveness set, while every observable join entry and the
+active continuation retain exact compiler provenance. -/
+theorem coreStep_deletedJoin_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      joins := (declaration.fvarId, declaration) :: sourceState.joins
+      control := .code sourceContinuation }
+    coreStep { sourceState with
+        control := .code (.jp declaration sourceContinuation) } =
+        .next sourceAfter ∧
+      BinderReadyReachableMachineRelated fuel rho sourceAfter
+        { targetState with control := .code targetContinuation } := by
+  dsimp only
+  constructor
+  · rfl
+  · unfold BinderReadyReachableMachineRelated
+    exact ⟨envRootsOn used sourceState.env,
+      envRootsOn used targetState.env,
+      sourceFrameRoots, targetFrameRoots,
+      programs,
+      .code continuation (joins.consSourceOfAbsent absent) env,
+      frames, runtime⟩
+
+/-- Semantic-step form of the hereditary deleted-join rule. -/
+theorem match_deletedJoinStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.jp declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have progress := coreStep_deletedJoin_binderReadyReachableRelated
+    sourceState targetState programs frames continuation joins env absent
+      runtime
+  rcases match_sourceOnlyCoreStep_binderReady
+      progress.1 progress.2 step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- An exact deleted-join view supplies both the hereditary continuation and
+ambient join-binder absence, closing the source-only administrative step. -/
+theorem ExactShadowCodeBinderReady.match_deletedJoinStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation sourceBody : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinDeleted
+          (binderName := binderName) (params := params) (type := type)
+          (sourceBody := sourceBody) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedJoinStep_binderReady
+    (declaration := .mk fvarId binderName params type sourceBody)
+    sourceState targetState programs frames
+    (ready.joinDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.joinDeleted_ambientAbsent runtime step
 
 /-- Complete graph-level join dispatcher.  The syntactic residual and its
 readiness proof choose either the one-step retained match or the zero-step
