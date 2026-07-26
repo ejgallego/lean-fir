@@ -1839,6 +1839,45 @@ theorem shadowProgram_binderReadyExactRelated
   canonicalExactShadowProgram_toBinderReadyExact
     (shadowProgram_canonicalExactRelated wellFormed result)
 
+/-- Immediate hereditary certificates selected by the control-changing
+`let` and `join` branches of an exact compiler view.  Matching on the view,
+rather than inverting its indexed readiness proof, keeps computed liveness
+indices such as `collectLetValue` opaque. -/
+def ExactShadowCodeView.controlResidualBinderReady
+    (ambient : UsedLocals)
+    {initial : UsedLocals} {fuel : Nat} {final : UsedLocals}
+    {source target : LCNF.Code .impure}
+    (view : ExactShadowCodeView initial fuel final source target) : Prop :=
+  match view with
+  | .letRetained continuation _ =>
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view
+  | .letDeleted continuation _ _ =>
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view
+  | .joinRetained continuation _ body =>
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view ∧
+        ExactShadowCodeBinderReady ambient body.toGraph.view
+  | .joinDeleted continuation _ =>
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view
+  | _ => True
+
+/-- Hereditary readiness supplies the immediate residual certificates
+described by its exact branch view. -/
+theorem ExactShadowCodeBinderReady.controlResidualBinderReady
+    (ready : ExactShadowCodeBinderReady ambient view) :
+    view.controlResidualBinderReady ambient := by
+  cases ready with
+  | letRetained continuationReady => exact continuationReady
+  | letDeleted _ continuationReady => exact continuationReady
+  | joinRetained continuationReady bodyReady =>
+      exact ⟨continuationReady, bodyReady⟩
+  | joinDeleted _ continuationReady => exact continuationReady
+  | cases _ | jump | «return» | unreachable
+  | objectSetRetained _ | objectSetDeleted _
+  | usizeSetRetained _ | usizeSetDeleted _
+  | scalarSetRetained _ | scalarSetDeleted _
+  | tagSet _ | increment _ | decrement _ | delete _ =>
+      trivial
+
 /-- Hereditary exact provenance embedded in the two monotonicity indices used
 by runtime controls.  Child traversals consume less fuel, while their exact
 final liveness set may be widened to the ambient set carried by an
@@ -1849,6 +1888,172 @@ def BinderReadyShadowCodeGraph (fuel : Nat) (used : UsedLocals)
     ∃ exact : ExactShadowCodeGraph remaining final source target,
       UsedSubset final used ∧
         ExactShadowCodeBinderReady used exact.view
+
+/-- Embed one exact child run into the bounded hereditary graph used by
+runtime controls.  Keeping this constructor at the exact-run boundary avoids
+reconstructing the child's seed when an operational step selects a residual
+continuation or installed join body. -/
+theorem ExactShadowCodeRun.toBinderReadyShadowCodeGraphAt
+    (run : ExactShadowCodeRun childFuel initial final source target)
+    (fuelBound : childFuel ≤ outerFuel)
+    (usedBound : UsedSubset final ambient)
+    (ready : ExactShadowCodeBinderReady ambient run.toGraph.view) :
+    BinderReadyShadowCodeGraph outerFuel ambient source target :=
+  ⟨childFuel, final, fuelBound, run.toGraph, usedBound, ready⟩
+
+/-- A retained let's exact hereditary certificate projects to its selected
+continuation under the enclosing graph's fuel and liveness bounds. -/
+theorem ExactShadowCodeBinderReady.letRetained_continuationGraph
+    {initial continuationUsed : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {declaration : LCNF.LetDecl .impure}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      declaration.fvarId ∈ continuationUsed ∨
+        safeToElim declaration.value = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained continuation keep))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound :
+      UsedSubset
+        (collectLetValue continuationUsed declaration.value) ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    ((collectLetValue_subset continuationUsed declaration.value).trans
+      usedBound)
+    continuationReady
+
+/-- A deleted let's target is already its selected continuation, whose exact
+certificate therefore becomes the post-step active-code graph directly. -/
+theorem ExactShadowCodeBinderReady.letDeleted_continuationGraph
+    {initial continuationUsed : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {declaration : LCNF.LetDecl .impure}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent :
+      continuationUsed.contains declaration.fvarId = false}
+    {safe : safeToElim declaration.value = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset continuationUsed ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    usedBound continuationReady
+
+/-- A retained join first executes its continuation.  Liveness monotonicity
+of the subsequently traversed body embeds that continuation's final set into
+the enclosing final set. -/
+theorem ExactShadowCodeBinderReady.joinRetained_continuationGraph
+    {initial continuationUsed bodyUsed : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceContinuation targetContinuation sourceBody targetBody :
+      LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains fvarId = true}
+    {body :
+      ExactShadowCodeRun nextFuel continuationUsed bodyUsed
+        sourceBody targetBody}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinRetained
+          (binderName := binderName) (params := params) (type := type)
+          continuation live body))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset bodyUsed ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view :=
+    ready.controlResidualBinderReady.1
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    ((shadowCode_spec body.result).2.trans usedBound)
+    continuationReady
+
+/-- The body installed by a retained join inherits the same enclosing fuel
+and final-liveness bounds as the parent exact graph. -/
+theorem ExactShadowCodeBinderReady.joinRetained_bodyGraph
+    {initial continuationUsed bodyUsed : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceContinuation targetContinuation sourceBody targetBody :
+      LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains fvarId = true}
+    {body :
+      ExactShadowCodeRun nextFuel continuationUsed bodyUsed
+        sourceBody targetBody}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinRetained
+          (binderName := binderName) (params := params) (type := type)
+          continuation live body))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset bodyUsed ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient sourceBody targetBody := by
+  have bodyReady :
+      ExactShadowCodeBinderReady ambient body.toGraph.view :=
+    ready.controlResidualBinderReady.2
+  exact body.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    usedBound bodyReady
+
+/-- A deleted join leaves only its exact continuation, with the parent's final
+liveness set unchanged. -/
+theorem ExactShadowCodeBinderReady.joinDeleted_continuationGraph
+    {initial continuationUsed : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceContinuation targetContinuation sourceBody : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinDeleted
+          (binderName := binderName) (params := params) (type := type)
+          (sourceBody := sourceBody) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset continuationUsed ambient) :
+    BinderReadyShadowCodeGraph outerFuel ambient
+      sourceContinuation targetContinuation := by
+  have continuationReady :
+      ExactShadowCodeBinderReady ambient continuation.toGraph.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact continuation.toBinderReadyShadowCodeGraphAt
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    usedBound continuationReady
 
 /-- Existential runtime-facing form for declaration bodies. -/
 def BinderReadyShadowCodeRelated (fuel : Nat)
