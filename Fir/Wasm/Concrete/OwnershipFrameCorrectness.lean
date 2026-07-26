@@ -1949,8 +1949,9 @@ theorem LiveCellRel.incValue_persistent_eq
 
 /-- Whole-heap source/concrete increment refinement. Persistent cells are
 exact no-ops in both runtimes; ordinary cells rewrite only the target common
-header and use the generic frame assembler for every other allocation. -/
-theorem LiveHeapRel.incrementReference_refines
+header and use the generic frame assembler for every other allocation. Both
+branches preserve the physical capacity of every mapped allocation. -/
+theorem LiveHeapRel.incrementReference_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     (related : LiveHeapRel state witness runtime)
@@ -1962,7 +1963,8 @@ theorem LiveHeapRel.incrementReference_refines
       incrementReference state address amount check = .ok result ∧
       Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1974,7 +1976,7 @@ theorem LiveHeapRel.incrementReference_refines
       targetRelated.incrementReference_persistent_eq persistentCase amount check,
       targetRelated.incValue_persistent_eq persistentCase runtime location found amount
         check,
-      related⟩
+      related, .refl state witness⟩
   · have ordinary : cell.persistent = false := by
       cases value : cell.persistent
       · rfl
@@ -2000,8 +2002,29 @@ theorem LiveHeapRel.incrementReference_refines
       related.setCell_of_headerWrite mapped found targetDescriptorFound rawRead
         resultEq headerInBounds headerWrite sameExtent finalValid (.live targetAfter)
     have semanticEq := targetRelated.incValue_eq ordinary runtime location found amount check
+    have capacity :=
+      related.mappedHeaderCapacity_of_headerWrite targetDescriptorFound rawRead
+        resultEq headerInBounds headerWrite sameExtent
     exact ⟨result, nextRuntime, operation, by rw [semanticEq, semanticUpdate],
-      finalRelated⟩
+      finalRelated, capacity⟩
+
+theorem LiveHeapRel.incrementReference_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (amount : Nat) (fits : cell.rc + amount < UInt32.size) (check : Bool) :
+    ∃ result nextRuntime,
+      incrementReference state address amount check = .ok result ∧
+      Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+    related.incrementReference_refines_with_capacity mapped found live amount fits
+      check
+  exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
 /-- Whole-heap source/concrete refinement for the nonrecursive decrement
 branch. The target count changes, every other allocation is framed by the
@@ -2727,6 +2750,47 @@ successful semantic step. The outer checked/unchecked bit is immaterial for a
 mapped heap address; recursive child releases remain checked in both models.
 The witness mapping is stable across dead-cell transitions, so the one-step
 theorem composes directly through both folds. -/
+theorem LiveHeapRel.decrementReference_refines_with_capacity
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    {amount : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (check : Bool)
+    (semanticOperation :
+      Fir.LeanIR.Impure.decValue runtime (.object (.heap location)) amount check =
+        .ok nextRuntime) :
+    ∃ result,
+      decrementReference state address amount check witness.closureDescriptors = .ok result ∧
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
+  induction amount generalizing state runtime nextRuntime with
+  | zero =>
+      simp [Fir.LeanIR.Impure.decValue] at semanticOperation
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst nextRuntime
+      exact ⟨state, rfl, related, .refl state witness⟩
+  | succ amount ih =>
+      simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
+        List.foldlM_cons, Bind.bind, Except.bind,
+        Fir.LeanIR.Impure.decValueOnce] at semanticOperation
+      cases firstSemantic : Fir.LeanIR.Impure.decLocation runtime location with
+      | error fault =>
+          rw [firstSemantic] at semanticOperation
+          contradiction
+      | ok middleRuntime =>
+          rw [firstSemantic] at semanticOperation
+          obtain ⟨middleState, firstConcrete, middleRelated, firstCapacity⟩ :=
+            related.decrementReferenceOnce_refines_with_capacity mapped check
+              firstSemantic
+          obtain ⟨result, restConcrete, finalRelated, restCapacity⟩ :=
+            ih middleRelated semanticOperation
+          refine ⟨result, ?_, finalRelated, firstCapacity.trans restCapacity⟩
+          simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+            Bind.bind, Except.bind]
+          rw [firstConcrete]
+          exact restConcrete
+
 theorem LiveHeapRel.decrementReference_refines
     {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
@@ -2740,31 +2804,10 @@ theorem LiveHeapRel.decrementReference_refines
     ∃ result,
       decrementReference state address amount check witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness nextRuntime := by
-  induction amount generalizing state runtime nextRuntime with
-  | zero =>
-      simp [Fir.LeanIR.Impure.decValue] at semanticOperation
-      have runtimeEq := Except.ok.inj semanticOperation
-      subst nextRuntime
-      exact ⟨state, rfl, related⟩
-  | succ amount ih =>
-      simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
-        List.foldlM_cons, Bind.bind, Except.bind,
-        Fir.LeanIR.Impure.decValueOnce] at semanticOperation
-      cases firstSemantic : Fir.LeanIR.Impure.decLocation runtime location with
-      | error fault =>
-          rw [firstSemantic] at semanticOperation
-          contradiction
-      | ok middleRuntime =>
-          rw [firstSemantic] at semanticOperation
-          obtain ⟨middleState, firstConcrete, middleRelated⟩ :=
-            related.decrementReferenceOnce_refines mapped check firstSemantic
-          obtain ⟨result, restConcrete, finalRelated⟩ :=
-            ih middleRelated semanticOperation
-          refine ⟨result, ?_, finalRelated⟩
-          simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
-            Bind.bind, Except.bind]
-          rw [firstConcrete]
-          exact restConcrete
+  obtain ⟨result, concrete, finalRelated, _⟩ :=
+    related.decrementReference_refines_with_capacity mapped check
+      semanticOperation
+  exact ⟨result, concrete, finalRelated⟩
 
 /-- Explicitly deleting an already released ordinary allocation fails at the
 live-header read; the physical-zero sentinel exception is unreachable because
@@ -2818,6 +2861,17 @@ theorem LiveHeapRel.deleteObject_deadObject
 /-- The erased failed-reset sentinel is a delete-specific no-op in both the
 source and concrete runtimes. This does not introduce an ordinary object
 relation for physical zero. -/
+theorem LiveHeapRel.deleteObject_erased_refines_with_capacity
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    (related : LiveHeapRel state witness runtime) :
+    ∃ result,
+      deleteObject state Word32.zero = .ok result ∧
+      Fir.LeanIR.Impure.deleteValue runtime .erased = .ok runtime ∧
+      LiveHeapRel result witness runtime ∧
+      MappedHeaderCapacityTransport state result witness := by
+  exact ⟨state, deleteObject_zero state,
+    Fir.LeanIR.Impure.deleteValue_erased runtime, related, .refl state witness⟩
+
 theorem LiveHeapRel.deleteObject_erased_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     (related : LiveHeapRel state witness runtime) :
@@ -2825,12 +2879,13 @@ theorem LiveHeapRel.deleteObject_erased_refines
       deleteObject state Word32.zero = .ok result ∧
       Fir.LeanIR.Impure.deleteValue runtime .erased = .ok runtime ∧
       LiveHeapRel result witness runtime := by
-  exact ⟨state, deleteObject_zero state,
-    Fir.LeanIR.Impure.deleteValue_erased runtime, related⟩
+  obtain ⟨result, concrete, semantic, finalRelated, _⟩ :=
+    related.deleteObject_erased_refines_with_capacity
+  exact ⟨result, concrete, semantic, finalRelated⟩
 
 /-- Explicit deletion installs the canonical concrete freed header and the
 matching semantic zero-count/dead cell without releasing owned children. -/
-theorem LiveHeapRel.deleteObject_refines
+theorem LiveHeapRel.deleteObject_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     (related : LiveHeapRel state witness runtime)
@@ -2840,7 +2895,8 @@ theorem LiveHeapRel.deleteObject_refines
         .ok nextRuntime) :
     ∃ result,
       deleteObject state address = .ok result ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   have live : cell.live = true := by
@@ -2897,6 +2953,24 @@ theorem LiveHeapRel.deleteObject_refines
     simp only [liftMemory]
     rw [if_neg (by simp [notPromoted])]
     exact releasedOperation
-  exact ⟨released, concreteDelete, finalRelated⟩
+  have capacity :=
+    related.mappedHeaderCapacity_of_headerWrite descriptorFound rawRead releasedEq
+      headerInBounds headerWrite rfl
+  exact ⟨released, concreteDelete, finalRelated, capacity⟩
+
+theorem LiveHeapRel.deleteObject_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (semanticOperation :
+      Fir.LeanIR.Impure.deleteValue runtime (.object (.heap location)) =
+        .ok nextRuntime) :
+    ∃ result,
+      deleteObject state address = .ok result ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, concrete, finalRelated, _⟩ :=
+    related.deleteObject_refines_with_capacity mapped semanticOperation
+  exact ⟨result, concrete, finalRelated⟩
 
 end Fir.Wasm.Concrete

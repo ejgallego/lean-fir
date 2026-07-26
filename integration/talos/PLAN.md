@@ -3265,6 +3265,16 @@ reset-prefix result. Ownership and mutation transitions are now the remaining
 transport instances before `ReuseCapacityStateRelated` can be threaded
 syntax-directly. No FIR semantic contract or executable ABI changed.
 
+W6.6dm discharges ownership-transition transport. Increment and explicit
+delete are same-extent header writes (or exact no-ops), while repeated
+decrement composes the already proved capacity result for each recursive
+ownership step. The concrete heap theorems and Talos operation wrappers now
+return `MappedHeaderCapacityTransport` for every successful ordinary,
+tagged, promoted-tag, and erased lane; compatibility wrappers retain the
+preexisting refinement API. Only payload/header mutation transitions remain
+before `ReuseCapacityStateRelated` can be threaded syntax-directly. No FIR
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

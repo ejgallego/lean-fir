@@ -3160,7 +3160,7 @@ theorem ConcreteRuntimeRel.replaceHeap_of_transportAux
 operation for both ordinary heap objects and checked tagged/promoted-tag
 values. `fits` is the wasm32 header-count side condition for the ordinary
 branch and is vacuous for tagged values. -/
-theorem incrementStep_of_refines
+theorem incrementStep_of_refines_with_capacity
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {sourceObject : Value}
     {word : Word32} {amount : Nat} {check : Bool}
@@ -3178,7 +3178,8 @@ theorem incrementStep_of_refines
           [.i32 (UInt32.ofNat word.value)] =
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
-        nextRuntime := by
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases objectRelated with
   | tobject referenceRelated =>
       cases referenceRelated with
@@ -3201,13 +3202,13 @@ theorem incrementStep_of_refines
                 cases impossible
               have countFits := fits _ cell rfl found
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.incrementReference_refines mapped found live
-                  amount countFits check
+                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.incrementReference_refines_with_capacity
+                  mapped found live amount countFits check
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_⟩
+              refine ⟨heap, ?_, ?_, capacity⟩
               · simp [incrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
               · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -3223,10 +3224,34 @@ theorem incrementStep_of_refines
           have afterEq : nextRuntime = runtime := by
             simpa [incValue] using updated.symm
           subst nextRuntime
-          refine ⟨initial.host.runtime.heap, ?_, ?_⟩
+          refine ⟨initial.host.runtime.heap, ?_, ?_,
+            .refl initial.host.runtime.heap witness⟩
           · simp [incrementStep, clearFailure,
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
           · simpa [replaceHeap, clearFailure] using runtimeRelated
+
+theorem incrementStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject : Value}
+    {word : Word32} {amount : Nat} {check : Bool}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (updated : incValue runtime sourceObject amount check = .ok nextRuntime)
+    (fits : ∀ (location : Location) (cell : HeapCell),
+      sourceObject = .object (.heap location) →
+      findCell? runtime.heap location = some cell →
+      cell.rc + amount < UInt32.size) :
+    ∃ heap,
+      incrementStep amount check initial
+          [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    incrementStep_of_refines_with_capacity runtimeRelated objectRelated updated fits
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- A stale mapped increment reaches the Talos boundary as the exact
 source-address dead-object fault before count arithmetic or a header write. -/
@@ -3374,6 +3399,72 @@ Ordinary objects may recursively release ownership trees for either check bit;
 tagged and promoted-tag words are checked no-ops, while their only successful
 unchecked operation is the amount-zero fold. The descriptor equality exposes
 the frozen closure-layout contract needed to release typed captures. -/
+theorem decrementStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject : Value}
+    {word : Word32} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (updated : decValue runtime sourceObject amount check = .ok nextRuntime) :
+    ∃ heap,
+      decrementStep amount check objectFields? initial
+          [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.decrementReference_refines_with_capacity
+                  mapped check updated
+              refine ⟨heap, ?_, ?_, capacity⟩
+              · simp [decrementStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, descriptorsEq,
+                  concreteOperation, replaceHeap]
+              · exact ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+                  runtimeRelated finalHeapRelated (decValue_runtimeAux updated)
+      | tagged taggedRelated =>
+          cases check with
+          | false =>
+              cases amount with
+              | zero =>
+                  have afterEq : nextRuntime = runtime := by
+                    simpa [decValue] using (Except.ok.inj updated).symm
+                  subst nextRuntime
+                  refine ⟨initial.host.runtime.heap, ?_, ?_,
+                    .refl initial.host.runtime.heap witness⟩
+                  · simp [decrementStep, decrementReference, clearFailure,
+                      Word32.ofUInt32_ofNat_value, replaceHeap, pure,
+                      Except.pure]
+                  · simpa [replaceHeap, clearFailure] using runtimeRelated
+              | succ amount =>
+                  simp only [decValue, List.replicate_succ, List.foldlM_cons,
+                    Bind.bind, Except.bind, decValueOnce] at updated
+                  simp at updated
+          | true =>
+              have concreteOperation :=
+                decrementReference_tagged_checked runtimeRelated.heap taggedRelated
+                  amount initial.host.closureDescriptors
+              have afterEq : nextRuntime = runtime := by
+                rw [decValue_tagged_checked] at updated
+                exact (Except.ok.inj updated).symm
+              subst nextRuntime
+              refine ⟨initial.host.runtime.heap, ?_, ?_,
+                .refl initial.host.runtime.heap witness⟩
+              · simp [decrementStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
+              · simpa [replaceHeap, clearFailure] using runtimeRelated
+
 theorem decrementStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {sourceObject : Value}
@@ -3392,49 +3483,10 @@ theorem decrementStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases objectRelated with
-  | tobject referenceRelated =>
-      cases referenceRelated with
-      | heap heapRelated =>
-          cases heapRelated with
-          | mapped mapped =>
-              obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.decrementReference_refines mapped check updated
-              refine ⟨heap, ?_, ?_⟩
-              · simp [decrementStep, clearFailure,
-                  Word32.ofUInt32_ofNat_value, descriptorsEq,
-                  concreteOperation, replaceHeap]
-              · exact ConcreteRuntimeRel.replaceHeap_of_runtimeAux
-                  runtimeRelated finalHeapRelated (decValue_runtimeAux updated)
-      | tagged taggedRelated =>
-          cases check with
-          | false =>
-              cases amount with
-              | zero =>
-                  have afterEq : nextRuntime = runtime := by
-                    simpa [decValue] using (Except.ok.inj updated).symm
-                  subst nextRuntime
-                  refine ⟨initial.host.runtime.heap, ?_, ?_⟩
-                  · simp [decrementStep, decrementReference, clearFailure,
-                      Word32.ofUInt32_ofNat_value, replaceHeap, pure,
-                      Except.pure]
-                  · simpa [replaceHeap, clearFailure] using runtimeRelated
-              | succ amount =>
-                  simp only [decValue, List.replicate_succ, List.foldlM_cons,
-                    Bind.bind, Except.bind, decValueOnce] at updated
-                  simp at updated
-          | true =>
-              have concreteOperation :=
-                decrementReference_tagged_checked runtimeRelated.heap taggedRelated
-                  amount initial.host.closureDescriptors
-              have afterEq : nextRuntime = runtime := by
-                rw [decValue_tagged_checked] at updated
-                exact (Except.ok.inj updated).symm
-              subst nextRuntime
-              refine ⟨initial.host.runtime.heap, ?_, ?_⟩
-              · simp [decrementStep, clearFailure,
-                  Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
-              · simpa [replaceHeap, clearFailure] using runtimeRelated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    decrementStep_of_refines_with_capacity runtimeRelated objectRelated
+      descriptorsEq updated
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- A positive stale decrement stops at its first released-header read and
 preserves the exact source-address fault through the Talos host. -/
@@ -3630,6 +3682,63 @@ theorem deleteValue_heapOnly
 /-- Concrete explicit deletion refines every semantically successful physical
 lane. This includes the operation-specific erased/zero no-op without creating
 an ordinary object relation for zero. -/
+theorem deleteStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {kind : AbiKind}
+    {sourceObject : Value} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : ValueRel witness kind (.word32 word) sourceObject)
+    (updated : deleteValue runtime sourceObject = .ok nextRuntime) :
+    ∃ heap,
+      deleteStep initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases valueRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+            runtimeRelated.heap.deleteObject_refines_with_capacity mapped updated
+          refine ⟨heap, ?_, ?_, capacity⟩
+          · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated (deleteValue_heapOnly updated)
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.deleteObject_refines_with_capacity mapped
+                  updated
+              refine ⟨heap, ?_, ?_, capacity⟩
+              · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+                  concreteOperation, replaceHeap]
+              · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+                  finalHeapRelated (deleteValue_heapOnly updated)
+      | tagged taggedRelated => simp [deleteValue] at updated
+  | erased =>
+      obtain ⟨heap, concreteOperation, semanticOperation, finalHeapRelated,
+          capacity⟩ :=
+        runtimeRelated.heap.deleteObject_erased_refines_with_capacity
+      have runtimeEq := Except.ok.inj (semanticOperation.symm.trans updated)
+      subst nextRuntime
+      refine ⟨heap, ?_, ?_, capacity⟩
+      · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
+          concreteOperation, replaceHeap]
+      · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+          finalHeapRelated (deleteValue_heapOnly updated)
+  | tagged taggedRelated => simp [deleteValue] at updated
+  | reuseNone => simp [deleteValue] at updated
+  | reuseSome heapRelated => simp [deleteValue] at updated
+  | uint8 encoded => simp [deleteValue] at updated
+  | uint16 encoded => simp [deleteValue] at updated
+  | uint32 encoded => simp [deleteValue] at updated
+
 theorem deleteStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {kind : AbiKind}
@@ -3643,46 +3752,9 @@ theorem deleteStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases valueRelated with
-  | object heapRelated =>
-      cases heapRelated with
-      | mapped mapped =>
-          obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.deleteObject_refines mapped updated
-          refine ⟨heap, ?_, ?_⟩
-          · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
-              concreteOperation, replaceHeap]
-          · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-              finalHeapRelated (deleteValue_heapOnly updated)
-  | tobject referenceRelated =>
-      cases referenceRelated with
-      | heap heapRelated =>
-          cases heapRelated with
-          | mapped mapped =>
-              obtain ⟨heap, concreteOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.deleteObject_refines mapped updated
-              refine ⟨heap, ?_, ?_⟩
-              · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
-                  concreteOperation, replaceHeap]
-              · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-                  finalHeapRelated (deleteValue_heapOnly updated)
-      | tagged taggedRelated => simp [deleteValue] at updated
-  | erased =>
-      obtain ⟨heap, concreteOperation, semanticOperation, finalHeapRelated⟩ :=
-        runtimeRelated.heap.deleteObject_erased_refines
-      have runtimeEq := Except.ok.inj (semanticOperation.symm.trans updated)
-      subst nextRuntime
-      refine ⟨heap, ?_, ?_⟩
-      · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
-          concreteOperation, replaceHeap]
-      · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-          finalHeapRelated (deleteValue_heapOnly updated)
-  | tagged taggedRelated => simp [deleteValue] at updated
-  | reuseNone => simp [deleteValue] at updated
-  | reuseSome heapRelated => simp [deleteValue] at updated
-  | uint8 encoded => simp [deleteValue] at updated
-  | uint16 encoded => simp [deleteValue] at updated
-  | uint32 encoded => simp [deleteValue] at updated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    deleteStep_of_refines_with_capacity runtimeRelated valueRelated updated
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- Repeating explicit deletion on a stale mapped ordinary object preserves
 the exact address/location dead-object fault and has no post-state. -/
