@@ -1072,9 +1072,9 @@ theorem OwnershipValueRel.object_or_erased
           simp [AbiKind.isObjectField] at admissible
 
 /-- Ordered reset slots preserve the first fault through public checked
-decrement. Successful children advance both heaps; the first failing child
-determines the exact source-classified error and prevents the suffix from
-running. -/
+decrement. Successful children advance both heaps; erased children are exact
+no-ops; the first failing child determines the exact source-classified error
+and prevents the suffix from running. -/
 theorem OwnershipValuesRel.foldlM_public_fault_refines
     {state : MemoryState} {witness : RefinementWitness}
     {runtime : RuntimeState} {words : List Word32} {values : List Value}
@@ -1083,10 +1083,9 @@ theorem OwnershipValuesRel.foldlM_public_fault_refines
     (heap : LiveHeapRel state witness runtime)
     (notFuel :
       fault ≠ .malformed "reference-count release fuel exhausted")
-    (notExpectedObject : fault ≠ .expectedObject)
     (semanticOperation :
       values.foldlM (init := runtime) (fun next value =>
-        Fir.LeanIR.Impure.decValueOnce next value true) = .error fault) :
+        Fir.LeanIR.Impure.releaseResetField next value) = .error fault) :
     ∃ failure,
       words.foldlM (init := state) (fun next child =>
         decrementReferenceOnce next child true witness.closureDescriptors) =
@@ -1102,7 +1101,8 @@ theorem OwnershipValuesRel.foldlM_public_fault_refines
           witness.closureDescriptors with heapStep | noOpStep
       · obtain ⟨location, valueEq, mapped⟩ := heapStep
         subst value
-        simp only [Fir.LeanIR.Impure.decValueOnce] at semanticOperation
+        simp only [Fir.LeanIR.Impure.releaseResetField,
+          Fir.LeanIR.Impure.decValueOnce] at semanticOperation
         cases childEq : Fir.LeanIR.Impure.decLocation runtime location with
         | error childFault =>
             rw [childEq] at semanticOperation
@@ -1118,7 +1118,7 @@ theorem OwnershipValuesRel.foldlM_public_fault_refines
             obtain ⟨nextState, concreteHead, nextHeap⟩ :=
               heap.decrementReferenceOnce_refines mapped true childEq
             obtain ⟨failure, concreteTail, faultRelated⟩ :=
-              ih nextHeap notFuel notExpectedObject semanticOperation
+              ih nextHeap notFuel semanticOperation
             refine ⟨failure, ?_, faultRelated⟩
             rw [concreteHead]
             exact concreteTail
@@ -1129,13 +1129,13 @@ theorem OwnershipValuesRel.foldlM_public_fault_refines
           | heap location => exact False.elim (notHeap location rfl)
           | tagged payload =>
               have semanticHead :
-                  Fir.LeanIR.Impure.decValueOnce runtime
-                      (.object (.tagged payload)) true =
+                  Fir.LeanIR.Impure.releaseResetField runtime
+                      (.object (.tagged payload)) =
                     .ok runtime := by
                 rfl
               rw [semanticHead] at semanticOperation
               obtain ⟨failure, concreteTail, faultRelated⟩ :=
-                ih heap notFuel notExpectedObject semanticOperation
+                ih heap notFuel semanticOperation
               have concreteHead :
                   decrementReferenceOnce state word true
                       witness.closureDescriptors =
@@ -1146,14 +1146,19 @@ theorem OwnershipValuesRel.foldlM_public_fault_refines
               rw [concreteHead]
               exact concreteTail
         · subst value
-          have faultEq : fault = .expectedObject := by
-            have errorEq :
-                (Except.error .expectedObject :
-                    Except RuntimeFault RuntimeState) =
-                  .error fault := by
-              simpa [Fir.LeanIR.Impure.decValueOnce] using semanticOperation
-            exact (Except.error.inj errorEq).symm
-          exact False.elim (notExpectedObject faultEq)
+          obtain ⟨failure, concreteTail, faultRelated⟩ :=
+            ih heap notFuel (by
+              simpa [Fir.LeanIR.Impure.releaseResetField] using
+                semanticOperation)
+          have concreteHead :
+              decrementReferenceOnce state word true
+                  witness.closureDescriptors =
+                .ok state := by
+            unfold decrementReferenceOnce
+            exact concreteFuelNoOp
+          refine ⟨failure, ?_, faultRelated⟩
+          rw [concreteHead]
+          exact concreteTail
 
 /-- A represented ownership list cannot expose release-fuel exhaustion while
 running its public checked decrement fold. Mapped children either take a
@@ -1230,7 +1235,6 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
     (countFits : count ≤ object.objectFields.size)
     (notFuel :
       fault ≠ .malformed "reference-count release fuel exhausted")
-    (notExpectedObject : fault ≠ .expectedObject)
     (semanticOperation :
       Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
         .error fault) :
@@ -1256,7 +1260,8 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
         setCell_spec_of_find runtime location cell replacement found
       have semanticFold :
           (object.objectFields.extract 0 count).foldlM
-              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              (fun next value =>
+                Fir.LeanIR.Impure.releaseResetField next value)
               middleRuntime = .error fault := by
         unfold Fir.LeanIR.Impure.reset at semanticOperation
         simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
@@ -1268,7 +1273,8 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
         have semanticOperation' : (do
             let next ← setCell runtime location replacement
             let next ← (object.objectFields.extract 0 count).foldlM
-              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              (fun next value =>
+                Fir.LeanIR.Impure.releaseResetField next value)
               next
             return (next, Value.reuseToken (some location))) =
               .error fault := by
@@ -1279,7 +1285,7 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
         cases foldEq :
             (object.objectFields.extract 0 count).foldlM
               (fun next value =>
-                Fir.LeanIR.Impure.decValueOnce next value true)
+                Fir.LeanIR.Impure.releaseResetField next value)
               middleRuntime with
         | error childFault =>
             rw [foldEq] at semanticOperation'
@@ -1323,7 +1329,7 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
           (object.objectFields.extract 0 count).toList.foldlM
               (init := middleRuntime)
               (fun next value =>
-                Fir.LeanIR.Impure.decValueOnce next value true) =
+                Fir.LeanIR.Impure.releaseResetField next value) =
             .error fault := by
         simpa only [Array.foldlM_toList] using semanticFold
       have protocolOwnership :=
@@ -1331,7 +1337,7 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
           (resetProtocolFieldKinds fieldKinds count)
       obtain ⟨failure, concreteFold, faultRelated⟩ :=
         protocolOwnership.foldlM_public_fault_refines protocolHeap notFuel
-          notExpectedObject semanticFoldList
+          semanticFoldList
       obtain ⟨addressHeap, _, _, _, _, _⟩ :=
         MemoryState.PrefixExtension.readLiveHeader_facts state address header
           headerRead

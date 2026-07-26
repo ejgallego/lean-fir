@@ -7,6 +7,20 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- A concrete heap transition preserves the physical allocation extent of
+every semantic heap location already mapped by the refinement witness.
+Payload, liveness, and ownership metadata may change. -/
+def MappedHeaderCapacityTransport
+    (before after : MemoryState) (witness : RefinementWitness) : Prop :=
+  ∀ address location header,
+    witness.locations.lookup? location = some address →
+    Header.read before.memory address = .ok header →
+    address.value + headerBytes ≤ before.heapCursor →
+    ∃ nextHeader,
+      Header.read after.memory address = .ok nextHeader ∧
+      nextHeader.allocationBytes = header.allocationBytes ∧
+      address.value + headerBytes ≤ after.heapCursor
+
 /-- Explicit transition relation for the unique reset-to-reuse protocol.
 `LiveHeapRel` is required only before reset; the exact concrete and semantic
 reset equations name the temporary states without claiming that cleared
@@ -369,6 +383,54 @@ theorem LiveHeapRel.allocationFrame_of_reuseConstructorMemory_other
     targetDescriptor otherDescriptor targetFound otherFound different targetHeader
       otherHeader targetRead otherRead
   exact .ofReuseConstructorMemoryPost resultEq post disjoint
+
+/-- An in-place constructor transaction preserves the retained extent of
+every previously mapped location. The target keeps its allocation word, while
+descriptor disjointness frames every other mapped allocation. -/
+theorem LiveHeapRel.mappedHeaderCapacity_of_reuseConstructorMemory
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor} {targetHeader replacement : Header}
+    {scrubbed fieldMemory memory : LinearMemory} {fields : List Word32}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (targetRead : Header.read before.memory targetAddress = .ok targetHeader)
+    (resultEq : after = { before with memory })
+    (post : ReuseConstructorMemoryPost before.memory scrubbed fieldMemory memory
+      targetAddress targetHeader.allocationBytes.toNat replacement fields)
+    (sameExtent : replacement.allocationBytes = targetHeader.allocationBytes) :
+    MappedHeaderCapacityTransport before after witness := by
+  intro address location header mapped headerRead headerOwned
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨regionHeader, regionRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    rw [headerRead] at regionRead
+    have regionHeaderEq := Except.ok.inj regionRead
+    subst regionHeader
+    have frame := related.allocationFrame_of_reuseConstructorMemory_other
+      targetFound descriptorFound different targetRead headerRead resultEq post
+    refine ⟨header, ?_, rfl, ?_⟩
+    · rw [frame.readHeader minimum]
+      exact headerRead
+    · rw [frame.cursor]
+      exact headerOwned
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    rw [targetRead] at headerRead
+    have headerEq := Except.ok.inj headerRead
+    subst header
+    refine ⟨replacement, ?_, sameExtent, ?_⟩
+    · rw [resultEq]
+      exact post.headerRead
+    · simpa [resultEq] using headerOwned
 
 /-- Publishing a replacement header with the same retained extent preserves
 all descriptor regions and pairwise disjointness while rebinding the target's
@@ -2444,7 +2506,8 @@ theorem LiveHeapRel.reuseObject_some_refines
       LiveHeapRel result (witness.rebindConstructor address info fieldKinds)
         nextRuntime ∧
       ValueRel (witness.rebindConstructor address info fieldKinds) .object
-        (.word32 address) (.object (.heap location)) := by
+        (.word32 address) (.object (.heap location)) ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨addressHeap, _, _, headerMinimum, _, headerInBounds⟩ :=
     MemoryState.PrefixExtension.readLiveHeader_facts state address header headerRead
   let objectHeader := objectRelated.header.choose
@@ -2594,7 +2657,18 @@ theorem LiveHeapRel.reuseObject_some_refines
     rw [reusedEq]
     rw [semanticSet]
     rfl
+  have capacityTransport :
+      MappedHeaderCapacityTransport state
+        ({ state with memory } : MemoryState) witness :=
+    related.mappedHeaderCapacity_of_reuseConstructorMemory descriptor
+      (by
+        obtain ⟨_, rawHeaderRead, _, _, _, _⟩ :=
+          MemoryState.PrefixExtension.readLiveHeader_facts state address header
+            headerRead
+        exact rawHeaderRead)
+      rfl post replacementAllocation
   exact ⟨({ state with memory } : MemoryState), nextRuntime, concreteReuse,
-    semanticReuse, finalHeap, .object (.mapped (by simpa using mapped))⟩
+    semanticReuse, finalHeap, .object (.mapped (by simpa using mapped)),
+    capacityTransport⟩
 
 end Fir.Wasm.Concrete

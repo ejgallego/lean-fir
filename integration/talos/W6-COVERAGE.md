@@ -123,8 +123,8 @@ Cross-cutting W6.5 state:
   compiler local, and the in-place reuse refinement derives its layout-fit
   premise from that bridge rather than accepting it independently; scoped
   header-capacity transport is instantiated for nonempty constructor
-  allocation and zero-token reuse, and unique reset has a same-address
-  retained-evidence bridge;
+  allocation, zero-token reuse, and actual in-place reuse, while unique reset
+  has a same-address retained-evidence bridge;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

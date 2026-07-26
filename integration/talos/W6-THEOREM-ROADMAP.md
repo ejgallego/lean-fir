@@ -255,7 +255,10 @@ operation family. That boundary is scoped to witness-related, frontier-owned
 headers rather than arbitrary readable memory. Prefix-extension proofs
 instantiate it for nonempty constructor allocation and nonempty reuse from the
 zero token, while a unique-reset bridge changes retained object evidence into
-same-address token evidence. In-place reuse and the remaining heap-transition
+same-address token evidence. The in-place reuse byte transaction now preserves
+the target's allocation word, frames all other mapped allocations through
+descriptor disjointness, and exports that transport through both the concrete
+and Talos operation theorems. Unique reset and the remaining heap-transition
 families still need transport instances, and the syntax-directed simulation
 still has to carry the strengthened state. Native unreachability losing its
 source fault is tracked separately by
@@ -325,10 +328,12 @@ acceptance tests pass.
 6. In progress: discharge T4S. Retained reuse capacity is validated and its
    static-to-concrete operation bridge and whole-fact-map invariant are proved;
    fresh nonempty allocation and zero-token reuse supply header-capacity
-   transport, and unique reset has its evidence-conversion boundary. In-place
-   reuse and the remaining heap operations must supply transport before the
-   syntax certificate can carry the strengthened state. Structured
-   unreachability remains the shared-contract blocker.
+   transport, in-place reuse carries mapped-header transport through the
+   validator-backed operation theorem, and unique reset has its
+   evidence-conversion boundary. Unique reset and the remaining heap operations
+   must supply transport before the syntax certificate can carry the
+   strengthened state. Structured unreachability remains the shared-contract
+   blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

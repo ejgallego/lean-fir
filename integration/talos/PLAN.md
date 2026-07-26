@@ -3221,6 +3221,19 @@ operation work is in-place reuse, the empty/tagged allocation branches, and
 ownership or mutation transitions that can affect represented allocations.
 No FIR semantic contract or executable ABI changed.
 
+W6.6dj discharges the in-place reuse transport itself. The concrete
+`MappedHeaderCapacityTransport` boundary is now stated at the heap layer:
+every semantic location already mapped by the witness keeps the same physical
+allocation extent. The byte transaction proves this by preserving the target
+header's allocation word and using descriptor disjointness to frame every
+other mapped allocation. `reuseObject_some_refines`, its Talos operation
+wrapper, and the validator-backed capacity theorem expose that transport
+alongside their existing result, witness, runtime, value, and semantic
+equations. The remaining operation work is unique reset's concrete
+header-preservation instance, the empty/tagged branches, and ownership or
+mutation transitions needed by the syntax-directed state invariant. No FIR
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

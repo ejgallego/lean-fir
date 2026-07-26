@@ -103,4 +103,5 @@ replacement and pins its executed form trace and multiplicities.
 The concrete reset refinement consumes the same `releaseResetField` fold.
 Its ordered ownership theorem treats erased/physical-zero slots as matching
 no-ops while preserving the existing checked decrement proof for every
-non-erased slot.
+non-erased slot. The heap, concrete-host, and generated-code child-fault
+theorems no longer require the former `fault ≠ expectedObject` workaround.

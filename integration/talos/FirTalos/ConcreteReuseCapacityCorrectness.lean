@@ -13,21 +13,12 @@ open FirTalos.Correctness
 /-- Heap transitions preserve reuse capacity when every related, previously
 owned allocation header remains readable with the same physical extent.
 Payload and ownership metadata may change freely. -/
-def HeaderCapacityTransport
-    (before after : MemoryState) (witness : RefinementWitness) : Prop :=
-  ∀ kind address semantic header,
-    ValueRel witness kind (.word32 address) semantic →
-    Header.read before.memory address = .ok header →
-    address.value + headerBytes ≤ before.heapCursor →
-    ∃ nextHeader,
-      Header.read after.memory address = .ok nextHeader ∧
-      nextHeader.allocationBytes = header.allocationBytes ∧
-      address.value + headerBytes ≤ after.heapCursor
+abbrev HeaderCapacityTransport := MappedHeaderCapacityTransport
 
 theorem HeaderCapacityTransport.refl
     (heap : MemoryState) (witness : RefinementWitness) :
     HeaderCapacityTransport heap heap witness := by
-  intro kind address semantic header valueRelated headerRead owned
+  intro address location header mapped headerRead owned
   exact ⟨header, headerRead, rfl, owned⟩
 
 /-- Fresh allocation is the common capacity-preserving heap transition: every
@@ -38,10 +29,38 @@ theorem HeaderCapacityTransport.ofPrefixExtension
     (witness : RefinementWitness)
     (extension : before.PrefixExtension after) :
     HeaderCapacityTransport before after witness := by
-  intro kind address semantic header valueRelated headerRead owned
+  intro address location header mapped headerRead owned
   refine ⟨header, ?_, rfl, Nat.le_trans owned extension.cursor⟩
   rw [extension.readHeader address owned]
   exact headerRead
+
+theorem valueRel_heapObject_mapped
+    {witness : RefinementWitness} {kind : AbiKind}
+    {address : Word32} {location : Location}
+    (related :
+      ValueRel witness kind (.word32 address)
+        (.object (.heap location))) :
+    witness.locations.lookup? location = some address := by
+  cases related with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped found => exact found
+  | tobject objectRelated =>
+      cases objectRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped found => exact found
+
+theorem valueRel_reuseToken_some_mapped
+    {witness : RefinementWitness} {address : Word32} {location : Location}
+    (related :
+      ValueRel witness .reuseToken (.word32 address)
+        (.reuseToken (some location))) :
+    witness.locations.lookup? location = some address := by
+  cases related with
+  | reuseSome heapRelated =>
+      cases heapRelated with
+      | mapped found => exact found
 
 /-- Nonempty constructor allocation instantiates the generic header-capacity
 transport boundary from its existing fresh-prefix theorem. -/
@@ -153,13 +172,16 @@ theorem ReuseCapacityValueRel.transport
   | emptyToken => exact .emptyToken
   | retainedObject valueRelated headerRead headerOwned minimum =>
       obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
-        capacityTransport _ _ _ _ valueRelated headerRead headerOwned
+        capacityTransport _ _ _ (valueRel_heapObject_mapped valueRelated) headerRead
+          headerOwned
       exact .retainedObject (witnessTransport valueRelated) nextHeaderRead
         nextHeaderOwned (by simpa [sameExtent] using minimum)
   | retainedEmptyToken => exact .retainedEmptyToken
   | retainedToken valueRelated headerRead headerOwned minimum =>
       obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
-        capacityTransport _ _ _ _ valueRelated headerRead headerOwned
+        capacityTransport _ _ _ (valueRel_reuseToken_some_mapped valueRelated)
+          headerRead
+          headerOwned
       exact .retainedToken (witnessTransport valueRelated) nextHeaderRead
         nextHeaderOwned (by simpa [sameExtent] using minimum)
 
@@ -489,7 +511,9 @@ theorem ReuseCapacityValueRel.retainedToken_of_reset
   cases objectRelated with
   | retainedObject valueRelated headerRead headerOwned minimum =>
       obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
-        capacityTransport _ address _ _ valueRelated headerRead headerOwned
+        capacityTransport address location _
+          (valueRel_heapObject_mapped valueRelated)
+          headerRead headerOwned
       exact .retainedToken tokenRelated nextHeaderRead nextHeaderOwned
         (by simpa [sameExtent] using minimum)
 
@@ -620,6 +644,7 @@ theorem reuseStep_some_of_capacityEvidence
         nextRuntime ∧
       PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat address.value)) (.object (.heap location)) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken (some location)) info updateHeader
           semanticFields = .ok (nextRuntime, .object (.heap location)) := by
   have layoutFits :=

@@ -2434,7 +2434,6 @@ theorem concreteFaultLeaf_reset_unique_fault
     (countFits : count ≤ object.objectFields.size)
     (notFuel :
       fault ≠ .malformed "reference-count release fuel exhausted")
-    (notExpectedObject : fault ≠ .expectedObject)
     (semanticFailure :
       reset sourceRuntime count (.object (.heap location)) = .error fault)
     (hImp : module.imports[id]? = some imp)
@@ -2450,7 +2449,7 @@ theorem concreteFaultLeaf_reset_unique_fault
   obtain ⟨failure, operation, failureRelated⟩ :=
     resetStep_unique_fault_of_refines initialRelated.1 objectRelated
       descriptorsEq found live ordinary unique constructor countFits notFuel
-      notExpectedObject semanticFailure
+      semanticFailure
   have valueAdapted :
       instructions sourceModule sourceFunction labels
           [.localGet objectId, .call (.runtime (.reset count))] =

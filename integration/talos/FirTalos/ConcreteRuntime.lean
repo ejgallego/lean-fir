@@ -2900,6 +2900,19 @@ theorem decValueOnce_runtimeAux
   | usize value | scalar value | erased | reuseToken value =>
       simp [decValueOnce] at operation
 
+theorem releaseResetField_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    (operation : releaseResetField before value = .ok after) :
+    RuntimeAuxEq before after := by
+  cases value with
+  | erased =>
+      have runtimeEq : before = after := Except.ok.inj operation
+      subst after
+      exact RuntimeAuxEq.refl _
+  | object reference | usize value | scalar value | reuseToken value =>
+      exact decValueOnce_runtimeAux (by
+        simpa [releaseResetField] using operation)
+
 theorem decValue_runtimeAux
     {before after : RuntimeState} {value : Value} {amount : Nat} {check : Bool}
     (operation : decValue before value amount check = .ok after) :
@@ -3723,9 +3736,8 @@ theorem resetStep_outOfBounds_of_refines
             concrete, ConcreteError.toTrap]
 
 /-- A unique constructor reset preserves any recursively reached mapped-child
-fault through the concrete host boundary. Erased-child `expectedObject` is
-excluded until the shared reset ownership contract is aligned; release-fuel
-exhaustion remains target-classified. -/
+fault through the concrete host boundary. Erased children are exact no-ops;
+release-fuel exhaustion remains target-classified. -/
 theorem resetStep_unique_fault_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {word : Word32} {location : Location}
@@ -3743,7 +3755,6 @@ theorem resetStep_unique_fault_of_refines
     (countFits : count ≤ object.objectFields.size)
     (notFuel :
       fault ≠ .malformed "reference-count release fuel exhausted")
-    (notExpectedObject : fault ≠ .expectedObject)
     (semanticFailure :
       reset runtime count (.object (.heap location)) = .error fault) :
     ∃ failure,
@@ -3759,7 +3770,7 @@ theorem resetStep_unique_fault_of_refines
               obtain ⟨failure, concrete, failureRelated⟩ :=
                 runtimeRelated.heap.resetObject_unique_fault_refines mapped
                   found live ordinary unique constructor countFits notFuel
-                  notExpectedObject semanticFailure
+                  semanticFailure
               refine ⟨failure, ?_, failureRelated⟩
               simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
                 descriptorsEq, concrete, ConcreteError.toTrap]
@@ -3968,7 +3979,7 @@ theorem resetStep_unique_of_refines
     Fir.LeanIR.Impure.setCell_spec_of_find runtime location cell replacement found
   have semanticFold :
       (object.objectFields.extract 0 count).foldlM
-          (fun next value => decValueOnce next value true) middleRuntime =
+          (fun next value => releaseResetField next value) middleRuntime =
         .ok nextRuntime := by
     unfold reset at updated
     simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
@@ -3980,7 +3991,7 @@ theorem resetStep_unique_of_refines
     have updated' : (do
         let next ← setCell runtime location replacement
         let next ← (object.objectFields.extract 0 count).foldlM
-          (fun next value => decValueOnce next value true) next
+          (fun next value => releaseResetField next value) next
         return (next, Value.reuseToken (some location))) =
           .ok (nextRuntime, Value.reuseToken (some location)) := by
       simpa only [replacement, resetProtocolObject, live, Bind.bind, Except.bind]
@@ -3988,7 +3999,7 @@ theorem resetStep_unique_of_refines
     rw [semanticSet] at updated'
     simp only [Bind.bind, Except.bind] at updated'
     cases foldEq : (object.objectFields.extract 0 count).foldlM
-        (fun next value => decValueOnce next value true) middleRuntime with
+        (fun next value => releaseResetField next value) middleRuntime with
     | error fault =>
         rw [foldEq] at updated'
         contradiction
@@ -4001,7 +4012,7 @@ theorem resetStep_unique_of_refines
   have aux : RuntimeAuxEq runtime nextRuntime :=
     (setCell_runtimeAux semanticSet).trans
       (Array.foldlM_runtimeAux
-        (fun operation => decValueOnce_runtimeAux operation) semanticFold)
+        (fun operation => releaseResetField_runtimeAux operation) semanticFold)
   obtain ⟨heap, info, fieldKinds, concreteReset, heapRelated, protocol,
       tokenRelated⟩ :=
     runtimeRelated.heap.resetObject_refines_unique mapped found live ordinary
@@ -4258,10 +4269,11 @@ theorem reuseStep_some_of_refines
         nextRuntime ∧
       PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat address.value)) (.object (.heap location)) ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken (some location)) info updateHeader
           semanticFields = .ok (nextRuntime, .object (.heap location)) := by
   obtain ⟨heap, nextRuntime, concreteReuse, semanticReuse, heapRelated,
-      exactRelated⟩ :=
+      exactRelated, capacityTransport⟩ :=
     Fir.Wasm.Concrete.LiveHeapRel.reuseObject_some_refines
       initial.host.runtime.heap witness runtime location address cell oldInfo
       oldFieldKinds old info fieldKinds fields.toArray semanticFields
@@ -4282,7 +4294,7 @@ theorem reuseStep_some_of_refines
     · exact .word32 exactRelated
     · exact .word32 exactRelated.object_to_tobject
   refine ⟨heap, nextRuntime, ?_, transport, nextRuntimeRelated, valueRelated,
-    semanticReuse⟩
+    capacityTransport, semanticReuse⟩
   simp [reuseStep, argsLength, decoded, concreteReuse, replaceHeap, clearFailure]
 
 /-- Constructor-tag mutation crosses the common checked-header gate before
