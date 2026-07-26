@@ -11,6 +11,7 @@ closure without introducing a second format AST. A facade named `f` receives
 public implementation types named `fState` and `fM` in the same namespace.
 -/
 syntax "#fir_wasm_pretty_facade " ident : command
+syntax "#fir_wasm_pretty_trace_facade " ident : command
 
 macro_rules
   | `(#fir_wasm_pretty_facade $name:ident) => do
@@ -75,8 +76,114 @@ macro_rules
           result.out
         end)
 
+/--
+Expand a low-level `Std.Format.prettyM` facade that retains the complete
+`MonadPrettyFormat` output/tag protocol.
+
+The returned trace deliberately stores events in reverse chronological order
+so recording an event is one list constructor. Consumers reverse the list
+while decoding. Keeping the rendered text alongside those events supports
+both exact styled comparisons and the existing text projection without
+pulling the substantially larger `Lean.Widget.TaggedText` dependency closure
+into the compiler artifact.
+-/
+macro_rules
+  | `(#fir_wasm_pretty_trace_facade $name:ident) => do
+      let event := Lean.mkIdentFrom name (name.getId.appendAfter "Event")
+      let trace := Lean.mkIdentFrom name (name.getId.appendAfter "Trace")
+      let state := Lean.mkIdentFrom name (name.getId.appendAfter "State")
+      let renderM := Lean.mkIdentFrom name (name.getId.appendAfter "M")
+      let monad := Lean.mkIdentFrom name (name.getId.appendAfter "Monad")
+      let pretty := Lean.mkIdentFrom name (name.getId.appendAfter "MonadPrettyFormat")
+      `(section
+        /-- One exact operation observed at the `MonadPrettyFormat` boundary. -/
+        structure $event where
+          /-- `0`: output, `1`: newline, `2`: start tag, `3`: end tags. -/
+          kind : Nat
+          /-- Output payload; empty for the three numeric event kinds. -/
+          text : String
+          /-- Indent, tag, or count payload; zero for output events. -/
+          value : Nat
+          deriving BEq, Repr
+
+        /--
+        Raw styled result. `eventsRev` is the reverse chronological
+        `MonadPrettyFormat` event stream.
+        -/
+        structure $trace where
+          text : String
+          eventsRev : List $event
+          deriving BEq, Repr
+
+        /-- Concrete state threaded through the styled `Std.Format.prettyM` facade. -/
+        structure $state where
+          out : String := ""
+          eventsRev : List $event := []
+          column : Nat := 0
+
+        abbrev $renderM (α : Type) := Nat → α × Nat
+
+        @[reducible] def $monad : Monad $renderM where
+          pure value := fun raw => (value, raw)
+          bind action next := fun raw =>
+            let (value, raw) := action raw
+            next value raw
+
+        @[reducible] unsafe def $pretty : Std.Format.MonadPrettyFormat $renderM where
+          pushOutput string := fun raw =>
+            let state : $state := unsafeCast raw
+            ((), unsafeCast ({
+              out := String.Internal.append state.out string
+              eventsRev :=
+                ({ kind := 0, text := string, value := 0 } : $event) ::
+                  state.eventsRev
+              column := state.column + String.Internal.length string } : $state))
+          pushNewline indent := fun raw =>
+            let state : $state := unsafeCast raw
+            ((), unsafeCast ({
+              out := String.Internal.append state.out
+                (String.Internal.pushn "\n" ' ' indent)
+              eventsRev :=
+                ({ kind := 1, text := "", value := indent } : $event) ::
+                  state.eventsRev
+              column := indent } : $state))
+          currColumn := fun raw =>
+            let state : $state := unsafeCast raw
+            (state.column, raw)
+          startTag tag := fun raw =>
+            let state : $state := unsafeCast raw
+            ((), unsafeCast ({
+              state with eventsRev :=
+                ({ kind := 2, text := "", value := tag } : $event) ::
+                  state.eventsRev } : $state))
+          endTags count := fun raw =>
+            let state : $state := unsafeCast raw
+            ((), unsafeCast ({
+              state with eventsRev :=
+                ({ kind := 3, text := "", value := count } : $event) ::
+                  state.eventsRev } : $state))
+
+        /--
+        Low-level JavaScript-facing styled rendering facade. Its semantic Wasm
+        boundary is
+
+        `Format(tobject) × Nat(tobject) × Nat(tobject) × Nat(tobject) →
+          PrettyTrace(object)`.
+
+        The trace records the exact incremental text/newline/tag protocol;
+        callers may project `text` only when styling is intentionally ignored.
+        -/
+        unsafe def $name (format : Std.Format) (width indent column : Nat) : $trace :=
+          let action : $renderM Unit :=
+            @Std.Format.prettyM $renderM format width indent $monad $pretty
+          let initial : Nat := unsafeCast ({ column } : $state)
+          let result : $state := unsafeCast (action initial).2
+          { text := result.out, eventsRev := result.eventsRev }
+        end)
+
 namespace Fir.Wasm.PrettyFormat
 
 #fir_wasm_pretty_facade prettyRaw
+#fir_wasm_pretty_trace_facade prettyTraceRaw
 
 end Fir.Wasm.PrettyFormat

@@ -7,11 +7,13 @@ const residentRuntimePath = process.argv[4];
 const residentProjectionPath = process.argv[5];
 const residentClosurePath = process.argv[6];
 const residentMatchPath = process.argv[7];
+const residentAllocatorPath = process.argv[8];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
-  residentProjectionPath && residentClosurePath && residentMatchPath,
+  residentProjectionPath && residentClosurePath && residentMatchPath &&
+  residentAllocatorPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
-  "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm");
+  "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -32,6 +34,7 @@ const residentRuntime = readArtifact(residentRuntimePath);
 const residentProjections = readArtifact(residentProjectionPath);
 const residentClosures = readArtifact(residentClosurePath);
 const residentMatches = readArtifact(residentMatchPath);
+const residentAllocator = readArtifact(residentAllocatorPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -69,6 +72,8 @@ assert.equal(operationCount(residentClosures, "closureMatches"), 77,
   "resident-closure prettyM closure-match inventory changed");
 assert.equal(operationCount(residentMatches, "closureMatches"), 0,
   "resident-match prettyM retained semantic closure matches");
+assert.equal(operationCount(residentAllocator, "closureMatches"), 0,
+  "resident-allocator prettyM regained semantic closure matches");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -112,6 +117,16 @@ assert.equal(
   "resident-match prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentAllocator),
+  functionImportCount(residentMatches),
+  "resident allocator changed the semantic function-import frontier",
+);
+assert.equal(
+  residentAllocator.manifest.imports.length,
+  functionImportCount(residentAllocator),
+  "resident-allocator prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -131,12 +146,18 @@ assert.equal(
   0,
   "resident-match prettyM imports memory",
 );
+assert.equal(
+  residentAllocator.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident-allocator prettyM imports memory",
+);
 for (const artifact of [
   getTagResident,
   residentRuntime,
   residentProjections,
   residentClosures,
   residentMatches,
+  residentAllocator,
 ]) {
   assert.deepStrictEqual(
     artifact.manifest.closureDispatch,
@@ -218,12 +239,33 @@ for (const descriptor of residentClosures.manifest.imports.filter(
 assert.ok(residentMatches.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident-match prettyM memory export is missing");
+for (const name of [
+  "fir_heap_frontier",
+  "fir_heap_set_frontier",
+  "fir_heap_alloc",
+  "fir_heap_store8",
+  "fir_heap_store16",
+  "fir_heap_store32",
+  "fir_heap_store64",
+]) {
+  assert.ok(residentAllocator.exports.some((entry) =>
+    entry.name === name && entry.kind === "function"),
+  `resident-allocator prettyM helper export ${name} is missing`);
+}
+assert.ok(residentAllocator.exports.some(({ name, kind }) =>
+  name === residentAllocator.manifest.entry && kind === "function"),
+"resident-allocator prettyM entry export is missing");
+assert.ok(residentAllocator.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident-allocator prettyM memory export is missing");
 
 console.log(
-  `PASS resident prettyM internalized getTag, isShared, projection, and match families ` +
+  `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
+  `then installed its allocator ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
   `${functionImportCount(residentClosures)} → ` +
-  `${functionImportCount(residentMatches)} function imports)`,
+  `${functionImportCount(residentMatches)} → ` +
+  `${functionImportCount(residentAllocator)} function imports)`,
 );

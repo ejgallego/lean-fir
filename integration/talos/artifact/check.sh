@@ -13,6 +13,8 @@ node run-resident-global.mjs _build/resident-global.wasm
 lake exe fir-wasm-artifact resident-memory-surface \
   _build/resident-memory-surface.wasm
 node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
+lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
+node run-resident-allocator.mjs _build/resident-allocator.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
@@ -33,6 +35,7 @@ lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
   Fir.Wasm.Emit.ResidentPrettyFormat
 lake -d ../../.. env lean FirWasmSourceExample.lean
+lake -d ../../.. env lean FirWasmPrettyTraceExample.lean
 mapfile -t source_artifacts < <(
   node --input-type=module -e '
     import { CONCRETE_SOURCE_PROBES } from "./concrete-corpus.mjs";
@@ -53,6 +56,8 @@ resident_pretties=(
   "source-pretty-format-resident-projections"
   "source-pretty-format-resident-closure-projections"
   "source-pretty-format-resident-closure-matches"
+  "source-pretty-format-resident-allocator"
+  "source-pretty-format-trace-resident-allocator"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -61,6 +66,7 @@ for resident_pretty in "${resident_pretties[@]}"; do
   done
 done
 lake -d ../../.. env lean FirWasmSourceExample.lean
+lake -d ../../.. env lean FirWasmPrettyTraceExample.lean
 for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm" "_build/$source.wasm"
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"
@@ -85,13 +91,16 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-closure-projections.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-closure-matches.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-allocator.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
   _build/source-pretty-format-resident-runtime.wasm \
   _build/source-pretty-format-resident-projections.wasm \
   _build/source-pretty-format-resident-closure-projections.wasm \
-  _build/source-pretty-format-resident-closure-matches.wasm
+  _build/source-pretty-format-resident-closure-matches.wasm \
+  _build/source-pretty-format-resident-allocator.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -202,6 +211,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closure-projections.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closure-matches.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-allocator.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -255,6 +266,13 @@ cmp "$first/resident/closure-matches.wasm" \
   "$second/resident/closure-matches.wasm"
 cmp "$first/resident/closure-matches.wasm.json" \
   "$second/resident/closure-matches.wasm.json"
+lake exe fir-wasm-artifact resident-allocator \
+  "$first/resident/allocator.wasm"
+lake exe fir-wasm-artifact resident-allocator \
+  "$second/resident/allocator.wasm"
+cmp "$first/resident/allocator.wasm" "$second/resident/allocator.wasm"
+cmp "$first/resident/allocator.wasm.json" \
+  "$second/resident/allocator.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

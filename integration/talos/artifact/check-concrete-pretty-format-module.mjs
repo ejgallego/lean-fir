@@ -9,7 +9,12 @@ function equalParams(actual, expected) {
  * Exercise prettyM through the concrete Wasm memory ABI. These helpers only
  * spell Lean 4.32's raw Format constructor layouts and packed-byte positions.
  */
-export function checkConcretePrettyFormatModule({ manifest, host, entry: prettyM }) {
+export function checkConcretePrettyFormatModule({
+  manifest,
+  host,
+  instance,
+  entry: prettyM,
+}) {
   assert.equal(manifest.result, "object");
   assert.ok(equalParams(manifest.params, ["tobject", "tobject", "tobject", "tobject"]),
     "concrete prettyM module has the wrong raw parameter ABI");
@@ -64,8 +69,14 @@ export function checkConcretePrettyFormatModule({ manifest, host, entry: prettyM
     ctor("Std.Format.tag", 7, [natural(kind), body], ["tobject", "tobject"]);
 
   function callPretty(format, width, indent = 0, column = 0) {
+    const args = [format, natural(width), natural(indent), natural(column)];
+    const setFrontier = instance.exports.fir_heap_set_frontier;
+    if (setFrontier !== undefined) {
+      assert.equal(typeof setFrontier, "function");
+      setFrontier(host.heapCursor);
+    }
     const result = host.decode("object",
-      prettyM(format, natural(width), natural(indent), natural(column)));
+      prettyM(...args));
     assert.equal(result.kind, "heap");
     return host.readString(host.addressOf(result.location));
   }

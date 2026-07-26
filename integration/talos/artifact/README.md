@@ -80,6 +80,9 @@ node run-resident-global.mjs _build/resident-global.wasm
 lake exe fir-wasm-artifact resident-memory-surface \
   _build/resident-memory-surface.wasm
 node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
+lake exe fir-wasm-artifact resident-allocator \
+  _build/resident-allocator.wasm
+node run-resident-allocator.mjs _build/resident-allocator.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -107,7 +110,7 @@ node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
 ```
 
-All five modules and their `.wasm.json` descriptors are generated
+All six runtime modules and their `.wasm.json` descriptors are generated
 deterministically. The `isShared` module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
 while a unique live heap object returns zero. The 983-byte projection module
@@ -312,7 +315,9 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm \
   _build/source-pretty-format-resident-runtime.wasm \
   _build/source-pretty-format-resident-projections.wasm \
-  _build/source-pretty-format-resident-closure-projections.wasm
+  _build/source-pretty-format-resident-closure-projections.wasm \
+  _build/source-pretty-format-resident-closure-matches.wasm \
+  _build/source-pretty-format-resident-allocator.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -394,10 +399,30 @@ initializations, 20 externals, and 27 literal/mutation/reference-count
 operations. The later W6 theorem still has to relate these physical comparisons
 to semantic `closureMatches` on related states.
 
+The next retained checkpoint keeps that 177-import frontier unchanged and
+installs the resident heap owner. Its initialized mutable global starts at
+byte 1024; allocation rejects sub-header, unaligned, and overflowing sizes,
+grows the module-owned memory by Wasm pages, and returns the prior frontier.
+The module also exports a monotone frontier handoff and typed raw stores so
+callers can construct values without a high-level adapter:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-allocator.wasm
+```
+
+The standalone allocator probe covers invalid inputs, page-crossing growth,
+byte-exact stores, Wasm bounds traps, zero imports, Node, Chrome, and Talos
+adaptation. The linked `prettyM` still invokes JavaScript for its remaining
+runtime families; this checkpoint establishes heap ownership before those
+families are internalized.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
-rebuilds that module and prepares a self-contained copy of the current
-JavaScript-hosted runtime, raw-layout smoke client, descriptor, final LCNF,
-checksums, and build metadata under `_build/prettyM-current`:
+builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
+self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
+client, descriptor, final LCNF, checksums, and capability metadata. The
+canonical `_build/prettyM-current` symlink is moved only after its immutable
+release has passed the checksum and smoke gates:
 
 ```text
 ./package-pretty-format.sh
@@ -405,9 +430,12 @@ cd _build/prettyM-current
 node smoke.mjs
 ```
 
-This package deliberately freezes the working pre-W7 runtime boundary. It is
-not a claim that the current module owns its memory or has zero function
-imports.
+This package is explicitly experimental and unversioned. Its module owns its
+memory and allocator and currently has 184 function imports: seven more than
+the text-only 177-import checkpoint in order to preserve the exact
+`MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
+rendered `String` remains available as the trace's text projection; zero
+imports is the later W7 closure milestone.
 
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:

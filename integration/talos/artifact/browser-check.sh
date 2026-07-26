@@ -19,6 +19,8 @@ test -s "$here/_build/resident-closure-projections.wasm"
 test -s "$here/_build/resident-closure-projections.wasm.json"
 test -s "$here/_build/resident-closure-matches.wasm"
 test -s "$here/_build/resident-closure-matches.wasm.json"
+test -s "$here/_build/resident-allocator.wasm"
+test -s "$here/_build/resident-allocator.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-get-tag.wasm"
 test -s "$here/_build/source-pretty-format-resident-get-tag.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-runtime.wasm"
@@ -29,6 +31,8 @@ test -s "$here/_build/source-pretty-format-resident-closure-projections.wasm"
 test -s "$here/_build/source-pretty-format-resident-closure-projections.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-closure-matches.wasm"
 test -s "$here/_build/source-pretty-format-resident-closure-matches.wasm.json"
+test -s "$here/_build/source-pretty-format-resident-allocator.wasm"
+test -s "$here/_build/source-pretty-format-resident-allocator.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &

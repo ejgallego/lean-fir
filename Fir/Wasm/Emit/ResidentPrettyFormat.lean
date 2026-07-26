@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.PrettyFormat
+import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentRuntime
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -16,6 +17,19 @@ private def linkRuntime (label : String)
     | .error error =>
         throw (.manifest s!"failed to internalize resident {label}: {repr error}")
   let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def linkAllocator (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentAllocator.install artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to install resident allocator: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
@@ -67,10 +81,21 @@ def compileClosureProjectionModule (entry : Name) :
 Continue from the closure-projection checkpoint and internalize exact
 closure-identity tests using the stable module-wide dispatch table.
 -/
-def compileModule (entry : Name) :
+def compileClosureMatchModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) := do
   let result ← compileClosureProjectionModule entry
   return result.bind <| linkRuntime "closure matches"
     Fir.Wasm.Emit.ResidentRuntime.internalizeClosureMatches
+
+/--
+Continue from the closure-match checkpoint and install the first Wasm-resident
+heap owner. This stage intentionally leaves semantic allocation imports
+unchanged; it establishes the low-level frontier and raw-store boundary used
+by subsequent allocation-family internalization.
+-/
+def compileModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileClosureMatchModule entry
+  return result.bind linkAllocator
 
 end Fir.Wasm.Emit.ResidentPrettyFormat
