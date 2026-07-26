@@ -6,7 +6,13 @@ import {
 import {
   checkFetchedResidentAllocator,
 } from "./resident-allocator-client.mjs";
+import {
+  checkFetchedResidentConstructors,
+} from "./resident-constructor-client.mjs";
 import { checkFetchedConcretePrettyFormat } from "./fetch-concrete-pretty-format.mjs";
+import {
+  checkFetchedConcretePrettyFormatTrace,
+} from "./fetch-concrete-pretty-format-trace.mjs";
 import { checkFetchedResidentGetTag } from "./resident-get-tag-client.mjs";
 import { checkFetchedResidentIsShared } from "./resident-is-shared-client.mjs";
 import {
@@ -24,6 +30,7 @@ try {
     checkFetchedResidentGlobal("./_build/resident-global.wasm"),
     checkFetchedResidentMemorySurface("./_build/resident-memory-surface.wasm"),
     checkFetchedResidentAllocator("./_build/resident-allocator.wasm"),
+    checkFetchedResidentConstructors("./_build/resident-constructors.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-get-tag.wasm",
@@ -42,6 +49,12 @@ try {
     ),
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-allocator.wasm",
+    ),
+    checkFetchedConcretePrettyFormat(
+      "./_build/source-pretty-format-resident-constructors.wasm",
+    ),
+    checkFetchedConcretePrettyFormatTrace(
+      "./_build/source-pretty-format-trace-resident-constructors.wasm",
     ),
     checkFetchedResidentGetTag("./_build/resident-get-tag.wasm"),
     checkFetchedResidentIsShared("./_build/resident-is-shared.wasm"),

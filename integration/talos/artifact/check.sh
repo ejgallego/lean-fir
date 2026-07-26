@@ -15,6 +15,9 @@ lake exe fir-wasm-artifact resident-memory-surface \
 node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
 lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
+lake exe fir-wasm-artifact resident-constructors \
+  _build/resident-constructors.wasm
+node run-resident-constructors.mjs _build/resident-constructors.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
@@ -57,7 +60,8 @@ resident_pretties=(
   "source-pretty-format-resident-closure-projections"
   "source-pretty-format-resident-closure-matches"
   "source-pretty-format-resident-allocator"
-  "source-pretty-format-trace-resident-allocator"
+  "source-pretty-format-resident-constructors"
+  "source-pretty-format-trace-resident-constructors"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -93,6 +97,8 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-closure-matches.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-allocator.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-constructors.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
@@ -100,7 +106,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-projections.wasm \
   _build/source-pretty-format-resident-closure-projections.wasm \
   _build/source-pretty-format-resident-closure-matches.wasm \
-  _build/source-pretty-format-resident-allocator.wasm
+  _build/source-pretty-format-resident-allocator.wasm \
+  _build/source-pretty-format-resident-constructors.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -213,6 +220,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closure-matches.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-allocator.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-constructors.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \

@@ -111,6 +111,7 @@ export class ConcreteHost {
   constructor(manifestImports = [], initialRuntime = undefined,
     externalRegistry = undefined, closureDispatch = undefined) {
     this.memory = undefined;
+    this.residentFrontier = undefined;
     this.buffer = new ArrayBuffer(PAGE_BYTES);
     this.view = new DataView(this.buffer);
     this.heapCursor = HEAP_BASE;
@@ -190,6 +191,49 @@ export class ConcreteHost {
     this.buffer = memory.buffer;
     this.view = new DataView(this.buffer);
     return this;
+  }
+
+  /**
+   * Keep the temporary mixed W7 runtime on one allocation frontier. Resident
+   * Wasm helpers and the remaining JavaScript semantic imports share memory,
+   * so every import boundary transfers the latest monotonically increasing
+   * frontier in both directions.
+   */
+  attachResidentFrontier(frontier, setFrontier) {
+    assert.equal(typeof frontier, "function",
+      "resident heap frontier export must be callable");
+    assert.equal(typeof setFrontier, "function",
+      "resident heap frontier setter export must be callable");
+    assert.equal(this.residentFrontier, undefined,
+      "concrete host cannot rebind resident heap frontier exports");
+    this.residentFrontier = { frontier, setFrontier };
+    this.synchronizeResidentFrontierBeforeImport();
+    return this;
+  }
+
+  synchronizeResidentFrontierBeforeImport() {
+    if (this.residentFrontier === undefined) return;
+    if (this.memory !== undefined && this.buffer !== this.memory.buffer) {
+      this.buffer = this.memory.buffer;
+      this.view = new DataView(this.buffer);
+    }
+    const resident = unsigned32(this.residentFrontier.frontier());
+    assert.ok(resident >= HEAP_BASE && resident % 8 === 0,
+      `invalid resident heap frontier ${resident}`);
+    assert.ok(Number.isInteger(this.heapCursor) &&
+      this.heapCursor >= HEAP_BASE && this.heapCursor <= 0xffffffff &&
+      this.heapCursor % 8 === 0,
+    `invalid host heap frontier ${this.heapCursor}`);
+    if (resident > this.heapCursor) {
+      this.heapCursor = resident;
+    } else if (this.heapCursor > resident) {
+      this.residentFrontier.setFrontier(this.heapCursor);
+    }
+  }
+
+  synchronizeResidentFrontierAfterImport() {
+    if (this.residentFrontier === undefined) return;
+    this.residentFrontier.setFrontier(this.heapCursor);
   }
 
   initialNaturalLimbs(value) {
@@ -1477,7 +1521,15 @@ export class ConcreteHost {
       imports[descriptor.module] ??= {};
       assert.equal(imports[descriptor.module][descriptor.name], undefined,
         `duplicate import ${descriptor.module}.${descriptor.name}`);
-      imports[descriptor.module][descriptor.name] = this.importFunction(descriptor.operation);
+      const imported = this.importFunction(descriptor.operation);
+      imports[descriptor.module][descriptor.name] = (...args) => {
+        this.synchronizeResidentFrontierBeforeImport();
+        try {
+          return imported(...args);
+        } finally {
+          this.synchronizeResidentFrontierAfterImport();
+        }
+      };
     }
     return imports;
   }

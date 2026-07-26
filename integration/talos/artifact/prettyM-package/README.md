@@ -83,7 +83,11 @@ the final zero-function-import W7 artifact. It owns a `WebAssembly.Memory`,
 starts its private frontier at byte 1024, and exports low-level
 `fir_heap_frontier`, `fir_heap_set_frontier`, `fir_heap_alloc`, and typed raw
 store operations. The accompanying `runtime/` tree supplies the current
-concrete JavaScript implementations of the remaining 177 function imports.
+concrete JavaScript implementations of the remaining 157 function imports.
+All 27 constructor-allocation operations in the styled artifact are resident
+in Wasm. While other allocating families remain imported, the temporary
+mixed-runtime client synchronizes the shared monotone frontier at each import
+boundary.
 
 The smoke client prepares ordinary Lean values directly in the exported
 memory, advances the monotone resident frontier before each call, decodes the

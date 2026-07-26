@@ -72,9 +72,9 @@ function decodeEventList(host, root) {
 
 /** Decode the deliberately raw `{ text, eventsRev }` result representation. */
 export function decodeConcretePrettyTrace(host, physicalResult) {
-  const result = host.decode("object", physicalResult);
-  assert.equal(result.kind, "heap", "pretty trace result must be heap-backed");
-  const address = host.addressOf(result.location);
+  assert.equal(host.classify(physicalResult), "heap",
+    "pretty trace result must be heap-backed");
+  const address = Number(physicalResult) >>> 0;
   const [text, eventsRev] = constructor(host, address, 0, 2, "pretty trace result");
   return {
     text: string(host, text, "pretty trace text"),

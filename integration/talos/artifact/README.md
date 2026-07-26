@@ -83,6 +83,9 @@ node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
 lake exe fir-wasm-artifact resident-allocator \
   _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
+lake exe fir-wasm-artifact resident-constructors \
+  _build/resident-constructors.wasm
+node run-resident-constructors.mjs _build/resident-constructors.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -110,7 +113,7 @@ node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
 ```
 
-All six runtime modules and their `.wasm.json` descriptors are generated
+All standalone runtime modules and their `.wasm.json` descriptors are generated
 deterministically. The `isShared` module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
 while a unique live heap object returns zero. The 983-byte projection module
@@ -127,6 +130,12 @@ artifacts, not the later theorems that the linked helpers satisfy the W6
 contracts on related states. Setting `FIR_BROWSER=google-chrome` while running
 `./check.sh` executes the same smoke clients in a browser Worker alongside the
 existing `prettyM` check.
+
+The 1,015-byte constructor module also has zero imports and owns its memory.
+It checks both immediate empty constructors and exact nonempty W6 headers,
+object slots, `USize` slots, packed scalar bytes, zero padding, repeated
+allocation, frontier movement, and preservation of the temporary retagging
+scratch word.
 
 Remaining JavaScript runtime operations can use that module-owned heap without
 a facade. Construct the concrete host before instantiation as usual, then
@@ -382,9 +391,9 @@ table to which W6's `RefinementWitness.closureDispatch` must be related. A
 future table-layout change therefore remains a shared-contract change rather
 than a generation-only rewrite.
 
-The complete retained audit is now
-`351 → 350 → 349 → 341 → 254 → 177` function imports. The final checkpoint
-in that sequence internalizes all 77 `closureMatches` calls:
+The closure-matching retained audit is
+`351 → 350 → 349 → 341 → 254 → 177` function imports. That checkpoint
+internalizes all 77 `closureMatches` calls:
 
 ```text
 node call-concrete-pretty-format.mjs \
@@ -417,6 +426,23 @@ adaptation. The linked `prettyM` still invokes JavaScript for its remaining
 runtime families; this checkpoint establishes heap ownership before those
 families are internalized.
 
+The next retained checkpoint internalizes all 23 text-frontier constructor
+allocations through that allocator, preserves the captured final LCNF, and
+reduces imports from 177 to 154:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-constructors.wasm
+```
+
+Empty constructors use their tagged immediate representation. Nonempty
+constructors zero the complete aligned allocation, install the frozen header,
+copy typed fields, and return the raw object word. During the temporary
+mixed-runtime phase, `module-client.mjs` synchronizes the monotone resident and
+host frontiers at each remaining JavaScript import boundary; this bridge does
+not add an ABI and becomes inactive at zero function imports. The full retained
+audit is now `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -431,11 +457,13 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 184 function imports: seven more than
-the text-only 177-import checkpoint in order to preserve the exact
+memory and allocator and currently has 157 function imports: three more than
+the text-only 154-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
-rendered `String` remains available as the trace's text projection; zero
-imports is the later W7 closure milestone.
+rendered `String` remains available as the trace's text projection. Node and
+the Chrome Worker decode the resident result constructor directly and compare
+the exact event stream with the native Lean 4.32 oracle; zero imports is the
+later W7 closure milestone.
 
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:

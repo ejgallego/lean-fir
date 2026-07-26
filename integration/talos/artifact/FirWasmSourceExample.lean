@@ -193,10 +193,8 @@ run_cmd do
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
-  let residentResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileGetTagModule
-    ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentArtifact ← match residentResult with
+  let residentArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeGetTag moduleArtifact with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile resident Format facade: {repr error}"
   unless moduleArtifact.module.runtimeOperations.contains .getTag &&
@@ -213,10 +211,8 @@ run_cmd do
       "_build/source-pretty-format-resident-get-tag.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write resident Format module: {repr error}"
-  let residentRuntimeResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileRuntimeModule
-      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentRuntimeArtifact ← match residentRuntimeResult with
+  let residentRuntimeArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIsShared residentArtifact with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile resident-runtime Format facade: {repr error}"
   unless residentArtifact.module.runtimeOperations.contains .isShared &&
@@ -240,10 +236,9 @@ run_cmd do
       readProjections.all expectedReadProjections.contains &&
       expectedReadProjections.all readProjections.contains do
     throwError "resident Format read-projection inventory changed"
-  let residentProjectionResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileReadProjectionModule
-      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentProjectionArtifact ← match residentProjectionResult with
+  let residentProjectionArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeReadProjections
+        residentRuntimeArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident-projection Format facade: {repr error}"
@@ -276,10 +271,9 @@ run_cmd do
           Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation ==
             some coordinate) do
     throwError "resident Format closure-projection inventory changed"
-  let residentClosureResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileClosureProjectionModule
-      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentClosureArtifact ← match residentClosureResult with
+  let residentClosureArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureProjections
+        residentProjectionArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident closure-projection Format facade: {repr error}"
@@ -308,10 +302,9 @@ run_cmd do
     Fir.Wasm.Emit.ResidentRuntime.isClosureMatch
   unless closureMatches.size == 77 do
     throwError "resident Format closure-match inventory changed"
-  let residentMatchResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileClosureMatchModule
-      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentMatchArtifact ← match residentMatchResult with
+  let residentMatchArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureMatches
+        residentClosureArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident closure-match Format facade: {repr error}"
@@ -334,10 +327,9 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident closure-match Format module: {repr error}"
-  let residentAllocatorResult ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
-      ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
-  let residentAllocatorArtifact ← match residentAllocatorResult with
+  let residentAllocatorArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.installAllocator
+        residentMatchArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident-allocator Format facade: {repr error}"
@@ -358,6 +350,34 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident-allocator Format module: {repr error}"
+  let constructors := residentAllocatorArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentConstructor.isConstructor
+  unless constructors.size == 23 do
+    throwError "resident Format constructor-allocation inventory changed"
+  let residentConstructorArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeConstructors
+        residentAllocatorArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident-constructor Format facade: {repr error}"
+  unless residentConstructorArtifact.module.runtimeOperations.all fun operation =>
+      !Fir.Wasm.Emit.ResidentConstructor.isConstructor operation do
+    throwError "resident Format retained a constructor-allocation import"
+  unless residentConstructorArtifact.module.imports.size + constructors.size ==
+      residentAllocatorArtifact.module.imports.size do
+    throwError "resident Format constructor import accounting changed"
+  unless residentConstructorArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch do
+    throwError "constructor linking changed the stable closure-dispatch table"
+  unless (List.range constructors.size).all fun ordinal =>
+      residentConstructorArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentConstructor.constructorName ordinal) do
+    throwError "resident Format constructor helper exports changed"
+  match ← residentConstructorArtifact.write
+      "_build/source-pretty-format-resident-constructors.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident-constructor Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

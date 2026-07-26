@@ -69,8 +69,12 @@ run_cmd do
   unless Fir.Wasm.Emit.ResidentAllocator.helperNames.all
       artifact.module.exports.contains do
     throwError "resident styled Format module lost allocator exports"
+  unless artifact.module.imports.size == 157 &&
+      artifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentConstructor.isConstructor operation do
+    throwError "resident styled Format constructor frontier changed"
   match ← artifact.write
-      "_build/source-pretty-format-trace-resident-allocator.wasm" with
+      "_build/source-pretty-format-trace-resident-constructors.wasm" with
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled Format module: {repr error}"

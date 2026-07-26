@@ -58,14 +58,20 @@ export async function instantiateModuleArtifact({ bytes, manifest, host }) {
     requireCondition(typeof host.attachMemory === "function",
       "module exports memory but its host does not provide attachMemory(memory)");
     host.attachMemory(memory);
+    const frontier = instance.exports.fir_heap_frontier;
     const setFrontier = instance.exports.fir_heap_set_frontier;
-    if (setFrontier !== undefined) {
+    if (frontier !== undefined || setFrontier !== undefined) {
+      requireCondition(typeof frontier === "function",
+        "fir_heap_frontier export must be callable");
       requireCondition(typeof setFrontier === "function",
         "fir_heap_set_frontier export must be callable");
       requireCondition(Number.isInteger(host.heapCursor) &&
         host.heapCursor >= 0 && host.heapCursor <= 0xffffffff,
       "resident allocator host must expose a wasm32 heapCursor");
       setFrontier(host.heapCursor);
+      requireCondition(typeof host.attachResidentFrontier === "function",
+        "resident allocator host must provide attachResidentFrontier(frontier, setFrontier)");
+      host.attachResidentFrontier(frontier, setFrontier);
     }
   }
   const entry = instance.exports[manifest.entry];
