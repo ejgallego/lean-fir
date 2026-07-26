@@ -107,7 +107,8 @@ traps for malformed source code.
    `ReuseCapacityStateRelated` through the syntax-directed simulation.
    Fresh nonempty constructor allocation and nonempty reuse from the zero
    token are complete, actual in-place reuse carries mapped-header transport,
-   and unique reset carries retained object evidence to its returned token.
-   Empty/tagged allocation and ownership or mutation transitions remain.
+   unique reset carries retained object evidence to its returned token, and
+   empty constructor allocation/reuse covers both immediate and promoted
+   tagged representations. Ownership or mutation transitions remain.
 3. State and prove T4S per operation, including explicit wasm32 allocation
    capacity, then compose it syntax-directly alongside T2/T4.

@@ -40,6 +40,17 @@ theorem MappedHeaderCapacityTransport.trans
     secondThird address location middleHeader mapped middleRead middleOwned
   exact ⟨finalHeader, finalRead, finalExtent.trans middleExtent, finalOwned⟩
 
+/-- Extending concrete memory above the old heap frontier preserves every
+header already represented by the refinement witness. -/
+theorem MappedHeaderCapacityTransport.ofPrefixExtension
+    {before after : MemoryState} (witness : RefinementWitness)
+    (extension : before.PrefixExtension after) :
+    MappedHeaderCapacityTransport before after witness := by
+  intro address location header mapped headerRead owned
+  refine ⟨header, ?_, rfl, Nat.le_trans owned extension.cursor⟩
+  rw [extension.readHeader address owned]
+  exact headerRead
+
 /-- A decoded concrete constructor represents one semantic constructor. The
 field clauses are indexed by the allocation-time ABI descriptor, which is the
 same metadata used by the W2 `allocCtor` host contract. -/

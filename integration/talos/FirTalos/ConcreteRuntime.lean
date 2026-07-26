@@ -434,6 +434,42 @@ theorem ConcreteRuntimeRel.allocateConstructorEmpty
     world := related.world
     trace := related.trace.witnessExtension extension }
 
+/-- Capacity-preserving form of empty constructor allocation. The tagged
+result may allocate a promoted representation, but every previously mapped
+semantic allocation keeps its retained extent. -/
+theorem ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fields : Array Word32}
+    {semanticFields : Array Value} {word : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (allocated : allocateConstructor concrete.heap info fields =
+      .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness runtime ∧
+      ValueRel nextWitness .tagged (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
+      MappedHeaderCapacityTransport concrete.heap result witness := by
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated, semanticStep,
+      capacityTransport⟩ :=
+    allocateConstructor_empty_liveHeapRel_extends_with_capacity concrete.heap
+      result witness runtime info fields semanticFields word related.heap arity
+      semanticArity empty tagFits allocated
+  refine ⟨nextWitness, extension, ?_, valueRelated, semanticStep,
+    capacityTransport⟩
+  exact {
+    heap := heapRelated
+    globals := related.globals.witnessExtension extension
+    world := related.world
+    trace := related.trace.witnessExtension extension }
+
 /-- Nonempty constructor allocation grows both heaps by one related object and
 preserves every auxiliary runtime component under the extended witness. -/
 theorem ConcreteRuntimeRel.allocateConstructorNonempty
@@ -2436,6 +2472,49 @@ theorem allocCtorEmptyStep_of_refines
   · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
 
+/-- Empty constructor execution additionally exports mapped-header capacity
+transport for the syntax-directed reuse-capacity invariant. -/
+theorem allocCtorEmptyStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated : allocateConstructor initial.host.runtime.heap info fields.toArray =
+      .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness runtime ∧
+      ValueRel nextWitness resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value))
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
+      semanticStep, capacityTransport⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
+      runtimeRelated arity semanticArity empty tagFits allocated
+  have valueRelated := taggedConstructorResult_of_refines empty resultRefines
+    exactRelated
+  refine ⟨nextWitness, extension, ?_, ?_, valueRelated, .word32 valueRelated,
+    semanticStep, capacityTransport⟩
+  · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
+  · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+
 /-- Executable/refinement boundary for a nonempty constructor allocation. -/
 theorem allocCtorNonemptyStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
@@ -4153,6 +4232,56 @@ theorem reuseStep_none_empty_of_refines
   have valueRelated := taggedConstructorResult_of_refines empty resultRefines
     exactRelated
   refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated, ?_⟩
+  · simp [reuseStep, argsLength, decoded, reused, replaceHeap, clearFailure]
+  · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
+  · simpa [reuse] using semanticAllocation
+
+/-- Empty-token reuse of an empty constructor additionally preserves every
+previously mapped allocation's retained capacity. -/
+theorem reuseStep_none_empty_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (Word32.zero, fields))
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (reused : reuseObject initial.host.runtime.heap Word32.zero info
+      updateHeader fields.toArray = .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        runtime ∧
+      ValueRel nextWitness resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value))
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      reuse runtime (.reuseToken none) info updateHeader semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have allocated : allocateConstructor initial.host.runtime.heap info
+      fields.toArray = .ok (heap, word) := by
+    unfold reuseObject at reused
+    rw [if_pos (by decide)] at reused
+    exact reused
+  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
+      semanticAllocation, capacityTransport⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
+      runtimeRelated arity semanticArity empty tagFits allocated
+  have valueRelated := taggedConstructorResult_of_refines empty resultRefines
+    exactRelated
+  refine ⟨nextWitness, extension, ?_, ?_, valueRelated, .word32 valueRelated, ?_,
+    capacityTransport⟩
   · simp [reuseStep, argsLength, decoded, reused, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
   · simpa [reuse] using semanticAllocation

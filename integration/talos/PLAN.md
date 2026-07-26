@@ -3254,6 +3254,17 @@ empty/tagged allocation branches and ownership or mutation transitions needed
 by the syntax-directed state invariant. No FIR semantic contract or
 executable ABI changed.
 
+W6.6dl discharges empty/tagged constructor transport. `encodeTagged` now has
+one common capacity theorem covering both physical cases: an immediate result
+is a heap identity transition, while a promoted tag is a fresh prefix
+extension. The result is lifted through empty `allocCtor` and empty-token
+`reuse`; their Talos capacity wrappers realize the validator's `emptyToken`
+fact while preserving every older retained extent. Forced recompilation also
+repaired two stale reset-fault destructurings after W6.6dk strengthened the
+reset-prefix result. Ownership and mutation transitions are now the remaining
+transport instances before `ReuseCapacityStateRelated` can be threaded
+syntax-directly. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

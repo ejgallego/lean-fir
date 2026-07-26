@@ -111,6 +111,44 @@ theorem allocateConstructor_empty_liveHeapRel_extends
     valueRelated.tobject_tagged_to_tagged,
     allocCtor_empty_eq runtime info semanticFields semanticArity empty⟩
 
+/-- Empty constructor allocation additionally preserves every mapped
+allocation's retained extent, whether the tagged result is immediate or
+promoted. -/
+theorem allocateConstructor_empty_liveHeapRel_extends_with_capacity
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : RuntimeState) (info : LCNF.CtorInfo)
+    (fields : Array Word32) (semanticFields : Array Value) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (allocated : allocateConstructor state info fields = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness runtime ∧
+      ValueRel nextWitness .tagged (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
+      MappedHeaderCapacityTransport state result witness := by
+  have encoded : encodeTagged state (UInt64.ofNat info.cidx) =
+      .ok (result, word) := by
+    unfold allocateConstructor at allocated
+    rw [if_pos arity] at allocated
+    rw [uint32Field_eq_ok "constructor tag" info.cidx tagFits] at allocated
+    simp only [Bind.bind, Except.bind] at allocated
+    rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])] at allocated
+    simpa [UInt32.toNat_ofNat_of_lt' tagFits] using allocated
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated,
+      capacityTransport⟩ :=
+    encodeTagged_liveHeapRel_extends_with_capacity state result witness runtime
+      (UInt64.ofNat info.cidx) word related encoded
+  exact ⟨nextWitness, extension, heapRelated,
+    valueRelated.tobject_tagged_to_tagged,
+    allocCtor_empty_eq runtime info semanticFields semanticArity empty,
+    capacityTransport⟩
+
 /-- A nonempty constructor allocation extends the complete concrete/semantic
 live-heap relation and relates the returned concrete address to the fresh
 semantic location.  This is the W6.1 operation-level refinement boundary

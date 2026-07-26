@@ -115,6 +115,42 @@ theorem allocatePromotedTag_prefixExtension
         (.inl (by rw [freshAddress]; omega))
     _ = state.memory.readByte byte := objectExtension.readByte byte beforeCursor
 
+/-- Promoted tagged values allocate only above the old frontier, so the
+retained extent of every mapped semantic heap object is unchanged. -/
+theorem MappedHeaderCapacityTransport.allocatePromotedTag
+    (state result : MemoryState) (witness : RefinementWitness)
+    (payload : UInt64) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : allocatePromotedTag state payload = .ok (result, address)) :
+    MappedHeaderCapacityTransport state result witness :=
+  .ofPrefixExtension witness
+    (allocatePromotedTag_prefixExtension state result payload address valid
+      allocated)
+
+/-- Tagged encoding preserves mapped allocation capacity in both physical
+representations: immediates leave the heap unchanged, while promoted tags are
+fresh prefix extensions. -/
+theorem MappedHeaderCapacityTransport.encodeTagged
+    (state result : MemoryState) (witness : RefinementWitness)
+    (payload : UInt64) (word : Word32)
+    (valid : state.FrontierInvariant)
+    (encoded : encodeTagged state payload = .ok (result, word)) :
+    MappedHeaderCapacityTransport state result witness := by
+  by_cases fits : payload.toNat ≤ maxImmediatePayload
+  · rw [encodeTagged_immediate state payload fits] at encoded
+    have pairEq :
+        (state, Word32.encodeImmediate payload.toNat fits) = (result, word) :=
+      Except.ok.inj encoded
+    have stateEq : state = result := congrArg Prod.fst pairEq
+    subst result
+    exact .refl state witness
+  · have promoted :
+      Fir.Wasm.Concrete.allocatePromotedTag state payload =
+          .ok (result, word) := by
+      simpa [Fir.Wasm.Concrete.encodeTagged, fits] using encoded
+    exact MappedHeaderCapacityTransport.allocatePromotedTag state result
+      witness payload word valid promoted
+
 /-- A fresh persistent natural establishes the exact promoted-tag relation
 and preserves the zero-frontier allocator invariant. -/
 theorem allocatePromotedTag_objectRel
@@ -382,5 +418,25 @@ theorem encodeTagged_liveHeapRel_extends
     have refined := allocatePromotedTag_liveHeapRel state result witness runtime
       payload word related promoted
     exact ⟨witness.promoteTag payload word, extension, refined.1, refined.2⟩
+
+/-- Monotone-witness tagged encoding additionally exposes the retained-header
+transport needed by the reuse-capacity state invariant. -/
+theorem encodeTagged_liveHeapRel_extends_with_capacity
+    (state result : MemoryState) (witness : RefinementWitness)
+    (runtime : Fir.LeanIR.Impure.RuntimeState)
+    (payload : UInt64) (word : Word32)
+    (related : LiveHeapRel state witness runtime)
+    (encoded : encodeTagged state payload = .ok (result, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      LiveHeapRel result nextWitness runtime ∧
+      ValueRel nextWitness .tobject (.word32 word)
+        (.object (.tagged payload)) ∧
+      MappedHeaderCapacityTransport state result witness := by
+  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+    encodeTagged_liveHeapRel_extends state result witness runtime payload word
+      related encoded
+  exact ⟨nextWitness, extension, heapRelated, valueRelated,
+    .encodeTagged state result witness payload word related.frontier encoded⟩
 
 end Fir.Wasm.Concrete

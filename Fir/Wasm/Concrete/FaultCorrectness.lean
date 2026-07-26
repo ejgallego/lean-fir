@@ -1317,7 +1317,7 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
       obtain ⟨fieldMemory, fieldWrite, _⟩ :=
         writeObjectFields_spec state.memory address.value 0
           (List.replicate count taggedZero) (by simpa using fieldsInBounds)
-      obtain ⟨protocolRuntime, protocolSet, protocolHeap⟩ :=
+      obtain ⟨protocolRuntime, protocolSet, protocolHeap, _⟩ :=
         LiveHeapRel.writeObjectFields_resetPrefix state fieldMemory witness
           runtime location address cell header info fieldKinds object count
           related mapped found descriptor constructor objectRelated headerRead
@@ -1456,7 +1456,7 @@ theorem LiveHeapRel.resetObject_unique_ne_releaseFuelExhausted
       obtain ⟨fieldMemory, fieldWrite, _⟩ :=
         writeObjectFields_spec state.memory address.value 0
           (List.replicate count taggedZero) (by simpa using fieldsInBounds)
-      obtain ⟨protocolRuntime, protocolSet, protocolHeap⟩ :=
+      obtain ⟨protocolRuntime, protocolSet, protocolHeap, _⟩ :=
         LiveHeapRel.writeObjectFields_resetPrefix state fieldMemory witness
           runtime location address cell header info fieldKinds object count
           related mapped found descriptor constructor objectRelated headerRead

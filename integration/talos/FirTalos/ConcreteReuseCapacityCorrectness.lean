@@ -28,11 +28,8 @@ theorem HeaderCapacityTransport.ofPrefixExtension
     {before after : MemoryState}
     (witness : RefinementWitness)
     (extension : before.PrefixExtension after) :
-    HeaderCapacityTransport before after witness := by
-  intro address location header mapped headerRead owned
-  refine ⟨header, ?_, rfl, Nat.le_trans owned extension.cursor⟩
-  rw [extension.readHeader address owned]
-  exact headerRead
+    HeaderCapacityTransport before after witness :=
+  MappedHeaderCapacityTransport.ofPrefixExtension witness extension
 
 theorem valueRel_heapObject_mapped
     {witness : RefinementWitness} {kind : AbiKind}
@@ -488,6 +485,112 @@ theorem ReuseCapacityValueRel.retainedObject_of_constructor
       headerRead).2.1
   exact .retainedObject valueRelated rawHeaderRead objectRelated.headerOwned
     allocationBytes
+
+/-- The static analysis records an empty-layout constructor as definitely
+empty, and the concrete tagged result realizes that fact for any admitted
+constructor result kind. -/
+theorem allocCtorEmptyStep_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated : allocateConstructor initial.host.runtime.heap info fields.toArray =
+      .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        runtime ∧
+      ValueRel nextWitness resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value))
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      ReuseCapacityValueRel heap nextWitness
+        (constructorReuseCapacityEvidence info) resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      allocCtor runtime info semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  obtain ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+      valueRelated, physicalRelated, semanticStep, capacityTransport⟩ :=
+    allocCtorEmptyStep_of_refines_with_capacity runtimeRelated argsLength decoded
+      arity semanticArity empty tagFits resultRefines allocated
+  have capacityValue :
+      ReuseCapacityValueRel heap nextWitness .emptyToken resultKind
+        (.word32 word) (.object (.tagged (UInt64.ofNat info.cidx))) := by
+    exact .emptyObject valueRelated
+  have evidenceEq :
+      constructorReuseCapacityEvidence info = .emptyToken := by
+    simp [constructorReuseCapacityEvidence, constructorAllocatesHeap,
+      empty.1.1, empty.1.2, empty.2]
+  exact ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+    valueRelated, physicalRelated, by simpa [evidenceEq] using capacityValue,
+    capacityTransport, semanticStep⟩
+
+/-- Empty-token reuse of an empty-layout constructor preserves old retained
+facts and realizes the analysis result as another definitely-empty tagged
+constructor value. -/
+theorem reuseStep_none_empty_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {word : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (Word32.zero, fields))
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (tagFits : info.cidx < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (reused : reuseObject initial.host.runtime.heap Word32.zero info
+      updateHeader fields.toArray = .ok (heap, word)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        runtime ∧
+      ValueRel nextWitness resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value))
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      ReuseCapacityValueRel heap nextWitness
+        (constructorReuseCapacityEvidence info) resultKind (.word32 word)
+        (.object (.tagged (UInt64.ofNat info.cidx))) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      reuse runtime (.reuseToken none) info updateHeader semanticFields =
+        .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
+  obtain ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+      valueRelated, physicalRelated, semanticStep, capacityTransport⟩ :=
+    reuseStep_none_empty_of_refines_with_capacity runtimeRelated argsLength
+      decoded arity semanticArity empty tagFits resultRefines reused
+  have capacityValue :
+      ReuseCapacityValueRel heap nextWitness .emptyToken resultKind
+        (.word32 word) (.object (.tagged (UInt64.ofNat info.cidx))) := by
+    exact .emptyObject valueRelated
+  have evidenceEq :
+      constructorReuseCapacityEvidence info = .emptyToken := by
+    simp [constructorReuseCapacityEvidence, constructorAllocatesHeap,
+      empty.1.1, empty.1.2, empty.2]
+  exact ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+    valueRelated, physicalRelated, by simpa [evidenceEq] using capacityValue,
+    capacityTransport, semanticStep⟩
 
 /-- A unique reset changes an ordinary object lane into a reuse-token lane at
 the same address. Header-capacity transport carries the retained lower bound
