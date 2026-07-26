@@ -5,6 +5,7 @@ namespace Fir.LeanIR.Passes.ElimDead
 
 open Lean
 open Lean.Compiler
+open Fir.LeanIR.Impure
 open Fir.LeanIR.ImpureHygiene
 open Fir.LeanIR.Passes.AlphaEqv
 open Fir.LeanIR.Passes.NonLockstep.Structural
@@ -40,6 +41,17 @@ theorem ExactShadowCodeGraph.toShadowCodeGraph
     (exact : ExactShadowCodeGraph fuel final source target) :
     ShadowCodeGraph fuel final source target :=
   ⟨fuel, exact.initial, final, Nat.le_refl fuel, exact.result, .refl final⟩
+
+/-- Forget an exact run directly into larger operational fuel and liveness
+indices.  Residual machine controls use this form because the compiler
+decreases local traversal fuel while the global proof relation retains its
+original bound. -/
+theorem ExactShadowCodeGraph.toShadowCodeGraphAt
+    (exact : ExactShadowCodeGraph fuel final source target)
+    (fuelBound : fuel ≤ outerFuel)
+    (usedBound : UsedSubset final ambient) :
+    ShadowCodeGraph outerFuel ambient source target :=
+  ⟨fuel, exact.initial, final, fuelBound, exact.result, usedBound⟩
 
 /-- Declaration-facing exact relation.  Unlike `ShadowCodeRelated`, this
 retains the full pass fuel and exact final liveness set produced from the
@@ -1826,6 +1838,252 @@ theorem shadowProgram_binderReadyExactRelated
       (BinderReadyExactShadowCodeRelated fuel) source target :=
   canonicalExactShadowProgram_toBinderReadyExact
     (shadowProgram_canonicalExactRelated wellFormed result)
+
+/-- Hereditary exact provenance embedded in the two monotonicity indices used
+by runtime controls.  Child traversals consume less fuel, while their exact
+final liveness set may be widened to the ambient set carried by an
+environment, join table, or saved frame. -/
+def BinderReadyShadowCodeGraph (fuel : Nat) (used : UsedLocals)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ remaining final, remaining ≤ fuel ∧
+    ∃ exact : ExactShadowCodeGraph remaining final source target,
+      UsedSubset final used ∧
+        ExactShadowCodeBinderReady used exact.view
+
+/-- Existential runtime-facing form for declaration bodies. -/
+def BinderReadyShadowCodeRelated (fuel : Nat)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ used, BinderReadyShadowCodeGraph fuel used source target
+
+/-- Join declaration relation retaining hereditary exact provenance for every
+live installed body. -/
+structure BinderReadyShadowFunDeclRelated (fuel : Nat) (used : UsedLocals)
+    (source target : LCNF.FunDecl .impure) : Prop where
+  fvarId_eq : source.fvarId = target.fvarId
+  binderName_eq : source.binderName = target.binderName
+  params_eq : source.params = target.params
+  type_eq : source.type = target.type
+  value : BinderReadyShadowCodeGraph fuel used source.value target.value
+
+/-- Extensional live-join relation whose observable entries retain hereditary
+exact provenance.  Source-only entries remain permitted for join declarations
+that the pass deleted and whose identifiers are absent from `used`. -/
+def BinderReadyShadowJoinEnvRelated (fuel : Nat) (used : UsedLocals)
+    (source target : JoinEnv) : Prop :=
+  ∀ key, used.contains key = true →
+    OptionalRel (BinderReadyShadowFunDeclRelated fuel used)
+      (findJoinPoint? source key) (findJoinPoint? target key)
+
+/-- Erase hereditary exact provenance while retaining the same bounded
+runtime graph and ambient liveness set. -/
+theorem BinderReadyShadowCodeGraph.toShadowCodeGraph
+    (graph : BinderReadyShadowCodeGraph fuel used source target) :
+    ShadowCodeGraph fuel used source target := by
+  rcases graph with
+    ⟨remaining, final, bounded, exact, subset, static⟩
+  exact ⟨remaining, exact.initial, final, bounded, exact.result, subset⟩
+
+/-- Declaration-facing erasure to the operational shadow relation. -/
+theorem BinderReadyShadowCodeRelated.toShadowCodeRelated
+    (related : BinderReadyShadowCodeRelated fuel source target) :
+    ShadowCodeRelated fuel source target := by
+  rcases related with ⟨used, graph⟩
+  exact ⟨used, graph.toShadowCodeGraph⟩
+
+/-- Erase hereditary provenance from one related live join declaration. -/
+theorem BinderReadyShadowFunDeclRelated.toShadowFunDeclRelated
+    (related :
+      BinderReadyShadowFunDeclRelated fuel used source target) :
+    ShadowFunDeclRelated fuel used source target := {
+  fvarId_eq := related.fvarId_eq
+  binderName_eq := related.binderName_eq
+  params_eq := related.params_eq
+  type_eq := related.type_eq
+  value := related.value.toShadowCodeGraph
+}
+
+/-- Erase hereditary provenance pointwise from the live join environment. -/
+theorem BinderReadyShadowJoinEnvRelated.toShadowJoinEnvRelated
+    (related :
+      BinderReadyShadowJoinEnvRelated fuel used source target) :
+    ShadowJoinEnvRelated fuel used source target := by
+  intro key member
+  have found := related key member
+  generalize sourceFound :
+      findJoinPoint? source key = sourceResult at found ⊢
+  generalize targetFound :
+      findJoinPoint? target key = targetResult at found ⊢
+  cases found with
+  | none => exact .none
+  | some declaration =>
+      exact .some declaration.toShadowFunDeclRelated
+
+/-- Empty join tables satisfy the hereditary live relation. -/
+theorem BinderReadyShadowJoinEnvRelated.empty
+    (fuel : Nat) (used : UsedLocals) :
+    BinderReadyShadowJoinEnvRelated fuel used [] [] := by
+  intro key member
+  exact .none
+
+/-- Install the same live key with hereditarily related bodies. -/
+theorem BinderReadyShadowJoinEnvRelated.consBoth
+    (declaration :
+      BinderReadyShadowFunDeclRelated fuel used
+        sourceDeclaration targetDeclaration)
+    (rest :
+      BinderReadyShadowJoinEnvRelated fuel used sourceJoins targetJoins) :
+    BinderReadyShadowJoinEnvRelated fuel used
+      ((key, sourceDeclaration) :: sourceJoins)
+      ((key, targetDeclaration) :: targetJoins) := by
+  intro target member
+  by_cases sameName : key.name == target.name
+  · simpa [findJoinPoint?, sameName] using
+      (OptionalRel.some declaration)
+  · simpa [findJoinPoint?, sameName] using rest target member
+
+/-- Install equal live keys with hereditarily related bodies. -/
+theorem BinderReadyShadowJoinEnvRelated.consBothOfKeys
+    (keyEq : sourceKey = targetKey)
+    (declaration :
+      BinderReadyShadowFunDeclRelated fuel used
+        sourceDeclaration targetDeclaration)
+    (rest :
+      BinderReadyShadowJoinEnvRelated fuel used sourceJoins targetJoins) :
+    BinderReadyShadowJoinEnvRelated fuel used
+      ((sourceKey, sourceDeclaration) :: sourceJoins)
+      ((targetKey, targetDeclaration) :: targetJoins) := by
+  subst targetKey
+  exact rest.consBoth declaration
+
+/-- Installing a source-only dead join preserves all observable lookups. -/
+theorem BinderReadyShadowJoinEnvRelated.consSourceOfAbsent
+    (absent : used.contains key = false)
+    (rest :
+      BinderReadyShadowJoinEnvRelated fuel used sourceJoins targetJoins) :
+    BinderReadyShadowJoinEnvRelated fuel used
+      ((key, sourceDeclaration) :: sourceJoins) targetJoins := by
+  intro target member
+  have different : key.name ≠ target.name :=
+    fvarId_name_ne_of_contains_of_absent used target key member absent
+  have sameName : (key.name == target.name) = false := by
+    simp [different]
+  simpa [findJoinPoint?, sameName] using rest target member
+
+/-- A successful source declaration lookup returns the corresponding target
+declaration together with its hereditary body relation. -/
+theorem binderReadyShadowProgram_findDecl_of_some
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel) source target)
+    (sourceFound : source.findDecl? name = some sourceDeclaration) :
+    ∃ targetDeclaration,
+      target.findDecl? name = some targetDeclaration ∧
+        DeclRelated (BinderReadyShadowCodeRelated fuel)
+          sourceDeclaration targetDeclaration := by
+  have found := programs.findDecl? name
+  rw [sourceFound] at found
+  generalize targetFound :
+      target.findDecl? name = targetResult at found
+  cases found with
+  | some declaration =>
+      exact ⟨_, rfl, declaration⟩
+
+/-- A successful live source join lookup returns the corresponding target
+join and its hereditary body graph. -/
+theorem BinderReadyShadowJoinEnvRelated.find_of_some
+    (related :
+      BinderReadyShadowJoinEnvRelated fuel used source target)
+    (member : used.contains key = true)
+    (sourceFound :
+      findJoinPoint? source key = some sourceDeclaration) :
+    ∃ targetDeclaration,
+      findJoinPoint? target key = some targetDeclaration ∧
+        BinderReadyShadowFunDeclRelated fuel used
+          sourceDeclaration targetDeclaration := by
+  have found := related key member
+  rw [sourceFound] at found
+  generalize targetFound :
+      findJoinPoint? target key = targetResult at found
+  cases found with
+  | some declaration =>
+      exact ⟨_, rfl, declaration⟩
+
+/-- A full-fuel exact certificate embeds into the bounded runtime relation
+with reflexive fuel and liveness widenings. -/
+theorem BinderReadyExactShadowCodeRelated.toBinderReadyShadowCodeRelated
+    (related : BinderReadyExactShadowCodeRelated fuel source target) :
+    BinderReadyShadowCodeRelated fuel source target := by
+  rcases related with ⟨final, exact, static⟩
+  exact ⟨final, fuel, final, Nat.le_refl fuel, exact,
+    UsedSubset.refl final, static⟩
+
+/-- Erase bounded hereditary provenance inside one declaration value. -/
+theorem forgetBinderReadyShadowDeclValue
+    (related :
+      DeclValueRelated (BinderReadyShadowCodeRelated fuel) source target) :
+    DeclValueRelated (ShadowCodeRelated fuel) source target := by
+  cases related with
+  | code body => exact .code body.toShadowCodeRelated
+  | extern metadata => exact .extern metadata
+
+/-- Lift exact-to-bounded embedding through one declaration value. -/
+theorem binderReadyExactShadowDeclValue_toBinderReadyShadow
+    (related :
+      DeclValueRelated
+        (BinderReadyExactShadowCodeRelated fuel) source target) :
+    DeclValueRelated
+      (BinderReadyShadowCodeRelated fuel) source target := by
+  cases related with
+  | code body =>
+      exact .code body.toBinderReadyShadowCodeRelated
+  | extern metadata => exact .extern metadata
+
+/-- Erase bounded hereditary program provenance pointwise. -/
+theorem forgetBinderReadyShadowProgram
+    (related :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel) source target) :
+    ProgramRelated (ShadowCodeRelated fuel) source target := by
+  apply listRel_mono (related := related)
+  intro left right declaration
+  exact {
+    name_eq := declaration.name_eq
+    levelParams_eq := declaration.levelParams_eq
+    type_eq := declaration.type_eq
+    params_eq := declaration.params_eq
+    safe_eq := declaration.safe_eq
+    value := forgetBinderReadyShadowDeclValue declaration.value
+    recursive_eq := declaration.recursive_eq
+    inlineAttr_eq := declaration.inlineAttr_eq
+  }
+
+/-- Embed exact hereditary program provenance into the bounded relation used
+by all future runtime code locations. -/
+theorem binderReadyExactShadowProgram_toBinderReadyShadow
+    (related :
+      ProgramRelated
+        (BinderReadyExactShadowCodeRelated fuel) source target) :
+    ProgramRelated (BinderReadyShadowCodeRelated fuel) source target := by
+  apply listRel_mono (related := related)
+  intro left right declaration
+  exact {
+    name_eq := declaration.name_eq
+    levelParams_eq := declaration.levelParams_eq
+    type_eq := declaration.type_eq
+    params_eq := declaration.params_eq
+    safe_eq := declaration.safe_eq
+    value :=
+      binderReadyExactShadowDeclValue_toBinderReadyShadow declaration.value
+    recursive_eq := declaration.recursive_eq
+    inlineAttr_eq := declaration.inlineAttr_eq
+  }
+
+/-- Successful checked compiler run in the bounded hereditary relation. -/
+theorem shadowProgram_binderReadyShadowRelated
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (result : shadowProgram? fuel source = some target) :
+    ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target :=
+  binderReadyExactShadowProgram_toBinderReadyShadow
+    (shadowProgram_binderReadyExactRelated wellFormed result)
 
 /-- Transparent replay of the let deletion decision at an exact traversal
 seed.  `true` means the continuation succeeded, the binder was absent, and

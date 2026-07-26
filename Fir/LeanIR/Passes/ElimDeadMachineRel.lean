@@ -232,6 +232,217 @@ def SomeReachableMachineRelated (fuel : Nat)
     (source target : MachineState) : Prop :=
   ∃ rho, ReachableMachineRelated fuel rho source target
 
+/-- Reachable control relation retaining hereditary exact provenance for the
+active code graph and every live join body.  Non-code controls carry the same
+runtime value relation as the established structural invariant. -/
+inductive BinderReadyReachableControlRelated
+    (fuel : Nat) (rho : AddressRenaming) :
+    Env → JoinEnv → Control → Env → JoinEnv → Control →
+      List Value → List Value → Prop where
+  | code
+      (graph : BinderReadyShadowCodeGraph fuel used sourceCode targetCode)
+      (joins : BinderReadyShadowJoinEnvRelated fuel used
+        sourceJoins targetJoins)
+      (env : EnvRelOn rho used sourceEnv targetEnv) :
+      BinderReadyReachableControlRelated fuel rho
+        sourceEnv sourceJoins (.code sourceCode)
+        targetEnv targetJoins (.code targetCode)
+        (envRootsOn used sourceEnv) (envRootsOn used targetEnv)
+  | yielded (value : ValueRel rho sourceValue targetValue) :
+      BinderReadyReachableControlRelated fuel rho
+        sourceEnv sourceJoins (.yielded sourceValue)
+        targetEnv targetJoins (.yielded targetValue)
+        [sourceValue] [targetValue]
+  | invokeName (name : Name)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      BinderReadyReachableControlRelated fuel rho
+        sourceEnv sourceJoins (.invokeName name sourceArguments)
+        targetEnv targetJoins (.invokeName name targetArguments)
+        sourceArguments.toList targetArguments.toList
+  | invokeValue (function : ValueRel rho sourceFunction targetFunction)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      BinderReadyReachableControlRelated fuel rho
+        sourceEnv sourceJoins
+          (.invokeValue sourceFunction sourceArguments)
+        targetEnv targetJoins
+          (.invokeValue targetFunction targetArguments)
+        (sourceFunction :: sourceArguments.toList)
+        (targetFunction :: targetArguments.toList)
+
+/-- Forget hereditary provenance from the active control and live joins. -/
+theorem BinderReadyReachableControlRelated.related
+    (related :
+      BinderReadyReachableControlRelated fuel rho
+        sourceEnv sourceJoins sourceControl
+        targetEnv targetJoins targetControl
+        sourceRoots targetRoots) :
+    ReachableControlRelated fuel rho
+      sourceEnv sourceJoins sourceControl
+      targetEnv targetJoins targetControl sourceRoots targetRoots := by
+  cases related with
+  | code graph joins env =>
+      exact .code graph.toShadowCodeGraph
+        joins.toShadowJoinEnvRelated env
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments =>
+      exact .invokeValue function arguments
+
+/-- Saved bind frames retain hereditary provenance for both their residual
+continuation and every live captured join body. -/
+inductive BinderReadyReachableFrameRelated
+    (fuel : Nat) (rho : AddressRenaming) :
+    Frame → Frame → List Value → List Value → Prop where
+  | bind
+      (graph :
+        BinderReadyShadowCodeGraph fuel used
+          sourceContinuation targetContinuation)
+      (joins :
+        BinderReadyShadowJoinEnvRelated fuel used
+          sourceJoins targetJoins)
+      (env : EnvRelOn rho used sourceEnv targetEnv) :
+      BinderReadyReachableFrameRelated fuel rho
+        (.bind fvarId sourceContinuation sourceEnv sourceJoins)
+        (.bind fvarId targetContinuation targetEnv targetJoins)
+        (envRootsOn used sourceEnv) (envRootsOn used targetEnv)
+  | apply
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      BinderReadyReachableFrameRelated fuel rho
+        (.apply sourceArguments) (.apply targetArguments)
+        sourceArguments.toList targetArguments.toList
+  | cache (name : Name) :
+      BinderReadyReachableFrameRelated fuel rho
+        (.cache name) (.cache name) [] []
+
+/-- Forget hereditary provenance from one saved frame. -/
+theorem BinderReadyReachableFrameRelated.related
+    (related :
+      BinderReadyReachableFrameRelated fuel rho
+        source target sourceRoots targetRoots) :
+    ReachableFrameRelated fuel rho
+      source target sourceRoots targetRoots := by
+  cases related with
+  | bind graph joins env =>
+      exact .bind graph.toShadowCodeGraph
+        joins.toShadowJoinEnvRelated env
+  | apply arguments => exact .apply arguments
+  | cache name => exact .cache name
+
+/-- Pointwise hereditary frame relation with the same published root lists. -/
+inductive BinderReadyReachableFramesRelated
+    (fuel : Nat) (rho : AddressRenaming) :
+    List Frame → List Frame → List Value → List Value → Prop where
+  | nil :
+      BinderReadyReachableFramesRelated fuel rho [] [] [] []
+  | cons
+      (head :
+        BinderReadyReachableFrameRelated fuel rho
+          sourceFrame targetFrame sourceHeadRoots targetHeadRoots)
+      (tail :
+        BinderReadyReachableFramesRelated fuel rho
+          sourceFrames targetFrames sourceTailRoots targetTailRoots) :
+      BinderReadyReachableFramesRelated fuel rho
+        (sourceFrame :: sourceFrames) (targetFrame :: targetFrames)
+        (sourceHeadRoots ++ sourceTailRoots)
+        (targetHeadRoots ++ targetTailRoots)
+
+/-- Forget hereditary provenance pointwise from the saved stack. -/
+theorem BinderReadyReachableFramesRelated.related
+    (related :
+      BinderReadyReachableFramesRelated fuel rho
+        source target sourceRoots targetRoots) :
+    ReachableFramesRelated fuel rho
+      source target sourceRoots targetRoots := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih => exact .cons head.related ih
+
+/-- Full structural machine relation with hereditary exact provenance at
+every live code-bearing location. -/
+def BinderReadyReachableMachineRelated
+    (fuel : Nat) (rho : AddressRenaming)
+    (source target : MachineState) : Prop :=
+  ∃ sourceControlRoots targetControlRoots sourceFrameRoots targetFrameRoots,
+    ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        source.program target.program ∧
+    BinderReadyReachableControlRelated fuel rho
+        source.env source.joins source.control
+        target.env target.joins target.control
+        sourceControlRoots targetControlRoots ∧
+    BinderReadyReachableFramesRelated fuel rho
+        source.frames target.frames sourceFrameRoots targetFrameRoots ∧
+    ShadowRuntimeRel rho source.runtime target.runtime
+        (sourceControlRoots ++ sourceFrameRoots)
+        (targetControlRoots ++ targetFrameRoots)
+
+/-- Hide the address renaming while retaining hereditary code provenance. -/
+def SomeBinderReadyReachableMachineRelated
+    (fuel : Nat) (source target : MachineState) : Prop :=
+  ∃ rho, BinderReadyReachableMachineRelated fuel rho source target
+
+/-- Forget hereditary provenance from the full machine relation. -/
+theorem SomeBinderReadyReachableMachineRelated.related
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target) :
+    SomeReachableMachineRelated fuel source target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots,
+    forgetBinderReadyShadowProgram programs,
+    control.related, frames.related, runtime⟩
+
+theorem BinderReadyReachableControlRelated.monoRenaming
+    (extension : RenamingExtends smaller larger)
+    (related :
+      BinderReadyReachableControlRelated fuel smaller
+        sourceEnv sourceJoins sourceControl
+        targetEnv targetJoins targetControl sourceRoots targetRoots) :
+    BinderReadyReachableControlRelated fuel larger
+      sourceEnv sourceJoins sourceControl
+      targetEnv targetJoins targetControl sourceRoots targetRoots := by
+  cases related with
+  | code graph joins env =>
+      exact .code graph joins (envRelOn_monoRenaming extension env)
+  | yielded value => exact .yielded (valueRel_mono extension value)
+  | invokeName name arguments =>
+      exact .invokeName name
+        (arrayRel_mono (valueRel_mono extension) arguments)
+  | invokeValue function arguments =>
+      exact .invokeValue (valueRel_mono extension function)
+        (arrayRel_mono (valueRel_mono extension) arguments)
+
+theorem BinderReadyReachableFrameRelated.monoRenaming
+    (extension : RenamingExtends smaller larger)
+    (related :
+      BinderReadyReachableFrameRelated fuel smaller
+        source target sourceRoots targetRoots) :
+    BinderReadyReachableFrameRelated fuel larger
+      source target sourceRoots targetRoots := by
+  cases related with
+  | bind graph joins env =>
+      exact .bind graph joins (envRelOn_monoRenaming extension env)
+  | apply arguments =>
+      exact .apply (arrayRel_mono (valueRel_mono extension) arguments)
+  | cache name => exact .cache name
+
+theorem BinderReadyReachableFramesRelated.monoRenaming
+    (extension : RenamingExtends smaller larger)
+    (related :
+      BinderReadyReachableFramesRelated fuel smaller
+        source target sourceRoots targetRoots) :
+    BinderReadyReachableFramesRelated fuel larger
+      source target sourceRoots targetRoots := by
+  induction related with
+  | nil => exact .nil
+  | cons head tail ih =>
+      exact .cons (head.monoRenaming extension) ih
+
 theorem ReachableControlRelated.monoRenaming
     (extension : RenamingExtends smaller larger)
     (related : ReachableControlRelated fuel smaller
@@ -341,6 +552,75 @@ theorem ReachableFramesRelated.prepareCall
     · simpa [extraEmpty, cache] using
         ReachableFramesRelated.cons
           (ReachableFrameRelated.apply extraArguments) related
+
+/-- Hereditary saved frames publish the same related root lists as their
+structural erasure. -/
+theorem BinderReadyReachableFrameRelated.roots
+    (related :
+      BinderReadyReachableFrameRelated fuel rho
+        source target sourceRoots targetRoots) :
+    ListRel (ValueRel rho) sourceRoots targetRoots :=
+  related.related.roots
+
+theorem BinderReadyReachableFramesRelated.roots
+    (related :
+      BinderReadyReachableFramesRelated fuel rho
+        source target sourceRoots targetRoots) :
+    ListRel (ValueRel rho) sourceRoots targetRoots :=
+  related.related.roots
+
+/-- Preparing a declaration call preserves hereditary provenance in the old
+stack; only exact apply/cache frames are added. -/
+theorem BinderReadyReachableFramesRelated.prepareCall
+    (name : Name) (params : Array (LCNF.Param .impure))
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (extraArguments : ArrayRel (ValueRel rho)
+      sourceExtraArguments targetExtraArguments)
+    (related :
+      BinderReadyReachableFramesRelated fuel rho
+        sourceFrames targetFrames sourceRoots targetRoots) :
+    BinderReadyReachableFramesRelated fuel rho
+      (let frames := if sourceExtraArguments.isEmpty then sourceFrames
+        else .apply sourceExtraArguments :: sourceFrames
+       if params.isEmpty && sourceArguments.isEmpty then
+          .cache name :: frames
+       else frames)
+      (let frames := if targetExtraArguments.isEmpty then targetFrames
+        else .apply targetExtraArguments :: targetFrames
+       if params.isEmpty && targetArguments.isEmpty then
+          .cache name :: frames
+       else frames)
+      (if sourceExtraArguments.isEmpty then sourceRoots
+        else sourceExtraArguments.toList ++ sourceRoots)
+      (if targetExtraArguments.isEmpty then targetRoots
+        else targetExtraArguments.toList ++ targetRoots) := by
+  have extraSize := arrayRel_size_eq extraArguments
+  have argumentSize := arrayRel_size_eq arguments
+  have extraEmptyEq : sourceExtraArguments.isEmpty =
+      targetExtraArguments.isEmpty := by
+    simp [Array.isEmpty, extraSize]
+  have argumentsEmptyEq : sourceArguments.isEmpty =
+      targetArguments.isEmpty := by
+    simp [Array.isEmpty, argumentSize]
+  rw [← extraEmptyEq, ← argumentsEmptyEq]
+  by_cases extraEmpty : sourceExtraArguments.isEmpty
+  · by_cases cache : params.isEmpty && sourceArguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        BinderReadyReachableFramesRelated.cons
+          (BinderReadyReachableFrameRelated.cache
+            (fuel := fuel) (rho := rho) name) related
+    · simpa [extraEmpty, cache] using related
+  · by_cases cache : params.isEmpty && sourceArguments.isEmpty
+    · simpa [extraEmpty, cache] using
+        BinderReadyReachableFramesRelated.cons
+          (BinderReadyReachableFrameRelated.cache
+            (fuel := fuel) (rho := rho) name)
+          (BinderReadyReachableFramesRelated.cons
+            (BinderReadyReachableFrameRelated.apply extraArguments) related)
+    · simpa [extraEmpty, cache] using
+        BinderReadyReachableFramesRelated.cons
+          (BinderReadyReachableFrameRelated.apply extraArguments) related
 
 /-- Preparing an external declaration call preserves the reachable machine
 relation while the interpreter waits for the foreign response.  The bound
@@ -2730,6 +3010,27 @@ theorem ReachableMachineRelated.monoRenaming
     frames.monoRenaming extension,
     shadowRuntimeRel_monoRenaming extension runtime sourceFresh targetFresh⟩
 
+/-- Address-renaming extension preserves hereditary code provenance while
+transporting only the runtime value relation. -/
+theorem BinderReadyReachableMachineRelated.monoRenaming
+    (related :
+      BinderReadyReachableMachineRelated fuel smaller source target)
+    (extension : RenamingExtends smaller larger)
+    (sourceFresh : ∀ location, source.runtime.nextLocation ≤ location →
+      larger.forward location = none)
+    (targetFresh : ∀ location, target.runtime.nextLocation ≤ location →
+      larger.reverse location = none) :
+    BinderReadyReachableMachineRelated fuel larger source target := by
+  rcases related with
+    ⟨sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  exact ⟨sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots,
+    programs, control.monoRenaming extension,
+    frames.monoRenaming extension,
+    shadowRuntimeRel_monoRenaming extension runtime sourceFresh targetFresh⟩
+
 /-- Related declaration graphs and entry arguments establish the generalized
 machine invariant at the canonical empty-runtime entry state. -/
 theorem initialState_reachableMachineRelated
@@ -2761,6 +3062,44 @@ theorem initialState_someReachableMachineRelated
       (initialState targetProgram entry targetArguments) :=
   ⟨emptyAddressRenaming,
     initialState_reachableMachineRelated programs arguments⟩
+
+/-- Checked compiler program provenance and related entry arguments establish
+the hereditary machine relation before the first declaration lookup. -/
+theorem initialState_binderReadyReachableMachineRelated
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceProgram targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    BinderReadyReachableMachineRelated fuel emptyAddressRenaming
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) := by
+  unfold BinderReadyReachableMachineRelated
+  refine
+    ⟨sourceArguments.toList, targetArguments.toList, [], [], ?_, ?_, ?_, ?_⟩
+  · simpa [initialState] using programs
+  · simpa [initialState] using
+      BinderReadyReachableControlRelated.invokeName
+        (sourceEnv := []) (sourceJoins := [])
+        (targetEnv := []) (targetJoins := []) entry arguments
+  · simpa [initialState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated
+          fuel emptyAddressRenaming [] [] [] [])
+  · simpa [initialState] using
+      emptyRuntime_shadowRelated_of_roots arguments
+
+theorem initialState_someBinderReadyReachableMachineRelated
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceProgram targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    SomeBinderReadyReachableMachineRelated fuel
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) :=
+  ⟨emptyAddressRenaming,
+    initialState_binderReadyReachableMachineRelated programs arguments⟩
 
 /-- A retained return narrows the active runtime roots from the complete live
 environment to the returned value, while keeping all saved-frame roots. -/
@@ -4932,17 +5271,32 @@ def BinderReadyExactShadowCodeReadyAt
     ExactShadowCodeBinderReady final exact.view ∧
       ExactShadowCodeRuntimeReadyAt state roots exact.view
 
+/-- Runtime-ready counterpart of `BinderReadyShadowCodeGraph`.  The exact
+child traversal may use less than the global machine fuel, and its static
+certificate is already widened to the ambient liveness index used by the
+active environment and join table. -/
+def BinderReadyShadowCodeReadyAt
+    (fuel : Nat) (used : UsedLocals)
+    (state : MachineState) (roots : List Value)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ remaining final, remaining ≤ fuel ∧
+    ∃ exact : ExactShadowCodeGraph remaining final source target,
+      UsedSubset final used ∧
+        ExactShadowCodeBinderReady used exact.view ∧
+          ExactShadowCodeRuntimeReadyAt state roots exact.view
+
 /-- Exact branch provenance plus hereditary binder absence discharges every
 static premise of the reachable machine edge.  The remaining
 `ExactShadowCodeRuntimeReadyAt` argument is intentionally limited to genuine
 runtime evaluation/ownership facts. -/
-theorem ExactShadowCodeView.reachableCodeReadyAt
+theorem ExactShadowCodeView.reachableCodeReadyAtAt
     (view : ExactShadowCodeView initial fuel final source target)
+    (fuelBound : fuel ≤ outerFuel)
     (subset : UsedSubset final ambient)
     (static : ExactShadowCodeBinderReady ambient view)
     (runtimeReady : ExactShadowCodeRuntimeReadyAt state roots view) :
-    ReachableCodeReadyAt fuel ambient state roots
-      (view.toGraph.toShadowCodeGraph.mono subset) := by
+    ReachableCodeReadyAt outerFuel ambient state roots
+      (view.toGraph.toShadowCodeGraphAt fuelBound subset) := by
   cases static with
   | @letRetained initial continuationUsed nextFuel sourceContinuation
       targetContinuation declaration continuation keep
@@ -4954,29 +5308,29 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
           exact by
               let graph :=
                 (ExactShadowCodeView.letRetained continuation keep).toGraph
-                  |>.toShadowCodeGraph
-                  |>.mono subset
+                  |>.toShadowCodeGraphAt fuelBound subset
               have continuationSubset :
                   UsedSubset continuationUsed ambient :=
                 (collectLetValue_subset continuationUsed declaration.value).trans
                   subset
               let continuationGraph :=
                 continuation.toShadowCodeGraphAt
-                  (Nat.le_succ nextFuel) continuationSubset
+                  (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+                  continuationSubset
               have covered :
                   LetValueCovered ambient declaration.value :=
                 (collectLetValue_covers continuationUsed declaration.value).mono
                   subset
               let residual :
-                  ShadowLetResidual (nextFuel + 1) ambient declaration
+                  ShadowLetResidual outerFuel ambient declaration
                     sourceContinuation (.let declaration targetContinuation) :=
                 .retained targetContinuation continuationGraph covered
               have edgeReady :
-                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                  ReachableLetReadyAt outerFuel ambient declaration
                     sourceContinuation state roots residual :=
                 .retained targetContinuation continuationGraph covered ready
               have aligned :
-                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                  ReachableLetReadyAt outerFuel ambient declaration
                     sourceContinuation state roots graph.letResidual := by
                 rw [show graph.letResidual = residual from
                   Subsingleton.elim _ _]
@@ -4991,30 +5345,30 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
           exact by
               let graph :=
                 (ExactShadowCodeView.letDeleted continuation absent safe).toGraph
-                  |>.toShadowCodeGraph
-                  |>.mono subset
+                  |>.toShadowCodeGraphAt fuelBound subset
               let continuationGraph :=
                 continuation.toShadowCodeGraphAt
-                  (Nat.le_succ nextFuel) subset
+                  (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
               let localContinuation :=
                 continuation.toShadowCodeGraphAt
-                  (Nat.le_succ nextFuel) (UsedSubset.refl final)
+                  (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+                  (UsedSubset.refl final)
               let residual :
-                  ShadowLetResidual (nextFuel + 1) ambient declaration
+                  ShadowLetResidual outerFuel ambient declaration
                     sourceContinuation target :=
                 .deleted target continuationGraph
                   (localContinuation := localContinuation)
                   (localSubset := subset) (localAbsent := absent)
                   (safe := safe)
               have edgeReady :
-                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                  ReachableLetReadyAt outerFuel ambient declaration
                     sourceContinuation state roots residual :=
                 .deleted target continuationGraph
                   (localContinuation := localContinuation)
                   (localSubset := subset) (localAbsent := absent)
                   (safe := safe) ambientAbsent ready
               have aligned :
-                  ReachableLetReadyAt (nextFuel + 1) ambient declaration
+                  ReachableLetReadyAt outerFuel ambient declaration
                     sourceContinuation state roots graph.letResidual := by
                 rw [show graph.letResidual = residual from
                   Subsingleton.elim _ _]
@@ -5028,18 +5382,19 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
             (ExactShadowCodeView.joinRetained
               (binderName := binderName) (params := params) (type := type)
               continuation live body).toGraph
-              |>.toShadowCodeGraph
-              |>.mono subset
+              |>.toShadowCodeGraphAt fuelBound subset
           have continuationSubset :
               UsedSubset continuationUsed ambient :=
             (shadowCode_spec body.result).2.trans subset
           let continuationGraph :=
             continuation.toShadowCodeGraphAt
-              (Nat.le_succ nextFuel) continuationSubset
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+              continuationSubset
           let bodyGraph :=
-            body.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+            body.toShadowCodeGraphAt
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
           let declarationRelated :
-              ShadowFunDeclRelated (nextFuel + 1) ambient
+              ShadowFunDeclRelated outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 (.mk fvarId binderName params type targetBody) := {
             fvarId_eq := rfl
@@ -5049,7 +5404,7 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
             value := bodyGraph
           }
           let residual :
-              ShadowJoinResidual (nextFuel + 1) ambient
+              ShadowJoinResidual outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation
                 (.jp (.mk fvarId binderName params type targetBody)
@@ -5057,13 +5412,13 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
             .retained (.mk fvarId binderName params type targetBody)
               targetContinuation declarationRelated continuationGraph
           have edgeReady :
-              ShadowJoinReadyAt (nextFuel + 1) ambient
+              ShadowJoinReadyAt outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation residual :=
             .retained (.mk fvarId binderName params type targetBody)
               targetContinuation declarationRelated continuationGraph
           have aligned :
-              ShadowJoinReadyAt (nextFuel + 1) ambient
+              ShadowJoinReadyAt outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation graph.joinResidual := by
             rw [show graph.joinResidual = residual from
@@ -5077,22 +5432,22 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
             (ExactShadowCodeView.joinDeleted
               (binderName := binderName) (params := params) (type := type)
               (sourceBody := sourceBody) continuation absent).toGraph
-              |>.toShadowCodeGraph
-              |>.mono subset
+              |>.toShadowCodeGraphAt fuelBound subset
           let continuationGraph :=
-            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+            continuation.toShadowCodeGraphAt
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
           let residual :
-              ShadowJoinResidual (nextFuel + 1) ambient
+              ShadowJoinResidual outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation target :=
             .deleted target continuationGraph
           have edgeReady :
-              ShadowJoinReadyAt (nextFuel + 1) ambient
+              ShadowJoinReadyAt outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation residual :=
             .deleted target continuationGraph ambientAbsent
           have aligned :
-              ShadowJoinReadyAt (nextFuel + 1) ambient
+              ShadowJoinReadyAt outerFuel ambient
                 (.mk fvarId binderName params type sourceBody)
                 sourceContinuation graph.joinResidual := by
             rw [show graph.joinResidual = residual from
@@ -5106,56 +5461,52 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
         ((ExactShadowCodeView.cases
           (discr := discr) (typeName := typeName)
           (resultType := resultType) alternatives).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @jump initial fuel join arguments =>
       exact .jump
         ((ExactShadowCodeView.jump
           (initial := initial) (fuel := fuel)
           (join := join) (arguments := arguments)).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @«return» initial fuel result =>
       exact .ret
         ((ExactShadowCodeView.return
           (initial := initial) (fuel := fuel) (result := result)).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @unreachable initial fuel type =>
       exact .unreachable
         ((ExactShadowCodeView.unreachable
           (initial := initial) (fuel := fuel) (type := type)).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @objectSetRetained initial continuationUsed nextFuel index
       sourceContinuation targetContinuation object field continuation live
       continuationStatic =>
       let graph :=
         (ExactShadowCodeView.objectSetRetained
           (index := index) (field := field) continuation live).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset
+          |>.toShadowCodeGraphAt fuelBound subset
       have growth : UsedSubset continuationUsed
           (collectArg continuationUsed field) :=
         collectArg_subset continuationUsed field
       let continuationGraph :=
-        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+        continuation.toShadowCodeGraphAt
+          (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
           (growth.trans subset)
       have objectMember : ambient.contains object = true :=
         subset object (growth object live)
       have fieldCovered : ArgCovered ambient field :=
         (argCovered_collectArg continuationUsed field).mono subset
       let residual :
-          ShadowObjectSetResidual (nextFuel + 1) ambient object index field
+          ShadowObjectSetResidual outerFuel ambient object index field
             sourceContinuation
             (.oset object index field targetContinuation) :=
         .retained targetContinuation continuationGraph objectMember fieldCovered
       have edgeReady :
-          ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+          ReachableObjectSetReadyAt outerFuel ambient object index
             field sourceContinuation state roots residual :=
         .retained targetContinuation continuationGraph objectMember fieldCovered
       have aligned :
-          ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+          ReachableObjectSetReadyAt outerFuel ambient object index
             field sourceContinuation state roots graph.objectSetResidual := by
         rw [show graph.objectSetResidual = residual from
           Subsingleton.elim _ _]
@@ -5172,20 +5523,20 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
           let graph :=
             (ExactShadowCodeView.objectSetDeleted
               (index := index) (field := field) continuation absent).toGraph
-              |>.toShadowCodeGraph
-              |>.mono subset
+              |>.toShadowCodeGraphAt fuelBound subset
           let continuationGraph :=
-            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+            continuation.toShadowCodeGraphAt
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
           let residual :
-              ShadowObjectSetResidual (nextFuel + 1) ambient object index
+              ShadowObjectSetResidual outerFuel ambient object index
                 field sourceContinuation target :=
             .deleted target continuationGraph
           have edgeReady :
-              ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+              ReachableObjectSetReadyAt outerFuel ambient object index
                 field sourceContinuation state roots residual :=
             .deleted target continuationGraph ready
           have aligned :
-              ReachableObjectSetReadyAt (nextFuel + 1) ambient object index
+              ReachableObjectSetReadyAt outerFuel ambient object index
                 field sourceContinuation state roots
                 graph.objectSetResidual := by
             rw [show graph.objectSetResidual = residual from
@@ -5198,29 +5549,29 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
       let graph :=
         (ExactShadowCodeView.usizeSetRetained
           (index := index) (field := field) continuation live).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset
+          |>.toShadowCodeGraphAt fuelBound subset
       have growth : UsedSubset continuationUsed
           (continuationUsed.insert field) :=
         usedSubset_insert continuationUsed field
       let continuationGraph :=
-        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+        continuation.toShadowCodeGraphAt
+          (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
           (growth.trans subset)
       have objectMember : ambient.contains object = true :=
         subset object (growth object live)
       have fieldMember : ambient.contains field = true :=
         subset field (by simp)
       let residual :
-          ShadowUSizeSetResidual (nextFuel + 1) ambient object index field
+          ShadowUSizeSetResidual outerFuel ambient object index field
             sourceContinuation
             (.uset object index field targetContinuation) :=
         .retained targetContinuation continuationGraph objectMember fieldMember
       have edgeReady :
-          ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+          ReachableUSizeSetReadyAt outerFuel ambient object index
             field sourceContinuation state roots residual :=
         .retained targetContinuation continuationGraph objectMember fieldMember
       have aligned :
-          ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+          ReachableUSizeSetReadyAt outerFuel ambient object index
             field sourceContinuation state roots graph.usizeSetResidual := by
         rw [show graph.usizeSetResidual = residual from
           Subsingleton.elim _ _]
@@ -5237,20 +5588,20 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
           let graph :=
             (ExactShadowCodeView.usizeSetDeleted
               (index := index) (field := field) continuation absent).toGraph
-              |>.toShadowCodeGraph
-              |>.mono subset
+              |>.toShadowCodeGraphAt fuelBound subset
           let continuationGraph :=
-            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+            continuation.toShadowCodeGraphAt
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
           let residual :
-              ShadowUSizeSetResidual (nextFuel + 1) ambient object index
+              ShadowUSizeSetResidual outerFuel ambient object index
                 field sourceContinuation target :=
             .deleted target continuationGraph
           have edgeReady :
-              ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+              ReachableUSizeSetReadyAt outerFuel ambient object index
                 field sourceContinuation state roots residual :=
             .deleted target continuationGraph ready
           have aligned :
-              ReachableUSizeSetReadyAt (nextFuel + 1) ambient object index
+              ReachableUSizeSetReadyAt outerFuel ambient object index
                 field sourceContinuation state roots
                 graph.usizeSetResidual := by
             rw [show graph.usizeSetResidual = residual from
@@ -5264,29 +5615,29 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
         (ExactShadowCodeView.scalarSetRetained
           (field := field) (width := width) (offset := offset)
           (type := type) continuation live).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset
+          |>.toShadowCodeGraphAt fuelBound subset
       have growth : UsedSubset continuationUsed
           (continuationUsed.insert field) :=
         usedSubset_insert continuationUsed field
       let continuationGraph :=
-        continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel)
+        continuation.toShadowCodeGraphAt
+          (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
           (growth.trans subset)
       have objectMember : ambient.contains object = true :=
         subset object (growth object live)
       have fieldMember : ambient.contains field = true :=
         subset field (by simp)
       let residual :
-          ShadowScalarSetResidual (nextFuel + 1) ambient object width offset
+          ShadowScalarSetResidual outerFuel ambient object width offset
             field type sourceContinuation
             (.sset object width offset field type targetContinuation) :=
         .retained targetContinuation continuationGraph objectMember fieldMember
       have edgeReady :
-          ReachableScalarSetReadyAt (nextFuel + 1) ambient object width offset
+          ReachableScalarSetReadyAt outerFuel ambient object width offset
             field type sourceContinuation state roots residual :=
         .retained targetContinuation continuationGraph objectMember fieldMember
       have aligned :
-          ReachableScalarSetReadyAt (nextFuel + 1) ambient object width offset
+          ReachableScalarSetReadyAt outerFuel ambient object width offset
             field type sourceContinuation state roots
             graph.scalarSetResidual := by
         rw [show graph.scalarSetResidual = residual from
@@ -5305,20 +5656,20 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
             (ExactShadowCodeView.scalarSetDeleted
               (field := field) (width := width) (offset := offset)
               (type := type) continuation absent).toGraph
-              |>.toShadowCodeGraph
-              |>.mono subset
+              |>.toShadowCodeGraphAt fuelBound subset
           let continuationGraph :=
-            continuation.toShadowCodeGraphAt (Nat.le_succ nextFuel) subset
+            continuation.toShadowCodeGraphAt
+              (Nat.le_trans (Nat.le_succ nextFuel) fuelBound) subset
           let residual :
-              ShadowScalarSetResidual (nextFuel + 1) ambient object width offset
+              ShadowScalarSetResidual outerFuel ambient object width offset
                 field type sourceContinuation target :=
             .deleted target continuationGraph
           have edgeReady :
-              ReachableScalarSetReadyAt (nextFuel + 1) ambient object width
+              ReachableScalarSetReadyAt outerFuel ambient object width
                 offset field type sourceContinuation state roots residual :=
             .deleted target continuationGraph ready
           have aligned :
-              ReachableScalarSetReadyAt (nextFuel + 1) ambient object width
+              ReachableScalarSetReadyAt outerFuel ambient object width
                 offset field type sourceContinuation state roots
                 graph.scalarSetResidual := by
             rw [show graph.scalarSetResidual = residual from
@@ -5330,8 +5681,7 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
       exact .setTag
         ((ExactShadowCodeView.tagSet
           (object := object) (tag := tag) continuation).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @increment initial continuationUsed nextFuel amount sourceContinuation
       targetContinuation object check persistent continuation
       continuationStatic =>
@@ -5339,8 +5689,7 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
         ((ExactShadowCodeView.increment
           (object := object) (amount := amount)
           (check := check) (persistent := persistent) continuation).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @decrement initial continuationUsed nextFuel amount sourceContinuation
       targetContinuation object check persistent objects continuation
       continuationStatic =>
@@ -5349,14 +5698,23 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
           (object := object) (amount := amount)
           (check := check) (persistent := persistent)
           (objects := objects) continuation).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
   | @delete initial continuationUsed nextFuel sourceContinuation
       targetContinuation object continuation continuationStatic =>
       exact .delete
         ((ExactShadowCodeView.delete (object := object) continuation).toGraph
-          |>.toShadowCodeGraph
-          |>.mono subset)
+          |>.toShadowCodeGraphAt fuelBound subset)
+
+/-- Reflexive-fuel spelling of the bounded readiness constructor. -/
+theorem ExactShadowCodeView.reachableCodeReadyAt
+    (view : ExactShadowCodeView initial fuel final source target)
+    (subset : UsedSubset final ambient)
+    (static : ExactShadowCodeBinderReady ambient view)
+    (runtimeReady : ExactShadowCodeRuntimeReadyAt state roots view) :
+    ReachableCodeReadyAt fuel ambient state roots
+      (view.toGraph.toShadowCodeGraph.mono subset) := by
+  simpa only [ExactShadowCodeGraph.toShadowCodeGraph] using
+    view.reachableCodeReadyAtAt (Nat.le_refl fuel) subset static runtimeReady
 
 /-- The materialized hereditary/dynamic package discharges all premises of a
 reachable code edge, exposing only its exact final liveness index. -/
@@ -5369,6 +5727,22 @@ theorem BinderReadyExactShadowCodeReadyAt.reachableCodeReadyAt
   exact ⟨final, exact.toShadowCodeGraph,
     exact.view.reachableCodeReadyAt (UsedSubset.refl final)
       static runtimeReady⟩
+
+/-- Bounded hereditary/dynamic provenance reconstructs the precise
+operational graph accepted by the global-fuel machine relation. -/
+theorem BinderReadyShadowCodeReadyAt.reachableCodeReadyAt
+    (ready :
+      BinderReadyShadowCodeReadyAt
+        fuel used state roots source target) :
+    ∃ graph : ShadowCodeGraph fuel used source target,
+      ReachableCodeReadyAt fuel used state roots graph := by
+  rcases ready with
+    ⟨remaining, final, bounded, exact, subset, static, runtimeReady⟩
+  let graph : ShadowCodeGraph fuel used source target :=
+    ⟨remaining, exact.initial, final, bounded, exact.result, subset⟩
+  exact ⟨graph,
+    exact.view.reachableCodeReadyAtAt
+      bounded subset static runtimeReady⟩
 
 /-- Checked scoping and canonical binder uniqueness discharge the full static
 side of exact entry readiness.  Only the operation-specific dynamic facts
