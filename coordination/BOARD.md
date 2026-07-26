@@ -15,7 +15,8 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Lane snapshot
 
-Snapshot base: `main` at `21f382c`.
+Lane rows name their own landed commits; the board intentionally has no
+moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
