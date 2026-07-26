@@ -304,17 +304,22 @@ python3 scripts/record_direct_native_ir.py \
   --case machine-reset-erased-and-repeated-owned-fields --no-build
 ```
 
-`--record` prints newly observed digests without treating drift as failure;
-normal mode writes per-case `attestation.json` and aggregate
-`attestations.json` evidence, retains each case's semantic claim, and fails when
-the final-impure artifact changes. The initial audited set separates three
-ownership paths: releasing both slots of a repeated alias from a unique owner,
-stopping recursive release at a shared nested child, and taking the
-shared-owner allocation path without releasing its child. This opt-in audit
-therefore pins the native compiler path underlying each semantic comparison
-and can distinguish resetting the intended owner from an optimizer choosing
-ordinary destruction or reusing one of the owner's projected children. It is
-not a CI tier and does not claim additional native/LCNF/V8 comparisons.
+`--record` prints newly observed digests without treating digest drift as
+failure. Both modes verify the case's required artifact fragments, so recording
+a new hash cannot silently bless an artifact that no longer supports its
+semantic claim. Normal mode writes per-case `attestation.json` and aggregate
+`attestations.json` evidence, retains the claim and its missing-fragment
+diagnostics, and fails when the final-impure artifact changes.
+
+The initial audited set separates four ownership paths: releasing both slots of
+a repeated alias from a unique owner, stopping recursive release at a shared
+nested child, taking the shared-owner allocation path without releasing its
+child, and loading a closed persistent owner graph through
+`inc[persistent][ref]` before the shared reset path. This opt-in audit therefore
+pins the native compiler path underlying each semantic comparison and can
+distinguish resetting the intended owner from an optimizer choosing ordinary
+destruction or reusing one of the owner's projected children. It is not a CI
+tier and does not claim additional native/LCNF/V8 comparisons.
 
 Only the first two tiers attach LCNF machine telemetry. The V8 matrix contains
 the source native–LCNF edge for triangular consistency, but the index selects

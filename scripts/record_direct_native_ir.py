@@ -25,6 +25,7 @@ MANIFEST_FIELDS = {
     "entry",
     "dependencies",
     "claim",
+    "requiredArtifactFragments",
     "expectedArtifactSha256",
 }
 ARTIFACT_FILES = (
@@ -96,6 +97,18 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"{case_id}: native IR claim must be a nonempty single line"
             )
+        required_fragments = value["requiredArtifactFragments"]
+        if (
+            not isinstance(required_fragments, list)
+            or any(
+                not isinstance(fragment, str) or not fragment
+                for fragment in required_fragments
+            )
+            or len(required_fragments) != len(set(required_fragments))
+        ):
+            raise ValidationError(
+                f"{case_id}: required native IR fragments must be unique nonempty strings"
+            )
         digest = checked_sha256(
             value["expectedArtifactSha256"],
             f"{case_id} expected native IR artifact",
@@ -107,6 +120,7 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
                 "entry": entry,
                 "dependencies": dependencies,
                 "claim": claim,
+                "requiredArtifactFragments": required_fragments,
                 "expectedArtifactSha256": digest,
             }
         )
@@ -121,6 +135,7 @@ def attest_artifacts(
     descriptors: list[dict],
     out_dir: Path,
     selected: list[str] | None = None,
+    verify_digest: bool = True,
 ) -> tuple[list[dict], list[str]]:
     descriptor_by_id = {item["caseId"]: item for item in descriptors}
     selected_ids = selected or sorted(descriptor_by_id)
@@ -172,17 +187,35 @@ def attest_artifacts(
         artifact = contents["program.lcnf"]
         actual_digest = sha256_bytes(artifact)
         expected_digest = descriptor["expectedArtifactSha256"]
-        matches = actual_digest == expected_digest
+        artifact_matches = actual_digest == expected_digest
+        try:
+            artifact_text = artifact.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValidationError(
+                f"{case_id}: recorded native IR artifact is not UTF-8"
+            ) from error
+        required_fragments = descriptor["requiredArtifactFragments"]
+        missing_fragments = [
+            fragment
+            for fragment in required_fragments
+            if fragment not in artifact_text
+        ]
+        claim_matches = not missing_fragments
+        matches = artifact_matches and claim_matches
         record = {
             "version": PROTOCOL_VERSION,
             "caseId": case_id,
             "entry": entry,
             "dependencies": descriptor["dependencies"],
             "claim": descriptor["claim"],
+            "requiredArtifactFragments": required_fragments,
+            "missingArtifactFragments": missing_fragments,
+            "claimMatches": claim_matches,
             "artifact": "program.lcnf",
             "artifactBytes": len(artifact),
             "artifactSha256": actual_digest,
             "expectedArtifactSha256": expected_digest,
+            "artifactMatches": artifact_matches,
             "matches": matches,
             "declarations": declarations,
             "forms": forms,
@@ -193,7 +226,12 @@ def attest_artifacts(
             encoding="utf-8",
         )
         records.append(record)
-        if not matches:
+        if missing_fragments:
+            failures.append(
+                f"{case_id}: native IR no longer supports its semantic claim; "
+                f"missing artifact fragments {missing_fragments!r}"
+            )
+        if verify_digest and not artifact_matches:
             failures.append(
                 f"{case_id}: native IR SHA-256 {actual_digest} "
                 f"does not match {expected_digest}"
@@ -270,14 +308,19 @@ def main(argv: list[str] | None = None) -> int:
     if recorded.returncode != 0:
         sys.stderr.write(recorded.stdout + recorded.stderr)
         raise ValidationError("failed to record direct native final-impure LCNF")
-    records, failures = attest_artifacts(descriptors, out_dir, args.cases)
+    records, failures = attest_artifacts(
+        descriptors,
+        out_dir,
+        args.cases,
+        verify_digest=not args.record,
+    )
     for record in records:
         status = "RECORDED" if args.record else ("PASS" if record["matches"] else "FAIL")
         print(
             f"{status} {record['caseId']} "
             f"native-ir sha256={record['artifactSha256']}"
         )
-    if failures and not args.record:
+    if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1

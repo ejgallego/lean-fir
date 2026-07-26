@@ -65,6 +65,7 @@ structure NativeOracleAttestation where
   entry : Name
   dependencies : Array Name := #[]
   claim : String
+  requiredArtifactFragments : Array String := #[]
   expectedArtifactSha256 : String
   deriving Inhabited
 
@@ -74,6 +75,7 @@ structure NativeOracleDescriptor where
   entry : String
   dependencies : Array String
   claim : String
+  requiredArtifactFragments : Array String
   expectedArtifactSha256 : String
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -674,6 +676,8 @@ def cases : Array Case := #[
       dependencies := #[``replaceMixedOwner]
       claim :=
         "shared owner reset decrements only the owner and allocates the replacement"
+      requiredArtifactFragments :=
+        #["inc[ref] owner;", "isShared owner;", "dec owner;", "reuseFailAlloc"]
       expectedArtifactSha256 :=
         "4e45f9af8557f2f90ce7ff564fc0fdd2d6eea4faa3d29f85ce0d9b708f9064b5"
     } },
@@ -714,7 +718,18 @@ def cases : Array Case := #[
           "Reset a cached persistent mixed owner and preserve both owner and child reachability"
       }
     }
-    program := persistentResetErasedAndOwnedFieldsProgram },
+    program := persistentResetErasedAndOwnedFieldsProgram
+    nativeOracle? := some {
+      entry := ``nativePersistentResetErasedAndOwnedFields
+      dependencies := #[``nativePersistentMixedOwner, ``replaceMixedOwner]
+      claim :=
+        "cached persistent owner stays shared while reset allocates a replacement and preserves its child"
+      requiredArtifactFragments :=
+        #["inc[persistent][ref] owner;", "nativePersistentMixedOwner._closed_1",
+          "nativePersistentMixedOwner._closed_0", "reuseFailAlloc"]
+      expectedArtifactSha256 :=
+        "81560717dd22a90fc4b40e2d41f5a1cad8ed8c08f8824a9ccec37d82b6ee96d7"
+    } },
   { validationCase := {
       id := "machine-reset-erased-and-nested-owned-fields"
       entry := `directResetErasedAndNestedOwnedFields
@@ -793,6 +808,9 @@ def cases : Array Case := #[
       dependencies := #[``replaceNestedOwner]
       claim :=
         "unique owner reset decrements a shared child without recursively releasing its grandchild"
+      requiredArtifactFragments :=
+        #["inc[ref] grandchild;", "inc[ref] child;", "isShared owner;",
+          "dec unused"]
       expectedArtifactSha256 :=
         "97aee3e462f7ba25269a1a449d56f478d215b0681af63c1f980e5518016f7ab3"
     } },
@@ -837,6 +855,9 @@ def cases : Array Case := #[
       dependencies := #[``replaceRepeatedOwner]
       claim :=
         "unique owner reset releases both aliased child slots before reusing its storage"
+      requiredArtifactFragments :=
+        #["inc[2][ref] child;", "oproj[1] owner;", "oproj[0] owner;",
+          "oset"]
       expectedArtifactSha256 :=
         "34469861bd43393e0c221989ea0f71a3a58431d8c92cb82144f48843dc83f721"
     } }
@@ -860,10 +881,11 @@ def nativeOracleDescriptors : Array NativeOracleDescriptor :=
       entry := toString attestation.entry
       dependencies := attestation.dependencies.map toString
       claim := attestation.claim
+      requiredArtifactFragments := attestation.requiredArtifactFragments
       expectedArtifactSha256 := attestation.expectedArtifactSha256
     }
 
-#guard nativeOracleDescriptors.size == 3
+#guard nativeOracleDescriptors.size == 4
 
 private def failure (backend caseId message : String) : BackendResult := {
   caseId

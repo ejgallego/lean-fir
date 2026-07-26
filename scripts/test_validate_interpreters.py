@@ -7865,6 +7865,7 @@ class DirectNativeIrTests(unittest.TestCase):
             "entry": "Fir.Validation.nativeIrCase",
             "dependencies": ["Fir.Validation.nativeIrHelper"],
             "claim": "the native helper takes the intended ownership path",
+            "requiredArtifactFragments": ["return"],
             "expectedArtifactSha256": digest,
         }
 
@@ -7891,6 +7892,15 @@ class DirectNativeIrTests(unittest.TestCase):
         with self.assertRaisesRegex(core.ValidationError, "nonempty single line"):
             native_ir.parse_manifest(
                 json.dumps(malformed_claim), ["native-ir-manifest"]
+            )
+
+        malformed_fragments = {
+            **descriptor,
+            "requiredArtifactFragments": ["return", "return"],
+        }
+        with self.assertRaisesRegex(core.ValidationError, "unique nonempty strings"):
+            native_ir.parse_manifest(
+                json.dumps(malformed_fragments), ["native-ir-manifest"]
             )
 
     def test_native_ir_attestation_records_evidence_and_mismatch(self) -> None:
@@ -7922,13 +7932,34 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertTrue(records[0]["matches"])
             self.assertEqual(records[0]["artifactSha256"], digest)
             self.assertEqual(records[0]["claim"], descriptor["claim"])
+            self.assertTrue(records[0]["claimMatches"])
+            self.assertEqual(records[0]["missingArtifactFragments"], [])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
+
+            missing_claim = {
+                **descriptor,
+                "requiredArtifactFragments": ["isShared owner"],
+            }
+            records, failures = native_ir.attest_artifacts(
+                [missing_claim], out_dir, verify_digest=False
+            )
+            self.assertFalse(records[0]["claimMatches"])
+            self.assertTrue(records[0]["artifactMatches"])
+            self.assertFalse(records[0]["matches"])
+            self.assertEqual(len(failures), 1)
 
             mismatch = {
                 **descriptor,
                 "expectedArtifactSha256": "0" * 64,
             }
+            records, failures = native_ir.attest_artifacts(
+                [mismatch], out_dir, verify_digest=False
+            )
+            self.assertFalse(records[0]["artifactMatches"])
+            self.assertTrue(records[0]["claimMatches"])
+            self.assertEqual(failures, [])
+
             records, failures = native_ir.attest_artifacts(
                 [mismatch], out_dir
             )
