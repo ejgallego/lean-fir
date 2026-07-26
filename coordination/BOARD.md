@@ -15,14 +15,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Lane snapshot
 
-Snapshot base: `main` at `3b82b0b`.
+Snapshot base: `main` at `21f382c`.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/wasm-lanes` | active | Close the W7 generation handoff, keep W6 independent, and reconcile proof-worktree ownership | No shared contract is blocking a lane |
+| Integration | integration owner | `integration/wasm-lanes` | active | Record the landed W7 allocator handoff and keep W6/W7 bridges explicit | No shared contract is blocking a lane |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | blocked | Compiler-derived binder-readiness endpoint is drafted in `ElimDeadMachineRel.lean`, but the uncommitted draft appeared alongside another owner's checkpoint | Ownership must be reconciled before proof edits, checks, or handoff continue |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Preserve mapped header capacity through leaf, fuel-indexed, recursive, and public ownership release | Consumes the released erased-reset contract; independent of W7 allocator and validation schemas |
-| W7 generation | generation owner | `wasm/generation` | active | Resident allocator and styled `prettyM` artifact rebased as `b93bf4d`; artifact gate and post-`3b82b0b` checks are in progress | New resident helper signatures queue a later W6 T5 bridge |
+| W7 generation | generation owner | `wasm/generation` | released | Resident allocator and styled `prettyM` package landed as `21f382c`; next generation slice may start independently | Allocator signatures queue a W6 Talos-adapter guard and later T5 bridge; no shared contract changed |
 | Validation | validation owner | `validation/interpreter-corpus` | released | Mixed erased/owned reset release is observable through native and interpreter sharing state at `3b82b0b` | Differentially checks the released reset contract; no new shared contract |
 
 ## Resident-helper bridge
@@ -30,7 +30,7 @@ Snapshot base: `main` at `3b82b0b`.
 | Helper or artifact | Generation commit | Contract base | State | Proof owner | Artifact digest |
 |---|---|---|---|---|---|
 | Existing resident helper set through closure matching | landed on `main` | recorded in Talos plan | generation-ready | W6 owner | recorded by individual manifests |
-| Resident allocator and styled `prettyM` package | `b93bf4d` | `d2df075` | staged | W6 owner at the later T5 bridge | pending checked handoff |
+| Resident allocator and styled `prettyM` package | `21f382c` | `2dfa1b3` | generation-ready | W6 owner at the later T5 bridge | styled Wasm `5134ef9811b1f80e17c1503afe6fd01e80a386ceace2e3eb6bd132509983f15e` |
 
 ## Contract queue
 
@@ -38,7 +38,7 @@ Snapshot base: `main` at `3b82b0b`.
 |---|---|---|---|---|---|
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
 | `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
-| `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | active | `b93bf4d` | Generation checkpoint is rebased through W6; exact artifact checks, digest, and post-validation-base handoff remain |
+| `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | released | `21f382c` | Zero-import allocator and styled package are generation-ready; allocator installation preserves the current 177-import `prettyM` frontier, and W6 owns the later bridge proof |
 
 ## Update format
 
