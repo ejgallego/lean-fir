@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-reset-erased-child-release
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: a90a988
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-07-25
 reproduction: Fir/LeanIR/Runtime.lean
-regression: Fir/Wasm/Concrete/FaultCorrectness.lean
+regression: Fir/LeanIR/InterpreterExamples.lean#resetErasedFieldProgram
 ---
 
 # Summary
@@ -75,8 +75,8 @@ owned by the integration lane.
 
 ## Workaround
 
-The Wasm proof states the mapped child-release theorem with
-`fault ≠ .expectedObject`; no runtime behavior is weakened or duplicated.
+No workaround remains. Wasm proofs may remove the former
+`fault ≠ .expectedObject` exclusion after rebasing onto the shared repair.
 
 ## Upstream tracking
 
@@ -84,4 +84,14 @@ none
 
 ## Resolution and regression
 
-Open.
+`releaseResetField` now makes the reset ownership protocol explicit:
+`.erased` is the canonical non-owning object-field sentinel and performs no
+reference-count transition, while all other values retain the existing
+checked-decrement behavior. `reset` uses this helper for every cleared prefix
+slot.
+
+`resetErasedFieldProgram` allocates a constructor containing an erased field,
+resets that field, reuses the retained allocation, and reads the replacement
+value. The interpreter now returns the replacement rather than faulting with
+`expectedObject`, matching recursive semantic ownership release and the
+concrete Wasm runtime.

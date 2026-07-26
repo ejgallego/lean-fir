@@ -672,6 +672,21 @@ def isShared (runtime : RuntimeState) (value : Value) : Except RuntimeFault Valu
       return .scalar (.uint8 (if shared then 1 else 0))
   | _ => .error .expectedObject
 
+/-- Release one constructor ownership slot while executing reset.
+
+Erased is the canonical non-owning object-field sentinel, so clearing such a
+slot performs no reference-count transition. Other values retain the checked
+decrement behavior, including faults for invalid scalar and reuse-token slots.
+-/
+def releaseResetField (runtime : RuntimeState) (value : Value) :
+    Except RuntimeFault RuntimeState :=
+  match value with
+  | .erased => .ok runtime
+  | _ => decValueOnce runtime value true
+
+@[simp] theorem releaseResetField_erased (runtime : RuntimeState) :
+    releaseResetField runtime .erased = .ok runtime := rfl
+
 def reset (runtime : RuntimeState) (count : Nat) (value : Value) :
     Except RuntimeFault (RuntimeState × Value) :=
   match value with
@@ -689,7 +704,7 @@ def reset (runtime : RuntimeState) (count : Nat) (value : Value) :
         if index < count then .object (.tagged 0) else field
       let runtime ← setCell runtime location { cell with object := .ctor { object with objectFields := cleared } }
       let runtime ← released.foldlM (init := runtime) fun runtime field =>
-        decValueOnce runtime field true
+        releaseResetField runtime field
       return (runtime, .reuseToken (some location))
   | _ => .error .expectedObject
 

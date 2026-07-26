@@ -363,6 +363,21 @@ def resetReuseProgram : ImpureProgram :=
 
 #guard returned? (runMain resetReuseProgram) (.object (.tagged 71))
 
+def resetErasedFieldCode : LCNF.Code .impure :=
+  .let (letDecl p objType
+    (.ctor { pairInfo with size := 1 } #[.erased])) <|
+  .let (letDecl r objType (.reset 1 p)) <|
+  .let (letDecl y objType (.lit (.nat 72))) <|
+  .let (letDecl z objType
+    (.reuse r { pairInfo with size := 1 } false #[.fvar y])) <|
+  .let (letDecl s objType (.oproj 0 z)) <|
+  .return s
+
+def resetErasedFieldProgram : ImpureProgram :=
+  { decls := #[decl `main #[] objType (.code resetErasedFieldCode)] }
+
+#guard returned? (runMain resetErasedFieldProgram) (.object (.tagged 72))
+
 def sharedResetCode : LCNF.Code .impure :=
   .let (letDecl x objType (.lit (.nat 80))) <|
   .let (letDecl p objType (.ctor { pairInfo with size := 1 } #[.fvar x])) <|
