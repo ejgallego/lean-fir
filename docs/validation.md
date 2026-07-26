@@ -306,12 +306,15 @@ python3 scripts/record_direct_native_ir.py \
 
 `--record` prints newly observed digests without treating drift as failure;
 normal mode writes per-case `attestation.json` and aggregate
-`attestations.json` evidence and fails when the final-impure artifact changes.
-This opt-in audit pins the native compiler path underlying a semantic
-comparison. In particular, it can distinguish resetting the intended owner
-from an optimizer choosing ordinary destruction or reusing one of the owner's
-projected children. It is not a CI tier and does not claim additional
-native/LCNF/V8 comparisons.
+`attestations.json` evidence, retains each case's semantic claim, and fails when
+the final-impure artifact changes. The initial audited set separates three
+ownership paths: releasing both slots of a repeated alias from a unique owner,
+stopping recursive release at a shared nested child, and taking the
+shared-owner allocation path without releasing its child. This opt-in audit
+therefore pins the native compiler path underlying each semantic comparison
+and can distinguish resetting the intended owner from an optimizer choosing
+ordinary destruction or reusing one of the owner's projected children. It is
+not a CI tier and does not claim additional native/LCNF/V8 comparisons.
 
 Only the first two tiers attach LCNF machine telemetry. The V8 matrix contains
 the source native–LCNF edge for triangular consistency, but the index selects

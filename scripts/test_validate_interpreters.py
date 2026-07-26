@@ -7864,6 +7864,7 @@ class DirectNativeIrTests(unittest.TestCase):
             "caseId": "native-ir-case",
             "entry": "Fir.Validation.nativeIrCase",
             "dependencies": ["Fir.Validation.nativeIrHelper"],
+            "claim": "the native helper takes the intended ownership path",
             "expectedArtifactSha256": digest,
         }
 
@@ -7885,6 +7886,12 @@ class DirectNativeIrTests(unittest.TestCase):
         malformed = {**descriptor, "expectedArtifactSha256": "not-a-digest"}
         with self.assertRaisesRegex(core.ValidationError, "SHA-256"):
             native_ir.parse_manifest(json.dumps(malformed), ["native-ir-manifest"])
+
+        malformed_claim = {**descriptor, "claim": " "}
+        with self.assertRaisesRegex(core.ValidationError, "nonempty single line"):
+            native_ir.parse_manifest(
+                json.dumps(malformed_claim), ["native-ir-manifest"]
+            )
 
     def test_native_ir_attestation_records_evidence_and_mismatch(self) -> None:
         artifact = b"def nativeIrCase := return\n"
@@ -7914,6 +7921,7 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertEqual(failures, [])
             self.assertTrue(records[0]["matches"])
             self.assertEqual(records[0]["artifactSha256"], digest)
+            self.assertEqual(records[0]["claim"], descriptor["claim"])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
 

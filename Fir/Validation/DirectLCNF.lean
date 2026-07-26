@@ -64,6 +64,7 @@ current source compiler does not emit.
 structure NativeOracleAttestation where
   entry : Name
   dependencies : Array Name := #[]
+  claim : String
   expectedArtifactSha256 : String
   deriving Inhabited
 
@@ -72,6 +73,7 @@ structure NativeOracleDescriptor where
   caseId : String
   entry : String
   dependencies : Array String
+  claim : String
   expectedArtifactSha256 : String
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -666,7 +668,15 @@ def cases : Array Case := #[
           "Keep a mixed owner shared across reset and observe owner decrement without child release"
       }
     }
-    program := sharedResetErasedAndOwnedFieldsProgram },
+    program := sharedResetErasedAndOwnedFieldsProgram
+    nativeOracle? := some {
+      entry := ``nativeSharedResetErasedAndOwnedFields
+      dependencies := #[``replaceMixedOwner]
+      claim :=
+        "shared owner reset decrements only the owner and allocates the replacement"
+      expectedArtifactSha256 :=
+        "4e45f9af8557f2f90ce7ff564fc0fdd2d6eea4faa3d29f85ce0d9b708f9064b5"
+    } },
   { validationCase := {
       id := "machine-persistent-reset-erased-and-owned-fields"
       entry := `directPersistentResetErasedAndOwnedFields
@@ -777,7 +787,15 @@ def cases : Array Case := #[
           "Stop recursive reset release at a shared child while preserving its grandchild alias"
       }
     }
-    program := resetErasedAndSharedNestedOwnedFieldsProgram },
+    program := resetErasedAndSharedNestedOwnedFieldsProgram
+    nativeOracle? := some {
+      entry := ``nativeResetErasedAndSharedNestedOwnedFields
+      dependencies := #[``replaceNestedOwner]
+      claim :=
+        "unique owner reset decrements a shared child without recursively releasing its grandchild"
+      expectedArtifactSha256 :=
+        "97aee3e462f7ba25269a1a449d56f478d215b0681af63c1f980e5518016f7ab3"
+    } },
   { validationCase := {
       id := "machine-reset-erased-and-repeated-owned-fields"
       entry := `directResetErasedAndRepeatedOwnedFields
@@ -817,6 +835,8 @@ def cases : Array Case := #[
     nativeOracle? := some {
       entry := ``nativeResetErasedAndRepeatedOwnedFields
       dependencies := #[``replaceRepeatedOwner]
+      claim :=
+        "unique owner reset releases both aliased child slots before reusing its storage"
       expectedArtifactSha256 :=
         "34469861bd43393e0c221989ea0f71a3a58431d8c92cb82144f48843dc83f721"
     } }
@@ -839,8 +859,11 @@ def nativeOracleDescriptors : Array NativeOracleDescriptor :=
       caseId := directCase.validationCase.id
       entry := toString attestation.entry
       dependencies := attestation.dependencies.map toString
+      claim := attestation.claim
       expectedArtifactSha256 := attestation.expectedArtifactSha256
     }
+
+#guard nativeOracleDescriptors.size == 3
 
 private def failure (backend caseId message : String) : BackendResult := {
   caseId

@@ -24,6 +24,7 @@ MANIFEST_FIELDS = {
     "caseId",
     "entry",
     "dependencies",
+    "claim",
     "expectedArtifactSha256",
 }
 ARTIFACT_FILES = (
@@ -85,6 +86,16 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"{case_id}: native IR dependencies must be unique nonempty strings"
             )
+        claim = value["claim"]
+        if (
+            not isinstance(claim, str)
+            or not claim
+            or claim != claim.strip()
+            or "\n" in claim
+        ):
+            raise ValidationError(
+                f"{case_id}: native IR claim must be a nonempty single line"
+            )
         digest = checked_sha256(
             value["expectedArtifactSha256"],
             f"{case_id} expected native IR artifact",
@@ -95,6 +106,7 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
                 "caseId": case_id,
                 "entry": entry,
                 "dependencies": dependencies,
+                "claim": claim,
                 "expectedArtifactSha256": digest,
             }
         )
@@ -166,6 +178,7 @@ def attest_artifacts(
             "caseId": case_id,
             "entry": entry,
             "dependencies": descriptor["dependencies"],
+            "claim": descriptor["claim"],
             "artifact": "program.lcnf",
             "artifactBytes": len(artifact),
             "artifactSha256": actual_digest,
