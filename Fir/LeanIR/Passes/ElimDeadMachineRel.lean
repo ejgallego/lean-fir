@@ -6384,6 +6384,32 @@ def ReachablyCodeReady (externals : ExternalSpec) (fuel : Nat)
       ∀ sourceCode, sourceAfter.control = .code sourceCode →
         ReachableMachineReadyAt fuel sourceAfter targetAfter
 
+/-- Compiler-provenance form of hereditary active-code readiness.  The future
+pair is still selected by the established operational relation, but its
+readiness conclusion restores the exact traversal graph and hereditary binder
+certificate at every live code-bearing location.  Thus the remaining premise
+is the dynamic obligation selected by the active compiler edge, together with
+preservation of this compiler-derived provenance along future paths. -/
+def BinderReadyReachablyCodeReady (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeReachableMachineRelated fuel sourceAfter targetAfter →
+      ∀ sourceCode, sourceAfter.control = .code sourceCode →
+        BinderReadyReachableMachineReadyAt fuel sourceAfter targetAfter
+
+/-- Exact hereditary/dynamic readiness erases to the operational active-code
+obligation consumed by the existing non-lockstep simulation. -/
+theorem BinderReadyReachablyCodeReady.reachablyCodeReady
+    (ready : BinderReadyReachablyCodeReady externals fuel source target) :
+    ReachablyCodeReady externals fuel source target := by
+  intro sourceAfter targetAfter sourcePath targetPath structural
+    sourceCode sourceControl
+  exact
+    (ready sourceAfter targetAfter sourcePath targetPath structural
+      sourceCode sourceControl).readyAt
+
 /-- Active-code hereditary readiness is sufficient for the canonical
 all-controls invariant used by the non-lockstep simulation. -/
 theorem ReachablyCodeReady.reachablyReady
@@ -14900,6 +14926,27 @@ theorem reachableProgram_loweringCorrect_reachablyCodeReady
   exact
     (initialReady entry member sourceArguments targetArguments arguments).reachablyReady
 
+/-- Program-level lowering endpoint retaining the checked compiler's exact
+traversal and hereditary binder certificates.  Only the future active edge's
+dynamic readiness and preservation of that provenance remain in
+`BinderReadyReachablyCodeReady`; the established simulation consumes its
+operational projection. -/
+theorem binderReadyProgram_loweringCorrect_reachablyCodeReady
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible : ReachableExternalSpecCompatible externals fuel)
+    (initialReady : ReachableInitialInvariantOn
+      (BinderReadyReachablyCodeReady externals fuel) source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply reachableProgram_loweringCorrect_reachablyCodeReady
+    (forgetBinderReadyShadowProgram programs) compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialReady entry member sourceArguments targetArguments
+      arguments).reachablyCodeReady
+
 /-- Exact declaration provenance is sufficient for the same endpoint; its
 forgetful projection supplies the monotone runtime graph. -/
 theorem exactProgram_loweringCorrect_reachablyCodeReady
@@ -14914,19 +14961,22 @@ theorem exactProgram_loweringCorrect_reachablyCodeReady
   reachableProgram_loweringCorrect_reachablyCodeReady
     (forgetExactShadowProgram programs) compatible initialReady
 
-/-- Compiler-run form of the non-lockstep theorem.  A successful transparent
-whole-program traversal now supplies both the exact declaration graph and its
-runtime projection; only active-code hereditary admissibility and the foreign
-response contract remain as semantic premises. -/
+/-- Checked compiler-run form of the non-lockstep theorem.  A successful
+transparent whole-program traversal now supplies the exact declaration graph,
+hereditary binder certificates, and their runtime projection.  The remaining
+active-code premise is stated directly in the hereditary/dynamic relation. -/
 theorem shadowProgram_loweringCorrect_reachablyCodeReady
+    (wellFormed : ProgramElimDeadWellFormed source)
     (run : shadowProgram? fuel source = some target)
     (compatible : ReachableExternalSpecCompatible externals fuel)
     (initialReady : ReachableInitialInvariantOn
-      (ReachablyCodeReady externals fuel) source target entries) :
+      (BinderReadyReachablyCodeReady externals fuel)
+      source target entries) :
     LoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals) source target entries :=
-  exactProgram_loweringCorrect_reachablyCodeReady
-    (shadowProgram_exactRelated run) compatible initialReady
+  binderReadyProgram_loweringCorrect_reachablyCodeReady
+    (shadowProgram_binderReadyShadowRelated wellFormed run)
+    compatible initialReady
 
 end Fir.LeanIR.Passes.ElimDead
