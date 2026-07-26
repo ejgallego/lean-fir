@@ -17,28 +17,43 @@ private def z : FVarId := ⟨`z⟩
 private def c : FVarId := ⟨`c⟩
 private def e : FVarId := ⟨`e⟩
 private def p : FVarId := ⟨`p⟩
+private def q : FVarId := ⟨`q⟩
 private def r : FVarId := ⟨`r⟩
+private def s : FVarId := ⟨`s⟩
 
 private def objType : Expr :=
   LCNF.ImpureType.object
 
+private def u8Type : Expr :=
+  LCNF.ImpureType.uint8
+
 private def param (fvarId : FVarId) : LCNF.Param .impure :=
   { fvarId, binderName := fvarId.name, type := objType, borrow := false }
 
-private def decl (name : Name) (params : Array (LCNF.Param .impure))
+private def typedDecl (name : Name) (params : Array (LCNF.Param .impure))
+    (type : Expr)
     (value : LCNF.DeclValue .impure) : LCNF.Decl .impure :=
   { name
     levelParams := []
-    type := objType
+    type
     params
     value
     safe := true
     recursive := false
     inlineAttr? := none }
 
+private def decl (name : Name) (params : Array (LCNF.Param .impure))
+    (value : LCNF.DeclValue .impure) : LCNF.Decl .impure :=
+  typedDecl name params objType value
+
+private def typedLetDecl (fvarId : FVarId) (type : Expr)
+    (value : LCNF.LetValue .impure) :
+    LCNF.LetDecl .impure :=
+  { fvarId, binderName := fvarId.name, type, value }
+
 private def letDecl (fvarId : FVarId) (value : LCNF.LetValue .impure) :
     LCNF.LetDecl .impure :=
-  { fvarId, binderName := fvarId.name, type := objType, value }
+  typedLetDecl fvarId objType value
 
 /--
 A validation case whose candidate is an explicit final-impure program rather
@@ -73,14 +88,46 @@ private structure NativeErasedOwner where
 private structure NativePayloadOwner where
   payload : Nat
 
+private structure NativeReplacement where
+  payload : Nat
+  marker : Nat
+
+private structure NativeHeapChild where
+  first : Nat
+  second : Nat
+
+private structure NativeMixedOwner where
+  proof : True
+  child : NativeHeapChild
+  marker : Nat
+
+@[extern "lean_is_exclusive_obj"]
+private opaque nativeIsExclusive {α : Type} (value : α) : Bool
+
 @[noinline]
 private def replaceErasedOwner (_owner : NativeErasedOwner) (payload : Nat) :
     NativePayloadOwner :=
   { payload }
 
+@[noinline]
+private def replaceMixedOwner (owner : NativeMixedOwner) (payload : Nat) :
+    NativeReplacement :=
+  { payload, marker := owner.marker }
+
+@[noinline]
+private def observeMixedReset (payload : Nat) (shared : Bool) : Nat :=
+  if shared then payload + 1 else payload
+
 private def nativeResetErasedField : Nat :=
   let erased : NativeErasedOwner := { proof := True.intro }
   (replaceErasedOwner erased 72).payload
+
+@[noinline]
+private def nativeResetErasedAndOwnedFields (first : Nat) : Nat :=
+  let child : NativeHeapChild := { first, second := first + 1 }
+  let owner : NativeMixedOwner := { proof := True.intro, child, marker := 0 }
+  let replacement := replaceMixedOwner owner 73
+  observeMixedReset replacement.payload (!nativeIsExclusive child)
 
 private def identityDecl : LCNF.Decl .impure :=
   decl `directIdentity #[param z] (.code (.return z))
@@ -131,6 +178,21 @@ private def erasedOwnerInfo : LCNF.CtorInfo :=
 private def payloadOwnerInfo : LCNF.CtorInfo :=
   { name := `NativePayloadOwner.mk, cidx := 0, size := 1, usize := 0, ssize := 0 }
 
+private def heapChildInfo : LCNF.CtorInfo :=
+  { name := `NativeHeapChild.mk, cidx := 0, size := 2, usize := 0, ssize := 0 }
+
+private def replacementInfo : LCNF.CtorInfo :=
+  { name := `NativeReplacement.mk, cidx := 0, size := 2, usize := 0, ssize := 0 }
+
+private def mixedOwnerInfo : LCNF.CtorInfo :=
+  { name := `NativeMixedOwner.mk, cidx := 0, size := 3, usize := 0, ssize := 0 }
+
+private def falseInfo : LCNF.CtorInfo :=
+  { name := ``Bool.false, cidx := 0, size := 0, usize := 0, ssize := 0 }
+
+private def trueInfo : LCNF.CtorInfo :=
+  { name := ``Bool.true, cidx := 1, size := 0, usize := 0, ssize := 0 }
+
 private def resetErasedFieldCode : LCNF.Code .impure :=
   .let (letDecl e .erased) <|
   .let (letDecl p (.ctor erasedOwnerInfo #[.fvar e])) <|
@@ -145,6 +207,34 @@ private def resetErasedFieldProgram : ImpureProgram := {
 
 private def resetErasedFieldFormTrace : Array String :=
   #["erased", "ctor", "reset", "lit", "reuse", "oproj", "return"]
+
+private def resetErasedAndOwnedFieldsCode : LCNF.Code .impure :=
+  .let (letDecl x (.lit (.nat 41))) <|
+  .let (letDecl y (.lit (.nat 42))) <|
+  .let (letDecl q (.ctor heapChildInfo #[.fvar x, .fvar y])) <|
+  .inc q 1 false false <|
+  .let (letDecl e .erased) <|
+  .let (letDecl x (.lit (.nat 0))) <|
+  .let (letDecl p (.ctor mixedOwnerInfo #[.fvar e, .fvar q, .fvar x])) <|
+  .let (letDecl r (.reset 3 p)) <|
+  .let (letDecl y (.lit (.nat 73))) <|
+  .let (letDecl z (.reuse r replacementInfo true #[.fvar y, .fvar x])) <|
+  .let (letDecl x (.oproj 0 z)) <|
+  .let (typedLetDecl s u8Type (.isShared q)) <|
+  .cases (.mk ``Bool objType s #[
+    .ctorAlt falseInfo (.return x),
+    .ctorAlt trueInfo <|
+      .let (letDecl y (.lit (.nat 74))) (.return y)])
+
+private def resetErasedAndOwnedFieldsProgram : ImpureProgram := {
+  decls := #[
+    typedDecl `directResetErasedAndOwnedFields #[] objType
+      (.code resetErasedAndOwnedFieldsCode)
+  ] }
+
+private def resetErasedAndOwnedFieldsFormTrace : Array String :=
+  #["lit", "lit", "ctor", "inc", "erased", "lit", "ctor", "reset", "lit",
+    "reuse", "oproj", "isShared", "cases", "return"]
 
 def cases : Array Case := #[
   { validationCase := {
@@ -222,10 +312,45 @@ def cases : Array Case := #[
           "Reset an erased ownership slot, reuse its storage, and compare with native replacement"
       }
     }
-    program := resetErasedFieldProgram }
+    program := resetErasedFieldProgram },
+  { validationCase := {
+      id := "machine-reset-erased-and-owned-fields"
+      entry := `directResetErasedAndOwnedFields
+      resultSchema := .nat
+      native := fun _ => .nat (nativeResetErasedAndOwnedFields 41)
+      tags :=
+        #["direct-lcnf", "machine", "ownership", "constructor", "reset", "reuse",
+          "erased", "isShared", "reference-count", "boundary"]
+      requiredLcnfForms :=
+        #["lit", "ctor", "inc", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfForms :=
+        #["lit", "ctor", "inc", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfFormCounts := #[
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "inc", minimum := 1, maximum := some 1 },
+        { form := "erased", minimum := 1, maximum := some 1 },
+        { form := "reset", minimum := 1, maximum := some 1 },
+        { form := "reuse", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }
+      ]
+      requiredExecutedLcnfFormTrace := some resetErasedAndOwnedFieldsFormTrace
+      provenance := {
+        suite := "fir-direct-lcnf"
+        path := "Fir/Validation/DirectLCNF.lean"
+        note :=
+          "Reset mixed erased/owned fields and expose the owned child's release through isShared"
+      }
+    }
+    program := resetErasedAndOwnedFieldsProgram }
 ]
 
-#guard cases.size == 3
+#guard cases.size == 4
 
 #guard cases.all fun directCase =>
   directCase.validationCase.requiredExecutedLcnfFormTrace.isSome
