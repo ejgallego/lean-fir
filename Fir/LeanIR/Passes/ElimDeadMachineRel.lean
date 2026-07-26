@@ -3888,6 +3888,149 @@ theorem coreStep_jump_reachableRelated
                     sourceAfter, targetAfter, rfl, rfl, targetBindingActual,
                     sourceStep, targetStep, nextRelated⟩
 
+/-- Successful retained-jump rule with hereditary join-body provenance.  The
+live join lookup returns an exact body graph, and related argument binding
+rebuilds the strong active-code machine relation at that body. -/
+theorem coreStep_jump_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used (.jmp join arguments) targetCode)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (sourceFound : findJoinPoint? sourceState.joins join =
+      some sourceDeclaration)
+    (sourceEvaluated : evalArgs sourceState.env arguments =
+      .ok sourceValues)
+    (sourceBinding : bindParamsOver sourceState.env sourceDeclaration.params
+      sourceValues = .ok sourceNextEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetDeclaration targetValues targetNextEnv sourceAfter targetAfter,
+      findJoinPoint? targetState.joins join = some targetDeclaration ∧
+      evalArgs targetState.env arguments = .ok targetValues ∧
+      bindParamsOver targetState.env targetDeclaration.params targetValues =
+        .ok targetNextEnv ∧
+      coreStep { sourceState with
+        control := .code (.jmp join arguments) } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .code targetCode } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have targetEq := graph.jumpTarget
+  subst targetCode
+  have covered := graph.covered
+  cases covered with
+  | jump targetMember argumentsCovered =>
+      have found := joins join targetMember
+      rw [sourceFound] at found
+      generalize targetFoundEq :
+        findJoinPoint? targetState.joins join = targetFound at found
+      cases found with
+      | some declarations =>
+          rename_i targetDeclaration
+          have evaluated := evalArgs_relOn env argumentsCovered
+          rw [sourceEvaluated] at evaluated
+          generalize targetEvaluatedEq :
+            evalArgs targetState.env arguments = targetEvaluation at evaluated
+          cases evaluated with
+          | @ok _ targetValues values =>
+              have binding := bindParamsOver_relOn (rho := rho) used env values
+                (params := sourceDeclaration.params)
+              rw [sourceBinding] at binding
+              generalize targetBindingEq :
+                bindParamsOver targetState.env sourceDeclaration.params
+                  targetValues = targetBinding at binding
+              cases binding with
+              | @ok _ targetNextEnv nextEnv =>
+                  have targetBindingActual :
+                      bindParamsOver targetState.env targetDeclaration.params
+                        targetValues = .ok targetNextEnv := by
+                    simpa [← declarations.params_eq] using targetBindingEq
+                  let sourceAfter := {
+                    sourceState with
+                    env := sourceNextEnv
+                    control := .code sourceDeclaration.value }
+                  let targetAfter := {
+                    targetState with
+                    env := targetNextEnv
+                    control := .code targetDeclaration.value }
+                  have sourceBoundRoots :=
+                    envRootsOn_bindParamsOver_subset
+                      (used := used) sourceBinding
+                  have targetBoundRoots :=
+                    envRootsOn_bindParamsOver_subset
+                      (used := used) targetBindingActual
+                  have sourceArgumentRoots :=
+                    evalArgs_values_subset argumentsCovered sourceEvaluated
+                  have targetArgumentRoots :=
+                    evalArgs_values_subset argumentsCovered targetEvaluatedEq
+                  have sourceSubset : RootSubset
+                      (envRootsOn used sourceNextEnv ++ sourceFrameRoots)
+                      (.erased ::
+                        (envRootsOn used sourceState.env ++ sourceFrameRoots)) := by
+                    intro root member
+                    simp only [List.mem_append, List.mem_cons] at member ⊢
+                    rcases member with nextRoot | frameRoot
+                    · have rooted := sourceBoundRoots root nextRoot
+                      simp only [List.mem_append] at rooted
+                      rcases rooted with argumentRoot | oldRoot
+                      · have argumentRooted :=
+                          sourceArgumentRoots root argumentRoot
+                        simp only [List.mem_cons] at argumentRooted
+                        rcases argumentRooted with erased | oldRoot
+                        · exact Or.inl erased
+                        · exact Or.inr (Or.inl oldRoot)
+                      · exact Or.inr (Or.inl oldRoot)
+                    · exact Or.inr (Or.inr frameRoot)
+                  have targetSubset : RootSubset
+                      (envRootsOn used targetNextEnv ++ targetFrameRoots)
+                      (.erased ::
+                        (envRootsOn used targetState.env ++ targetFrameRoots)) := by
+                    intro root member
+                    simp only [List.mem_append, List.mem_cons] at member ⊢
+                    rcases member with nextRoot | frameRoot
+                    · have rooted := targetBoundRoots root nextRoot
+                      simp only [List.mem_append] at rooted
+                      rcases rooted with argumentRoot | oldRoot
+                      · have argumentRooted :=
+                          targetArgumentRoots root argumentRoot
+                        simp only [List.mem_cons] at argumentRooted
+                        rcases argumentRooted with erased | oldRoot
+                        · exact Or.inl erased
+                        · exact Or.inr (Or.inl oldRoot)
+                      · exact Or.inr (Or.inl oldRoot)
+                    · exact Or.inr (Or.inr frameRoot)
+                  have nextRuntime := runtime.prependErased.restrictExtra
+                    (listRel_append (envRootsOn_related nextEnv) frames.roots)
+                    sourceSubset targetSubset
+                  have sourceStep : coreStep { sourceState with
+                      control := .code (.jmp join arguments) } =
+                      .next sourceAfter := by
+                    simp [sourceAfter, coreStep, sourceFound,
+                      sourceEvaluated, sourceBinding]
+                  have targetStep : coreStep { targetState with
+                      control := .code (.jmp join arguments) } =
+                      .next targetAfter := by
+                    simp [targetAfter, coreStep, targetFoundEq,
+                      targetEvaluatedEq, targetBindingActual]
+                  have nextRelated :
+                      BinderReadyReachableMachineRelated fuel rho
+                        sourceAfter targetAfter := by
+                    unfold BinderReadyReachableMachineRelated
+                    exact ⟨envRootsOn used sourceNextEnv,
+                      envRootsOn used targetNextEnv,
+                      sourceFrameRoots, targetFrameRoots,
+                      programs, .code declarations.value joins nextEnv,
+                      frames, nextRuntime⟩
+                  exact ⟨targetDeclaration, targetValues, targetNextEnv,
+                    sourceAfter, targetAfter, rfl, rfl, targetBindingActual,
+                    sourceStep, targetStep, nextRelated⟩
+
 /-- Machine-level source-only rule for a deleted value-producing `let`.
 The caller supplies the operation-specific reachable-runtime theorem; binder
 absence then proves that resuming the source continuation does not change its
@@ -11657,6 +11800,139 @@ theorem match_jumpCodeStep
               rcases match_internalCoreSteps sourceTransition targetTransition
                   afterRelated step with ⟨targetPath, finalRelated⟩
               exact ⟨computedTargetAfter, targetPath, ⟨rho, finalRelated⟩⟩
+
+/-- Hereditary graph-level jump dispatcher.  Fault branches contradict the
+`Step` premise as before; the successful branch enters the exact body graph
+returned by the strong live-join relation. -/
+theorem match_jumpCodeStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.jmp join arguments) targetCode)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.jmp join arguments) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have targetEq := graph.jumpTarget
+  subst targetCode
+  let sourceCurrent := {
+    sourceState with control := .code (.jmp join arguments) }
+  let targetCurrent := {
+    targetState with control := .code (.jmp join arguments) }
+  have noStep {observation : Observation}
+      (sourceDone : coreStep sourceCurrent = .done observation) :
+      False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.jmp join arguments) } = sourceCurrent by
+            rfl] at transition
+        rw [sourceDone] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.jmp join arguments) } = sourceCurrent by
+            rfl] at transition
+        rw [sourceDone] at transition
+        contradiction
+  generalize sourceFoundEq :
+    findJoinPoint? sourceState.joins join = sourceFound
+  cases sourceFound with
+  | none =>
+      have sourceDone : coreStep sourceCurrent =
+          .done (observe sourceCurrent
+            (.fault (.unknownJoinPoint join))) := by
+        simp [sourceCurrent, coreStep, sourceFoundEq, fail]
+      exact (noStep sourceDone).elim
+  | some sourceDeclaration =>
+      generalize sourceEvaluatedEq :
+        evalArgs sourceState.env arguments = sourceEvaluation
+      cases sourceEvaluation with
+      | error fault =>
+          have sourceDone : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, coreStep, sourceFoundEq,
+              sourceEvaluatedEq, fail]
+          exact (noStep sourceDone).elim
+      | ok sourceValues =>
+          generalize sourceBindingEq :
+            bindParamsOver sourceState.env sourceDeclaration.params
+              sourceValues = sourceBinding
+          cases sourceBinding with
+          | error fault =>
+              have sourceDone : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, sourceFoundEq,
+                  sourceEvaluatedEq, sourceBindingEq, fail]
+              exact (noStep sourceDone).elim
+          | ok sourceNextEnv =>
+              rcases coreStep_jump_binderReadyReachableRelated
+                  (rho := rho) sourceState targetState programs frames graph
+                  joins env sourceFoundEq sourceEvaluatedEq sourceBindingEq
+                  runtime with
+                ⟨targetDeclaration, targetValues, targetNextEnv,
+                  computedSourceAfter, computedTargetAfter,
+                  targetFound, targetEvaluated, targetBinding,
+                  sourceTransition, targetTransition, afterRelated⟩
+              rcases match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨computedTargetAfter, targetPath, finalRelated⟩
+
+/-- Terminal exact-jump view lifted through live join lookup and parameter
+binding into the hereditary machine relation. -/
+theorem ExactShadowCodeBinderReady.match_jumpStep
+    {initial ambient : UsedLocals}
+    {terminalFuel fuel : Nat}
+    {join : FVarId} {arguments : Array (LCNF.Arg .impure)}
+    (_ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.jump
+          (initial := initial) (fuel := terminalFuel)
+          (join := join) (arguments := arguments)))
+    (fuelBound : terminalFuel ≤ fuel)
+    (usedBound :
+      UsedSubset (collectArgs (initial.insert join) arguments) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.jmp join arguments) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.jmp join arguments) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let graph :=
+    (ExactShadowCodeView.jump
+      (initial := initial) (fuel := terminalFuel)
+      (join := join) (arguments := arguments)).toGraph
+      |>.toShadowCodeGraphAt fuelBound usedBound
+  exact match_jumpCodeStep_binderReady sourceState targetState programs frames
+    graph joins env runtime step
 
 /-- Graph-level semantic-step dispatcher for retained case tables.  A source
 step determines a successful discriminant lookup, tag read, and arm choice.
