@@ -4922,6 +4922,16 @@ def ExactShadowCodeRuntimeReadyAt
       DeletedScalarSetReadyAt state roots object field
   | _, _ => True
 
+/-- Hereditary static provenance paired with only the active node's dynamic
+runtime obligation.  This is the code-local certificate that a preservation
+invariant must carry after declaration lookup or a residual control step. -/
+def BinderReadyExactShadowCodeReadyAt
+    (fuel : Nat) (state : MachineState) (roots : List Value)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ final, ∃ exact : ExactShadowCodeGraph fuel final source target,
+    ExactShadowCodeBinderReady final exact.view ∧
+      ExactShadowCodeRuntimeReadyAt state roots exact.view
+
 /-- Exact branch provenance plus hereditary binder absence discharges every
 static premise of the reachable machine edge.  The remaining
 `ExactShadowCodeRuntimeReadyAt` argument is intentionally limited to genuine
@@ -5347,6 +5357,18 @@ theorem ExactShadowCodeView.reachableCodeReadyAt
         ((ExactShadowCodeView.delete (object := object) continuation).toGraph
           |>.toShadowCodeGraph
           |>.mono subset)
+
+/-- The materialized hereditary/dynamic package discharges all premises of a
+reachable code edge, exposing only its exact final liveness index. -/
+theorem BinderReadyExactShadowCodeReadyAt.reachableCodeReadyAt
+    (ready :
+      BinderReadyExactShadowCodeReadyAt fuel state roots source target) :
+    ∃ final, ∃ graph : ShadowCodeGraph fuel final source target,
+      ReachableCodeReadyAt fuel final state roots graph := by
+  rcases ready with ⟨final, exact, static, runtimeReady⟩
+  exact ⟨final, exact.toShadowCodeGraph,
+    exact.view.reachableCodeReadyAt (UsedSubset.refl final)
+      static runtimeReady⟩
 
 /-- Checked scoping and canonical binder uniqueness discharge the full static
 side of exact entry readiness.  Only the operation-specific dynamic facts

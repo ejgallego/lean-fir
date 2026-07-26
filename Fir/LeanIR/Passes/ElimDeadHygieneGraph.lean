@@ -162,6 +162,147 @@ theorem shadowProgram_exactRelated
       unfold ProgramRelated
       simpa using shadowDecls_exactRelated declarationsResult
 
+/-- Exact declaration relation enriched with the two static source facts
+consumed by canonical active-code readiness.  The scope index is existential
+so residual bodies may retain the precise lexical index inherited from their
+parent traversal. -/
+def CanonicalExactShadowCodeRelated (fuel : Nat)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ final,
+    Nonempty (ExactShadowCodeGraph fuel final source target) ∧
+      ∃ index,
+        ScopedCodeWellFormedTree index source ∧
+          BinderNamesUnique (codeBinderIds source)
+
+/-- Forget the checked static package while retaining exact pass provenance. -/
+theorem CanonicalExactShadowCodeRelated.toExact
+    (canonical : CanonicalExactShadowCodeRelated fuel source target) :
+    ExactShadowCodeRelated fuel source target := by
+  rcases canonical with ⟨final, exact, index, wellFormed, unique⟩
+  exact ⟨final, exact⟩
+
+/-- Forget the canonical package inside one declaration value. -/
+theorem forgetCanonicalExactShadowDeclValue
+    (related :
+      DeclValueRelated (CanonicalExactShadowCodeRelated fuel) source target) :
+    DeclValueRelated (ExactShadowCodeRelated fuel) source target := by
+  cases related with
+  | code canonical => exact .code canonical.toExact
+  | extern metadata => exact .extern metadata
+
+/-- Pointwise program forgetting from canonical exact declaration bodies. -/
+theorem forgetCanonicalExactShadowProgram
+    (related :
+      ProgramRelated (CanonicalExactShadowCodeRelated fuel) source target) :
+    ProgramRelated (ExactShadowCodeRelated fuel) source target := by
+  apply listRel_mono (related := related)
+  intro left right declaration
+  exact {
+    name_eq := declaration.name_eq
+    levelParams_eq := declaration.levelParams_eq
+    type_eq := declaration.type_eq
+    params_eq := declaration.params_eq
+    safe_eq := declaration.safe_eq
+    value := forgetCanonicalExactShadowDeclValue declaration.value
+    recursive_eq := declaration.recursive_eq
+    inlineAttr_eq := declaration.inlineAttr_eq
+  }
+
+/-- A checked declaration and its successful transparent run produce a
+canonical exact body relation.  Declaration parameters are removed from the
+global uniqueness list after establishing the body's own uniqueness. -/
+theorem shadowDecl_canonicalExactRelated
+    (wellFormed : DeclElimDeadWellFormed source)
+    (result : shadowDecl? fuel source = some target) :
+    DeclRelated (CanonicalExactShadowCodeRelated fuel) source target := by
+  cases valueEq : source.value with
+  | extern metadata =>
+      simp [shadowDecl?, valueEq] at result
+      subst target
+      exact {
+        name_eq := rfl
+        levelParams_eq := rfl
+        type_eq := rfl
+        params_eq := rfl
+        safe_eq := rfl
+        value := by
+          rw [valueEq]
+          exact .extern metadata
+        recursive_eq := rfl
+        inlineAttr_eq := rfl
+      }
+  | code code =>
+      have certificate := wellFormed.certificate
+      rw [DeclElimDeadCertificate, valueEq] at certificate
+      cases transformed : shadowCode? fuel {} code with
+      | none => simp [shadowDecl?, valueEq, transformed] at result
+      | some output =>
+          obtain ⟨targetCode, final⟩ := output
+          simp [shadowDecl?, valueEq, transformed] at result
+          subst target
+          exact {
+            name_eq := rfl
+            levelParams_eq := rfl
+            type_eq := rfl
+            params_eq := rfl
+            safe_eq := rfl
+            value := by
+              rw [valueEq]
+              exact .code ⟨final, ⟨⟨{}, transformed⟩⟩,
+                ScopeIndex.empty.pushParams source.params,
+                certificate.2.1,
+                BinderNamesUnique.right_of_append certificate.2.2⟩
+            recursive_eq := rfl
+            inlineAttr_eq := rfl
+          }
+
+/-- Checked declaration lists retain canonical exact provenance pointwise. -/
+theorem shadowDecls_canonicalExactRelated
+    (wellFormed : ∀ declaration, declaration ∈ sources →
+      DeclElimDeadWellFormed declaration)
+    (result : shadowDecls? fuel sources = some targets) :
+    ListRel (DeclRelated (CanonicalExactShadowCodeRelated fuel))
+      sources targets := by
+  induction sources generalizing targets with
+  | nil =>
+      simp [shadowDecls?] at result
+      subst targets
+      exact .nil
+  | cons source rest ih =>
+      cases headResult : shadowDecl? fuel source with
+      | none => simp [shadowDecls?, headResult] at result
+      | some target =>
+          cases tailResult : shadowDecls? fuel rest with
+          | none => simp [shadowDecls?, headResult, tailResult] at result
+          | some targetsRest =>
+              simp [shadowDecls?, headResult, tailResult] at result
+              subst targets
+              apply ListRel.cons
+              · exact shadowDecl_canonicalExactRelated
+                  (wellFormed source (by simp)) headResult
+              · apply ih
+                · intro declaration member
+                  exact wellFormed declaration (by simp [member])
+                · exact tailResult
+
+/-- A successful whole-program run over a checked, transparently unique
+source program retains exact branch provenance and canonical source facts for
+every internal declaration body. -/
+theorem shadowProgram_canonicalExactRelated
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (result : shadowProgram? fuel source = some target) :
+    ProgramRelated (CanonicalExactShadowCodeRelated fuel) source target := by
+  cases declarationsResult : shadowDecls? fuel source.decls.toList with
+  | none => simp [shadowProgram?, declarationsResult] at result
+  | some declarations =>
+      simp [shadowProgram?, declarationsResult] at result
+      subst target
+      unfold ProgramRelated
+      apply shadowDecls_canonicalExactRelated
+        (result := declarationsResult)
+      intro declaration member
+      exact (wellFormed.declaration member)
+
 /-- Exact code result with its seed exposed as an index.  Child edges in the
 proof-relevant view use this form so their seed is definitionally the
 threaded liveness output of the preceding child. -/
@@ -1628,6 +1769,63 @@ theorem ExactShadowCodeGraph.binderReady_of_canonical
     ExactShadowCodeBinderReady final exact.view := by
   rcases CodeBinderList.canonicalExists source with ⟨listing⟩
   exact exact.binderReady_of_listing wellFormed listing unique
+
+/-- Exact code relation with the hereditary static deletion certificate
+already constructed.  Runtime preservation can carry this smaller package
+without retaining the original scope index or rebuilding binder ownership. -/
+def BinderReadyExactShadowCodeRelated (fuel : Nat)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ final, ∃ exact : ExactShadowCodeGraph fuel final source target,
+    ExactShadowCodeBinderReady final exact.view
+
+/-- Canonical checked source facts construct the hereditary exact relation. -/
+theorem CanonicalExactShadowCodeRelated.toBinderReadyExact
+    (canonical : CanonicalExactShadowCodeRelated fuel source target) :
+    BinderReadyExactShadowCodeRelated fuel source target := by
+  rcases canonical with
+    ⟨final, ⟨exact⟩, index, wellFormed, unique⟩
+  exact ⟨final, exact,
+    exact.binderReady_of_canonical wellFormed unique⟩
+
+/-- Lift canonical-to-hereditary forgetting through one declaration value. -/
+theorem canonicalExactShadowDeclValue_toBinderReadyExact
+    (related :
+      DeclValueRelated (CanonicalExactShadowCodeRelated fuel) source target) :
+    DeclValueRelated
+      (BinderReadyExactShadowCodeRelated fuel) source target := by
+  cases related with
+  | code canonical => exact .code canonical.toBinderReadyExact
+  | extern metadata => exact .extern metadata
+
+/-- Lift canonical-to-hereditary forgetting through a whole program. -/
+theorem canonicalExactShadowProgram_toBinderReadyExact
+    (related :
+      ProgramRelated (CanonicalExactShadowCodeRelated fuel) source target) :
+    ProgramRelated
+      (BinderReadyExactShadowCodeRelated fuel) source target := by
+  apply listRel_mono (related := related)
+  intro left right declaration
+  exact {
+    name_eq := declaration.name_eq
+    levelParams_eq := declaration.levelParams_eq
+    type_eq := declaration.type_eq
+    params_eq := declaration.params_eq
+    safe_eq := declaration.safe_eq
+    value :=
+      canonicalExactShadowDeclValue_toBinderReadyExact declaration.value
+    recursive_eq := declaration.recursive_eq
+    inlineAttr_eq := declaration.inlineAttr_eq
+  }
+
+/-- Compiler-run source theorem with all hereditary static body certificates
+materialized pointwise in the program relation. -/
+theorem shadowProgram_binderReadyExactRelated
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (result : shadowProgram? fuel source = some target) :
+    ProgramRelated
+      (BinderReadyExactShadowCodeRelated fuel) source target :=
+  canonicalExactShadowProgram_toBinderReadyExact
+    (shadowProgram_canonicalExactRelated wellFormed result)
 
 /-- Transparent replay of the let deletion decision at an exact traversal
 seed.  `true` means the continuation succeeded, the binder was absent, and
