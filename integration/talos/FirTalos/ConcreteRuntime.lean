@@ -6579,6 +6579,88 @@ theorem effectStepSimulates_elided
 
 /-- Nonpersistent source increment composed through the real compiler,
 adapter, concrete runtime, and exact generated unary host-call prefix. -/
+theorem effectStepSimulates_inc_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : incValue sourceRuntime sourceObject amount check = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (objectRefines : objectKind.refines .tobject = true)
+    (callFound : callIndex? sourceModule (.runtime (.inc amount check)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (incrementContract amount check))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (fits : ∀ (location : Location) (cell : HeapCell),
+      sourceObject = .object (.heap location) →
+      findCell? sourceRuntime.heap location = some cell →
+      cell.rc + amount < UInt32.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.inc objectId amount check false continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+        incrementStep_of_refines_with_capacity initialRelated.1 objectRelated
+          updated fits
+      refine ⟨heap, ?_, capacity⟩
+      apply effectStepSimulates_unaryHost
+        (step := incrementStep amount check)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_inc objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
 theorem effectStepSimulates_inc
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -6622,42 +6704,11 @@ theorem effectStepSimulates_inc
         (.inc objectId amount check false continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
-    unfold lookupValue at objectLookup
-    split at objectLookup
-    · rename_i value found
-      injection objectLookup with valueEq
-      subst value
-      exact found
-    · contradiction
-  obtain ⟨physical, hObject, physicalRelated⟩ :=
-    initialRelated.resolve sourceLookup objectFound kindAt
-  have tobjectRelated := physicalRelated.toTObject objectRefines
-  cases tobjectRelated with
-  | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated⟩ :=
-        incrementStep_of_refines initialRelated.1 objectRelated updated fits
-      refine ⟨heap, ?_⟩
-      apply effectStepSimulates_unaryHost
-        (step := incrementStep amount check)
-      · intro externals
-        simp [executeStep, coreStep, objectLookup, updated]
-      · exact codeAdapted_inc objectCompiled objectFound callFound
-          continuationAdapted
-      · exact initialRelated
-      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-          initialRelated.2.2⟩
-      · exact hObject
-      · exact hImp
-      · exact hSat
-      · exact hi
-      · exact hContract
-      · exact hParams
-      · exact hResults
-      · exact operation
-  | word64 valueRelated => cases valueRelated
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_inc_with_capacity objectLookup updated initialRelated
+      objectCompiled objectFound kindAt objectRefines callFound
+      continuationAdapted hImp hSat hi hContract hParams hResults fits
+  exact ⟨heap, step⟩
 
 /-- Persistent increments are source and concrete control-flow no-ops. -/
 theorem effectStepSimulates_inc_persistent
@@ -6689,6 +6740,89 @@ compiler and adapter, concrete recursive ownership release, and the exact
 generated unary host-call prefix. Both checked and unchecked ordinary heap
 operations use this rule; representation refinement excludes successful
 nonzero unchecked tagged releases. -/
+theorem effectStepSimulates_dec_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : decValue sourceRuntime sourceObject amount check = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (objectRefines : objectKind.refines .tobject = true)
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (callFound : callIndex? sourceModule
+      (.runtime (.dec amount check objectFields?)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (decrementContract amount check objectFields?))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.dec objectId amount check false objectFields? continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+        decrementStep_of_refines_with_capacity initialRelated.1 objectRelated
+          descriptorsEq updated
+      refine ⟨heap, ?_, capacity⟩
+      apply effectStepSimulates_unaryHost
+        (step := decrementStep amount check objectFields?)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_dec objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
 theorem effectStepSimulates_dec
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -6733,43 +6867,11 @@ theorem effectStepSimulates_dec
         (.dec objectId amount check false objectFields? continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
-    unfold lookupValue at objectLookup
-    split at objectLookup
-    · rename_i value found
-      injection objectLookup with valueEq
-      subst value
-      exact found
-    · contradiction
-  obtain ⟨physical, hObject, physicalRelated⟩ :=
-    initialRelated.resolve sourceLookup objectFound kindAt
-  have tobjectRelated := physicalRelated.toTObject objectRefines
-  cases tobjectRelated with
-  | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated⟩ :=
-        decrementStep_of_refines initialRelated.1 objectRelated descriptorsEq
-          updated
-      refine ⟨heap, ?_⟩
-      apply effectStepSimulates_unaryHost
-        (step := decrementStep amount check objectFields?)
-      · intro externals
-        simp [executeStep, coreStep, objectLookup, updated]
-      · exact codeAdapted_dec objectCompiled objectFound callFound
-          continuationAdapted
-      · exact initialRelated
-      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-          initialRelated.2.2⟩
-      · exact hObject
-      · exact hImp
-      · exact hSat
-      · exact hi
-      · exact hContract
-      · exact hParams
-      · exact hResults
-      · exact operation
-  | word64 valueRelated => cases valueRelated
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_dec_with_capacity objectLookup updated initialRelated
+      objectCompiled objectFound kindAt objectRefines descriptorsEq callFound
+      continuationAdapted hImp hSat hi hContract hParams hResults
+  exact ⟨heap, step⟩
 
 /-- Persistent decrements are source and concrete control-flow no-ops. -/
 theorem effectStepSimulates_dec_persistent
@@ -6801,6 +6903,79 @@ theorem effectStepSimulates_dec_persistent
 adapter, concrete canonical-header update, and generated unary host call. The
 same theorem admits the erased/zero no-op only through its exact `.erased`
 value relation. -/
+theorem effectStepSimulates_delete_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {sourceObject : Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId = .ok sourceObject)
+    (updated : deleteValue sourceRuntime sourceObject = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some objectKind)
+    (callFound : callIndex? sourceModule (.runtime .delete) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some deleteContract)
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv (.del objectId continuation)
+        continuation ([.localGet objectIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value found
+      injection objectLookup with valueEq
+      subst value
+      exact found
+    · contradiction
+  obtain ⟨physical, hObject, physicalRelated⟩ :=
+    initialRelated.resolve sourceLookup objectFound kindAt
+  cases physicalRelated with
+  | word32 valueRelated =>
+      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+        deleteStep_of_refines_with_capacity initialRelated.1 valueRelated updated
+      refine ⟨heap, ?_, capacity⟩
+      apply effectStepSimulates_unaryHost (step := deleteStep)
+      · intro externals
+        simp [executeStep, coreStep, objectLookup, updated]
+      · exact codeAdapted_delete objectCompiled objectFound callFound
+          continuationAdapted
+      · exact initialRelated
+      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+          initialRelated.2.2⟩
+      · exact hObject
+      · exact hImp
+      · exact hSat
+      · exact hi
+      · exact hContract
+      · exact hParams
+      · exact hResults
+      · exact operation
+  | word64 valueRelated =>
+      cases valueRelated <;> simp [deleteValue] at updated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
 theorem effectStepSimulates_delete
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -6837,25 +7012,82 @@ theorem effectStepSimulates_delete
         hostEnv sourceRuntime nextRuntime sourceEnv (.del objectId continuation)
         continuation ([.localGet objectIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_delete_with_capacity objectLookup updated initialRelated
+      objectCompiled objectFound kindAt callFound continuationAdapted hImp hSat hi
+      hContract hParams hResults
+  exact ⟨heap, step⟩
+
+/-- Constructor-tag mutation composed through the source evaluator, real
+compiler and adapter, concrete header writer, and exact unary host-call prefix.
+The explicit live-constructor facts are precisely the semantic and concrete
+decoder obligations needed by the complete-heap refinement theorem. -/
+theorem effectStepSimulates_setTag_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (updated : setTag sourceRuntime (.object (.heap location)) tag =
+      .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (kindAt : (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+      some .object)
+    (callFound : callIndex? sourceModule (.runtime (.setTag tag)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (setTagContract tag))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (tagFits : tag < UInt32.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.setTag objectId tag continuation) continuation
+        ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
+        (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have sourceLookup : lookup sourceEnv objectId =
+      some (.object (.heap location)) := by
     unfold lookupValue at objectLookup
     split at objectLookup
-    · rename_i value found
+    · rename_i value foundLookup
       injection objectLookup with valueEq
       subst value
-      exact found
+      exact foundLookup
     · contradiction
   obtain ⟨physical, hObject, physicalRelated⟩ :=
     initialRelated.resolve sourceLookup objectFound kindAt
   cases physicalRelated with
-  | word32 valueRelated =>
-      obtain ⟨heap, operation, runtimeRelated⟩ :=
-        deleteStep_of_refines initialRelated.1 valueRelated updated
-      refine ⟨heap, ?_⟩
-      apply effectStepSimulates_unaryHost (step := deleteStep)
+  | word32 objectRelated =>
+      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+        setTagStep_of_refines_with_capacity initialRelated.1 objectRelated found
+          live objectEq updated tagFits
+      refine ⟨heap, ?_, capacity⟩
+      apply effectStepSimulates_unaryHost (step := setTagStep tag)
       · intro externals
         simp [executeStep, coreStep, objectLookup, updated]
-      · exact codeAdapted_delete objectCompiled objectFound callFound
+      · exact codeAdapted_setTag objectCompiled objectFound callFound
           continuationAdapted
       · exact initialRelated
       · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
@@ -6868,15 +7100,10 @@ theorem effectStepSimulates_delete
       · exact hParams
       · exact hResults
       · exact operation
-  | word64 valueRelated =>
-      cases valueRelated <;> simp [deleteValue] at updated
+  | word64 valueRelated => cases valueRelated
   | float32Bits valueRelated => cases valueRelated
   | float64Bits valueRelated => cases valueRelated
 
-/-- Constructor-tag mutation composed through the source evaluator, real
-compiler and adapter, concrete header writer, and exact unary host-call prefix.
-The explicit live-constructor facts are precisely the semantic and concrete
-decoder obligations needed by the complete-heap refinement theorem. -/
 theorem effectStepSimulates_setTag
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -6921,32 +7148,111 @@ theorem effectStepSimulates_setTag
         (.setTag objectId tag continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  have sourceLookup : lookup sourceEnv objectId =
-      some (.object (.heap location)) := by
-    unfold lookupValue at objectLookup
-    split at objectLookup
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_setTag_with_capacity objectLookup updated initialRelated
+      objectCompiled objectFound kindAt callFound continuationAdapted hImp hSat hi
+      hContract hParams hResults found live objectEq tagFits
+  exact ⟨heap, step⟩
+
+/-- FVar object-field mutation composed through exact compiler-assigned i32
+locals, the real compiler and adapter, the checked concrete slot writer, and
+the generated binary host-call prefix. -/
+theorem effectStepSimulates_objectSet_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {location : Location} {cell : HeapCell}
+    {objectWord : Word32}
+    {semantic : ConstructorObject} {field : Value} {fieldKind : AbiKind}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok field)
+    (updated : setObjectField sourceRuntime (.object (.heap location)) index
+      field = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.compileArg context (.fvar fieldId) =
+      .ok ([.localGet fieldId], fieldKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (fieldLocalKindAt :
+      (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd = some fieldKind)
+    (fieldObjectKind : fieldKind.isObjectField = true)
+    (callFound : callIndex? sourceModule
+      (.runtime (.objectSet index fieldKind)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (objectSetContract index fieldKind))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (indexValid : index < semantic.objectFields.size)
+    (fieldDescriptorKindAt : fieldKinds[index]? = some fieldKind) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.oset objectId index (.fvar fieldId) continuation) continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have fieldSourceLookup : lookup sourceEnv fieldId = some field := by
+    unfold lookupValue at fieldLookup
+    split at fieldLookup
     · rename_i value foundLookup
-      injection objectLookup with valueEq
+      injection fieldLookup with valueEq
       subst value
       exact foundLookup
     · contradiction
-  obtain ⟨physical, hObject, physicalRelated⟩ :=
-    initialRelated.resolve sourceLookup objectFound kindAt
-  cases physicalRelated with
-  | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated⟩ :=
-        setTagStep_of_refines initialRelated.1 objectRelated found live objectEq
-          updated tagFits
-      refine ⟨heap, ?_⟩
-      apply effectStepSimulates_unaryHost (step := setTagStep tag)
+  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
+    initialRelated.resolve fieldSourceLookup fieldFound fieldLocalKindAt
+  cases physicalFieldRelated with
+  | word32 fieldRelated =>
+      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+        objectSetStep_of_refines_with_capacity initialRelated.1 objectRelated
+          fieldRelated found live objectEq descriptorFound indexValid
+          fieldDescriptorKindAt updated
+      refine ⟨heap, ?_, capacity⟩
+      apply effectStepSimulates_binaryHost
+        (step := objectSetStep index fieldKind)
       · intro externals
-        simp [executeStep, coreStep, objectLookup, updated]
-      · exact codeAdapted_setTag objectCompiled objectFound callFound
-          continuationAdapted
+        change evalArg sourceEnv (.fvar fieldId) = .ok field at fieldLookup
+        simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+      · apply codeAdapted_oset (targetField := [.localGet fieldIndex])
+          objectCompiled fieldCompiled objectFound
+        · apply instructions_localGets (fvarIds := [fieldId])
+            (indices := [fieldIndex])
+          exact .cons (by simpa [functionBindings] using fieldFound) .nil
+        · exact callFound
+        · exact continuationAdapted
       · exact initialRelated
       · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
           initialRelated.2.2⟩
       · exact hObject
+      · exact hField
       · exact hImp
       · exact hSat
       · exact hi
@@ -6954,13 +7260,11 @@ theorem effectStepSimulates_setTag
       · exact hParams
       · exact hResults
       · exact operation
-  | word64 valueRelated => cases valueRelated
-  | float32Bits valueRelated => cases valueRelated
-  | float64Bits valueRelated => cases valueRelated
+  | word64 fieldRelated =>
+      cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
+  | float32Bits fieldRelated => cases fieldRelated
+  | float64Bits fieldRelated => cases fieldRelated
 
-/-- FVar object-field mutation composed through exact compiler-assigned i32
-locals, the real compiler and adapter, the checked concrete slot writer, and
-the generated binary host-call prefix. -/
 theorem effectStepSimulates_objectSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -7022,56 +7326,101 @@ theorem effectStepSimulates_objectSet
         (.oset objectId index (.fvar fieldId) continuation) continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  have fieldSourceLookup : lookup sourceEnv fieldId = some field := by
-    unfold lookupValue at fieldLookup
-    split at fieldLookup
-    · rename_i value foundLookup
-      injection fieldLookup with valueEq
-      subst value
-      exact foundLookup
-    · contradiction
-  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
-    initialRelated.resolve fieldSourceLookup fieldFound fieldLocalKindAt
-  cases physicalFieldRelated with
-  | word32 fieldRelated =>
-      obtain ⟨heap, operation, runtimeRelated⟩ :=
-        objectSetStep_of_refines initialRelated.1 objectRelated fieldRelated
-          found live objectEq descriptorFound indexValid fieldDescriptorKindAt
-          updated
-      refine ⟨heap, ?_⟩
-      apply effectStepSimulates_binaryHost
-        (step := objectSetStep index fieldKind)
-      · intro externals
-        change evalArg sourceEnv (.fvar fieldId) = .ok field at fieldLookup
-        simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-      · apply codeAdapted_oset (targetField := [.localGet fieldIndex])
-          objectCompiled fieldCompiled objectFound
-        · apply instructions_localGets (fvarIds := [fieldId])
-            (indices := [fieldIndex])
-          exact .cons (by simpa [functionBindings] using fieldFound) .nil
-        · exact callFound
-        · exact continuationAdapted
-      · exact initialRelated
-      · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-          initialRelated.2.2⟩
-      · exact hObject
-      · exact hField
-      · exact hImp
-      · exact hSat
-      · exact hi
-      · exact hContract
-      · exact hParams
-      · exact hResults
-      · exact operation
-  | word64 fieldRelated =>
-      cases fieldRelated <;> simp [AbiKind.isObjectField] at fieldObjectKind
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_objectSet_with_capacity objectLookup fieldLookup updated
+      initialRelated hObject objectRelated objectCompiled fieldCompiled
+      objectFound fieldFound fieldLocalKindAt fieldObjectKind callFound
+      continuationAdapted hImp hSat hi hContract hParams hResults found live
+      objectEq descriptorFound indexValid fieldDescriptorKindAt
+  exact ⟨heap, step⟩
 
 /-- Erased object-field mutation composed through the compiler's canonical
 wasm32 zero, the real adapter, the checked concrete slot writer, and the
 generated local/constant host-call prefix. This closes the non-FVar branch of
 `LCNF.Arg` without treating an ordinary object word as an erased sentinel. -/
+theorem effectStepSimulates_objectSet_erased_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex : Nat} {location : Location} {cell : HeapCell}
+    {objectWord : Word32} {semantic : ConstructorObject}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (updated : setObjectField sourceRuntime (.object (.heap location)) index
+      .erased = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (callFound : callIndex? sourceModule
+      (.runtime (.objectSet index .erased)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (objectSetContract index .erased))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (indexValid : index < semantic.objectFields.size)
+    (fieldDescriptorKindAt : fieldKinds[index]? = some .erased) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.oset objectId index .erased continuation) continuation
+        ([.localGet objectIndex, .const 0, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have fieldRelated :
+      ValueRel witness .erased (.word32 Word32.zero) .erased := .erased
+  obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+    objectSetStep_of_refines_with_capacity initialRelated.1 objectRelated
+      fieldRelated found live objectEq descriptorFound indexValid
+      fieldDescriptorKindAt updated
+  refine ⟨heap, ?_, capacity⟩
+  apply effectStepSimulates_localI32ConstHost
+    (step := objectSetStep index .erased)
+  · intro externals
+    simp [executeStep, coreStep, evalArg, objectLookup, updated]
+  · apply codeAdapted_oset
+      (arg := .erased) (fieldCode := [.i32Const .erased 0])
+      (targetField := [.const 0]) objectCompiled (by rfl) objectFound
+    · simp [instructions, instruction, pure, Except.pure, Bind.bind,
+        Except.bind]
+    · exact callFound
+    · exact continuationAdapted
+  · exact initialRelated
+  · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+      initialRelated.2.2⟩
+  · exact hObject
+  · exact hImp
+  · exact hSat
+  · exact hi
+  · exact hContract
+  · exact hParams
+  · exact hResults
+  · simpa [Word32.zero] using operation
+
 theorem effectStepSimulates_objectSet_erased
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -7124,38 +7473,124 @@ theorem effectStepSimulates_objectSet_erased
         (.oset objectId index .erased continuation) continuation
         ([.localGet objectIndex, .const 0, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  have fieldRelated :
-      ValueRel witness .erased (.word32 Word32.zero) .erased := .erased
-  obtain ⟨heap, operation, runtimeRelated⟩ :=
-    objectSetStep_of_refines initialRelated.1 objectRelated fieldRelated found
-      live objectEq descriptorFound indexValid fieldDescriptorKindAt updated
-  refine ⟨heap, ?_⟩
-  apply effectStepSimulates_localI32ConstHost
-    (step := objectSetStep index .erased)
-  · intro externals
-    simp [executeStep, coreStep, evalArg, objectLookup, updated]
-  · apply codeAdapted_oset
-      (arg := .erased) (fieldCode := [.i32Const .erased 0])
-      (targetField := [.const 0]) objectCompiled (by rfl) objectFound
-    · simp [instructions, instruction, pure, Except.pure, Bind.bind,
-        Except.bind]
-    · exact callFound
-    · exact continuationAdapted
-  · exact initialRelated
-  · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-      initialRelated.2.2⟩
-  · exact hObject
-  · exact hImp
-  · exact hSat
-  · exact hi
-  · exact hContract
-  · exact hParams
-  · exact hResults
-  · simpa [Word32.zero] using operation
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_objectSet_erased_with_capacity objectLookup updated
+      initialRelated hObject objectRelated objectCompiled objectFound callFound
+      continuationAdapted hImp hSat hi hContract hParams hResults found live
+      objectEq descriptorFound indexValid fieldDescriptorKindAt
+  exact ⟨heap, step⟩
 
 /-- `USize`-field mutation composed through exact compiler-assigned i32/i64
 locals, the real compiler and adapter, checked concrete slot writer, and the
 generated binary host-call prefix. -/
+theorem effectStepSimulates_usizeSet_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {location : Location} {cell : HeapCell}
+    {semantic : ConstructorObject} {field : UInt64}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.usize field))
+    (updated : setUSizeSlot sourceRuntime (.object (.heap location)) index
+      (.usize field) = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, .usize))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (objectKindAt :
+      (functionBindings sourceFunction)[objectIndex]?.map Prod.snd = some .object)
+    (fieldKindAt :
+      (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd = some .usize)
+    (callFound : callIndex? sourceModule (.runtime (.usizeSet index)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some (usizeSetContract index))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (slotStart : semantic.objectFields.size ≤ index)
+    (slotEnd : index < semantic.objectFields.size + semantic.usizeFields.size) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.uset objectId index fieldId continuation) continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have objectSourceLookup : lookup sourceEnv objectId =
+      some (.object (.heap location)) := by
+    unfold lookupValue at objectLookup
+    split at objectLookup
+    · rename_i value foundLookup
+      injection objectLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  have fieldSourceLookup : lookup sourceEnv fieldId = some (.usize field) := by
+    unfold lookupValue at fieldLookup
+    split at fieldLookup
+    · rename_i value foundLookup
+      injection fieldLookup with valueEq
+      subst value
+      exact foundLookup
+    · contradiction
+  obtain ⟨physicalObject, hObject, physicalObjectRelated⟩ :=
+    initialRelated.resolve objectSourceLookup objectFound objectKindAt
+  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
+    initialRelated.resolve fieldSourceLookup fieldFound fieldKindAt
+  cases physicalObjectRelated with
+  | word32 objectRelated =>
+      cases physicalFieldRelated with
+      | word64 fieldRelated =>
+          cases fieldRelated with
+          | usize =>
+              obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+                usizeSetStep_of_refines_with_capacity initialRelated.1
+                  objectRelated found live objectEq slotStart slotEnd updated
+              refine ⟨heap, ?_, capacity⟩
+              apply effectStepSimulates_binaryHost (step := usizeSetStep index)
+              · intro externals
+                simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+              · exact codeAdapted_uset objectCompiled fieldCompiled objectFound
+                  fieldFound callFound continuationAdapted
+              · exact initialRelated
+              · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+                  initialRelated.2.2⟩
+              · exact hObject
+              · exact hField
+              · exact hImp
+              · exact hSat
+              · exact hi
+              · exact hContract
+              · exact hParams
+              · exact hResults
+              · exact operation
+      | word32 fieldRelated => cases fieldRelated
+      | float32Bits fieldRelated => cases fieldRelated
+      | float64Bits fieldRelated => cases fieldRelated
+  | word64 objectRelated => cases objectRelated
+  | float32Bits objectRelated => cases objectRelated
+  | float64Bits objectRelated => cases objectRelated
+
 theorem effectStepSimulates_usizeSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -7208,16 +7643,104 @@ theorem effectStepSimulates_usizeSet
         (.uset objectId index fieldId continuation) continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  have objectSourceLookup : lookup sourceEnv objectId =
-      some (.object (.heap location)) := by
-    unfold lookupValue at objectLookup
-    split at objectLookup
-    · rename_i value foundLookup
-      injection objectLookup with valueEq
-      subst value
-      exact foundLookup
-    · contradiction
-  have fieldSourceLookup : lookup sourceEnv fieldId = some (.usize field) := by
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_usizeSet_with_capacity objectLookup fieldLookup updated
+      initialRelated objectCompiled fieldCompiled objectFound fieldFound
+      objectKindAt fieldKindAt callFound continuationAdapted hImp hSat hi
+      hContract hParams hResults found live objectEq slotStart slotEnd
+  exact ⟨heap, step⟩
+
+/-- Packed-integer field mutation composed through exact compiler-assigned
+locals, the real compiler and adapter, the width-indexed concrete writer, and
+the generated binary host-call prefix. Every supported packed-integer write
+preserves each retained field whose byte interval is disjoint. -/
+theorem effectStepSimulates_scalarSet_with_capacity
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl} {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr} {continuation : Lean.Compiler.LCNF.Code .impure}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {objectIndex fieldIndex : Nat} {objectWord : Word32}
+    {location : Location} {cell : HeapCell} {semantic : ConstructorObject}
+    {field : ScalarValue} {fieldKind : AbiKind}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {targetRest : Wasm.Program} {witness : RefinementWitness}
+    (objectLookup : lookupValue sourceEnv objectId =
+      .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.scalar field))
+    (updated : setScalarField sourceRuntime (.object (.heap location)) slotIndex
+      byteOffset (.scalar field) = .ok nextRuntime)
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (hObject : locals.get objectIndex =
+      some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (objectFound : findFVar? (functionBindings sourceFunction) objectId =
+      some objectIndex)
+    (fieldFound : findFVar? (functionBindings sourceFunction) fieldId =
+      some fieldIndex)
+    (fieldKindAt :
+      (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd = some fieldKind)
+    (callFound : callIndex? sourceModule
+      (.runtime (.scalarSet slotIndex byteOffset fieldKind)) = some id)
+    (continuationAdapted : CodeAdapted context sourceModule sourceFunction labels
+      continuation targetRest)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? = some
+      (scalarSetContract slotIndex byteOffset fieldKind))
+    (hParams : imp.params.length = 2)
+    (hResults : imp.results.length = 0)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (historySafe : match fieldKind with
+      | .uint8 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 1 ≤ old.offset
+      | .uint16 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 2 ≤ old.offset
+      | .uint32 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 4 ≤ old.offset
+      | .uint64 => ∀ old ∈ semantic.scalarFields,
+          old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+          old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+            byteOffset + 8 ≤ old.offset
+      | _ => semantic.scalarFields.filter (fun old =>
+          old.width != slotIndex || old.offset != byteOffset) = [])
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : match fieldKind with
+      | .uint8 => byteOffset + 1 ≤ info.ssize
+      | .uint16 => byteOffset + 2 ≤ info.ssize
+      | .uint32 => byteOffset + 4 ≤ info.ssize
+      | .uint64 => byteOffset + 8 ≤ info.ssize
+      | _ => False) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
+        targetRest initial (replaceHeap initial heap) locals witness witness ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  have fieldSourceLookup : lookup sourceEnv fieldId = some (.scalar field) := by
     unfold lookupValue at fieldLookup
     split at fieldLookup
     · rename_i value foundLookup
@@ -7225,48 +7748,116 @@ theorem effectStepSimulates_usizeSet
       subst value
       exact foundLookup
     · contradiction
-  obtain ⟨physicalObject, hObject, physicalObjectRelated⟩ :=
-    initialRelated.resolve objectSourceLookup objectFound objectKindAt
   obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
     initialRelated.resolve fieldSourceLookup fieldFound fieldKindAt
-  cases physicalObjectRelated with
-  | word32 objectRelated =>
-      cases physicalFieldRelated with
-      | word64 fieldRelated =>
-          cases fieldRelated with
-          | usize =>
-              obtain ⟨heap, operation, runtimeRelated⟩ :=
-                usizeSetStep_of_refines initialRelated.1 objectRelated found live
-                  objectEq slotStart slotEnd updated
-              refine ⟨heap, ?_⟩
-              apply effectStepSimulates_binaryHost (step := usizeSetStep index)
-              · intro externals
-                simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-              · exact codeAdapted_uset objectCompiled fieldCompiled objectFound
-                  fieldFound callFound continuationAdapted
-              · exact initialRelated
-              · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-                  initialRelated.2.2⟩
-              · exact hObject
-              · exact hField
-              · exact hImp
-              · exact hSat
-              · exact hi
-              · exact hContract
-              · exact hParams
-              · exact hResults
-              · exact operation
-      | word32 fieldRelated => cases fieldRelated
-      | float32Bits fieldRelated => cases fieldRelated
-      | float64Bits fieldRelated => cases fieldRelated
-  | word64 objectRelated => cases objectRelated
-  | float32Bits objectRelated => cases objectRelated
-  | float64Bits objectRelated => cases objectRelated
+  cases physicalFieldRelated with
+  | word32 fieldRelated =>
+      cases fieldRelated with
+      | uint8 encoded =>
+          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+            scalarSetStep_uint8_of_refines_with_capacity initialRelated.1
+              objectRelated (.uint8 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .uint8)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
+      | uint16 encoded =>
+          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+            scalarSetStep_uint16_of_refines_with_capacity initialRelated.1
+              objectRelated (.uint16 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .uint16)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
+      | uint32 encoded =>
+          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+            scalarSetStep_uint32_of_refines_with_capacity initialRelated.1
+              objectRelated (.uint32 encoded) found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .uint32)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
+  | word64 fieldRelated =>
+      cases fieldRelated with
+      | uint64 =>
+          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+            scalarSetStep_uint64_of_refines_with_capacity initialRelated.1
+              objectRelated .uint64 found live objectEq descriptorFound
+              (by simpa using historySafe) slotIndexEq
+              (by simpa using fieldFits) updated
+          refine ⟨heap, ?_, capacity⟩
+          apply effectStepSimulates_binaryHost
+            (step := scalarSetStep slotIndex byteOffset .uint64)
+          · intro externals
+            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
+          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
+              fieldFound callFound continuationAdapted
+          · exact initialRelated
+          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              initialRelated.2.2⟩
+          · exact hObject
+          · exact hField
+          · exact hImp
+          · exact hSat
+          · exact hi
+          · exact hContract
+          · exact hParams
+          · exact hResults
+          · exact operation
+  | float32Bits fieldRelated => cases fieldRelated
+  | float64Bits fieldRelated => cases fieldRelated
 
-/-- Packed-integer field mutation composed through exact compiler-assigned
-locals, the real compiler and adapter, the width-indexed concrete writer, and
-the generated binary host-call prefix. Every supported packed-integer write
-preserves each retained field whose byte interval is disjoint. -/
 theorem effectStepSimulates_scalarSet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -7352,123 +7943,13 @@ theorem effectStepSimulates_scalarSet
         continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  have fieldSourceLookup : lookup sourceEnv fieldId = some (.scalar field) := by
-    unfold lookupValue at fieldLookup
-    split at fieldLookup
-    · rename_i value foundLookup
-      injection fieldLookup with valueEq
-      subst value
-      exact foundLookup
-    · contradiction
-  obtain ⟨physicalField, hField, physicalFieldRelated⟩ :=
-    initialRelated.resolve fieldSourceLookup fieldFound fieldKindAt
-  cases physicalFieldRelated with
-  | word32 fieldRelated =>
-      cases fieldRelated with
-      | uint8 encoded =>
-          obtain ⟨heap, operation, runtimeRelated⟩ :=
-            scalarSetStep_uint8_of_refines initialRelated.1 objectRelated
-              (.uint8 encoded) found live objectEq descriptorFound
-              (by simpa using historySafe)
-              slotIndexEq (by simpa using fieldFits) updated
-          refine ⟨heap, ?_⟩
-          apply effectStepSimulates_binaryHost
-            (step := scalarSetStep slotIndex byteOffset .uint8)
-          · intro externals
-            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
-              fieldFound callFound continuationAdapted
-          · exact initialRelated
-          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-              initialRelated.2.2⟩
-          · exact hObject
-          · exact hField
-          · exact hImp
-          · exact hSat
-          · exact hi
-          · exact hContract
-          · exact hParams
-          · exact hResults
-          · exact operation
-      | uint16 encoded =>
-          obtain ⟨heap, operation, runtimeRelated⟩ :=
-            scalarSetStep_uint16_of_refines initialRelated.1 objectRelated
-              (.uint16 encoded) found live objectEq descriptorFound
-              (by simpa using historySafe)
-              slotIndexEq (by simpa using fieldFits) updated
-          refine ⟨heap, ?_⟩
-          apply effectStepSimulates_binaryHost
-            (step := scalarSetStep slotIndex byteOffset .uint16)
-          · intro externals
-            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
-              fieldFound callFound continuationAdapted
-          · exact initialRelated
-          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-              initialRelated.2.2⟩
-          · exact hObject
-          · exact hField
-          · exact hImp
-          · exact hSat
-          · exact hi
-          · exact hContract
-          · exact hParams
-          · exact hResults
-          · exact operation
-      | uint32 encoded =>
-          obtain ⟨heap, operation, runtimeRelated⟩ :=
-            scalarSetStep_uint32_of_refines initialRelated.1 objectRelated
-              (.uint32 encoded) found live objectEq descriptorFound
-              (by simpa using historySafe)
-              slotIndexEq (by simpa using fieldFits) updated
-          refine ⟨heap, ?_⟩
-          apply effectStepSimulates_binaryHost
-            (step := scalarSetStep slotIndex byteOffset .uint32)
-          · intro externals
-            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
-              fieldFound callFound continuationAdapted
-          · exact initialRelated
-          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-              initialRelated.2.2⟩
-          · exact hObject
-          · exact hField
-          · exact hImp
-          · exact hSat
-          · exact hi
-          · exact hContract
-          · exact hParams
-          · exact hResults
-          · exact operation
-  | word64 fieldRelated =>
-      cases fieldRelated with
-      | uint64 =>
-          obtain ⟨heap, operation, runtimeRelated⟩ :=
-            scalarSetStep_uint64_of_refines initialRelated.1 objectRelated .uint64
-              found live objectEq descriptorFound (by simpa using historySafe)
-              slotIndexEq
-              (by simpa using fieldFits) updated
-          refine ⟨heap, ?_⟩
-          apply effectStepSimulates_binaryHost
-            (step := scalarSetStep slotIndex byteOffset .uint64)
-          · intro externals
-            simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
-          · exact codeAdapted_sset objectCompiled fieldCompiled objectFound
-              fieldFound callFound continuationAdapted
-          · exact initialRelated
-          · exact ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
-              initialRelated.2.2⟩
-          · exact hObject
-          · exact hField
-          · exact hImp
-          · exact hSat
-          · exact hi
-          · exact hContract
-          · exact hParams
-          · exact hResults
-          · exact operation
-  | float32Bits fieldRelated => cases fieldRelated
-  | float64Bits fieldRelated => cases fieldRelated
+  obtain ⟨heap, step, _⟩ :=
+    effectStepSimulates_scalarSet_with_capacity objectLookup fieldLookup updated
+      initialRelated hObject objectRelated objectCompiled fieldCompiled
+      objectFound fieldFound fieldKindAt callFound continuationAdapted hImp hSat
+      hi hContract hParams hResults found live objectEq descriptorFound
+      historySafe slotIndexEq fieldFits
+  exact ⟨heap, step⟩
 
 /-- Concrete-host WP for generated reset and its reuse-token destination
 local. The result word is zero on tagged/fallback paths and the original heap

@@ -266,7 +266,11 @@ the same transport boundary. Ownership operations now expose transport for
 increment, recursive decrement, and deletion. Mutation operations expose it
 for constructor tags, object fields, `USize` fields, and every supported packed
 integer width. The operation-level transport inventory is complete; the
-syntax-directed simulation still has to carry the strengthened state. Native
+complete no-result effect spine now carries it through generic effect-step and
+heap-replacement adapters, with reflexive transport for persistent ownership
+effects. The result-producing let spine still has to insert constructor,
+reset, and reuse facts or erase ordinary result facts before branch and call
+propagation. Native
 unreachability losing its source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
@@ -339,9 +343,10 @@ acceptance tests pass.
    transport through prefix clearing and recursive child release. Empty
    constructor allocation/reuse covers immediate and promoted tagged results;
    ownership and mutation operations now supply transport across every
-   admitted successful effect. The syntax certificate must still carry the
-   strengthened state. Structured unreachability remains the shared-contract
-   blocker.
+   admitted successful effect. The complete no-result effect spine carries the
+   strengthened state through generic effect-step adapters. The remaining
+   syntax work is the result-producing let spine and subsequent branch/call
+   propagation. Structured unreachability remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

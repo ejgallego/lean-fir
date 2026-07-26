@@ -439,6 +439,171 @@ theorem ReuseCapacityStateRelated.stateRelated
       witness :=
   related.1
 
+/-- A successful concrete transition lifts the ordinary final state relation
+to the strengthened capacity invariant whenever it transports witnesses and
+preserves the allocation extent of every previously mapped location. Source
+bindings and concrete locals are unchanged by this generic no-result rule. -/
+theorem ReuseCapacityStateRelated.transport
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {beforeWitness afterWitness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (finalRelated :
+      StateRelated sourceFunction nextRuntime sourceEnv nextStore targetLocals
+        afterWitness)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness) :
+    ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+      nextStore targetLocals afterWitness := by
+  exact ⟨finalRelated,
+    related.2.transport witnessTransport capacityTransport⟩
+
+/-- Same-witness specialization used by ownership and mutation effects. -/
+theorem ReuseCapacityStateRelated.transportSameWitness
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (finalRelated :
+      StateRelated sourceFunction nextRuntime sourceEnv nextStore targetLocals
+        witness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap witness) :
+    ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+      nextStore targetLocals witness :=
+  related.transport finalRelated (WitnessTransport.refl witness)
+    capacityTransport
+
+/-- Common concrete-host specialization: a heap-only operation with unchanged
+source bindings, locals, and witness preserves the strengthened state exactly
+when its operation theorem supplies mapped-header transport. -/
+theorem ReuseCapacityStateRelated.replaceHeap
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        initial targetLocals witness)
+    (runtimeRelated :
+      ConcreteRuntimeRel (FirTalos.Concrete.replaceHeap initial heap).host.runtime
+        witness nextRuntime)
+    (capacityTransport :
+      HeaderCapacityTransport initial.host.runtime.heap heap witness) :
+    ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+      (FirTalos.Concrete.replaceHeap initial heap) targetLocals witness := by
+  apply related.transportSameWitness
+    ⟨runtimeRelated, by simp [FirTalos.Concrete.replaceHeap, clearFailure],
+      related.1.2.2⟩
+  simpa [FirTalos.Concrete.replaceHeap, clearFailure] using capacityTransport
+
+/-- Capacity-aware syntax bridge for any already composed no-result effect.
+The existing W6 effect simulation continues to own source control, lowering,
+ordinary state refinement, and Wasm weakest preconditions; this lemma adds
+only the static-capacity invariant required by T4S. -/
+theorem ReuseCapacityStateRelated.ofEffectStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {beforeWitness afterWitness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+        targetRest targetStore nextStore targetLocals beforeWitness
+        afterWitness)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness) :
+    ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+      nextStore targetLocals afterWitness :=
+  related.transport step.2.2.2.1 witnessTransport capacityTransport
+
+/-- Same-witness concrete-host effect specialization. This is the direct
+syntax-level consumer of every ownership and mutation theorem whose target
+store is `replaceHeap initial heap`. -/
+theorem ReuseCapacityStateRelated.ofReplaceHeapEffectStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        initial targetLocals witness)
+    (step :
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+        targetRest initial (FirTalos.Concrete.replaceHeap initial heap)
+        targetLocals witness witness)
+    (capacityTransport :
+      HeaderCapacityTransport initial.host.runtime.heap heap witness) :
+    ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+      (FirTalos.Concrete.replaceHeap initial heap) targetLocals witness := by
+  apply related.ofEffectStep step (WitnessTransport.refl witness)
+  simpa [FirTalos.Concrete.replaceHeap, clearFailure] using capacityTransport
+
+/-- Existential form matching the public `_with_capacity` effect theorems.
+It packages both the unchanged W6 simulation certificate and the strengthened
+state at its continuation node. -/
+theorem ReuseCapacityStateRelated.ofReplaceHeapEffectResult
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    {initial : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        initial targetLocals witness)
+    (result :
+      ∃ heap,
+        EffectStepSimulates context sourceModule sourceFunction labels module
+          hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+          targetRest initial (FirTalos.Concrete.replaceHeap initial heap)
+          targetLocals witness witness ∧
+        HeaderCapacityTransport initial.host.runtime.heap heap witness) :
+    ∃ heap,
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+        targetRest initial (FirTalos.Concrete.replaceHeap initial heap)
+        targetLocals witness witness ∧
+      ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+        (FirTalos.Concrete.replaceHeap initial heap) targetLocals witness := by
+  obtain ⟨heap, step, capacity⟩ := result
+  exact ⟨heap, step, related.ofReplaceHeapEffectStep step capacity⟩
+
 theorem ReuseCapacityStateRelated.resolveFittingToken
     {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}

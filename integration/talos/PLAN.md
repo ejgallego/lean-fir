@@ -3286,6 +3286,18 @@ The operation-level transport inventory is complete; the remaining capacity
 work is to thread `ReuseCapacityStateRelated` through syntax-directed
 execution. No FIR semantic contract or executable ABI changed.
 
+W6.6do threads that inventory through the complete no-result effect spine.
+Ownership and mutation `EffectStepSimulates` theorems now expose mapped-header
+capacity transport alongside their source, compiler, and weakest-precondition
+simulation; compatibility wrappers preserve the existing theorem surface.
+Generic transport, effect-step, and heap-replacement adapters reconstruct
+`ReuseCapacityStateRelated` at continuation nodes, while persistent ownership
+effects use reflexive transport because their concrete heaps are unchanged.
+The remaining syntax work is the result-producing let spine: constructor,
+reset, and reuse insert new facts, while ordinary results erase or bind facts
+before branch and call propagation. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
