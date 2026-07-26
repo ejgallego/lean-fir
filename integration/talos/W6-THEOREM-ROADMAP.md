@@ -251,9 +251,14 @@ derives the operation theorem's retained-layout premise from the two. The
 whole static map is now interpreted by `ReuseCapacityFactsRel` inside
 `ReuseCapacityStateRelated`; its generic transport/bind rule reduces syntax
 preservation to proving `HeaderCapacityTransport` for each successful
-operation family. The syntax-directed simulation still has to carry that
-strengthened state. Native unreachability losing its source fault is tracked
-separately by
+operation family. That boundary is scoped to witness-related, frontier-owned
+headers rather than arbitrary readable memory. Prefix-extension proofs
+instantiate it for nonempty constructor allocation and nonempty reuse from the
+zero token, while a unique-reset bridge changes retained object evidence into
+same-address token evidence. In-place reuse and the remaining heap-transition
+families still need transport instances, and the syntax-directed simulation
+still has to carry the strengthened state. Native unreachability losing its
+source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
@@ -319,9 +324,11 @@ acceptance tests pass.
    using `W6-FAULT-AUDIT.md` as the exact checklist.
 6. In progress: discharge T4S. Retained reuse capacity is validated and its
    static-to-concrete operation bridge and whole-fact-map invariant are proved;
-   operation families must supply header-capacity transport before the syntax
-   certificate can carry the strengthened state. Structured unreachability
-   remains the shared-contract blocker.
+   fresh nonempty allocation and zero-token reuse supply header-capacity
+   transport, and unique reset has its evidence-conversion boundary. In-place
+   reuse and the remaining heap operations must supply transport before the
+   syntax certificate can carry the strengthened state. Structured
+   unreachability remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

@@ -73,7 +73,7 @@ the premise that derives its operation equation remains to be packaged.
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
 | reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, unique-constructor bounds, nonunique fallback decrement, and non-`expectedObject` unique-constructor child-fault leaves complete; `.tobject` excludes operand-shape `expectedObject`; every mapped branch excludes release-fuel target traps, while erased child source release is tracked by `FIR-BUG-wasm-none-reset-erased-child-release` |
-| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; the wasm32 capacity analysis supplies fitting evidence, its dynamic value relation ties retained evidence to the exact allocation header, and the in-place operation theorem now derives rather than assumes the retained-layout inequality required by T4S |
+| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; the wasm32 capacity analysis supplies fitting evidence, its dynamic value relation ties retained evidence to the exact allocation header, and the in-place operation theorem now derives rather than assumes the retained-layout inequality required by T4S; fresh nonempty allocation and zero-token reuse instantiate scoped header-capacity transport, while unique reset has a same-address evidence bridge |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
 | exact external call | arbitrary `RuntimeFault` returned by the installed implementation | arbitrary-arity terminal leaf complete |
@@ -103,9 +103,11 @@ traps for malformed source code.
 
 1. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.
-2. Prove `HeaderCapacityTransport` for each successful operation family, then
-   carry `ReuseCapacityStateRelated` through the syntax-directed simulation.
-   The whole-map bind rule and operation layout-fit boundary are already
-   available.
+2. Continue instantiating `HeaderCapacityTransport`, then carry
+   `ReuseCapacityStateRelated` through the syntax-directed simulation.
+   Fresh nonempty constructor allocation and nonempty reuse from the zero
+   token are complete, as is the retained-object-to-reuse-token reset bridge.
+   In-place reuse, empty/tagged allocation, and ownership or mutation
+   transitions remain.
 3. State and prove T4S per operation, including explicit wasm32 allocation
    capacity, then compose it syntax-directly alongside T2/T4.

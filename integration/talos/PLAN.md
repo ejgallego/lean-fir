@@ -3209,6 +3209,18 @@ instantiate header-capacity transport for each operation family and thread
 the analysis state through `ConcreteCodeSimulation`. No FIR semantic contract
 or executable ABI changed.
 
+W6.6di scopes header-capacity transport to allocation headers that are both
+represented by the refinement witness and owned below the current heap
+frontier. This avoids an unnecessarily global claim about arbitrary readable
+memory while retaining exactly the premise needed by tracked reuse facts.
+Fresh prefix extension now instantiates the boundary for nonempty constructor
+allocation and for nonempty reuse from the physical zero token. A unique-reset
+bridge converts retained object evidence into same-address reuse-token evidence
+when the reset operation supplies witness and header transport. The remaining
+operation work is in-place reuse, the empty/tagged allocation branches, and
+ownership or mutation transitions that can affect represented allocations.
+No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -10,20 +10,84 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
-/-- Heap transitions preserve reuse capacity when every previously readable
-allocation header remains readable with the same physical extent. Payload and
-ownership metadata may change freely. -/
-def HeaderCapacityTransport (before after : MemoryState) : Prop :=
-  ∀ address header,
+/-- Heap transitions preserve reuse capacity when every related, previously
+owned allocation header remains readable with the same physical extent.
+Payload and ownership metadata may change freely. -/
+def HeaderCapacityTransport
+    (before after : MemoryState) (witness : RefinementWitness) : Prop :=
+  ∀ kind address semantic header,
+    ValueRel witness kind (.word32 address) semantic →
     Header.read before.memory address = .ok header →
+    address.value + headerBytes ≤ before.heapCursor →
     ∃ nextHeader,
       Header.read after.memory address = .ok nextHeader ∧
-      nextHeader.allocationBytes = header.allocationBytes
+      nextHeader.allocationBytes = header.allocationBytes ∧
+      address.value + headerBytes ≤ after.heapCursor
 
-theorem HeaderCapacityTransport.refl (heap : MemoryState) :
-    HeaderCapacityTransport heap heap := by
-  intro address header headerRead
-  exact ⟨header, headerRead, rfl⟩
+theorem HeaderCapacityTransport.refl
+    (heap : MemoryState) (witness : RefinementWitness) :
+    HeaderCapacityTransport heap heap witness := by
+  intro kind address semantic header valueRelated headerRead owned
+  exact ⟨header, headerRead, rfl, owned⟩
+
+/-- Fresh allocation is the common capacity-preserving heap transition: every
+previously owned header remains byte-for-byte readable below the extended
+frontier. -/
+theorem HeaderCapacityTransport.ofPrefixExtension
+    {before after : MemoryState}
+    (witness : RefinementWitness)
+    (extension : before.PrefixExtension after) :
+    HeaderCapacityTransport before after witness := by
+  intro kind address semantic header valueRelated headerRead owned
+  refine ⟨header, ?_, rfl, Nat.le_trans owned extension.cursor⟩
+  rw [extension.readHeader address owned]
+  exact headerRead
+
+/-- Nonempty constructor allocation instantiates the generic header-capacity
+transport boundary from its existing fresh-prefix theorem. -/
+theorem HeaderCapacityTransport.allocateConstructor_nonempty
+    (state result : MemoryState) (witness : RefinementWitness)
+    (info : LCNF.CtorInfo) (fields : Array Word32) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (arity : fields.size = info.size)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (allocated :
+      allocateConstructor state info fields = .ok (result, address)) :
+    HeaderCapacityTransport state result witness :=
+  .ofPrefixExtension witness
+    (allocateConstructor_nonempty_prefixExtension state result info fields
+      address valid arity nonempty tagFits objectFieldsFit usizeFieldsFit
+      scalarBytesFit allocated)
+
+/-- Empty-token reuse of a nonempty constructor is the same fresh allocation,
+so it preserves every previously tracked retained extent. -/
+theorem HeaderCapacityTransport.reuseObject_none_nonempty
+    (state result : MemoryState) (witness : RefinementWitness)
+    (info : LCNF.CtorInfo) (updateHeader : Bool)
+    (fields : Array Word32) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (arity : fields.size = info.size)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (reused :
+      reuseObject state Word32.zero info updateHeader fields =
+        .ok (result, address)) :
+    HeaderCapacityTransport state result witness := by
+  have allocated :
+      allocateConstructor state info fields = .ok (result, address) := by
+    unfold reuseObject at reused
+    rw [if_pos (by decide)] at reused
+    exact reused
+  exact .allocateConstructor_nonempty state result witness info fields address
+    valid arity nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit
+    allocated
 
 /--
 Dynamic meaning of the validator's reset/reuse capacity evidence.
@@ -53,6 +117,7 @@ inductive ReuseCapacityValueRel
         ValueRel witness kind (.word32 address)
           (.object (.heap location)))
       (headerRead : Header.read heap.memory address = .ok header)
+      (headerOwned : address.value + headerBytes ≤ heap.heapCursor)
       (minimum : available ≤ header.allocationBytes.toNat) :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available) kind
         (.word32 address) (.object (.heap location))
@@ -64,6 +129,7 @@ inductive ReuseCapacityValueRel
         ValueRel witness .reuseToken (.word32 address)
           (.reuseToken (some location)))
       (headerRead : Header.read heap.memory address = .ok header)
+      (headerOwned : address.value + headerBytes ≤ heap.heapCursor)
       (minimum : available ≤ header.allocationBytes.toNat) :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available)
         .reuseToken (.word32 address) (.reuseToken (some location))
@@ -76,7 +142,8 @@ theorem ReuseCapacityValueRel.transport
     {evidence : ReuseCapacityEvidence} {kind : AbiKind}
     {lane : LaneValue} {semantic : Value}
     (witnessTransport : WitnessTransport beforeWitness afterWitness)
-    (capacityTransport : HeaderCapacityTransport before after)
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
     (related :
       ReuseCapacityValueRel before beforeWitness evidence kind lane semantic) :
     ReuseCapacityValueRel after afterWitness evidence kind lane semantic := by
@@ -84,17 +151,17 @@ theorem ReuseCapacityValueRel.transport
   | emptyObject valueRelated =>
       exact .emptyObject (witnessTransport valueRelated)
   | emptyToken => exact .emptyToken
-  | retainedObject valueRelated headerRead minimum =>
-      obtain ⟨nextHeader, nextHeaderRead, sameExtent⟩ :=
-        capacityTransport _ _ headerRead
+  | retainedObject valueRelated headerRead headerOwned minimum =>
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
+        capacityTransport _ _ _ _ valueRelated headerRead headerOwned
       exact .retainedObject (witnessTransport valueRelated) nextHeaderRead
-        (by simpa [sameExtent] using minimum)
+        nextHeaderOwned (by simpa [sameExtent] using minimum)
   | retainedEmptyToken => exact .retainedEmptyToken
-  | retainedToken valueRelated headerRead minimum =>
-      obtain ⟨nextHeader, nextHeaderRead, sameExtent⟩ :=
-        capacityTransport _ _ headerRead
+  | retainedToken valueRelated headerRead headerOwned minimum =>
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
+        capacityTransport _ _ _ _ valueRelated headerRead headerOwned
       exact .retainedToken (witnessTransport valueRelated) nextHeaderRead
-        (by simpa [sameExtent] using minimum)
+        nextHeaderOwned (by simpa [sameExtent] using minimum)
 
 /-- Capacity tracking strengthens, but never replaces, the ordinary
 ABI-indexed value relation. -/
@@ -108,9 +175,9 @@ theorem ReuseCapacityValueRel.valueRelated
   cases related with
   | emptyObject valueRelated => exact valueRelated
   | emptyToken => exact .reuseNone
-  | retainedObject valueRelated _ _ => exact valueRelated
+  | retainedObject valueRelated _ _ _ => exact valueRelated
   | retainedEmptyToken => exact .reuseNone
-  | retainedToken valueRelated _ _ => exact valueRelated
+  | retainedToken valueRelated _ _ _ => exact valueRelated
 
 /-- Erasing one tracked name does not affect lookup of a different name. -/
 theorem findReuseCapacityEvidence?_erase_other
@@ -210,7 +277,8 @@ theorem ReuseCapacityFactsRel.transport
     {targetLocals : Wasm.Locals} {before after : MemoryState}
     {beforeWitness afterWitness : RefinementWitness}
     (witnessTransport : WitnessTransport beforeWitness afterWitness)
-    (capacityTransport : HeaderCapacityTransport before after)
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
     (related :
       ReuseCapacityFactsRel facts bindings sourceEnv targetLocals before
         beforeWitness) :
@@ -241,7 +309,8 @@ theorem ReuseCapacityFactsRel.bind
     (localUpdate : FirTalos.Correctness.LocalUpdate targetLocals updatedLocals
       resultIndex (physicalOfLane lane))
     (witnessTransport : WitnessTransport beforeWitness afterWitness)
-    (capacityTransport : HeaderCapacityTransport before after)
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
     (valueRelated :
       ReuseCapacityValueRel after afterWitness evidence kind lane semantic) :
     ReuseCapacityFactsRel
@@ -395,7 +464,34 @@ theorem ReuseCapacityValueRel.retainedObject_of_constructor
   have rawHeaderRead :=
     (MemoryState.PrefixExtension.readLiveHeader_facts heap address header
       headerRead).2.1
-  exact .retainedObject valueRelated rawHeaderRead allocationBytes
+  exact .retainedObject valueRelated rawHeaderRead objectRelated.headerOwned
+    allocationBytes
+
+/-- A unique reset changes an ordinary object lane into a reuse-token lane at
+the same address. Header-capacity transport carries the retained lower bound
+through prefix clearing and child ownership updates. -/
+theorem ReuseCapacityValueRel.retainedToken_of_reset
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {available : Nat} {kind : AbiKind}
+    {address : Word32} {location : Location}
+    (objectRelated :
+      ReuseCapacityValueRel before beforeWitness
+        (.retainedAtLeast available) kind (.word32 address)
+        (.object (.heap location)))
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
+    (tokenRelated :
+      ValueRel afterWitness .reuseToken (.word32 address)
+        (.reuseToken (some location))) :
+    ReuseCapacityValueRel after afterWitness (.retainedAtLeast available)
+      .reuseToken (.word32 address) (.reuseToken (some location)) := by
+  cases objectRelated with
+  | retainedObject valueRelated headerRead headerOwned minimum =>
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
+        capacityTransport _ address _ _ valueRelated headerRead headerOwned
+      exact .retainedToken tokenRelated nextHeaderRead nextHeaderOwned
+        (by simpa [sameExtent] using minimum)
 
 /-- At reuse-token kind, definitely-empty evidence fixes both the semantic
 token and its physical word. -/
@@ -424,12 +520,14 @@ theorem ReuseCapacityValueRel.retainedToken_cases
         ValueRel witness .reuseToken (.word32 address)
           (.reuseToken (some location)) ∧
         Header.read heap.memory address = .ok header ∧
+        address.value + headerBytes ≤ heap.heapCursor ∧
         available ≤ header.allocationBytes.toNat := by
   cases related with
-  | retainedObject valueRelated _ _ => cases valueRelated
+  | retainedObject valueRelated _ _ _ => cases valueRelated
   | retainedEmptyToken => exact .inl ⟨rfl, rfl⟩
-  | retainedToken valueRelated headerRead minimum =>
-      exact .inr ⟨_, _, _, rfl, rfl, valueRelated, headerRead, minimum⟩
+  | retainedToken valueRelated headerRead headerOwned minimum =>
+      exact .inr
+        ⟨_, _, _, rfl, rfl, valueRelated, headerRead, headerOwned, minimum⟩
 
 /--
 The central W6.6dg bridge: static fitting evidence and its dynamic header
@@ -449,7 +547,7 @@ theorem ReuseCapacityValueRel.reuseToken_some_layoutFits
     (ConstructorLayout.ofInfo info).allocationBytes ≤
       header.allocationBytes.toNat := by
   cases related with
-  | retainedToken _ relatedHeaderRead minimum =>
+  | retainedToken _ relatedHeaderRead _ minimum =>
       have layoutMinimum :=
         findFittingReuseCapacityEvidence?_retained_layoutFits
           facts tokenId info _ fitting
