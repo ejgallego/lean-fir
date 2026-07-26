@@ -8,6 +8,22 @@ open Lean.Compiler
 open Fir.Wasm
 open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
+open FirTalos.Correctness
+
+/-- Heap transitions preserve reuse capacity when every previously readable
+allocation header remains readable with the same physical extent. Payload and
+ownership metadata may change freely. -/
+def HeaderCapacityTransport (before after : MemoryState) : Prop :=
+  ∀ address header,
+    Header.read before.memory address = .ok header →
+    ∃ nextHeader,
+      Header.read after.memory address = .ok nextHeader ∧
+      nextHeader.allocationBytes = header.allocationBytes
+
+theorem HeaderCapacityTransport.refl (heap : MemoryState) :
+    HeaderCapacityTransport heap heap := by
+  intro address header headerRead
+  exact ⟨header, headerRead, rfl⟩
 
 /--
 Dynamic meaning of the validator's reset/reuse capacity evidence.
@@ -16,8 +32,9 @@ The relation deliberately covers both sides of `reset`: constructor results
 are ordinary object lanes, while reset results are reuse-token lanes. A
 definitely empty constructor is tagged and therefore resets to physical zero.
 Retained evidence permits reset to return zero for a shared or persistent
-object; when the value names a heap allocation, the concrete live header
-carries the validated lower bound.
+object; when the value names a heap allocation, its concrete header carries
+the validated lower bound. Raw header readability is intentional: ownership
+may mark an allocation dead without changing its retained extent.
 -/
 inductive ReuseCapacityValueRel
     (heap : MemoryState) (witness : RefinementWitness) :
@@ -35,7 +52,7 @@ inductive ReuseCapacityValueRel
       (related :
         ValueRel witness kind (.word32 address)
           (.object (.heap location)))
-      (headerRead : heap.readLiveHeader address = .ok header)
+      (headerRead : Header.read heap.memory address = .ok header)
       (minimum : available ≤ header.allocationBytes.toNat) :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available) kind
         (.word32 address) (.object (.heap location))
@@ -46,10 +63,317 @@ inductive ReuseCapacityValueRel
       (related :
         ValueRel witness .reuseToken (.word32 address)
           (.reuseToken (some location)))
-      (headerRead : heap.readLiveHeader address = .ok header)
+      (headerRead : Header.read heap.memory address = .ok header)
       (minimum : available ≤ header.allocationBytes.toNat) :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available)
         .reuseToken (.word32 address) (.reuseToken (some location))
+
+/-- Capacity evidence survives any representation-witness transition and heap
+step that preserves already allocated header extents. -/
+theorem ReuseCapacityValueRel.transport
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {evidence : ReuseCapacityEvidence} {kind : AbiKind}
+    {lane : LaneValue} {semantic : Value}
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport : HeaderCapacityTransport before after)
+    (related :
+      ReuseCapacityValueRel before beforeWitness evidence kind lane semantic) :
+    ReuseCapacityValueRel after afterWitness evidence kind lane semantic := by
+  cases related with
+  | emptyObject valueRelated =>
+      exact .emptyObject (witnessTransport valueRelated)
+  | emptyToken => exact .emptyToken
+  | retainedObject valueRelated headerRead minimum =>
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent⟩ :=
+        capacityTransport _ _ headerRead
+      exact .retainedObject (witnessTransport valueRelated) nextHeaderRead
+        (by simpa [sameExtent] using minimum)
+  | retainedEmptyToken => exact .retainedEmptyToken
+  | retainedToken valueRelated headerRead minimum =>
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent⟩ :=
+        capacityTransport _ _ headerRead
+      exact .retainedToken (witnessTransport valueRelated) nextHeaderRead
+        (by simpa [sameExtent] using minimum)
+
+/-- Capacity tracking strengthens, but never replaces, the ordinary
+ABI-indexed value relation. -/
+theorem ReuseCapacityValueRel.valueRelated
+    {heap : MemoryState} {witness : RefinementWitness}
+    {evidence : ReuseCapacityEvidence} {kind : AbiKind}
+    {lane : LaneValue} {semantic : Value}
+    (related :
+      ReuseCapacityValueRel heap witness evidence kind lane semantic) :
+    ValueRel witness kind lane semantic := by
+  cases related with
+  | emptyObject valueRelated => exact valueRelated
+  | emptyToken => exact .reuseNone
+  | retainedObject valueRelated _ _ => exact valueRelated
+  | retainedEmptyToken => exact .reuseNone
+  | retainedToken valueRelated _ _ => exact valueRelated
+
+/-- Erasing one tracked name does not affect lookup of a different name. -/
+theorem findReuseCapacityEvidence?_erase_other
+    (facts : ReuseCapacityFacts) (erased query : FVarId)
+    (different : erased.name ≠ query.name) :
+    findReuseCapacityEvidence? (eraseReuseCapacityFact facts erased) query =
+      findReuseCapacityEvidence? facts query := by
+  induction facts with
+  | nil => rfl
+  | cons entry rest ih =>
+      rcases entry with ⟨candidate, evidence⟩
+      by_cases erasedCandidate : candidate.name = erased.name
+      · have candidateQuery : candidate.name ≠ query.name := by
+          intro equal
+          exact different (erasedCandidate.symm.trans equal)
+        have filterEq :
+            List.filter (fun entry : FVarId × ReuseCapacityEvidence =>
+              entry.1.name != erased.name) ((candidate, evidence) :: rest) =
+              List.filter (fun entry : FVarId × ReuseCapacityEvidence =>
+                entry.1.name != erased.name) rest := by
+          simp [erasedCandidate]
+        unfold eraseReuseCapacityFact
+        rw [filterEq]
+        change findReuseCapacityEvidence?
+            (eraseReuseCapacityFact rest erased) query =
+          findReuseCapacityEvidence? ((candidate, evidence) :: rest) query
+        rw [ih]
+        simp [findReuseCapacityEvidence?, candidateQuery]
+      · have filterEq :
+            List.filter (fun entry : FVarId × ReuseCapacityEvidence =>
+              entry.1.name != erased.name) ((candidate, evidence) :: rest) =
+              (candidate, evidence) ::
+                List.filter (fun entry : FVarId × ReuseCapacityEvidence =>
+                  entry.1.name != erased.name) rest := by
+          simp [erasedCandidate]
+        unfold eraseReuseCapacityFact
+        rw [filterEq]
+        change findReuseCapacityEvidence?
+            ((candidate, evidence) ::
+              eraseReuseCapacityFact rest erased) query =
+          findReuseCapacityEvidence? ((candidate, evidence) :: rest) query
+        by_cases candidateQuery : candidate.name = query.name
+        · simp [findReuseCapacityEvidence?, candidateQuery]
+        · simpa [findReuseCapacityEvidence?, candidateQuery] using ih
+
+/-- Inserting a fact leaves lookup of every differently named binding
+unchanged. -/
+theorem findReuseCapacityEvidence?_insert_other
+    (facts : ReuseCapacityFacts) (inserted query : FVarId)
+    (evidence : ReuseCapacityEvidence)
+    (different : inserted.name ≠ query.name) :
+    findReuseCapacityEvidence?
+        (insertReuseCapacityFact facts inserted evidence) query =
+      findReuseCapacityEvidence? facts query := by
+  simp [insertReuseCapacityFact, findReuseCapacityEvidence?, different,
+    findReuseCapacityEvidence?_erase_other facts inserted query different]
+
+/-- Dynamic interpretation of every fact carried by the static analysis.
+Each tracked source binding is resolved at the compiler-assigned local and
+related to the current concrete heap by `ReuseCapacityValueRel`. -/
+def ReuseCapacityFactsRel
+    (facts : ReuseCapacityFacts)
+    (bindings : List (FVarId × AbiKind)) (sourceEnv : Env)
+    (targetLocals : Wasm.Locals) (heap : MemoryState)
+    (witness : RefinementWitness) : Prop :=
+  ∀ fvarId evidence,
+    findReuseCapacityEvidence? facts fvarId = some evidence →
+    ∃ index kind lane semantic,
+      lookup sourceEnv fvarId = some semantic ∧
+      findFVar? bindings fvarId = some index ∧
+      bindings[index]?.map Prod.snd = some kind ∧
+      targetLocals.get index = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel heap witness evidence kind lane semantic
+
+theorem ReuseCapacityFactsRel.resolve
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals : Wasm.Locals} {heap : MemoryState}
+    {witness : RefinementWitness} {fvarId : FVarId}
+    {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals heap witness)
+    (found : findReuseCapacityEvidence? facts fvarId = some evidence) :
+    ∃ index kind lane semantic,
+      lookup sourceEnv fvarId = some semantic ∧
+      findFVar? bindings fvarId = some index ∧
+      bindings[index]?.map Prod.snd = some kind ∧
+      targetLocals.get index = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel heap witness evidence kind lane semantic :=
+  related fvarId evidence found
+
+/-- All existing facts survive a heap/witness transition that preserves
+allocation extents. Source bindings and concrete locals are unchanged. -/
+theorem ReuseCapacityFactsRel.transport
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals : Wasm.Locals} {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport : HeaderCapacityTransport before after)
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals before
+        beforeWitness) :
+    ReuseCapacityFactsRel facts bindings sourceEnv targetLocals after
+      afterWitness := by
+  intro fvarId evidence found
+  obtain ⟨index, kind, lane, semantic, sourceLookup, localFound, kindAt,
+      targetLookup, valueRelated⟩ := related.resolve found
+  exact ⟨index, kind, lane, semantic, sourceLookup, localFound, kindAt,
+    targetLookup, valueRelated.transport witnessTransport capacityTransport⟩
+
+/-- Bind a newly tracked result while preserving every differently named old
+fact through the heap, witness, environment, and local transitions. -/
+theorem ReuseCapacityFactsRel.bind
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals updatedLocals : Wasm.Locals}
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {result : FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {lane : LaneValue} {semantic : Value}
+    {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals before
+        beforeWitness)
+    (resultFound : findFVar? bindings result = some resultIndex)
+    (kindAt : bindings[resultIndex]?.map Prod.snd = some kind)
+    (localUpdate : FirTalos.Correctness.LocalUpdate targetLocals updatedLocals
+      resultIndex (physicalOfLane lane))
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport : HeaderCapacityTransport before after)
+    (valueRelated :
+      ReuseCapacityValueRel after afterWitness evidence kind lane semantic) :
+    ReuseCapacityFactsRel
+      (insertReuseCapacityFact facts result evidence) bindings
+      (Fir.LeanIR.Impure.bind sourceEnv result semantic) updatedLocals after
+      afterWitness := by
+  intro fvarId actualEvidence found
+  by_cases sameName : result.name = fvarId.name
+  · have found' : some evidence = some actualEvidence := by
+      simpa [insertReuseCapacityFact, findReuseCapacityEvidence?, sameName]
+        using found
+    have evidenceEq := Option.some.inj found'
+    subst actualEvidence
+    have sameFind :=
+      FirTalos.Correctness.findFVar?_eq_of_name_eq bindings sameName
+    have actualResultFound :
+        findFVar? bindings fvarId = some resultIndex := by
+      rw [← sameFind]
+      exact resultFound
+    have sourceLookup :
+        lookup (Fir.LeanIR.Impure.bind sourceEnv result semantic) fvarId =
+          some semantic := by
+      simp [Fir.LeanIR.Impure.bind, lookup, sameName]
+    exact ⟨resultIndex, kind, lane, semantic, sourceLookup, actualResultFound,
+      kindAt, localUpdate.1, valueRelated⟩
+  · have oldFound :
+        findReuseCapacityEvidence? facts fvarId = some actualEvidence := by
+      rw [← findReuseCapacityEvidence?_insert_other facts result fvarId
+        evidence sameName]
+      exact found
+    obtain ⟨index, oldKind, oldLane, oldSemantic, sourceLookup, localFound,
+        oldKindAt, targetLookup, oldValueRelated⟩ :=
+      related.resolve oldFound
+    have differentIndex :=
+      FirTalos.Correctness.findFVar?_ne_of_name_ne bindings sameName
+        resultFound localFound
+    have boundSourceLookup :
+        lookup (Fir.LeanIR.Impure.bind sourceEnv result semantic) fvarId =
+          some oldSemantic := by
+      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using sourceLookup
+    have updatedLookup :
+        updatedLocals.get index = some (physicalOfLane oldLane) :=
+      (localUpdate.2 differentIndex.symm).trans targetLookup
+    exact ⟨index, oldKind, oldLane, oldSemantic, boundSourceLookup, localFound,
+      oldKindAt, updatedLookup,
+      oldValueRelated.transport witnessTransport capacityTransport⟩
+
+/-- Resolve a fitting static token fact to the exact dynamic lane at the
+compiler-assigned reuse-token local. -/
+theorem ReuseCapacityFactsRel.resolveFittingToken
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals : Wasm.Locals} {heap : MemoryState}
+    {witness : RefinementWitness} {tokenId : FVarId}
+    {info : LCNF.CtorInfo} {evidence : ReuseCapacityEvidence}
+    {tokenIndex : Nat} {sourceToken : Value}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals heap witness)
+    (fitting :
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence)
+    (sourceLookup : lookup sourceEnv tokenId = some sourceToken)
+    (localFound : findFVar? bindings tokenId = some tokenIndex)
+    (kindAt :
+      bindings[tokenIndex]?.map Prod.snd = some .reuseToken) :
+    ∃ lane,
+      targetLocals.get tokenIndex = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel heap witness evidence .reuseToken lane
+        sourceToken := by
+  have tracked :=
+    (findFittingReuseCapacityEvidence?_eq_some facts tokenId info evidence
+      fitting).1
+  obtain ⟨index, kind, lane, semantic, actualSourceLookup, actualLocalFound,
+      actualKindAt, targetLookup, capacityRelated⟩ :=
+    related.resolve tracked
+  rw [sourceLookup] at actualSourceLookup
+  have semanticEq := Option.some.inj actualSourceLookup
+  subst semantic
+  rw [localFound] at actualLocalFound
+  have indexEq := Option.some.inj actualLocalFound
+  subst index
+  rw [kindAt] at actualKindAt
+  have kindEq := Option.some.inj actualKindAt
+  subst kind
+  exact ⟨lane, targetLookup, capacityRelated⟩
+
+/-- Strengthening of W6's ordinary concrete state invariant with the dynamic
+meaning of the static capacity-analysis state at the current code node. -/
+def ReuseCapacityStateRelated
+    (facts : ReuseCapacityFacts) (sourceFunction : Fir.Wasm.Function)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    ReuseCapacityFactsRel facts (functionBindings sourceFunction) sourceEnv
+      targetLocals targetStore.host.runtime.heap witness
+
+theorem ReuseCapacityStateRelated.stateRelated
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness) :
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness :=
+  related.1
+
+theorem ReuseCapacityStateRelated.resolveFittingToken
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {tokenId : FVarId}
+    {info : LCNF.CtorInfo} {evidence : ReuseCapacityEvidence}
+    {tokenIndex : Nat} {sourceToken : Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (fitting :
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence)
+    (sourceLookup : lookup sourceEnv tokenId = some sourceToken)
+    (localFound :
+      findFVar? (functionBindings sourceFunction) tokenId = some tokenIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[tokenIndex]?.map Prod.snd =
+        some .reuseToken) :
+    ∃ lane,
+      targetLocals.get tokenIndex = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel targetStore.host.runtime.heap witness evidence
+        .reuseToken lane sourceToken :=
+  related.2.resolveFittingToken fitting sourceLookup localFound kindAt
 
 /-- A decoded constructor relation supplies the exact dynamic lower bound
 recorded when the validator sees its direct allocation. -/
@@ -68,7 +392,10 @@ theorem ReuseCapacityValueRel.retainedObject_of_constructor
       kind (.word32 address) (.object (.heap location)) := by
   obtain ⟨header, headerRead, _, allocationBytes, _, _, _, _⟩ :=
     objectRelated.header
-  exact .retainedObject valueRelated headerRead allocationBytes
+  have rawHeaderRead :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+      headerRead).2.1
+  exact .retainedObject valueRelated rawHeaderRead allocationBytes
 
 /-- At reuse-token kind, definitely-empty evidence fixes both the semantic
 token and its physical word. -/
@@ -83,7 +410,7 @@ theorem ReuseCapacityValueRel.emptyToken_eq
   | emptyToken => exact ⟨rfl, rfl⟩
 
 /-- Retained evidence at reuse-token kind is either the zero fallback or a
-nonzero mapped token whose live header realizes the tracked capacity. -/
+nonzero mapped token whose header realizes the tracked capacity. -/
 theorem ReuseCapacityValueRel.retainedToken_cases
     {heap : MemoryState} {witness : RefinementWitness}
     {available : Nat} {lane : LaneValue} {token : Value}
@@ -96,7 +423,7 @@ theorem ReuseCapacityValueRel.retainedToken_cases
         token = .reuseToken (some location) ∧
         ValueRel witness .reuseToken (.word32 address)
           (.reuseToken (some location)) ∧
-        heap.readLiveHeader address = .ok header ∧
+        Header.read heap.memory address = .ok header ∧
         available ≤ header.allocationBytes.toNat := by
   cases related with
   | retainedObject valueRelated _ _ => cases valueRelated
@@ -126,7 +453,10 @@ theorem ReuseCapacityValueRel.reuseToken_some_layoutFits
       have layoutMinimum :=
         findFittingReuseCapacityEvidence?_retained_layoutFits
           facts tokenId info _ fitting
-      rw [headerRead] at relatedHeaderRead
+      have rawHeaderRead :=
+        (MemoryState.PrefixExtension.readLiveHeader_facts heap address header
+          headerRead).2.1
+      rw [rawHeaderRead] at relatedHeaderRead
       injection relatedHeaderRead with headerEq
       subst header
       exact Nat.le_trans layoutMinimum minimum

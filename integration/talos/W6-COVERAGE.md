@@ -118,9 +118,10 @@ Cross-cutting W6.5 state:
   and trips the exact concrete `reuseAllocationTooSmall` capacity check, but
   `reuseCapacitySafeProgram` now rejects it from `WasmSupported`; fitting and
   shared-reset positive programs remain admitted; a dynamic capacity-value
-  invariant now connects fitting retained evidence to the exact concrete live
-  header, and the in-place reuse refinement derives its layout-fit premise
-  from that bridge rather than accepting it independently;
+  invariant now connects fitting retained evidence to the exact concrete
+  allocation header, a whole-map invariant resolves every static fact at its
+  compiler local, and the in-place reuse refinement derives its layout-fit
+  premise from that bridge rather than accepting it independently;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

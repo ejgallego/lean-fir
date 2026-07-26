@@ -248,9 +248,12 @@ token provenance and records fitting evidence for every admitted nonempty
 reuse. `ReuseCapacityValueRel` gives that evidence a dynamic interpretation at
 the exact physical heap header, and `reuseStep_some_of_capacityEvidence`
 derives the operation theorem's retained-layout premise from the two. The
-syntax-directed simulation still has to preserve the dynamic relation across
-constructor/reset/reuse steps. Native unreachability losing its source fault
-is tracked separately by
+whole static map is now interpreted by `ReuseCapacityFactsRel` inside
+`ReuseCapacityStateRelated`; its generic transport/bind rule reduces syntax
+preservation to proving `HeaderCapacityTransport` for each successful
+operation family. The syntax-directed simulation still has to carry that
+strengthened state. Native unreachability losing its source fault is tracked
+separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
@@ -315,9 +318,10 @@ acceptance tests pass.
    leaves for every structured failure admitted by the supported fragment,
    using `W6-FAULT-AUDIT.md` as the exact checklist.
 6. In progress: discharge T4S. Retained reuse capacity is validated and its
-   static-to-concrete operation bridge is proved; the syntax certificate still
-   needs to transport the dynamic relation. Structured unreachability remains
-   the shared-contract blocker.
+   static-to-concrete operation bridge and whole-fact-map invariant are proved;
+   operation families must supply header-capacity transport before the syntax
+   certificate can carry the strengthened state. Structured unreachability
+   remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

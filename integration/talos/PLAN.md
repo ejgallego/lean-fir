@@ -3185,7 +3185,7 @@ provenance results; no FIR semantic contract or executable ABI changed.
 W6.6dg gives that static boundary a concrete dynamic meaning. The
 `ReuseCapacityValueRel` invariant covers constructor values and reset tokens:
 definitely-empty evidence is represented by a tagged object or the zero token,
-while retained evidence on a heap value names a readable live header whose
+while retained evidence on a heap value names a readable allocation header whose
 allocation realizes the tracked lower bound. Combining this relation with the
 validator's fitting fact now derives the exact `layoutFits` inequality at the
 physical token address. `reuseStep_some_of_capacityEvidence` consumes those
@@ -3194,6 +3194,20 @@ capacity premise. The remaining syntax work is to preserve
 `ReuseCapacityValueRel` across constructor, reset, and reuse steps and attach
 it to `ConcreteCodeSimulation`; no FIR semantic contract or executable ABI
 changed.
+
+W6.6dh lifts the per-value capacity meaning to the static analysis state.
+`ReuseCapacityFactsRel` resolves every tracked source binding at its
+compiler-assigned local, while `ReuseCapacityStateRelated` strengthens the
+existing W6 state invariant with that whole-map interpretation.
+`HeaderCapacityTransport` isolates the precise heap-step obligation: payload,
+liveness, and ownership metadata may change, but an existing allocation header
+must remain readable with the same retained extent. Generic transport and bind
+theorems preserve all old facts across such a heap/witness transition and add
+the newly tracked constructor/reset/reuse result; a fitting token can then be
+resolved directly from the strengthened state. The next syntax slice must
+instantiate header-capacity transport for each operation family and thread
+the analysis state through `ConcreteCodeSimulation`. No FIR semantic contract
+or executable ABI changed.
 
 ## Parallel agent packages
 
