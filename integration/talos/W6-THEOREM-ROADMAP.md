@@ -176,9 +176,9 @@ and arbitrary recursive children. A separate non-fuel error monotonicity
 theorem lifts the result to the larger cursor-derived concrete budget, and a
 repetition induction preserves the first fault after successful earlier
 decrements. The Talos and compiler/adaptor leaf retain exact
-`ConcreteErrorSourceRel` with explicit closure-descriptor identity. Unchecked
-tagged operands and release-fuel exclusion remain separate obligations, as do
-reset's own child-release effects.
+`ConcreteErrorSourceRel` with explicit closure-descriptor identity. The
+following slices discharge unchecked tagged operands, reset's child-release
+wrappers, and public release-fuel target safety separately.
 The tagged obligation is now closed: unchecked increment faults immediately,
 and every positive unchecked decrement faults on its first repetition, for
 both immediate and promoted physical tag representations. Their Talos and
@@ -196,8 +196,14 @@ shared-contract discrepancy is tracked by
 `FIR-BUG-wasm-none-reset-erased-child-release`. Reset's nonunique fallback
 decrement is now packaged separately: any non-fuel fault from that delegated
 public checked decrement crosses the reset host and compiler terminal leaf
-unchanged, before the empty token local or continuation. Release-fuel
-target-safety exclusion remains.
+unchanged, before the empty token local or continuation.
+Release-fuel target safety is now closed for mapped ownership operations.
+A live-cell measure proves FIR's public budget cannot return its internal
+fuel marker; success/fault refinement excludes the concrete target error for
+one decrement and every repetition. The ownership-list lift includes erased
+slots, and the complete reset theorem covers dead, fallback, kind, bounds,
+and in-bounds unique-prefix branches. Talos decrement and reset host calls
+therefore cannot emit the structured release-fuel target trap.
 
 The public endpoint is now explicit:
 

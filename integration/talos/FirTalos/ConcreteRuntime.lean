@@ -3453,6 +3453,63 @@ theorem decrementStep_fault_of_refines
                 Word32.ofUInt32_ofNat_value, descriptorsEq, concrete,
                 ConcreteError.toTrap]
 
+/-- A generated mapped-heap decrement cannot cross the Talos host boundary
+with the target-only recursive-release fuel trap. -/
+theorem decrementStep_ne_releaseFuelExhausted_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {amount : Nat} {check : Bool} {objectFields? : Option Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .tobject (.word32 word)
+      (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors) :
+    decrementStep amount check objectFields? initial
+        [.i32 (UInt32.ofNat word.value)] ≠
+      trap (clearFailure initial)
+        (.runtime
+          ((.target .releaseFuelExhausted : ConcreteError).toTrap)) := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              have concreteSafe :=
+                runtimeRelated.heap.decrementReference_ne_releaseFuelExhausted
+                  (amount := amount) mapped check
+              intro targetStep
+              cases concreteOperation :
+                  decrementReference initial.host.runtime.heap word amount check
+                    initial.host.closureDescriptors with
+              | ok heap =>
+                  simp [decrementStep, clearFailure,
+                    Word32.ofUInt32_ofNat_value, concreteOperation, trap]
+                    at targetStep
+              | error failure =>
+                  have failureNotTarget :
+                      failure ≠
+                        (.target .releaseFuelExhausted : ConcreteError) := by
+                    intro failureEq
+                    subst failure
+                    rw [descriptorsEq] at concreteOperation
+                    exact concreteSafe concreteOperation
+                  have storedFailureEq := congrArg
+                    (fun result =>
+                      match result with
+                      | .Trap store _ => store.host.failure?
+                      | .Return _ _ => none)
+                    targetStep
+                  have trapEq :
+                      failure.toTrap =
+                        (.target .releaseFuelExhausted : ConcreteError).toTrap := by
+                    simpa [decrementStep, clearFailure,
+                      Word32.ofUInt32_ofNat_value, concreteOperation, trap]
+                      using storedFailureEq
+                  exact failureNotTarget
+                    (ConcreteError.toTrap_injective trapEq)
+
 /-- Successful semantic deletion is heap-only for both the ordinary-object
 transition and the erased failed-reset no-op. -/
 theorem deleteValue_heapOnly
@@ -3741,6 +3798,64 @@ theorem resetStep_nonunique_fault_of_refines
               refine ⟨failure, ?_, failureRelated⟩
               simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
                 descriptorsEq, concrete, ConcreteError.toTrap]
+
+/-- A generated reset of a mapped heap object cannot cross the Talos host
+boundary with the target-only recursive-release fuel trap. This statement
+covers dead, fallback, constructor-kind, bounds, and in-bounds unique-prefix
+branches uniformly. -/
+theorem resetStep_ne_releaseFuelExhausted_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] ≠
+      trap (clearFailure initial)
+        (.runtime
+          ((.target .releaseFuelExhausted : ConcreteError).toTrap)) := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              have concreteSafe :=
+                runtimeRelated.heap.resetObject_ne_releaseFuelExhausted
+                  mapped count
+              intro targetStep
+              cases concreteOperation :
+                  resetObject initial.host.runtime.heap count word
+                    initial.host.closureDescriptors with
+              | ok result =>
+                  simp [resetStep, clearFailure,
+                    Word32.ofUInt32_ofNat_value, concreteOperation, trap]
+                    at targetStep
+              | error failure =>
+                  have failureNotTarget :
+                      failure ≠
+                        (.target .releaseFuelExhausted : ConcreteError) := by
+                    intro failureEq
+                    subst failure
+                    rw [descriptorsEq] at concreteOperation
+                    exact concreteSafe concreteOperation
+                  have storedFailureEq := congrArg
+                    (fun result =>
+                      match result with
+                      | .Trap store _ => store.host.failure?
+                      | .Return _ _ => none)
+                    targetStep
+                  have trapEq :
+                      failure.toTrap =
+                        (.target .releaseFuelExhausted : ConcreteError).toTrap := by
+                    simpa [resetStep, clearFailure,
+                      Word32.ofUInt32_ofNat_value, concreteOperation, trap]
+                      using storedFailureEq
+                  exact failureNotTarget
+                    (ConcreteError.toTrap_injective trapEq)
 
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines

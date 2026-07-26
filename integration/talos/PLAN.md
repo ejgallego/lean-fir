@@ -3151,6 +3151,21 @@ ownership wrapper obligation; the erased unique-child semantic mismatch
 remains isolated in its confirmed bug card. No shared semantic contract or
 executable ABI changed.
 
+W6.6de closes recursive-release fuel target safety. A live-cell termination
+measure proves that FIR's public heap-length budget cannot expose its private
+release-fuel marker: every genuine recursive descent marks the parent dead
+first, and successful sibling prefixes never increase the measure. Success
+and exact non-fuel fault refinement then exclude the concrete
+`releaseFuelExhausted` target error for one public decrement and every finite
+repetition. An ownership-list theorem carries that result through reset's
+cleared-prefix protocol without excluding erased slots, and a complete mapped
+reset theorem covers dead, fallback, nonconstructor, bounds, and in-bounds
+unique-constructor branches. Matching Talos theorems exclude the structured
+target trap from generated decrement and reset host calls. The experimental
+zero-fuel primitive regression remains intentional; only public related
+operations receive the adequacy guarantee. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
