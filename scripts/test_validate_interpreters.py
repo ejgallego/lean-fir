@@ -7985,6 +7985,44 @@ class CoverageIndexTests(unittest.TestCase):
             },
         }
 
+    @staticmethod
+    def policy(
+        tier_id: str,
+        backends: list[str],
+        *,
+        minimum_cases: int = 1,
+        minimum_comparisons: int = 1,
+        require_machine: bool = True,
+    ) -> dict:
+        return {
+            "tiers": [
+                {
+                    "id": tier_id,
+                    "minimumCases": minimum_cases,
+                    "minimumComparisons": minimum_comparisons,
+                    "requiredBackends": sorted(backends),
+                    "requireMachineCoverage": require_machine,
+                }
+            ],
+            "aggregate": {
+                "minimumUniqueCases": minimum_cases,
+                "minimumTierCases": minimum_cases,
+                "minimumComparisons": minimum_comparisons,
+            },
+            "machine": {
+                "minimumCases": minimum_cases if require_machine else 0,
+                "minimumInterpreterSteps": (
+                    minimum_cases * 2 if require_machine else 0
+                ),
+                "requiredStaticForms": ["return"] if require_machine else [],
+                "requiredExecutedForms": ["return"] if require_machine else [],
+                "requiredAdministrativeKinds": (
+                    ["admin:yield-done"] if require_machine else []
+                ),
+                "requiredExternals": [],
+            },
+        }
+
     def test_machine_coverage_requires_the_matrix_case_domain(self) -> None:
         matrix = self.matrix(["a"], ["native", "lcnf"], [("native", "lcnf")])
         report = self.machine_report("lcnf", ["b"])
@@ -8061,6 +8099,9 @@ class CoverageIndexTests(unittest.TestCase):
                         "machineCoverage": "../_build/source/coverage.json",
                     }
                 ],
+                "policy": self.policy(
+                    "source", ["native", "lcnf"]
+                ),
             }
             plan_path = plan_dir / "coverage-index.json"
             plan_path.write_bytes(json_bytes(plan))
@@ -8080,7 +8121,102 @@ class CoverageIndexTests(unittest.TestCase):
                 )
         self.assertEqual(first["summary"]["comparisonCount"], 1)
         self.assertEqual(first["summary"]["machine"]["caseCount"], 1)
+        self.assertEqual(first["summary"]["policyFailureCount"], 0)
+        self.assertTrue(first["policy"]["satisfied"])
         self.assertTrue(first["summary"]["complete"])
+
+    def test_policy_reports_monotone_floor_and_inventory_regressions(self) -> None:
+        matrix = self.matrix(
+            ["case"], ["native", "lcnf"], [("native", "lcnf")]
+        )
+        machine = coverage_index.machine_coverage_summary(
+            self.machine_report("lcnf", ["case"]),
+            matrix,
+            "fixture",
+        )
+        tier = {
+            "id": "source",
+            "caseCount": 1,
+            "backends": [{"backend": "native"}, {"backend": "lcnf"}],
+            "pairs": [{"comparedCases": 1}],
+            "machineCoverage": machine,
+        }
+        aggregate = coverage_index.aggregate_machine_coverage([machine])
+        summary = {
+            "uniqueCaseCount": 1,
+            "tierCaseCount": 1,
+            "comparisonCount": 1,
+            "machine": aggregate,
+        }
+        policy = self.policy(
+            "source",
+            ["native", "lcnf"],
+            minimum_cases=2,
+            minimum_comparisons=2,
+        )
+        policy["machine"]["requiredAdministrativeKinds"] = [
+            "admin:yield-apply",
+            "admin:yield-done",
+        ]
+        report = coverage_index.coverage_policy_report(
+            policy, [tier], summary
+        )
+        self.assertEqual(report["failureCount"], 8)
+        self.assertEqual(report["tiers"][0]["caseDeficit"], 1)
+        self.assertEqual(report["aggregate"]["comparisonDeficit"], 1)
+        self.assertEqual(
+            report["machine"]["missingAdministrativeKinds"],
+            ["admin:yield-apply"],
+        )
+        self.assertFalse(report["satisfied"])
+
+    def test_policy_rejects_ambiguous_required_inventories(self) -> None:
+        policy = self.policy("source", ["native", "lcnf"])
+        policy["machine"]["requiredExecutedForms"] = ["return", "return"]
+        machine = coverage_index.aggregate_machine_coverage([])
+        summary = {
+            "uniqueCaseCount": 0,
+            "tierCaseCount": 0,
+            "comparisonCount": 0,
+            "machine": machine,
+        }
+        tier = {
+            "id": "source",
+            "caseCount": 0,
+            "backends": [],
+            "pairs": [],
+            "machineCoverage": None,
+        }
+        with self.assertRaisesRegex(
+            core.ValidationError, "sorted array of unique"
+        ):
+            coverage_index.coverage_policy_report(
+                policy, [tier], summary
+            )
+
+    def test_cli_fails_when_the_coverage_policy_is_unsatisfied(self) -> None:
+        report = {"summary": {"complete": False}}
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "validation_coverage_index.py",
+                "--plan",
+                "plan.json",
+                "--out",
+                "index.json",
+            ],
+        ), mock.patch.object(
+            coverage_index,
+            "build_coverage_index",
+            return_value=report,
+        ), mock.patch.object(
+            coverage_index, "write_coverage_index"
+        ), mock.patch.object(
+            coverage_index, "render_coverage_index", return_value=[]
+        ):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(coverage_index.main(), 1)
 
     def test_index_rejects_a_pair_absent_from_the_matrix(self) -> None:
         matrix = self.matrix(["case"], ["native", "lcnf"], [("native", "lcnf")])
@@ -8105,6 +8241,11 @@ class CoverageIndexTests(unittest.TestCase):
                         "machineCoverage": None,
                     }
                 ],
+                "policy": self.policy(
+                    "source",
+                    ["native", "lcnf"],
+                    require_machine=False,
+                ),
             }
             plan_path = plan_dir / "coverage-index.json"
             plan_path.write_bytes(json_bytes(plan))
@@ -8126,6 +8267,7 @@ class CoverageIndexTests(unittest.TestCase):
                 "sha256": "1" * 64,
             },
             "tiers": [],
+            "policy": {},
             "summary": {},
         }
         with tempfile.TemporaryDirectory() as directory:

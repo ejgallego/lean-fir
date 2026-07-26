@@ -41,5 +41,118 @@
       ],
       "machineCoverage": null
     }
-  ]
+  ],
+  "policy": {
+    "tiers": [
+      {
+        "id": "source-lcnf",
+        "minimumCases": 97,
+        "minimumComparisons": 97,
+        "requiredBackends": [
+          "lcnf",
+          "native"
+        ],
+        "requireMachineCoverage": true
+      },
+      {
+        "id": "direct-lcnf-machine",
+        "minimumCases": 2,
+        "minimumComparisons": 2,
+        "requiredBackends": [
+          "direct-lcnf",
+          "direct-native"
+        ],
+        "requireMachineCoverage": true
+      },
+      {
+        "id": "wasm-v8",
+        "minimumCases": 97,
+        "minimumComparisons": 194,
+        "requiredBackends": [
+          "lcnf",
+          "native",
+          "v8"
+        ],
+        "requireMachineCoverage": false
+      }
+    ],
+    "aggregate": {
+      "minimumUniqueCases": 99,
+      "minimumTierCases": 196,
+      "minimumComparisons": 293
+    },
+    "machine": {
+      "minimumCases": 99,
+      "minimumInterpreterSteps": 1687,
+      "requiredStaticForms": [
+        "box",
+        "cases",
+        "ctor",
+        "dec",
+        "del",
+        "extern",
+        "fap",
+        "fvar",
+        "inc",
+        "isShared",
+        "join",
+        "jump",
+        "lit",
+        "oproj",
+        "oset",
+        "pap",
+        "return",
+        "setTag",
+        "sproj",
+        "sset",
+        "unbox",
+        "uproj",
+        "uset"
+      ],
+      "requiredExecutedForms": [
+        "box",
+        "cases",
+        "ctor",
+        "dec",
+        "del",
+        "extern",
+        "fap",
+        "fvar",
+        "inc",
+        "isShared",
+        "join",
+        "jump",
+        "lit",
+        "oproj",
+        "oset",
+        "pap",
+        "return",
+        "setTag",
+        "sproj",
+        "sset",
+        "unbox",
+        "uproj",
+        "uset"
+      ],
+      "requiredAdministrativeKinds": [
+        "admin:invoke-name",
+        "admin:invoke-value",
+        "admin:yield-apply",
+        "admin:yield-bind",
+        "admin:yield-cache",
+        "admin:yield-done"
+      ],
+      "requiredExternals": [
+        "ByteArray.get!",
+        "ByteArray.set!",
+        "ByteArray.size",
+        "Fir.Validation.Corpus.NativeEffects.recordByteArrayImpl",
+        "Fir.Validation.Corpus.NativeEffects.recordImpl",
+        "Int.decLt",
+        "Int.neg",
+        "Int.ofNat",
+        "Nat.add"
+      ]
+    }
+  }
 }

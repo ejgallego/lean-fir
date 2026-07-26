@@ -306,6 +306,20 @@ dispatches, interpreter steps, and any obligation or telemetry failures.
 `--verify-index` recomputes the identity and rebuilds the index from its current
 inputs.
 
+The plan's required `policy` turns those observations into monotone regression
+checks. Each tier declares minimum case and comparison counts, its required
+backend set, and whether it must attach machine telemetry. Aggregate floors pin
+unique cases, tier cases, and comparisons. The machine policy pins minimum case
+and interpreter-step counts plus required static forms, executed forms,
+administrative transitions, and externals. Counts may grow and inventories may
+gain members without changing the policy; losing an established floor or
+required member produces an explicit deficit or missing-name list. The
+evaluated policy and its failure count are covered by the index identity, and
+both index creation and verification exit unsuccessfully when the policy is
+unsatisfied. This catches removal of a fixture together with its local
+obligations, including loss of the direct tier's otherwise source-unreachable
+`admin:yield-apply`.
+
 The driver discovers the corpus from the plan-selected manifest backend
 (`native` by default), then composes named backend adapters and optional
 build-only product providers. Each adapter owns

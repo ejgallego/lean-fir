@@ -501,6 +501,281 @@ def aggregate_machine_coverage(coverages: list[dict]) -> dict:
     }
 
 
+def coverage_policy_report(
+    raw_policy: object,
+    tiers: list[dict],
+    summary: dict,
+) -> dict:
+    """Evaluate monotone coverage floors declared by the composition plan."""
+    if not isinstance(raw_policy, dict) or set(raw_policy) != {
+        "tiers",
+        "aggregate",
+        "machine",
+    }:
+        raise ValidationError(
+            "coverage index policy requires tiers, aggregate, and machine"
+        )
+    raw_tier_policies = raw_policy["tiers"]
+    if not isinstance(raw_tier_policies, list):
+        raise ValidationError("coverage index tier policy must be an array")
+    if len(raw_tier_policies) != len(tiers):
+        raise ValidationError(
+            "coverage index tier policy must cover every tier exactly once"
+        )
+
+    tier_reports: list[dict] = []
+    for raw_requirement, tier in zip(raw_tier_policies, tiers):
+        if not isinstance(raw_requirement, dict) or set(raw_requirement) != {
+            "id",
+            "minimumCases",
+            "minimumComparisons",
+            "requiredBackends",
+            "requireMachineCoverage",
+        }:
+            raise ValidationError(
+                "coverage index tier policy entries require id, minimumCases, "
+                "minimumComparisons, requiredBackends, and "
+                "requireMachineCoverage"
+            )
+        tier_id = validate_backend_name(
+            raw_requirement["id"], "coverage policy tier id"
+        )
+        if tier_id != tier["id"]:
+            raise ValidationError(
+                "coverage index tier policy order must match tier order"
+            )
+        minimum_cases = _checked_nat(
+            raw_requirement["minimumCases"],
+            f"coverage policy tier {tier_id} minimumCases",
+        )
+        minimum_comparisons = _checked_nat(
+            raw_requirement["minimumComparisons"],
+            f"coverage policy tier {tier_id} minimumComparisons",
+        )
+        required_backends = _checked_string_list(
+            raw_requirement["requiredBackends"],
+            f"coverage policy tier {tier_id} requiredBackends",
+        )
+        for backend in required_backends:
+            validate_backend_name(
+                backend, f"coverage policy tier {tier_id} backend"
+            )
+        require_machine = raw_requirement["requireMachineCoverage"]
+        if not isinstance(require_machine, bool):
+            raise ValidationError(
+                f"coverage policy tier {tier_id} "
+                "requireMachineCoverage must be Boolean"
+            )
+
+        observed_backends = sorted(
+            item["backend"] for item in tier["backends"]
+        )
+        observed_comparisons = sum(
+            _checked_nat(
+                item["comparedCases"],
+                f"coverage policy tier {tier_id} compared cases",
+            )
+            for item in tier["pairs"]
+        )
+        case_deficit = max(0, minimum_cases - tier["caseCount"])
+        comparison_deficit = max(
+            0, minimum_comparisons - observed_comparisons
+        )
+        missing_backends = sorted(
+            set(required_backends) - set(observed_backends)
+        )
+        missing_machine = (
+            require_machine and tier["machineCoverage"] is None
+        )
+        failure_count = sum(
+            (
+                int(case_deficit > 0),
+                int(comparison_deficit > 0),
+                int(bool(missing_backends)),
+                int(missing_machine),
+            )
+        )
+        tier_reports.append(
+            {
+                "id": tier_id,
+                "minimumCases": minimum_cases,
+                "observedCases": tier["caseCount"],
+                "caseDeficit": case_deficit,
+                "minimumComparisons": minimum_comparisons,
+                "observedComparisons": observed_comparisons,
+                "comparisonDeficit": comparison_deficit,
+                "requiredBackends": required_backends,
+                "observedBackends": observed_backends,
+                "missingBackends": missing_backends,
+                "requireMachineCoverage": require_machine,
+                "machineCoveragePresent": tier["machineCoverage"] is not None,
+                "failureCount": failure_count,
+                "satisfied": failure_count == 0,
+            }
+        )
+
+    raw_aggregate = raw_policy["aggregate"]
+    if not isinstance(raw_aggregate, dict) or set(raw_aggregate) != {
+        "minimumUniqueCases",
+        "minimumTierCases",
+        "minimumComparisons",
+    }:
+        raise ValidationError(
+            "coverage index aggregate policy requires minimumUniqueCases, "
+            "minimumTierCases, and minimumComparisons"
+        )
+    minimum_unique_cases = _checked_nat(
+        raw_aggregate["minimumUniqueCases"],
+        "coverage aggregate policy minimumUniqueCases",
+    )
+    minimum_tier_cases = _checked_nat(
+        raw_aggregate["minimumTierCases"],
+        "coverage aggregate policy minimumTierCases",
+    )
+    minimum_comparisons = _checked_nat(
+        raw_aggregate["minimumComparisons"],
+        "coverage aggregate policy minimumComparisons",
+    )
+    unique_case_deficit = max(
+        0, minimum_unique_cases - summary["uniqueCaseCount"]
+    )
+    tier_case_deficit = max(
+        0, minimum_tier_cases - summary["tierCaseCount"]
+    )
+    comparison_deficit = max(
+        0, minimum_comparisons - summary["comparisonCount"]
+    )
+    aggregate_failure_count = sum(
+        (
+            int(unique_case_deficit > 0),
+            int(tier_case_deficit > 0),
+            int(comparison_deficit > 0),
+        )
+    )
+    aggregate_report = {
+        "minimumUniqueCases": minimum_unique_cases,
+        "observedUniqueCases": summary["uniqueCaseCount"],
+        "uniqueCaseDeficit": unique_case_deficit,
+        "minimumTierCases": minimum_tier_cases,
+        "observedTierCases": summary["tierCaseCount"],
+        "tierCaseDeficit": tier_case_deficit,
+        "minimumComparisons": minimum_comparisons,
+        "observedComparisons": summary["comparisonCount"],
+        "comparisonDeficit": comparison_deficit,
+        "failureCount": aggregate_failure_count,
+        "satisfied": aggregate_failure_count == 0,
+    }
+
+    raw_machine = raw_policy["machine"]
+    if not isinstance(raw_machine, dict) or set(raw_machine) != {
+        "minimumCases",
+        "minimumInterpreterSteps",
+        "requiredStaticForms",
+        "requiredExecutedForms",
+        "requiredAdministrativeKinds",
+        "requiredExternals",
+    }:
+        raise ValidationError(
+            "coverage index machine policy requires minimumCases, "
+            "minimumInterpreterSteps, requiredStaticForms, "
+            "requiredExecutedForms, requiredAdministrativeKinds, and "
+            "requiredExternals"
+        )
+    minimum_machine_cases = _checked_nat(
+        raw_machine["minimumCases"],
+        "coverage machine policy minimumCases",
+    )
+    minimum_steps = _checked_nat(
+        raw_machine["minimumInterpreterSteps"],
+        "coverage machine policy minimumInterpreterSteps",
+    )
+    required_static_forms = _checked_string_list(
+        raw_machine["requiredStaticForms"],
+        "coverage machine policy requiredStaticForms",
+    )
+    required_executed_forms = _checked_string_list(
+        raw_machine["requiredExecutedForms"],
+        "coverage machine policy requiredExecutedForms",
+    )
+    required_administrative = _checked_string_list(
+        raw_machine["requiredAdministrativeKinds"],
+        "coverage machine policy requiredAdministrativeKinds",
+    )
+    required_externals = _checked_string_list(
+        raw_machine["requiredExternals"],
+        "coverage machine policy requiredExternals",
+    )
+    machine = summary["machine"]
+    observed_static_forms = machine["forms"]["staticObserved"]
+    observed_executed_forms = machine["forms"]["executedObserved"]
+    observed_administrative = [
+        item["kind"] for item in machine["steps"]["observedAdministrativeKinds"]
+    ]
+    observed_externals = machine["externals"]["executedObserved"]
+    machine_case_deficit = max(
+        0, minimum_machine_cases - machine["caseCount"]
+    )
+    step_deficit = max(
+        0, minimum_steps - machine["steps"]["interpreterStepCount"]
+    )
+    missing_static_forms = sorted(
+        set(required_static_forms) - set(observed_static_forms)
+    )
+    missing_executed_forms = sorted(
+        set(required_executed_forms) - set(observed_executed_forms)
+    )
+    missing_administrative = sorted(
+        set(required_administrative) - set(observed_administrative)
+    )
+    missing_externals = sorted(
+        set(required_externals) - set(observed_externals)
+    )
+    machine_failure_count = sum(
+        (
+            int(machine_case_deficit > 0),
+            int(step_deficit > 0),
+            int(bool(missing_static_forms)),
+            int(bool(missing_executed_forms)),
+            int(bool(missing_administrative)),
+            int(bool(missing_externals)),
+        )
+    )
+    machine_report = {
+        "minimumCases": minimum_machine_cases,
+        "observedCases": machine["caseCount"],
+        "caseDeficit": machine_case_deficit,
+        "minimumInterpreterSteps": minimum_steps,
+        "observedInterpreterSteps": machine["steps"]["interpreterStepCount"],
+        "interpreterStepDeficit": step_deficit,
+        "requiredStaticForms": required_static_forms,
+        "observedStaticForms": observed_static_forms,
+        "missingStaticForms": missing_static_forms,
+        "requiredExecutedForms": required_executed_forms,
+        "observedExecutedForms": observed_executed_forms,
+        "missingExecutedForms": missing_executed_forms,
+        "requiredAdministrativeKinds": required_administrative,
+        "observedAdministrativeKinds": observed_administrative,
+        "missingAdministrativeKinds": missing_administrative,
+        "requiredExternals": required_externals,
+        "observedExternals": observed_externals,
+        "missingExternals": missing_externals,
+        "failureCount": machine_failure_count,
+        "satisfied": machine_failure_count == 0,
+    }
+    failure_count = (
+        sum(report["failureCount"] for report in tier_reports)
+        + aggregate_failure_count
+        + machine_failure_count
+    )
+    return {
+        "tiers": tier_reports,
+        "aggregate": aggregate_report,
+        "machine": machine_report,
+        "failureCount": failure_count,
+        "satisfied": failure_count == 0,
+    }
+
+
 def _tier_from_config(
     raw_tier: object,
     plan_path: Path,
@@ -680,9 +955,9 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
             "coverage index plan escapes the repository root"
         ) from error
     plan, plan_content = _read_json(plan_path, "coverage index plan")
-    if set(plan) != {"version", "tiers"}:
+    if set(plan) != {"version", "tiers", "policy"}:
         raise ValidationError(
-            "coverage index plan must contain exactly version and tiers"
+            "coverage index plan must contain exactly version, tiers, and policy"
         )
     if plan["version"] != PROTOCOL_VERSION or isinstance(plan["version"], bool):
         raise ValidationError("unsupported coverage index plan version")
@@ -705,6 +980,42 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         if tier["machineCoverage"] is not None
     ]
     machine = aggregate_machine_coverage(machine_coverages)
+    summary = {
+        "tierCount": len(tiers),
+        "tierCaseCount": sum(tier["caseCount"] for tier in tiers),
+        "uniqueCaseCount": len(set().union(*case_domains)),
+        "backendResultCount": sum(
+            _checked_nat(item["resultCaseCount"], "tier backend results")
+            for tier in tiers
+            for item in tier["backends"]
+        ),
+        "successfulBackendResultCount": sum(
+            _checked_nat(
+                item["successfulCaseCount"], "tier backend successes"
+            )
+            for tier in tiers
+            for item in tier["backends"]
+        ),
+        "comparisonCount": sum(
+            _checked_nat(item["comparedCases"], "tier comparisons")
+            for tier in tiers
+            for item in tier["pairs"]
+        ),
+        "equalComparisonCount": sum(
+            _checked_nat(item["equalCases"], "tier equal comparisons")
+            for tier in tiers
+            for item in tier["pairs"]
+        ),
+        "findingCount": sum(tier["findingCount"] for tier in tiers),
+        "machine": machine,
+    }
+    policy = coverage_policy_report(plan["policy"], tiers, summary)
+    summary["policyFailureCount"] = policy["failureCount"]
+    summary["complete"] = (
+        all(tier["complete"] for tier in tiers)
+        and machine["complete"]
+        and policy["satisfied"]
+    )
     provisional = {
         "version": PROTOCOL_VERSION,
         "plan": {
@@ -712,37 +1023,8 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
             "sha256": sha256_bytes(plan_content),
         },
         "tiers": tiers,
-        "summary": {
-            "tierCount": len(tiers),
-            "tierCaseCount": sum(tier["caseCount"] for tier in tiers),
-            "uniqueCaseCount": len(set().union(*case_domains)),
-            "backendResultCount": sum(
-                _checked_nat(item["resultCaseCount"], "tier backend results")
-                for tier in tiers
-                for item in tier["backends"]
-            ),
-            "successfulBackendResultCount": sum(
-                _checked_nat(
-                    item["successfulCaseCount"], "tier backend successes"
-                )
-                for tier in tiers
-                for item in tier["backends"]
-            ),
-            "comparisonCount": sum(
-                _checked_nat(item["comparedCases"], "tier comparisons")
-                for tier in tiers
-                for item in tier["pairs"]
-            ),
-            "equalComparisonCount": sum(
-                _checked_nat(item["equalCases"], "tier equal comparisons")
-                for tier in tiers
-                for item in tier["pairs"]
-            ),
-            "findingCount": sum(tier["findingCount"] for tier in tiers),
-            "machine": machine,
-            "complete": all(tier["complete"] for tier in tiers)
-            and machine["complete"],
-        },
+        "policy": policy,
+        "summary": summary,
     }
     return {
         "version": provisional["version"],
@@ -752,6 +1034,7 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         },
         "plan": provisional["plan"],
         "tiers": provisional["tiers"],
+        "policy": provisional["policy"],
         "summary": provisional["summary"],
     }
 
@@ -766,7 +1049,14 @@ def write_coverage_index(path: Path, report: dict) -> None:
 
 def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
     report, _ = _read_json(path, "coverage index")
-    if set(report) != {"version", "identity", "plan", "tiers", "summary"}:
+    if set(report) != {
+        "version",
+        "identity",
+        "plan",
+        "tiers",
+        "policy",
+        "summary",
+    }:
         raise ValidationError("coverage index has an unsupported schema")
     identity = report["identity"]
     if (
@@ -833,6 +1123,50 @@ def render_coverage_index(report: dict) -> list[str]:
         f"steps {machine['steps']['interpreterStepCount']}, "
         f"obligation failures {machine['obligationFailureCount']}, "
         f"telemetry failures {machine['telemetryFailureCount']}"
+    )
+    policy = report["policy"]
+    lines.append(
+        "coverage policy: "
+        f"{'satisfied' if policy['satisfied'] else 'unsatisfied'}, "
+        f"failures {policy['failureCount']}"
+    )
+    for tier in policy["tiers"]:
+        lines.append(
+            f"coverage policy tier {tier['id']}: "
+            f"cases {tier['observedCases']}/{tier['minimumCases']} minimum, "
+            f"comparisons {tier['observedComparisons']}/"
+            f"{tier['minimumComparisons']} minimum, "
+            f"backends {len(tier['observedBackends'])}/"
+            f"{len(tier['requiredBackends'])} required, "
+            f"machine {'present' if tier['machineCoveragePresent'] else 'absent'}, "
+            f"failures {tier['failureCount']}"
+        )
+    aggregate_policy = policy["aggregate"]
+    lines.append(
+        "coverage policy aggregate: "
+        f"unique cases {aggregate_policy['observedUniqueCases']}/"
+        f"{aggregate_policy['minimumUniqueCases']} minimum, "
+        f"tier cases {aggregate_policy['observedTierCases']}/"
+        f"{aggregate_policy['minimumTierCases']} minimum, "
+        f"comparisons {aggregate_policy['observedComparisons']}/"
+        f"{aggregate_policy['minimumComparisons']} minimum, "
+        f"failures {aggregate_policy['failureCount']}"
+    )
+    machine_policy = policy["machine"]
+    missing_form_count = len(machine_policy["missingStaticForms"]) + len(
+        machine_policy["missingExecutedForms"]
+    )
+    lines.append(
+        "coverage policy machine: "
+        f"cases {machine_policy['observedCases']}/"
+        f"{machine_policy['minimumCases']} minimum, "
+        f"steps {machine_policy['observedInterpreterSteps']}/"
+        f"{machine_policy['minimumInterpreterSteps']} minimum, "
+        f"missing forms {missing_form_count}, "
+        f"administrative kinds "
+        f"{len(machine_policy['missingAdministrativeKinds'])}, "
+        f"externals {len(machine_policy['missingExternals'])}, "
+        f"failures {machine_policy['failureCount']}"
     )
     return lines
 
