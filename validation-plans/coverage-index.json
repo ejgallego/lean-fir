@@ -56,8 +56,8 @@
       },
       {
         "id": "direct-lcnf-machine",
-        "minimumCases": 4,
-        "minimumComparisons": 4,
+        "minimumCases": 5,
+        "minimumComparisons": 5,
         "requiredBackends": [
           "direct-lcnf",
           "direct-native"
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 101,
-      "minimumTierCases": 198,
-      "minimumComparisons": 295
+      "minimumUniqueCases": 102,
+      "minimumTierCases": 199,
+      "minimumComparisons": 296
     },
     "machine": {
-      "minimumCases": 101,
-      "minimumInterpreterSteps": 1714,
+      "minimumCases": 102,
+      "minimumInterpreterSteps": 1735,
       "requiredStaticForms": [
         "box",
         "cases",
