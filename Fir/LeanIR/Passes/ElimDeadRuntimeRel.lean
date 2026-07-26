@@ -7461,9 +7461,115 @@ theorem ShadowRuntimeRel.decValueOnceBoth_related
       simpa [decValueOnce] using
         related.decLocationBoth_related mapping reachable
 
-/-- Releasing pointwise-related published values left-to-right preserves
-related runtimes and faults after every prefix. -/
-theorem ShadowRuntimeRel.releaseListBoth_related
+/-- Releasing one related reset field preserves related runtimes. Erased
+fields are synchronized no-ops; every owning field follows the ordinary
+checked-decrement proof. -/
+theorem ShadowRuntimeRel.releaseResetFieldBoth_of_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      releaseResetField left leftObject = .ok leftResult) :
+    ∃ rightResult,
+      releaseResetField right rightObject = .ok rightResult ∧
+      ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra := by
+  cases objects with
+  | erased =>
+      simp only [releaseResetField] at sourceEffect ⊢
+      have resultEq := Except.ok.inj sourceEffect
+      subst leftResult
+      exact ⟨right, rfl, related⟩
+  | tagged payload =>
+      have sourceDec :
+          decValueOnce left (.object (.tagged payload)) true =
+            .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot (.tagged payload)
+          sourceDec with ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+  | usize value =>
+      have sourceDec :
+          decValueOnce left (.usize value) true = .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot (.usize value)
+          sourceDec with ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+  | scalar value =>
+      have sourceDec :
+          decValueOnce left (.scalar value) true = .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot (.scalar value)
+          sourceDec with ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+  | reuseNone =>
+      have sourceDec :
+          decValueOnce left (.reuseToken none) true = .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot (.reuseNone)
+          sourceDec with ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+  | reuseSome mapping =>
+      rename_i leftLocation rightLocation
+      have sourceDec :
+          decValueOnce left (.reuseToken (some leftLocation)) true =
+            .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot
+          (.reuseSome mapping) sourceDec with
+        ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+  | heap mapping =>
+      rename_i leftLocation rightLocation
+      have sourceDec :
+          decValueOnce left (.object (.heap leftLocation)) true =
+            .ok leftResult := by
+        simpa [releaseResetField] using sourceEffect
+      rcases related.decValueOnceBoth_of_related objectRoot (.heap mapping)
+          sourceDec with ⟨rightResult, targetDec, next⟩
+      exact ⟨rightResult, by simpa [releaseResetField] using targetDec, next⟩
+
+/-- Releasing one related reset field produces related results or related
+faults. -/
+theorem ShadowRuntimeRel.releaseResetFieldBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (releaseResetField left leftObject)
+      (releaseResetField right rightObject) := by
+  cases objects with
+  | erased =>
+      exact .ok related
+  | tagged payload =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.tagged payload)
+          (check := true)
+  | usize value =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.usize value)
+          (check := true)
+  | scalar value =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.scalar value)
+          (check := true)
+  | reuseNone =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.reuseNone)
+          (check := true)
+  | reuseSome mapping =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.reuseSome mapping)
+          (check := true)
+  | heap mapping =>
+      simpa [releaseResetField] using
+        related.decValueOnceBoth_related objectRoot (.heap mapping)
+          (check := true)
+
+/-- Releasing pointwise-related reset fields left-to-right preserves related
+runtimes and faults after every prefix. -/
+theorem ShadowRuntimeRel.releaseResetFieldsBoth_related
     (related : ShadowRuntimeRel rho left right leftRoots rightRoots)
     (values : ListRel (ValueRel rho) leftValues rightValues)
     (leftPublished : RootSubset leftValues leftRoots) :
@@ -7471,9 +7577,9 @@ theorem ShadowRuntimeRel.releaseListBoth_related
       (fun leftResult rightResult =>
         ShadowRuntimeRel rho leftResult rightResult leftRoots rightRoots)
       (leftValues.foldlM (init := left)
-        fun runtime value => decValueOnce runtime value true)
+        fun runtime value => releaseResetField runtime value)
       (rightValues.foldlM (init := right)
-        fun runtime value => decValueOnce runtime value true) := by
+        fun runtime value => releaseResetField runtime value) := by
   induction values generalizing left right with
   | nil =>
       exact .ok related
@@ -7485,11 +7591,11 @@ theorem ShadowRuntimeRel.releaseListBoth_related
         exact leftPublished value (List.mem_cons_of_mem leftHead member)
       simp only [List.foldlM_cons, Bind.bind, Except.bind]
       have headResults :=
-        related.decValueOnceBoth_related headPublished heads (check := true)
+        related.releaseResetFieldBoth_related headPublished heads
       generalize leftHeadEq :
-          decValueOnce left leftHead true = leftHeadResult at headResults
+          releaseResetField left leftHead = leftHeadResult at headResults
       generalize rightHeadEq :
-          decValueOnce right rightHead true = rightHeadResult at headResults
+          releaseResetField right rightHead = rightHeadResult at headResults
       cases headResults with
       | error faults =>
           exact .error faults
@@ -7776,7 +7882,7 @@ theorem ShadowRuntimeRel.resetBoth_of_related
                       ⟨leftParent, rightParent, leftSet, rightSet,
                         parentRelated⟩
                     let release (runtime : RuntimeState) (field : Value) :=
-                      decValueOnce runtime field true
+                      releaseResetField runtime field
                     have source := sourceEffect
                     simp only [reset, leftGet, Bind.bind, Except.bind]
                       at source
@@ -7801,7 +7907,7 @@ theorem ShadowRuntimeRel.resetBoth_of_related
                     generalize leftFoldEq :
                         Array.foldlM
                             (fun runtime field =>
-                              decValueOnce runtime field true)
+                              releaseResetField runtime field)
                             leftParent
                             (leftConstructor.objectFields.extract 0 count) =
                           leftFoldResult at source
@@ -7865,7 +7971,7 @@ theorem ShadowRuntimeRel.resetBoth_of_related
                                 Except.bind] at operation ⊢
                               simp only [release] at operation ⊢
                               cases headEffect :
-                                  decValueOnce beforeLeft leftHead true with
+                                  releaseResetField beforeLeft leftHead with
                               | error fault =>
                                   rw [headEffect] at operation
                                   contradiction
@@ -7878,7 +7984,7 @@ theorem ShadowRuntimeRel.resetBoth_of_related
                                     List.mem_append_left _
                                       (leftSubset _ List.mem_cons_self)
                                   rcases states
-                                      |>.decValueOnceBoth_of_related
+                                      |>.releaseResetFieldBoth_of_related
                                         headRoot heads headEffect with
                                     ⟨middleRight, targetHead, middleStates⟩
                                   rw [targetHead]
@@ -7928,7 +8034,7 @@ theorem ShadowRuntimeRel.resetBoth_of_related
                         have rightFoldRaw :
                             Array.foldlM
                                 (fun runtime field =>
-                                  decValueOnce runtime field true)
+                                  releaseResetField runtime field)
                                 rightParent
                                 (rightConstructor.objectFields.extract
                                   0 count) =
@@ -8186,7 +8292,7 @@ theorem ShadowRuntimeRel.resetBoth_related
                           leftConstructor.objectFields member
                       simpa [leftObjectEq, HeapObject.ownedValues] using
                         oldMember
-                    have folded := parentRelated.releaseListBoth_related
+                    have folded := parentRelated.releaseResetFieldsBoth_related
                       releasedFields
                       (by
                         intro value member
@@ -8195,12 +8301,12 @@ theorem ShadowRuntimeRel.resetBoth_related
                     generalize leftFoldEq :
                         leftReleased.toList.foldlM (init := leftParent)
                           (fun runtime field =>
-                            decValueOnce runtime field true) =
+                            releaseResetField runtime field) =
                           leftFoldResult at folded
                     generalize rightFoldEq :
                         rightReleased.toList.foldlM (init := rightParent)
                           (fun runtime field =>
-                            decValueOnce runtime field true) =
+                            releaseResetField runtime field) =
                           rightFoldResult at folded
                     have leftSetRaw :
                         setCell left leftLocation
@@ -8232,7 +8338,7 @@ theorem ShadowRuntimeRel.resetBoth_related
                         have leftFoldRaw :
                             Array.foldlM
                                 (fun runtime field =>
-                                  decValueOnce runtime field true)
+                                  releaseResetField runtime field)
                                 leftParent
                                 (leftConstructor.objectFields.extract
                                   0 count) =
@@ -8242,7 +8348,7 @@ theorem ShadowRuntimeRel.resetBoth_related
                         have rightFoldRaw :
                             Array.foldlM
                                 (fun runtime field =>
-                                  decValueOnce runtime field true)
+                                  releaseResetField runtime field)
                                 rightParent
                                 (rightConstructor.objectFields.extract
                                   0 count) =
@@ -8280,7 +8386,7 @@ theorem ShadowRuntimeRel.resetBoth_related
                         have leftFoldRaw :
                             Array.foldlM
                                 (fun runtime field =>
-                                  decValueOnce runtime field true)
+                                  releaseResetField runtime field)
                                 leftParent
                                 (leftConstructor.objectFields.extract
                                   0 count) =
@@ -8290,7 +8396,7 @@ theorem ShadowRuntimeRel.resetBoth_related
                         have rightFoldRaw :
                             Array.foldlM
                                 (fun runtime field =>
-                                  decValueOnce runtime field true)
+                                  releaseResetField runtime field)
                                 rightParent
                                 (rightConstructor.objectFields.extract
                                   0 count) =
