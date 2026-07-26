@@ -1075,6 +1075,74 @@ theorem LiveHeapRel.resetObject_unique_fault_refines
       rw [constructor] at closureEq
       contradiction
 
+/-- A live nonunique reset delegates its entire failing branch to one public
+checked decrement. The reset wrapper preserves the exact non-fuel source
+fault and performs no token-producing continuation. -/
+theorem LiveHeapRel.resetObject_nonunique_fault_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {count : Nat} {fault : RuntimeFault}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (semanticOperation :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .error fault) :
+    ∃ failure,
+      resetObject state count address witness.closureDescriptors =
+          .error failure ∧
+      ConcreteErrorSourceRel witness failure fault := by
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, _, notPromoted, _, refCount⟩ :=
+    targetRelated.ownershipHeader
+  have headerCountNe : header.refCount ≠ 1 := by
+    intro one
+    rw [one] at refCount
+    simp at refCount
+    exact notUnique refCount.symm
+  have fallback :
+      (header.isPromotedTag || header.persistent || header.refCount != 1) =
+        true := by
+    simp [notPromoted, headerCountNe]
+  have semanticDec :
+      Fir.LeanIR.Impure.decLocation runtime location = .error fault := by
+    unfold Fir.LeanIR.Impure.reset at semanticOperation
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at semanticOperation
+    rw [if_pos (by simp [notUnique])] at semanticOperation
+    cases decEq : Fir.LeanIR.Impure.decLocation runtime location with
+    | error childFault =>
+        rw [decEq] at semanticOperation
+        have childFaultEq : childFault = fault :=
+          Except.error.inj semanticOperation
+        subst childFault
+        rfl
+    | ok nextRuntime =>
+        rw [decEq] at semanticOperation
+        contradiction
+  obtain ⟨failure, concreteDec, faultRelated⟩ :=
+    related.decrementReferenceOnce_fault_refines mapped true notFuel
+      semanticDec
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  have concreteReset :
+      resetObject state count address witness.closureDescriptors =
+        .error failure := by
+    unfold resetObject
+    rw [addressHeap, headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_pos fallback, concreteDec]
+  exact ⟨failure, concreteReset, faultRelated⟩
+
 /-- Repeated public decrement preserves the first source-classified fault.
 Every successful earlier repetition advances the related heaps; the failing
 repetition uses the public one-step fault theorem and prevents the suffix from

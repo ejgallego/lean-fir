@@ -2485,6 +2485,115 @@ theorem concreteFaultLeaf_reset_unique_fault
     initialRelated hObject hImp hSat hi hContract hParams operation
     failureRelated
 
+/-- A generated nonunique reset preserves the exact fault from its delegated
+checked decrement and cannot write the empty token or enter the continuation
+after that failure. -/
+theorem concreteFaultLeaf_reset_nonunique_fault
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {hostSpec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {id : Nat}
+    {imp : Wasm.ImportDecl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceEnv : Env}
+    {objectId : Lean.FVarId}
+    {count : Nat}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {objectIndex resultIndex : Nat}
+    {objectWord : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {fault : RuntimeFault}
+    {targetRest : Wasm.Program}
+    (valueEq : decl.value = .reset count objectId)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.reset count))])
+    (objectFound :
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex)
+    (callFound :
+      callIndex? sourceModule (.runtime (.reset count)) = some id)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (sourceLookup :
+      lookup sourceEnv objectId = some (.object (.heap location)))
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (hObject :
+      locals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord)
+        (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (notUnique : cell.rc ≠ 1)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (semanticFailure :
+      reset sourceRuntime count (.object (.heap location)) = .error fault)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module hostSpec)
+    (hi : id < module.imports.length)
+    (hContract :
+      hostSpec.contracts[id]? = some (resetContract count))
+    (hParams : imp.params.length = 1) :
+    ConcreteFaultLeaf context sourceModule sourceFunction labels module hostEnv
+      sourceExternals sourceRuntime sourceEnv (.let decl continuation)
+      (.localGet objectIndex :: .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness sourceRuntime fault := by
+  obtain ⟨failure, operation, failureRelated⟩ :=
+    resetStep_nonunique_fault_of_refines initialRelated.1 objectRelated
+      descriptorsEq found live notUnique notFuel semanticFailure
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .call (.runtime (.reset count))] =
+        .ok [.localGet objectIndex, .call id] := by
+    have objectFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            objectId =
+          some objectIndex := by
+      simpa [functionBindings] using objectFound
+    simp [instructions, instruction, objectFound', callFound]
+    rfl
+  have evaluated :
+      evalLetValue
+          (sourceCodeState context sourceRuntime sourceEnv
+            (.let decl continuation)) decl =
+        .error fault := by
+    unfold evalLetValue
+    rw [valueEq]
+    simp only [sourceCodeState, lookupValue, sourceLookup]
+    change (do
+      let (runtime, token) ←
+        reset sourceRuntime count (.object (.heap location))
+      return (runtime, LetAction.value token)) =
+      .error fault
+    rw [semanticFailure]
+    rfl
+  exact concreteFaultLeaf_unaryHostLet
+    (step := resetStep count)
+    (failure := failure)
+    evaluated valueCompiled valueAdapted resultFound continuationAdapted
+    initialRelated hObject hImp hSat hi hContract hParams operation
+    failureRelated
+
 /-- Compiler/adaptor terminal boundary for an arbitrary represented failure
 of a generated nonempty reuse call. Operation-specific wrappers provide the
 exact source/concrete equations and their error relation. -/

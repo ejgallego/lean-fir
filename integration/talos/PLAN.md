@@ -3138,6 +3138,19 @@ decrement skips physical zero. The proof does not weaken either runtime;
 nonunique fallback decrement and release-fuel target-safety remain next. No
 shared semantic contract or executable ABI changed.
 
+W6.6dd closes reset's nonunique fallback-decrement fault wrapper. Once a live
+mapped cell has a semantic reference count different from one, the physical
+ownership header takes the same fallback gate. Any non-fuel source fault from
+the delegated public checked decrement is then preserved by the existing
+general decrement theorem, and the reset wrapper produces the same
+source-classified Talos trap. The compiler/adaptor terminal leaf proves that
+neither the empty reuse-token local nor the continuation is reached. This
+branch needs no new recursive ownership induction and does not inspect
+constructor shape or fields. Release-fuel target-safety is now the remaining
+ownership wrapper obligation; the erased unique-child semantic mismatch
+remains isolated in its confirmed bug card. No shared semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

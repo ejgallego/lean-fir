@@ -194,7 +194,10 @@ related store before writing the reuse-token local. The theorem excludes
 currently faults where concrete checked decrement skips physical zero; this
 shared-contract discrepancy is tracked by
 `FIR-BUG-wasm-none-reset-erased-child-release`. Reset's nonunique fallback
-decrement and release-fuel target-safety exclusion remain.
+decrement is now packaged separately: any non-fuel fault from that delegated
+public checked decrement crosses the reset host and compiler terminal leaf
+unchanged, before the empty token local or continuation. Release-fuel
+target-safety exclusion remains.
 
 The public endpoint is now explicit:
 

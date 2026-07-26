@@ -3707,6 +3707,41 @@ theorem resetStep_unique_fault_of_refines
               simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
                 descriptorsEq, concrete, ConcreteError.toTrap]
 
+/-- A nonunique reset preserves the exact fault produced by its delegated
+public checked decrement. -/
+theorem resetStep_nonunique_fault_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {location : Location}
+    {cell : HeapCell} {count : Nat} {fault : RuntimeFault}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated :
+      ValueRel witness .tobject (.word32 word) (.object (.heap location)))
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (notFuel :
+      fault ≠ .malformed "reference-count release fuel exhausted")
+    (semanticFailure :
+      reset runtime count (.object (.heap location)) = .error fault) :
+    ∃ failure,
+      resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+          trap (clearFailure initial) (.runtime failure.toTrap) ∧
+        ConcreteErrorSourceRel witness failure fault := by
+  cases valueRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨failure, concrete, failureRelated⟩ :=
+                runtimeRelated.heap.resetObject_nonunique_fault_refines mapped
+                  found live notUnique notFuel semanticFailure
+              refine ⟨failure, ?_, failureRelated⟩
+              simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+                descriptorsEq, concrete, ConcreteError.toTrap]
+
 /-- Tagged reset is an exact heap no-op and returns the empty reuse token. -/
 theorem resetStep_tagged_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

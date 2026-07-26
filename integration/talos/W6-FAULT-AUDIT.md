@@ -72,7 +72,7 @@ the premise that derives its operation equation remains to be packaged.
 | increment / decrement / delete | `expectedObject`, `expectedHeapReference`, `deadObject`, `referenceCountUnderflow`, recursive child faults, release-fuel `malformed` | mapped stale, direct underflow, arbitrary-depth recursive decrement, and unchecked tagged increment/positive-decrement leaves complete; ABI relations exclude the other operand-shape cases; release-fuel exclusion remains |
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
-| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, unique-constructor bounds, and non-`expectedObject` unique-constructor child-fault leaves complete; `.tobject` excludes operand-shape `expectedObject`; fallback decrement and release-fuel exclusion remain, while erased child release is tracked by `FIR-BUG-wasm-none-reset-erased-child-release` |
+| reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, unique-constructor bounds, nonunique fallback decrement, and non-`expectedObject` unique-constructor child-fault leaves complete; `.tobject` excludes operand-shape `expectedObject`; release-fuel exclusion remains, while erased child release is tracked by `FIR-BUG-wasm-none-reset-erased-child-release` |
 | reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
@@ -103,8 +103,8 @@ traps for malformed source code.
 
 ## Next proof slices
 
-1. Package reset's nonunique fallback decrement faults through the existing
-   public decrement theorem.
+1. Prove release-fuel target-trap exclusion from related generated ownership
+   operations.
 2. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.
 3. Decide the clean retained-capacity invariant for reset/reuse and make the
