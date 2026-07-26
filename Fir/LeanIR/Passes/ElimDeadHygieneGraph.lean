@@ -1840,9 +1840,9 @@ theorem shadowProgram_binderReadyExactRelated
     (shadowProgram_canonicalExactRelated wellFormed result)
 
 /-- Immediate hereditary certificates selected by the control-changing
-`let` and `join` branches of an exact compiler view.  Matching on the view,
-rather than inverting its indexed readiness proof, keeps computed liveness
-indices such as `collectLetValue` opaque. -/
+`let`, `join`, and `cases` branches of an exact compiler view.  Matching on
+the view, rather than inverting its indexed readiness proof, keeps computed
+liveness indices such as `collectLetValue` opaque. -/
 def ExactShadowCodeView.controlResidualBinderReady
     (ambient : UsedLocals)
     {initial : UsedLocals} {fuel : Nat} {final : UsedLocals}
@@ -1858,6 +1858,8 @@ def ExactShadowCodeView.controlResidualBinderReady
         ExactShadowCodeBinderReady ambient body.toGraph.view
   | .joinDeleted continuation _ =>
       ExactShadowCodeBinderReady ambient continuation.toGraph.view
+  | .cases alternatives =>
+      ExactShadowAltListBinderReady ambient alternatives.view
   | _ => True
 
 /-- Hereditary readiness supplies the immediate residual certificates
@@ -1871,7 +1873,8 @@ theorem ExactShadowCodeBinderReady.controlResidualBinderReady
   | joinRetained continuationReady bodyReady =>
       exact ⟨continuationReady, bodyReady⟩
   | joinDeleted _ continuationReady => exact continuationReady
-  | cases _ | jump | «return» | unreachable
+  | cases alternativesReady => exact alternativesReady
+  | jump | «return» | unreachable
   | objectSetRetained _ | objectSetDeleted _
   | usizeSetRetained _ | usizeSetDeleted _
   | scalarSetRetained _ | scalarSetDeleted _
@@ -1889,6 +1892,24 @@ def BinderReadyShadowCodeGraph (fuel : Nat) (used : UsedLocals)
       UsedSubset final used ∧
         ExactShadowCodeBinderReady used exact.view
 
+/-- Hereditary alternative relation.  Metadata is unchanged and each body
+retains an exact binder-ready compiler graph under the enclosing machine
+fuel and liveness indices. -/
+inductive BinderReadyShadowAltRelated (fuel : Nat) (used : UsedLocals) :
+    LCNF.Alt .impure → LCNF.Alt .impure → Prop where
+  | ctor (info : LCNF.CtorInfo)
+      (body : BinderReadyShadowCodeGraph fuel used sourceBody targetBody) :
+      BinderReadyShadowAltRelated fuel used
+        (.ctorAlt info sourceBody) (.ctorAlt info targetBody)
+  | default
+      (body : BinderReadyShadowCodeGraph fuel used sourceBody targetBody) :
+      BinderReadyShadowAltRelated fuel used
+        (.default sourceBody) (.default targetBody)
+
+def BinderReadyShadowAltListRelated (fuel : Nat) (used : UsedLocals)
+    (source target : List (LCNF.Alt .impure)) : Prop :=
+  ListRel (BinderReadyShadowAltRelated fuel used) source target
+
 /-- Embed one exact child run into the bounded hereditary graph used by
 runtime controls.  Keeping this constructor at the exact-run boundary avoids
 reconstructing the child's seed when an operational step selects a residual
@@ -1900,6 +1921,129 @@ theorem ExactShadowCodeRun.toBinderReadyShadowCodeGraphAt
     (ready : ExactShadowCodeBinderReady ambient run.toGraph.view) :
     BinderReadyShadowCodeGraph outerFuel ambient source target :=
   ⟨childFuel, final, fuelBound, run.toGraph, usedBound, ready⟩
+
+/-- Project an exact, binder-ready alternative traversal pointwise.  The
+tail's liveness monotonicity widens each preceding body to the list's final
+ambient index, matching the compiler's left-to-right liveness threading. -/
+theorem ExactShadowAltListBinderReady.toRelated
+    {childFuel outerFuel : Nat}
+    {initial final ambient : UsedLocals}
+    {source target : List (LCNF.Alt .impure)}
+    {view :
+      ExactShadowAltListView childFuel initial final source target}
+    (ready : ExactShadowAltListBinderReady ambient view)
+    (fuelBound : childFuel ≤ outerFuel)
+    (usedBound : UsedSubset final ambient) :
+    BinderReadyShadowAltListRelated outerFuel ambient source target := by
+  induction source generalizing initial final target with
+  | nil =>
+      cases view
+      exact .nil
+  | cons alternative sourceRest ih =>
+      cases view with
+      | @ctor middle sourceBody targetBody _ sourceRest targetRest info body
+          rest =>
+          cases ready with
+          | ctor bodyReady restReady =>
+              have restSpec := shadowAltList_spec
+                (transformCode := shadowCode? childFuel)
+                (transformSpec := fun _ _ _ _ bodyRun =>
+                  shadowCode_spec bodyRun)
+                (result := rest.result)
+              have bodyGraph :
+                  BinderReadyShadowCodeGraph outerFuel ambient
+                    sourceBody targetBody :=
+                body.toBinderReadyShadowCodeGraphAt fuelBound
+                  (restSpec.2.trans usedBound) bodyReady
+              exact .cons (.ctor info bodyGraph)
+                (ih (view := rest.view) restReady usedBound)
+      | @default middle sourceBody targetBody _ sourceRest targetRest body
+          rest =>
+          cases ready with
+          | default bodyReady restReady =>
+              have restSpec := shadowAltList_spec
+                (transformCode := shadowCode? childFuel)
+                (transformSpec := fun _ _ _ _ bodyRun =>
+                  shadowCode_spec bodyRun)
+                (result := rest.result)
+              have bodyGraph :
+                  BinderReadyShadowCodeGraph outerFuel ambient
+                    sourceBody targetBody :=
+                body.toBinderReadyShadowCodeGraphAt fuelBound
+                  (restSpec.2.trans usedBound) bodyReady
+              exact .cons (.default bodyGraph)
+                (ih (view := rest.view) restReady usedBound)
+
+theorem BinderReadyShadowAltListRelated.findCtor
+    (related :
+      BinderReadyShadowAltListRelated fuel used source target) :
+    OptionalRel (BinderReadyShadowCodeGraph fuel used)
+      (findCtorAlt tag source) (findCtorAlt tag target) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor info body =>
+          by_cases tagMatches : info.cidx == tag
+          · simpa [findCtorAlt, tagMatches] using OptionalRel.some body
+          · simpa [findCtorAlt, tagMatches] using ih
+      | default body => simpa [findCtorAlt] using ih
+
+theorem BinderReadyShadowAltListRelated.findDefault
+    (related :
+      BinderReadyShadowAltListRelated fuel used source target) :
+    OptionalRel (BinderReadyShadowCodeGraph fuel used)
+      (findDefaultAlt source) (findDefaultAlt target) := by
+  induction related with
+  | nil => exact .none
+  | cons head tail ih =>
+      cases head with
+      | ctor info body => simpa [findDefaultAlt] using ih
+      | default body =>
+          simpa [findDefaultAlt] using OptionalRel.some body
+
+theorem BinderReadyShadowAltListRelated.choose
+    (related :
+      BinderReadyShadowAltListRelated fuel used source target) :
+    OptionalRel (BinderReadyShadowCodeGraph fuel used)
+      (chooseAlt tag source) (chooseAlt tag target) := by
+  unfold chooseAlt
+  have constructors := related.findCtor (tag := tag)
+  generalize sourceFoundEq : findCtorAlt tag source = sourceFound
+    at constructors ⊢
+  generalize targetFoundEq : findCtorAlt tag target = targetFound
+    at constructors ⊢
+  cases constructors with
+  | none => exact related.findDefault
+  | some body => exact .some body
+
+/-- The exact `cases` view exposes a hereditary relation for every residual
+alternative under the parent graph's bounds. -/
+theorem ExactShadowCodeBinderReady.cases_alternativesRelated
+    {initial beforeDiscr ambient : UsedLocals}
+    {nextFuel outerFuel : Nat}
+    {sourceAlternatives : Array (LCNF.Alt .impure)}
+    {targetAlternatives : List (LCNF.Alt .impure)}
+    {discr : FVarId} {typeName : Name} {resultType : Expr}
+    {alternatives :
+      ExactShadowAltListRun nextFuel initial beforeDiscr
+        sourceAlternatives.toList targetAlternatives}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.cases
+          (discr := discr) (typeName := typeName) (resultType := resultType)
+          alternatives))
+    (fuelBound : nextFuel + 1 ≤ outerFuel)
+    (usedBound : UsedSubset (beforeDiscr.insert discr) ambient) :
+    BinderReadyShadowAltListRelated outerFuel ambient
+      sourceAlternatives.toList targetAlternatives := by
+  have alternativesReady :
+      ExactShadowAltListBinderReady ambient alternatives.view := by
+    simpa [ExactShadowCodeView.controlResidualBinderReady] using
+      ready.controlResidualBinderReady
+  exact alternativesReady.toRelated
+    (Nat.le_trans (Nat.le_succ nextFuel) fuelBound)
+    ((usedSubset_insert beforeDiscr discr).trans usedBound)
 
 /-- A retained let's exact hereditary certificate projects to its selected
 continuation under the enclosing graph's fuel and liveness bounds. -/
