@@ -7,6 +7,7 @@ open Lean
 open Lean.Compiler
 open Fir.LeanIR.ImpureHygiene
 open Fir.LeanIR.Passes.AlphaEqv
+open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCaseScopedBridge
 open Fir.LeanIR.Passes.SimpCaseWellFormed
 
@@ -39,6 +40,127 @@ theorem ExactShadowCodeGraph.toShadowCodeGraph
     (exact : ExactShadowCodeGraph fuel final source target) :
     ShadowCodeGraph fuel final source target :=
   ⟨fuel, exact.initial, final, Nat.le_refl fuel, exact.result, .refl final⟩
+
+/-- Declaration-facing exact relation.  Unlike `ShadowCodeRelated`, this
+retains the full pass fuel and exact final liveness set produced from the
+declaration seed, so later invocation proofs can recover the canonical view. -/
+def ExactShadowCodeRelated (fuel : Nat)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ final, Nonempty (ExactShadowCodeGraph fuel final source target)
+
+/-- Forget exact declaration provenance into the monotone runtime relation. -/
+theorem ExactShadowCodeRelated.toShadowCodeRelated
+    (exact : ExactShadowCodeRelated fuel source target) :
+    ShadowCodeRelated fuel source target := by
+  rcases exact with ⟨final, ⟨graph⟩⟩
+  exact ⟨final, graph.toShadowCodeGraph⟩
+
+/-- Forget exact provenance inside one declaration value. -/
+theorem forgetExactShadowDeclValue
+    (related :
+      DeclValueRelated (ExactShadowCodeRelated fuel) source target) :
+    DeclValueRelated (ShadowCodeRelated fuel) source target := by
+  cases related with
+  | code exact => exact .code exact.toShadowCodeRelated
+  | extern metadata => exact .extern metadata
+
+/-- Pointwise declaration forgetting preserves every ABI field and changes
+only the relation carried by an internal code body. -/
+theorem forgetExactShadowDecl
+    (related : DeclRelated (ExactShadowCodeRelated fuel) source target) :
+    DeclRelated (ShadowCodeRelated fuel) source target := by
+  exact {
+    name_eq := related.name_eq
+    levelParams_eq := related.levelParams_eq
+    type_eq := related.type_eq
+    params_eq := related.params_eq
+    safe_eq := related.safe_eq
+    value := forgetExactShadowDeclValue related.value
+    recursive_eq := related.recursive_eq
+    inlineAttr_eq := related.inlineAttr_eq
+  }
+
+/-- Whole-program forgetting from exact declaration bodies to the runtime
+graph used by the non-lockstep machine relation. -/
+theorem forgetExactShadowProgram
+    (related : ProgramRelated (ExactShadowCodeRelated fuel) source target) :
+    ProgramRelated (ShadowCodeRelated fuel) source target :=
+  listRel_mono (fun declaration =>
+    forgetExactShadowDecl declaration) related
+
+/-- A successful declaration run retains the exact full-fuel traversal of an
+internal body; external declarations are unchanged. -/
+theorem shadowDecl_exactRelated
+    (result : shadowDecl? fuel source = some target) :
+    DeclRelated (ExactShadowCodeRelated fuel) source target := by
+  cases valueEq : source.value with
+  | extern metadata =>
+      simp [shadowDecl?, valueEq] at result
+      subst target
+      exact {
+        name_eq := rfl
+        levelParams_eq := rfl
+        type_eq := rfl
+        params_eq := rfl
+        safe_eq := rfl
+        value := by
+          rw [valueEq]
+          exact .extern metadata
+        recursive_eq := rfl
+        inlineAttr_eq := rfl
+      }
+  | code code =>
+      cases transformed : shadowCode? fuel {} code with
+      | none => simp [shadowDecl?, valueEq, transformed] at result
+      | some output =>
+          obtain ⟨targetCode, final⟩ := output
+          simp [shadowDecl?, valueEq, transformed] at result
+          subst target
+          exact {
+            name_eq := rfl
+            levelParams_eq := rfl
+            type_eq := rfl
+            params_eq := rfl
+            safe_eq := rfl
+            value := by
+              rw [valueEq]
+              exact .code ⟨final, ⟨⟨{}, transformed⟩⟩⟩
+            recursive_eq := rfl
+            inlineAttr_eq := rfl
+          }
+
+/-- The declaration-list traversal retains exact provenance pointwise. -/
+theorem shadowDecls_exactRelated
+    (result : shadowDecls? fuel sources = some targets) :
+    ListRel (DeclRelated (ExactShadowCodeRelated fuel)) sources targets := by
+  induction sources generalizing targets with
+  | nil =>
+      simp [shadowDecls?] at result
+      subst targets
+      exact .nil
+  | cons source rest ih =>
+      cases headResult : shadowDecl? fuel source with
+      | none => simp [shadowDecls?, headResult] at result
+      | some target =>
+          cases tailResult : shadowDecls? fuel rest with
+          | none => simp [shadowDecls?, headResult, tailResult] at result
+          | some targetsRest =>
+              simp [shadowDecls?, headResult, tailResult] at result
+              subst targets
+              exact .cons (shadowDecl_exactRelated headResult) (ih tailResult)
+
+/-- A successful whole-program run preserves exact full-fuel provenance for
+every transformed internal declaration body. -/
+theorem shadowProgram_exactRelated
+    (result : shadowProgram? fuel source = some target) :
+    ProgramRelated (ExactShadowCodeRelated fuel) source target := by
+  cases declarationsResult : shadowDecls? fuel source.decls.toList with
+  | none => simp [shadowProgram?, declarationsResult] at result
+  | some declarations =>
+      simp [shadowProgram?, declarationsResult] at result
+      subst target
+      unfold ProgramRelated
+      simpa using shadowDecls_exactRelated declarationsResult
 
 /-- Exact code result with its seed exposed as an index.  Child edges in the
 proof-relevant view use this form so their seed is definitionally the

@@ -14153,4 +14153,33 @@ theorem reachableProgram_loweringCorrect_reachablyCodeReady
   exact
     (initialReady entry member sourceArguments targetArguments arguments).reachablyReady
 
+/-- Exact declaration provenance is sufficient for the same endpoint; its
+forgetful projection supplies the monotone runtime graph. -/
+theorem exactProgram_loweringCorrect_reachablyCodeReady
+    (programs : ProgramRelated
+      (ExactShadowCodeRelated fuel) source target)
+    (compatible : ReachableExternalSpecCompatible externals fuel)
+    (initialReady : ReachableInitialInvariantOn
+      (ReachablyCodeReady externals fuel) source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  reachableProgram_loweringCorrect_reachablyCodeReady
+    (forgetExactShadowProgram programs) compatible initialReady
+
+/-- Compiler-run form of the non-lockstep theorem.  A successful transparent
+whole-program traversal now supplies both the exact declaration graph and its
+runtime projection; only active-code hereditary admissibility and the foreign
+response contract remain as semantic premises. -/
+theorem shadowProgram_loweringCorrect_reachablyCodeReady
+    (run : shadowProgram? fuel source = some target)
+    (compatible : ReachableExternalSpecCompatible externals fuel)
+    (initialReady : ReachableInitialInvariantOn
+      (ReachablyCodeReady externals fuel) source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  exactProgram_loweringCorrect_reachablyCodeReady
+    (shadowProgram_exactRelated run) compatible initialReady
+
 end Fir.LeanIR.Passes.ElimDead
