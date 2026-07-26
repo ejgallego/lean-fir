@@ -143,6 +143,19 @@ private def nativeSharedResetErasedAndOwnedFields (first : Nat) : Nat :=
   observeSharedMixedReset replacement.payload
     (!nativeIsExclusive child) (!nativeIsExclusive owner)
 
+private def nativePersistentMixedOwner : NativeMixedOwner :=
+  { proof := True.intro
+    child := { first := 41, second := 42 }
+    marker := 0 }
+
+@[noinline]
+private def nativePersistentResetErasedAndOwnedFields (payload : Nat) : Nat :=
+  let owner := nativePersistentMixedOwner
+  let child := owner.child
+  let replacement := replaceMixedOwner owner payload
+  observeSharedMixedReset replacement.payload
+    (!nativeIsExclusive child) (!nativeIsExclusive owner)
+
 private def identityDecl : LCNF.Decl .impure :=
   decl `directIdentity #[param z] (.code (.return z))
 
@@ -286,6 +299,48 @@ private def sharedResetErasedAndOwnedFieldsFormTrace : Array String :=
   #["lit", "lit", "ctor", "inc", "erased", "lit", "ctor", "inc", "reset",
     "lit", "reuse", "oproj", "isShared", "isShared", "cases", "cases", "lit",
     "return"]
+
+private def persistentMixedOwnerCode : LCNF.Code .impure :=
+  .let (letDecl x (.lit (.nat 41))) <|
+  .let (letDecl y (.lit (.nat 42))) <|
+  .let (letDecl q (.ctor heapChildInfo #[.fvar x, .fvar y])) <|
+  .let (letDecl e .erased) <|
+  .let (letDecl x (.lit (.nat 0))) <|
+  .let (letDecl p (.ctor mixedOwnerInfo #[.fvar e, .fvar q, .fvar x])) <|
+  .return p
+
+private def persistentResetErasedAndOwnedFieldsCode : LCNF.Code .impure :=
+  .let (letDecl p (.fap `directPersistentMixedOwner #[])) <|
+  .let (letDecl q (.oproj 1 p)) <|
+  .let (letDecl x (.oproj 2 p)) <|
+  .let (letDecl r (.reset 3 p)) <|
+  .let (letDecl y (.lit (.nat 73))) <|
+  .let (letDecl z (.reuse r replacementInfo true #[.fvar y, .fvar x])) <|
+  .let (letDecl x (.oproj 0 z)) <|
+  .let (typedLetDecl s u8Type (.isShared q)) <|
+  .let (typedLetDecl t u8Type (.isShared p)) <|
+  .cases (.mk ``Bool objType s #[
+    .ctorAlt falseInfo <| .cases (.mk ``Bool objType t #[
+      .ctorAlt falseInfo (.return x),
+      .ctorAlt trueInfo <|
+        .let (letDecl y (.lit (.nat 75))) (.return y)]),
+    .ctorAlt trueInfo <| .cases (.mk ``Bool objType t #[
+      .ctorAlt falseInfo <|
+        .let (letDecl y (.lit (.nat 74))) (.return y),
+      .ctorAlt trueInfo <|
+        .let (letDecl y (.lit (.nat 76))) (.return y)])])
+
+private def persistentResetErasedAndOwnedFieldsProgram : ImpureProgram := {
+  decls := #[
+    typedDecl `directPersistentMixedOwner #[] objType (.code persistentMixedOwnerCode),
+    typedDecl `directPersistentResetErasedAndOwnedFields #[] objType
+      (.code persistentResetErasedAndOwnedFieldsCode)
+  ] }
+
+private def persistentResetErasedAndOwnedFieldsFormTrace : Array String :=
+  #["fap", "lit", "lit", "ctor", "erased", "lit", "ctor", "return", "oproj",
+    "oproj", "reset", "lit", "reuse", "oproj", "isShared", "isShared", "cases",
+    "cases", "lit", "return"]
 
 def cases : Array Case := #[
   { validationCase := {
@@ -434,10 +489,48 @@ def cases : Array Case := #[
           "Keep a mixed owner shared across reset and observe owner decrement without child release"
       }
     }
-    program := sharedResetErasedAndOwnedFieldsProgram }
+    program := sharedResetErasedAndOwnedFieldsProgram },
+  { validationCase := {
+      id := "machine-persistent-reset-erased-and-owned-fields"
+      entry := `directPersistentResetErasedAndOwnedFields
+      resultSchema := .nat
+      native := fun _ => .nat (nativePersistentResetErasedAndOwnedFields 73)
+      tags :=
+        #["direct-lcnf", "machine", "ownership", "constructor", "reset", "reuse",
+          "erased", "isShared", "reference-count", "persistent", "cache", "slow-path",
+          "boundary"]
+      requiredLcnfForms :=
+        #["fap", "lit", "ctor", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfForms :=
+        #["fap", "lit", "ctor", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfFormCounts := #[
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 5, maximum := some 5 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "erased", minimum := 1, maximum := some 1 },
+        { form := "reset", minimum := 1, maximum := some 1 },
+        { form := "reuse", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 3, maximum := some 3 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 2, maximum := some 2 }
+      ]
+      requiredExecutedLcnfFormTrace := some persistentResetErasedAndOwnedFieldsFormTrace
+      requiredAdministrativeStepKinds :=
+        #["admin:yield-bind", "admin:yield-cache"]
+      provenance := {
+        suite := "fir-direct-lcnf"
+        path := "Fir/Validation/DirectLCNF.lean"
+        note :=
+          "Reset a cached persistent mixed owner and preserve both owner and child reachability"
+      }
+    }
+    program := persistentResetErasedAndOwnedFieldsProgram }
 ]
 
-#guard cases.size == 5
+#guard cases.size == 6
 
 #guard cases.all fun directCase =>
   directCase.validationCase.requiredExecutedLcnfFormTrace.isSome
