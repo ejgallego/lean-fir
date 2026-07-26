@@ -290,6 +290,29 @@ coverage report. The current index keeps three claims separate:
   the source compiler emitted them;
 - `wasm-v8` validates the real V8 engine against both native and LCNF results.
 
+Direct cases may additionally opt into native-oracle path attestation without
+changing the shared corpus protocol. The recorder compiles the case's named
+native helper and explicitly rooted dependencies to final impure LCNF, writes
+the formatted dependency closure under
+`_build/validation-direct-native-ir/`, and compares `program.lcnf` with the
+SHA-256 stored beside that direct case:
+
+```sh
+python3 scripts/record_direct_native_ir.py
+
+python3 scripts/record_direct_native_ir.py \
+  --case machine-reset-erased-and-repeated-owned-fields --no-build
+```
+
+`--record` prints newly observed digests without treating drift as failure;
+normal mode writes per-case `attestation.json` and aggregate
+`attestations.json` evidence and fails when the final-impure artifact changes.
+This opt-in audit pins the native compiler path underlying a semantic
+comparison. In particular, it can distinguish resetting the intended owner
+from an optimizer choosing ordinary destruction or reusing one of the owner's
+projected children. It is not a CI tier and does not claim additional
+native/LCNF/V8 comparisons.
+
 Only the first two tiers attach LCNF machine telemetry. The V8 matrix contains
 the source native–LCNF edge for triangular consistency, but the index selects
 only its two V8 edges, so neither semantic comparisons nor interpreter form

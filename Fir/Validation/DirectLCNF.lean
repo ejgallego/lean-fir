@@ -61,10 +61,25 @@ A validation case whose candidate is an explicit final-impure program rather
 than source compiled by Lean. These cases cover machine transitions that the
 current source compiler does not emit.
 -/
+structure NativeOracleAttestation where
+  entry : Name
+  dependencies : Array Name := #[]
+  expectedArtifactSha256 : String
+  deriving Inhabited
+
+structure NativeOracleDescriptor where
+  version : Nat := protocolVersion
+  caseId : String
+  entry : String
+  dependencies : Array String
+  expectedArtifactSha256 : String
+  deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
+
 structure Case where
   validationCase : Corpus.Case
   program : ImpureProgram
   externalNames : Array Name := #[]
+  nativeOracle? : Option NativeOracleAttestation := none
 
 def Case.artifact (directCase : Case) : Lcnf.Artifact := {
   entry := directCase.validationCase.entry
@@ -798,7 +813,13 @@ def cases : Array Case := #[
           "Release two ownership slots that alias the same child and observe exact decrement multiplicity"
       }
     }
-    program := resetErasedAndRepeatedOwnedFieldsProgram }
+    program := resetErasedAndRepeatedOwnedFieldsProgram
+    nativeOracle? := some {
+      entry := ``nativeResetErasedAndRepeatedOwnedFields
+      dependencies := #[``replaceRepeatedOwner]
+      expectedArtifactSha256 :=
+        "34469861bd43393e0c221989ea0f71a3a58431d8c92cb82144f48843dc83f721"
+    } }
 ]
 
 #guard cases.size == 9
@@ -811,6 +832,15 @@ def findCase? (id : String) : Option Case :=
 
 def descriptors : Array Corpus.CaseDescriptor :=
   cases.map (·.validationCase.descriptor)
+
+def nativeOracleDescriptors : Array NativeOracleDescriptor :=
+  cases.filterMap fun directCase =>
+    directCase.nativeOracle?.map fun attestation => {
+      caseId := directCase.validationCase.id
+      entry := toString attestation.entry
+      dependencies := attestation.dependencies.map toString
+      expectedArtifactSha256 := attestation.expectedArtifactSha256
+    }
 
 private def failure (backend caseId message : String) : BackendResult := {
   caseId
@@ -843,7 +873,8 @@ def runLcnfCase (directCase : Case) : IO BackendResult :=
 def usage (backend : String) : String :=
   s!"usage: fir-{backend} --case ID\n" ++
     s!"       fir-{backend} --list [--tag TAG]\n" ++
-    s!"       fir-{backend} --manifest"
+    s!"       fir-{backend} --manifest\n" ++
+    s!"       fir-{backend} --native-oracle-manifest"
 
 def main (backend : String) (runCase : Case → IO BackendResult)
     (args : List String) : IO UInt32 := do
@@ -865,6 +896,10 @@ def main (backend : String) (runCase : Case → IO BackendResult)
       return 0
   | ["--manifest"] =>
       for descriptor in descriptors do
+        Jsonl.emit descriptor
+      return 0
+  | ["--native-oracle-manifest"] =>
+      for descriptor in nativeOracleDescriptors do
         Jsonl.emit descriptor
       return 0
   | _ =>

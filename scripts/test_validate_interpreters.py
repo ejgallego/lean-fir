@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import validate_interpreters as harness
+import record_direct_native_ir as native_ir
 import validation_coverage_index as coverage_index
 import validation_harness as core
 import validation_lcnf as lcnf
@@ -7854,6 +7855,99 @@ class HarnessTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(harness.ValidationError, "duplicate diagnostic"):
             harness.diagnostics(duplicate)
+
+
+class DirectNativeIrTests(unittest.TestCase):
+    def native_ir_descriptor(self, digest: str) -> dict:
+        return {
+            "version": 2,
+            "caseId": "native-ir-case",
+            "entry": "Fir.Validation.nativeIrCase",
+            "dependencies": ["Fir.Validation.nativeIrHelper"],
+            "expectedArtifactSha256": digest,
+        }
+
+    def test_native_ir_manifest_is_strict_and_preserves_roots(self) -> None:
+        artifact = b"def nativeIrCase := return\n"
+        descriptor = self.native_ir_descriptor(native_ir.sha256_bytes(artifact))
+        parsed = native_ir.parse_manifest(
+            json.dumps(descriptor) + "\n",
+            ["fir-direct-native", "--native-oracle-manifest"],
+        )
+        self.assertEqual(parsed, [descriptor])
+
+        duplicate = "\n".join([json.dumps(descriptor), json.dumps(descriptor)])
+        with self.assertRaisesRegex(
+            core.ValidationError, "duplicate native IR attestation case"
+        ):
+            native_ir.parse_manifest(duplicate, ["native-ir-manifest"])
+
+        malformed = {**descriptor, "expectedArtifactSha256": "not-a-digest"}
+        with self.assertRaisesRegex(core.ValidationError, "SHA-256"):
+            native_ir.parse_manifest(json.dumps(malformed), ["native-ir-manifest"])
+
+    def test_native_ir_attestation_records_evidence_and_mismatch(self) -> None:
+        artifact = b"def nativeIrCase := return\n"
+        digest = native_ir.sha256_bytes(artifact)
+        descriptor = self.native_ir_descriptor(digest)
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            case_dir = out_dir / descriptor["caseId"]
+            case_dir.mkdir()
+            (case_dir / "program.lcnf").write_bytes(artifact)
+            (case_dir / "entry.txt").write_text(
+                descriptor["entry"] + "\n", encoding="utf-8"
+            )
+            (case_dir / "declarations.txt").write_text(
+                "\n".join(
+                    [descriptor["entry"], *descriptor["dependencies"], ""]
+                ),
+                encoding="utf-8",
+            )
+            (case_dir / "forms.txt").write_text(
+                "return\n", encoding="utf-8"
+            )
+
+            records, failures = native_ir.attest_artifacts(
+                [descriptor], out_dir
+            )
+            self.assertEqual(failures, [])
+            self.assertTrue(records[0]["matches"])
+            self.assertEqual(records[0]["artifactSha256"], digest)
+            self.assertTrue((case_dir / "attestation.json").is_file())
+            self.assertTrue((out_dir / "attestations.json").is_file())
+
+            mismatch = {
+                **descriptor,
+                "expectedArtifactSha256": "0" * 64,
+            }
+            records, failures = native_ir.attest_artifacts(
+                [mismatch], out_dir
+            )
+            self.assertFalse(records[0]["matches"])
+            self.assertEqual(len(failures), 1)
+
+    def test_native_ir_attestation_rejects_missing_root(self) -> None:
+        artifact = b"def nativeIrCase := return\n"
+        descriptor = self.native_ir_descriptor(native_ir.sha256_bytes(artifact))
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            case_dir = out_dir / descriptor["caseId"]
+            case_dir.mkdir()
+            (case_dir / "program.lcnf").write_bytes(artifact)
+            (case_dir / "entry.txt").write_text(
+                descriptor["entry"] + "\n", encoding="utf-8"
+            )
+            (case_dir / "declarations.txt").write_text(
+                descriptor["entry"] + "\n", encoding="utf-8"
+            )
+            (case_dir / "forms.txt").write_text(
+                "return\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "omits rooted declarations"
+            ):
+                native_ir.attest_artifacts([descriptor], out_dir)
 
 
 class CoverageIndexTests(unittest.TestCase):
