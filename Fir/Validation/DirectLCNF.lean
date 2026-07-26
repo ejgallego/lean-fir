@@ -102,6 +102,15 @@ private structure NativeMixedOwner where
   child : NativeHeapChild
   marker : Nat
 
+private structure NativeNestedChild where
+  grandchild : NativeHeapChild
+  marker : Nat
+
+private structure NativeNestedOwner where
+  proof : True
+  child : NativeNestedChild
+  marker : Nat
+
 @[extern "lean_is_exclusive_obj"]
 private opaque nativeIsExclusive {α : Type} (value : α) : Bool
 
@@ -112,6 +121,11 @@ private def replaceErasedOwner (_owner : NativeErasedOwner) (payload : Nat) :
 
 @[noinline]
 private def replaceMixedOwner (owner : NativeMixedOwner) (payload : Nat) :
+    NativeReplacement :=
+  { payload, marker := owner.marker }
+
+@[noinline]
+private def replaceNestedOwner (owner : NativeNestedOwner) (payload : Nat) :
     NativeReplacement :=
   { payload, marker := owner.marker }
 
@@ -155,6 +169,14 @@ private def nativePersistentResetErasedAndOwnedFields (payload : Nat) : Nat :=
   let replacement := replaceMixedOwner owner payload
   observeSharedMixedReset replacement.payload
     (!nativeIsExclusive child) (!nativeIsExclusive owner)
+
+@[noinline]
+private def nativeResetErasedAndNestedOwnedFields (first : Nat) : Nat :=
+  let grandchild : NativeHeapChild := { first, second := first + 1 }
+  let child : NativeNestedChild := { grandchild, marker := 0 }
+  let owner : NativeNestedOwner := { proof := True.intro, child, marker := 0 }
+  let replacement := replaceNestedOwner owner 73
+  observeMixedReset replacement.payload (!nativeIsExclusive grandchild)
 
 private def identityDecl : LCNF.Decl .impure :=
   decl `directIdentity #[param z] (.code (.return z))
@@ -213,6 +235,12 @@ private def replacementInfo : LCNF.CtorInfo :=
 
 private def mixedOwnerInfo : LCNF.CtorInfo :=
   { name := `NativeMixedOwner.mk, cidx := 0, size := 3, usize := 0, ssize := 0 }
+
+private def nestedChildInfo : LCNF.CtorInfo :=
+  { name := `NativeNestedChild.mk, cidx := 0, size := 2, usize := 0, ssize := 0 }
+
+private def nestedOwnerInfo : LCNF.CtorInfo :=
+  { name := `NativeNestedOwner.mk, cidx := 0, size := 3, usize := 0, ssize := 0 }
 
 private def falseInfo : LCNF.CtorInfo :=
   { name := ``Bool.false, cidx := 0, size := 0, usize := 0, ssize := 0 }
@@ -341,6 +369,35 @@ private def persistentResetErasedAndOwnedFieldsFormTrace : Array String :=
   #["fap", "lit", "lit", "ctor", "erased", "lit", "ctor", "return", "oproj",
     "oproj", "reset", "lit", "reuse", "oproj", "isShared", "isShared", "cases",
     "cases", "lit", "return"]
+
+private def resetErasedAndNestedOwnedFieldsCode : LCNF.Code .impure :=
+  .let (letDecl x (.lit (.nat 41))) <|
+  .let (letDecl y (.lit (.nat 42))) <|
+  .let (letDecl q (.ctor heapChildInfo #[.fvar x, .fvar y])) <|
+  .inc q 1 false false <|
+  .let (letDecl x (.lit (.nat 0))) <|
+  .let (letDecl c (.ctor nestedChildInfo #[.fvar q, .fvar x])) <|
+  .let (letDecl e .erased) <|
+  .let (letDecl p (.ctor nestedOwnerInfo #[.fvar e, .fvar c, .fvar x])) <|
+  .let (letDecl r (.reset 3 p)) <|
+  .let (letDecl y (.lit (.nat 73))) <|
+  .let (letDecl z (.reuse r replacementInfo true #[.fvar y, .fvar x])) <|
+  .let (letDecl x (.oproj 0 z)) <|
+  .let (typedLetDecl s u8Type (.isShared q)) <|
+  .cases (.mk ``Bool objType s #[
+    .ctorAlt falseInfo (.return x),
+    .ctorAlt trueInfo <|
+      .let (letDecl y (.lit (.nat 74))) (.return y)])
+
+private def resetErasedAndNestedOwnedFieldsProgram : ImpureProgram := {
+  decls := #[
+    typedDecl `directResetErasedAndNestedOwnedFields #[] objType
+      (.code resetErasedAndNestedOwnedFieldsCode)
+  ] }
+
+private def resetErasedAndNestedOwnedFieldsFormTrace : Array String :=
+  #["lit", "lit", "ctor", "inc", "lit", "ctor", "erased", "ctor", "reset",
+    "lit", "reuse", "oproj", "isShared", "cases", "return"]
 
 def cases : Array Case := #[
   { validationCase := {
@@ -527,10 +584,46 @@ def cases : Array Case := #[
           "Reset a cached persistent mixed owner and preserve both owner and child reachability"
       }
     }
-    program := persistentResetErasedAndOwnedFieldsProgram }
+    program := persistentResetErasedAndOwnedFieldsProgram },
+  { validationCase := {
+      id := "machine-reset-erased-and-nested-owned-fields"
+      entry := `directResetErasedAndNestedOwnedFields
+      resultSchema := .nat
+      native := fun _ => .nat (nativeResetErasedAndNestedOwnedFields 41)
+      tags :=
+        #["direct-lcnf", "machine", "ownership", "constructor", "reset", "reuse",
+          "erased", "isShared", "reference-count", "recursive-release", "nested",
+          "boundary"]
+      requiredLcnfForms :=
+        #["lit", "ctor", "inc", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfForms :=
+        #["lit", "ctor", "inc", "erased", "reset", "reuse", "oproj", "isShared",
+          "cases", "return"]
+      requiredExecutedLcnfFormCounts := #[
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "inc", minimum := 1, maximum := some 1 },
+        { form := "erased", minimum := 1, maximum := some 1 },
+        { form := "reset", minimum := 1, maximum := some 1 },
+        { form := "reuse", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 1, maximum := some 1 }
+      ]
+      requiredExecutedLcnfFormTrace := some resetErasedAndNestedOwnedFieldsFormTrace
+      provenance := {
+        suite := "fir-direct-lcnf"
+        path := "Fir/Validation/DirectLCNF.lean"
+        note :=
+          "Reset a unique nested owner and observe recursive release making its grandchild exclusive"
+      }
+    }
+    program := resetErasedAndNestedOwnedFieldsProgram }
 ]
 
-#guard cases.size == 6
+#guard cases.size == 7
 
 #guard cases.all fun directCase =>
   directCase.validationCase.requiredExecutedLcnfFormTrace.isSome
