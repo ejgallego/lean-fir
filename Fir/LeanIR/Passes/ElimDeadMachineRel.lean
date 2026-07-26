@@ -4372,6 +4372,33 @@ theorem continueCode_reachableRelated
     sourceFrameRoots, targetFrameRoots,
     programs, .code continuation joins env, frames, runtime⟩
 
+/-- Resume related residual continuations without forgetting their hereditary
+exact compiler provenance. -/
+theorem continueCode_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    BinderReadyReachableMachineRelated fuel rho
+      { sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      { targetState with control := .code targetContinuation } := by
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨envRootsOn used sourceState.env,
+    envRootsOn used targetState.env,
+    sourceFrameRoots, targetFrameRoots,
+    programs, .code continuation joins env, frames, runtime⟩
+
 /-- Deleted object-field write: the source updates an unreachable cell and
 the target stutters at the transformed continuation. -/
 theorem coreStep_deletedObjectSet_reachableRelated
@@ -4806,6 +4833,86 @@ theorem coreStep_setTag_reachableRelated
           sourceFrameRoots, targetFrameRoots,
           programs, .code continuation joins env, frames, nextRuntime⟩
 
+/-- Hereditary counterpart of `coreStep_setTag_reachableRelated`: the paired
+runtime update resumes continuations that still carry exact compiler
+provenance. -/
+theorem coreStep_setTag_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : setTag sourceState.runtime objectValue tag =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      setTag targetState.runtime targetObjectValue tag =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.setTag object tag sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.setTag object tag targetContinuation)) =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.setTagBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold BinderReadyReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- A successful non-persistent increment is matched on the related live
 operand and preserves the reachable machine relation. -/
 theorem coreStep_increment_reachableRelated
@@ -4879,6 +4986,84 @@ theorem coreStep_increment_reachableRelated
         simp only
         rw [targetEffect]
       · unfold ReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
+/-- Hereditary paired rule for a successful non-persistent increment. -/
+theorem coreStep_increment_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : incValue sourceState.runtime objectValue amount check =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      incValue targetState.runtime targetObjectValue amount check =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.inc object amount check false sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.inc object amount check false targetContinuation)) =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.incValueBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold BinderReadyReachableMachineRelated
         exact ⟨envRootsOn used sourceState.env,
           envRootsOn used targetState.env,
           sourceFrameRoots, targetFrameRoots,
@@ -4962,6 +5147,84 @@ theorem coreStep_decrement_reachableRelated
           sourceFrameRoots, targetFrameRoots,
           programs, .code continuation joins env, frames, nextRuntime⟩
 
+/-- Hereditary paired rule for a successful non-persistent decrement. -/
+theorem coreStep_decrement_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : decValue sourceState.runtime objectValue amount check =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      decValue targetState.runtime targetObjectValue amount check =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.dec object amount check false compilerObjects sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.dec object amount check false compilerObjects targetContinuation)) =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.decValueBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep, Bool.false_eq_true, ↓reduceIte]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold BinderReadyReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
 /-- A successful retained delete is matched on the related live operand and
 preserves the reachable machine relation. -/
 theorem coreStep_delete_reachableRelated
@@ -5035,6 +5298,84 @@ theorem coreStep_delete_reachableRelated
         simp only
         rw [targetEffect]
       · unfold ReachableMachineRelated
+        exact ⟨envRootsOn used sourceState.env,
+          envRootsOn used targetState.env,
+          sourceFrameRoots, targetFrameRoots,
+          programs, .code continuation joins env, frames, nextRuntime⟩
+
+/-- Hereditary paired rule for a successful retained delete. -/
+theorem coreStep_delete_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : deleteValue sourceState.runtime objectValue =
+      .ok sourceNextRuntime)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      deleteValue targetState.runtime targetObjectValue =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.del object sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.del object targetContinuation)) =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have sourceObjectLookup :=
+    lookupValue_eq_ok_iff.mp objectRead
+  have objects := env object objectMember
+  generalize targetObjectLookup :
+    lookup targetState.env object = targetObjectOption at objects
+  rw [sourceObjectLookup] at objects
+  cases objects with
+  | some objectValues =>
+      rename_i targetObjectValue
+      have targetObjectRead :
+          lookupValue targetState.env object = .ok targetObjectValue :=
+        lookupValue_eq_ok_iff.mpr targetObjectLookup
+      have objectRoot :
+          objectValue ∈
+            envRootsOn used sourceState.env ++ sourceFrameRoots := by
+        exact List.mem_append_left _
+          (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+      rcases runtime.deleteValueBoth_of_related objectRoot objectValues effect with
+        ⟨targetNextRuntime, targetEffect, nextRuntime⟩
+      refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+        targetEffect, ?_⟩
+      dsimp only
+      refine ⟨?_, ?_, ?_⟩
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [objectRead]
+        simp only
+        rw [effect]
+      · unfold withCodeControl
+        simp only [coreStep]
+        rw [targetObjectRead]
+        simp only
+        rw [targetEffect]
+      · unfold BinderReadyReachableMachineRelated
         exact ⟨envRootsOn used sourceState.env,
           envRootsOn used targetState.env,
           sourceFrameRoots, targetFrameRoots,
@@ -13050,6 +13391,121 @@ theorem match_setTagCodeStep
             ⟨targetPath, finalRelated⟩
           exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
 
+/-- Hereditary semantic matcher for a retained constructor-tag update. -/
+theorem match_setTagCodeStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.setTag object tag sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.setTag object tag targetContinuation)) targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.setTag object tag sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize effect :
+        setTag sourceState.runtime objectValue tag = effectResult
+      cases effectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              effect, fail]
+          exact (noStep done).elim
+      | ok sourceNextRuntime =>
+          rcases coreStep_setTag_binderReadyReachableRelated
+              sourceState targetState programs frames continuation joins env
+              objectMember objectRead effect runtime with
+            ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+              targetEffect, sourceTransition, targetTransition,
+              afterRelated⟩
+          rcases match_internalCoreSteps_binderReady
+              sourceTransition targetTransition afterRelated step with
+            ⟨targetPath, finalRelated⟩
+          exact ⟨_, targetPath, finalRelated⟩
+
+/-- An exact tag-update view supplies the live operand and hereditary
+continuation required by the runtime matcher. -/
+theorem ExactShadowCodeBinderReady.match_setTagStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel tag : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.tagSet
+          (object := object) (tag := tag) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.setTag object tag sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.setTag object tag targetContinuation)) targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_setTagCodeStep_binderReady sourceState targetState programs
+    frames (ready.tagSet_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
 /-- Complete graph-level matcher for reference-count increments. Persistent
 instructions are synchronized administrative steps; ordinary increments use
 the paired reachable-runtime update. -/
@@ -13149,6 +13605,151 @@ theorem match_incrementCodeStep
                   afterRelated step with
                 ⟨targetPath, finalRelated⟩
               exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
+
+/-- Hereditary semantic matcher for reference-count increments. -/
+theorem match_incrementCodeStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.inc object amount check persistent sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.inc object amount check persistent targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases persistent with
+  | true =>
+      let sourceNext := {
+        sourceState with control := .code sourceContinuation }
+      let targetNext := {
+        targetState with control := .code targetContinuation }
+      have sourceTransition :
+          coreStep (withCodeControl sourceState
+            (.inc object amount check true sourceContinuation)) =
+            .next sourceNext := by
+        simp [sourceNext, withCodeControl, coreStep]
+      have targetTransition :
+          coreStep (withCodeControl targetState
+            (.inc object amount check true targetContinuation)) =
+            .next targetNext := by
+        simp [targetNext, withCodeControl, coreStep]
+      have afterRelated : BinderReadyReachableMachineRelated fuel rho
+          sourceNext targetNext := by
+        exact continueCode_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env runtime
+      rcases match_internalCoreSteps_binderReady
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨targetNext, targetPath, finalRelated⟩
+  | false =>
+      let sourceCurrent := withCodeControl sourceState
+        (.inc object amount check false sourceContinuation)
+      have noStep {observation : Observation}
+          (done : coreStep sourceCurrent = .done observation) : False := by
+        cases step with
+        | internal transition =>
+            rw [show withCodeControl sourceState
+              (.inc object amount check false sourceContinuation) =
+                sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+        | external transition externalProof =>
+            rw [show withCodeControl sourceState
+              (.inc object amount check false sourceContinuation) =
+                sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+      generalize objectRead :
+        lookupValue sourceState.env object = objectResult
+      cases objectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+          exact (noStep done).elim
+      | ok objectValue =>
+          generalize effect :
+            incValue sourceState.runtime objectValue amount check = effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_increment_binderReadyReachableRelated
+                  sourceState targetState programs frames continuation joins
+                  env objectMember objectRead effect runtime with
+                ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+                  targetEffect, sourceTransition, targetTransition,
+                  afterRelated⟩
+              rcases match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
+/-- An exact increment view supplies its live operand and hereditary
+continuation to the persistent or runtime-updating matcher. -/
+theorem ExactShadowCodeBinderReady.match_incrementStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel amount : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId} {check persistent : Bool}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.increment
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.inc object amount check persistent sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.inc object amount check persistent targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_incrementCodeStep_binderReady sourceState targetState programs
+    frames (ready.increment_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
 
 /-- Complete graph-level matcher for reference-count decrements. Persistent
 instructions are synchronized administrative steps; ordinary decrements use
@@ -13253,6 +13854,159 @@ theorem match_decrementCodeStep
                 ⟨targetPath, finalRelated⟩
               exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
 
+/-- Hereditary semantic matcher for reference-count decrements. -/
+theorem match_decrementCodeStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.dec object amount check persistent compilerObjects
+          sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.dec object amount check persistent compilerObjects
+            targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases persistent with
+  | true =>
+      let sourceNext := {
+        sourceState with control := .code sourceContinuation }
+      let targetNext := {
+        targetState with control := .code targetContinuation }
+      have sourceTransition :
+          coreStep (withCodeControl sourceState
+            (.dec object amount check true compilerObjects
+              sourceContinuation)) =
+            .next sourceNext := by
+        simp [sourceNext, withCodeControl, coreStep]
+      have targetTransition :
+          coreStep (withCodeControl targetState
+            (.dec object amount check true compilerObjects
+              targetContinuation)) =
+            .next targetNext := by
+        simp [targetNext, withCodeControl, coreStep]
+      have afterRelated : BinderReadyReachableMachineRelated fuel rho
+          sourceNext targetNext := by
+        exact continueCode_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env runtime
+      rcases match_internalCoreSteps_binderReady
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨targetNext, targetPath, finalRelated⟩
+  | false =>
+      let sourceCurrent := withCodeControl sourceState
+        (.dec object amount check false compilerObjects sourceContinuation)
+      have noStep {observation : Observation}
+          (done : coreStep sourceCurrent = .done observation) : False := by
+        cases step with
+        | internal transition =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+        | external transition externalProof =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+      generalize objectRead :
+        lookupValue sourceState.env object = objectResult
+      cases objectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+          exact (noStep done).elim
+      | ok objectValue =>
+          generalize effect :
+            decValue sourceState.runtime objectValue amount check = effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_decrement_binderReadyReachableRelated
+                  sourceState targetState programs frames continuation joins
+                  env objectMember objectRead effect runtime with
+                ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+                  targetEffect, sourceTransition, targetTransition,
+                  afterRelated⟩
+              rcases match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
+/-- An exact decrement view supplies its live operand and hereditary
+continuation to the persistent or runtime-updating matcher. -/
+theorem ExactShadowCodeBinderReady.match_decrementStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel amount : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId} {check persistent : Bool}
+    {compilerObjects : Option Nat}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.decrement
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent)
+          (objects := compilerObjects) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.dec object amount check persistent compilerObjects
+          sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.dec object amount check persistent compilerObjects
+            targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_decrementCodeStep_binderReady sourceState targetState programs
+    frames (ready.decrement_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
 /-- Complete graph-level matcher for retained deletes. Source faults are
 terminal; a successful erased or live-heap delete takes one matching target
 step. -/
@@ -13324,6 +14078,119 @@ theorem match_deleteCodeStep
               afterRelated step with
             ⟨targetPath, finalRelated⟩
           exact ⟨_, targetPath, ⟨rho, finalRelated⟩⟩
+
+/-- Hereditary semantic matcher for retained deletes. -/
+theorem match_deleteCodeStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState (.del object sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState (.del object targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.del object sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.del object sourceContinuation) = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.del object sourceContinuation) = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize effect :
+        deleteValue sourceState.runtime objectValue = effectResult
+      cases effectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              effect, fail]
+          exact (noStep done).elim
+      | ok sourceNextRuntime =>
+          rcases coreStep_delete_binderReadyReachableRelated
+              sourceState targetState programs frames continuation joins env
+              objectMember objectRead effect runtime with
+            ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+              targetEffect, sourceTransition, targetTransition,
+              afterRelated⟩
+          rcases match_internalCoreSteps_binderReady
+              sourceTransition targetTransition afterRelated step with
+            ⟨targetPath, finalRelated⟩
+          exact ⟨_, targetPath, finalRelated⟩
+
+/-- An exact delete view supplies its live operand and hereditary
+continuation to the runtime matcher. -/
+theorem ExactShadowCodeBinderReady.match_deleteStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.delete
+          (object := object) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState (.del object sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState (.del object targetContinuation))
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_deleteCodeStep_binderReady sourceState targetState programs
+    frames (ready.delete_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
 
 /-- Unified semantic-step dispatcher for an active related code graph.
 `ReachableCodeReadyAt` supplies the exact ownership certificate required by
