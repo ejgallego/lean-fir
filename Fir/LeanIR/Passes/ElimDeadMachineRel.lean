@@ -3408,6 +3408,82 @@ theorem coreStep_return_reachableRelated
               sourceFrameRoots, targetFrameRoots,
               programs, .yielded values, frames, nextRuntime⟩
 
+/-- Hereditary counterpart of `coreStep_return_reachableRelated`.  Returning
+narrows the active roots to the related result values while preserving exact
+provenance in every saved code-bearing frame and declaration body. -/
+theorem coreStep_return_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (member : used.contains result = true)
+    (sourceRead : lookup sourceState.env result = some sourceValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetValue,
+      let sourceAfter := {
+        sourceState with control := .yielded sourceValue }
+      let targetAfter := {
+        targetState with control := .yielded targetValue }
+      lookup targetState.env result = some targetValue ∧
+        ValueRel rho sourceValue targetValue ∧
+        coreStep { sourceState with control := .code (.return result) } =
+          .next sourceAfter ∧
+        coreStep { targetState with control := .code (.return result) } =
+          .next targetAfter ∧
+        BinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  have looked := env result member
+  rw [sourceRead] at looked
+  generalize targetRead : lookup targetState.env result = targetResult
+    at looked
+  cases targetResult with
+  | none => cases looked
+  | some targetValue =>
+      cases looked with
+      | some values =>
+          dsimp only
+          have sourceRoot : sourceValue ∈
+              envRootsOn used sourceState.env :=
+            lookup_mem_envRootsOn member sourceRead
+          have targetRoot : targetValue ∈
+              envRootsOn used targetState.env :=
+            lookup_mem_envRootsOn member targetRead
+          have extra : ListRel (ValueRel rho)
+              ([sourceValue] ++ sourceFrameRoots)
+              ([targetValue] ++ targetFrameRoots) :=
+            listRel_append (.cons values .nil) frames.roots
+          have sourceSubset : RootSubset
+              ([sourceValue] ++ sourceFrameRoots)
+              (envRootsOn used sourceState.env ++ sourceFrameRoots) := by
+            intro value live
+            simp only [List.mem_append, List.mem_singleton] at live ⊢
+            rcases live with same | framed
+            · subst value
+              exact Or.inl sourceRoot
+            · exact Or.inr framed
+          have targetSubset : RootSubset
+              ([targetValue] ++ targetFrameRoots)
+              (envRootsOn used targetState.env ++ targetFrameRoots) := by
+            intro value live
+            simp only [List.mem_append, List.mem_singleton] at live ⊢
+            rcases live with same | framed
+            · subst value
+              exact Or.inl targetRoot
+            · exact Or.inr framed
+          have nextRuntime := runtime.restrictExtra extra
+            sourceSubset targetSubset
+          refine ⟨targetValue, rfl, values, ?_, ?_, ?_⟩
+          · simp [coreStep, lookupValue, sourceRead]
+          · simp [coreStep, lookupValue, targetRead]
+          · unfold BinderReadyReachableMachineRelated
+            exact ⟨[sourceValue], [targetValue],
+              sourceFrameRoots, targetFrameRoots,
+              programs, .yielded values, frames, nextRuntime⟩
+
 /-- A retained return whose covered result is absent from the source
 environment has an absent target lookup as well.  Both machines therefore
 terminate with the same address-free `unknownVar` fault. -/
@@ -11406,6 +11482,94 @@ theorem match_returnCodeStep
       (source := sourceCurrent) (target := targetCurrent)
       ⟨rho, currentRelated⟩ rfl rfl (by simpa [sourceCurrent] using step))
   simpa [sourceCurrent, targetCurrent] using matched
+
+/-- Strong graph-free matcher for a retained return.  The current exact graph
+is consumed by the control transfer, while hereditary provenance remains in
+the saved frames and program relation. -/
+theorem match_returnStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (member : used.contains result = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.return result) } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.return result) } targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  generalize sourceReadEq :
+    lookup sourceState.env result = sourceRead
+  cases sourceRead with
+  | none =>
+      have sourceDone :
+          coreStep { sourceState with control := .code (.return result) } =
+            .done (observe
+              { sourceState with control := .code (.return result) }
+              (.fault (.unknownVar result))) := by
+        simp [coreStep, lookupValue, sourceReadEq, fail]
+      cases step with
+      | internal actual =>
+          rw [sourceDone] at actual
+          contradiction
+      | external actual externalProof =>
+          rw [sourceDone] at actual
+          contradiction
+  | some sourceValue =>
+      rcases coreStep_return_binderReadyReachableRelated
+          sourceState targetState programs frames env member sourceReadEq
+          runtime with
+        ⟨targetValue, targetRead, values,
+          sourceTransition, targetTransition, afterRelated⟩
+      rcases match_internalCoreSteps_binderReady
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨_, targetPath, finalRelated⟩
+
+/-- Terminal exact-return view lifted end to end into the hereditary machine
+relation.  Its active graph disappears after yielding the value, so only
+coverage of the result local and the already-strong saved state remain. -/
+theorem ExactShadowCodeBinderReady.match_returnStep
+    {initial ambient : UsedLocals}
+    {terminalFuel fuel : Nat}
+    {result : FVarId}
+    (_ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.return
+          (initial := initial) (fuel := terminalFuel) (result := result)))
+    (fuelBound : terminalFuel ≤ fuel)
+    (usedBound : UsedSubset (initial.insert result) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.return result) } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.return result) } targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let graph :=
+    (ExactShadowCodeView.return
+      (initial := initial) (fuel := terminalFuel) (result := result)).toGraph
+      |>.toShadowCodeGraphAt fuelBound usedBound
+  have member : ambient.contains result = true := by
+    cases graph.covered with
+    | ret member => exact member
+  exact match_returnStep_binderReady sourceState targetState programs frames
+    env member runtime step
 
 /-- Graph-level semantic-step dispatcher for retained jumps.  Every failure
 branch is terminal and contradicts the `Step` premise; successful lookup,
