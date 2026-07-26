@@ -320,6 +320,19 @@ unsatisfied. This catches removal of a fixture together with its local
 obligations, including loss of the direct tier's otherwise source-unreachable
 `admin:yield-apply`.
 
+The index's `attribution` block explains where that aggregate coverage comes
+from. It records every case, static form, executed form, administrative kind,
+and executed external together with the ordered tier list that observed it.
+Policy-required items remain in the inventory even when no tier observed them,
+so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
+also retain contribution counts and the exact items unique to that tier. In the
+current baseline, the 97 source cases are shared by the source-LCNF and V8
+tiers, the two direct cases are unique to the direct tier, and
+`admin:yield-apply` is the direct tier's unique administrative contribution.
+The source tier uniquely contributes 18 static forms, 18 executed forms, and
+all nine interpreter externals. Attribution is derived from the same verified
+inputs and policy and is covered by the index identity.
+
 The driver discovers the corpus from the plan-selected manifest backend
 (`native` by default), then composes named backend adapters and optional
 build-only product providers. Each adapter owns

@@ -8072,6 +8072,43 @@ class CoverageIndexTests(unittest.TestCase):
             aggregate["steps"]["unobservedAdministrativeKinds"], []
         )
         self.assertTrue(aggregate["complete"])
+        attribution = coverage_index.coverage_attribution(
+            [
+                {
+                    "id": "source",
+                    "caseIds": ["source"],
+                    "machineCoverage": source,
+                },
+                {
+                    "id": "direct",
+                    "caseIds": ["direct"],
+                    "machineCoverage": direct,
+                },
+            ],
+            {
+                "machine": {
+                    "requiredStaticForms": ["return"],
+                    "requiredExecutedForms": ["return"],
+                    "requiredAdministrativeKinds": [
+                        "admin:yield-apply",
+                        "admin:yield-done",
+                    ],
+                    "requiredExternals": [],
+                }
+            },
+        )
+        apply_attribution = next(
+            item
+            for item in attribution["administrativeKinds"]["items"]
+            if item["name"] == "admin:yield-apply"
+        )
+        self.assertEqual(apply_attribution["tiers"], ["direct"])
+        self.assertTrue(apply_attribution["uniqueContribution"])
+        self.assertEqual(
+            attribution["tiers"][1]["uniqueContributions"]["cases"],
+            ["direct"],
+        )
+        self.assertTrue(attribution["summary"]["complete"])
 
     def test_index_is_deterministic_and_verifies_current_inputs(self) -> None:
         matrix = self.matrix(["case"], ["native", "lcnf"], [("native", "lcnf")])
@@ -8122,7 +8159,11 @@ class CoverageIndexTests(unittest.TestCase):
         self.assertEqual(first["summary"]["comparisonCount"], 1)
         self.assertEqual(first["summary"]["machine"]["caseCount"], 1)
         self.assertEqual(first["summary"]["policyFailureCount"], 0)
+        self.assertEqual(
+            first["summary"]["attributionUncoveredRequiredItemCount"], 0
+        )
         self.assertTrue(first["policy"]["satisfied"])
+        self.assertTrue(first["attribution"]["summary"]["complete"])
         self.assertTrue(first["summary"]["complete"])
 
     def test_policy_reports_monotone_floor_and_inventory_regressions(self) -> None:
@@ -8136,6 +8177,7 @@ class CoverageIndexTests(unittest.TestCase):
         )
         tier = {
             "id": "source",
+            "caseIds": ["case"],
             "caseCount": 1,
             "backends": [{"backend": "native"}, {"backend": "lcnf"}],
             "pairs": [{"comparedCases": 1}],
@@ -8169,6 +8211,17 @@ class CoverageIndexTests(unittest.TestCase):
             ["admin:yield-apply"],
         )
         self.assertFalse(report["satisfied"])
+        attribution = coverage_index.coverage_attribution([tier], report)
+        apply_attribution = next(
+            item
+            for item in attribution["administrativeKinds"]["items"]
+            if item["name"] == "admin:yield-apply"
+        )
+        self.assertEqual(apply_attribution["tiers"], [])
+        self.assertEqual(
+            attribution["summary"]["uncoveredRequiredItemCount"], 1
+        )
+        self.assertFalse(attribution["summary"]["complete"])
 
     def test_policy_rejects_ambiguous_required_inventories(self) -> None:
         policy = self.policy("source", ["native", "lcnf"])
@@ -8268,6 +8321,7 @@ class CoverageIndexTests(unittest.TestCase):
             },
             "tiers": [],
             "policy": {},
+            "attribution": {},
             "summary": {},
         }
         with tempfile.TemporaryDirectory() as directory:

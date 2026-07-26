@@ -776,6 +776,180 @@ def coverage_policy_report(
     }
 
 
+def _attributed_dimension(
+    contributions: dict[str, list[str]],
+    tier_order: list[str],
+    required: list[str],
+) -> dict:
+    required_set = set(required)
+    universe = {
+        *required_set,
+        *(
+            item
+            for tier_items in contributions.values()
+            for item in tier_items
+        ),
+    }
+    items = []
+    for name in sorted(universe):
+        contributing_tiers = [
+            tier_id
+            for tier_id in tier_order
+            if name in contributions.get(tier_id, [])
+        ]
+        items.append(
+            {
+                "name": name,
+                "tiers": contributing_tiers,
+                "requiredByPolicy": name in required_set,
+                "uniqueContribution": len(contributing_tiers) == 1,
+            }
+        )
+    return {
+        "items": items,
+        "summary": {
+            "itemCount": len(items),
+            "observedItemCount": sum(int(bool(item["tiers"])) for item in items),
+            "requiredItemCount": len(required_set),
+            "coveredRequiredItemCount": sum(
+                int(item["requiredByPolicy"] and bool(item["tiers"]))
+                for item in items
+            ),
+            "uncoveredRequiredItemCount": sum(
+                int(item["requiredByPolicy"] and not item["tiers"])
+                for item in items
+            ),
+            "uniqueContributionItemCount": sum(
+                int(item["uniqueContribution"]) for item in items
+            ),
+        },
+    }
+
+
+def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
+    """Attribute cases and machine observations to their contributing tiers."""
+    tier_order = [tier["id"] for tier in tiers]
+    case_contributions = {
+        tier["id"]: list(tier["caseIds"]) for tier in tiers
+    }
+    static_form_contributions = {
+        tier["id"]: (
+            tier["machineCoverage"]["forms"]["staticObserved"]
+            if tier["machineCoverage"] is not None
+            else []
+        )
+        for tier in tiers
+    }
+    executed_form_contributions = {
+        tier["id"]: (
+            tier["machineCoverage"]["forms"]["executedObserved"]
+            if tier["machineCoverage"] is not None
+            else []
+        )
+        for tier in tiers
+    }
+    administrative_contributions = {
+        tier["id"]: (
+            [
+                item["kind"]
+                for item in tier["machineCoverage"]["steps"][
+                    "observedAdministrativeKinds"
+                ]
+            ]
+            if tier["machineCoverage"] is not None
+            else []
+        )
+        for tier in tiers
+    }
+    external_contributions = {
+        tier["id"]: (
+            tier["machineCoverage"]["externals"]["executedObserved"]
+            if tier["machineCoverage"] is not None
+            else []
+        )
+        for tier in tiers
+    }
+    machine_policy = policy["machine"]
+    dimensions = {
+        "cases": _attributed_dimension(
+            case_contributions, tier_order, []
+        ),
+        "staticForms": _attributed_dimension(
+            static_form_contributions,
+            tier_order,
+            machine_policy["requiredStaticForms"],
+        ),
+        "executedForms": _attributed_dimension(
+            executed_form_contributions,
+            tier_order,
+            machine_policy["requiredExecutedForms"],
+        ),
+        "administrativeKinds": _attributed_dimension(
+            administrative_contributions,
+            tier_order,
+            machine_policy["requiredAdministrativeKinds"],
+        ),
+        "externals": _attributed_dimension(
+            external_contributions,
+            tier_order,
+            machine_policy["requiredExternals"],
+        ),
+    }
+    tier_reports = []
+    contribution_maps = {
+        "cases": case_contributions,
+        "staticForms": static_form_contributions,
+        "executedForms": executed_form_contributions,
+        "administrativeKinds": administrative_contributions,
+        "externals": external_contributions,
+    }
+    for tier in tiers:
+        tier_id = tier["id"]
+        tier_reports.append(
+            {
+                "id": tier_id,
+                "machineCoveragePresent": (
+                    tier["machineCoverage"] is not None
+                ),
+                "contributionCounts": {
+                    name: len(contributions[tier_id])
+                    for name, contributions in contribution_maps.items()
+                },
+                "uniqueContributions": {
+                    name: [
+                        item["name"]
+                        for item in dimensions[name]["items"]
+                        if item["tiers"] == [tier_id]
+                    ]
+                    for name in contribution_maps
+                },
+            }
+        )
+    uncovered = sum(
+        dimension["summary"]["uncoveredRequiredItemCount"]
+        for name, dimension in dimensions.items()
+        if name != "cases"
+    )
+    unique = sum(
+        dimension["summary"]["uniqueContributionItemCount"]
+        for dimension in dimensions.values()
+    )
+    return {
+        **dimensions,
+        "tiers": tier_reports,
+        "summary": {
+            "machineCoverageTiers": [
+                tier["id"]
+                for tier in tiers
+                if tier["machineCoverage"] is not None
+            ],
+            "uncoveredRequiredItemCount": uncovered,
+            "uniqueContributionItemCount": unique,
+            "complete": uncovered == 0,
+        },
+    }
+
+
 def _tier_from_config(
     raw_tier: object,
     plan_path: Path,
@@ -1010,11 +1184,16 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         "machine": machine,
     }
     policy = coverage_policy_report(plan["policy"], tiers, summary)
+    attribution = coverage_attribution(tiers, policy)
     summary["policyFailureCount"] = policy["failureCount"]
+    summary["attributionUncoveredRequiredItemCount"] = attribution["summary"][
+        "uncoveredRequiredItemCount"
+    ]
     summary["complete"] = (
         all(tier["complete"] for tier in tiers)
         and machine["complete"]
         and policy["satisfied"]
+        and attribution["summary"]["complete"]
     )
     provisional = {
         "version": PROTOCOL_VERSION,
@@ -1024,6 +1203,7 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         },
         "tiers": tiers,
         "policy": policy,
+        "attribution": attribution,
         "summary": summary,
     }
     return {
@@ -1035,6 +1215,7 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         "plan": provisional["plan"],
         "tiers": provisional["tiers"],
         "policy": provisional["policy"],
+        "attribution": provisional["attribution"],
         "summary": provisional["summary"],
     }
 
@@ -1055,6 +1236,7 @@ def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
         "plan",
         "tiers",
         "policy",
+        "attribution",
         "summary",
     }:
         raise ValidationError("coverage index has an unsupported schema")
@@ -1124,6 +1306,37 @@ def render_coverage_index(report: dict) -> list[str]:
         f"obligation failures {machine['obligationFailureCount']}, "
         f"telemetry failures {machine['telemetryFailureCount']}"
     )
+    attribution = report["attribution"]
+    lines.append(
+        "coverage attribution: "
+        f"cases {attribution['cases']['summary']['observedItemCount']}, "
+        f"static forms "
+        f"{attribution['staticForms']['summary']['observedItemCount']}, "
+        f"executed forms "
+        f"{attribution['executedForms']['summary']['observedItemCount']}, "
+        f"administrative kinds "
+        f"{attribution['administrativeKinds']['summary']['observedItemCount']}, "
+        f"externals {attribution['externals']['summary']['observedItemCount']}, "
+        f"unique contributions "
+        f"{attribution['summary']['uniqueContributionItemCount']}, "
+        f"uncovered required "
+        f"{attribution['summary']['uncoveredRequiredItemCount']}"
+    )
+    for tier in attribution["tiers"]:
+        unique = tier["uniqueContributions"]
+        unique_administrative = (
+            ",".join(unique["administrativeKinds"])
+            if unique["administrativeKinds"]
+            else "none"
+        )
+        lines.append(
+            f"coverage attribution tier {tier['id']}: "
+            f"unique cases {len(unique['cases'])}, "
+            f"static forms {len(unique['staticForms'])}, "
+            f"executed forms {len(unique['executedForms'])}, "
+            f"administrative {unique_administrative}, "
+            f"externals {len(unique['externals'])}"
+        )
     policy = report["policy"]
     lines.append(
         "coverage policy: "
