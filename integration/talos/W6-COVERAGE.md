@@ -117,7 +117,10 @@ Cross-cutting W6.5 state:
 - the raw one-field-reset/two-field-reuse counterexample still succeeds in FIR
   and trips the exact concrete `reuseAllocationTooSmall` capacity check, but
   `reuseCapacitySafeProgram` now rejects it from `WasmSupported`; fitting and
-  shared-reset positive programs remain admitted;
+  shared-reset positive programs remain admitted; a dynamic capacity-value
+  invariant now connects fitting retained evidence to the exact concrete live
+  header, and the in-place reuse refinement derives its layout-fit premise
+  from that bridge rather than accepting it independently;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
   `usizeProj`, and all four supported integer `scalarProj` variants are

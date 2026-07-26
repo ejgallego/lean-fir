@@ -3182,6 +3182,19 @@ join-parameter token transport are conservatively rejected for now. This is
 an intentionally unstable proof boundary that may be widened with stronger
 provenance results; no FIR semantic contract or executable ABI changed.
 
+W6.6dg gives that static boundary a concrete dynamic meaning. The
+`ReuseCapacityValueRel` invariant covers constructor values and reset tokens:
+definitely-empty evidence is represented by a tagged object or the zero token,
+while retained evidence on a heap value names a readable live header whose
+allocation realizes the tracked lower bound. Combining this relation with the
+validator's fitting fact now derives the exact `layoutFits` inequality at the
+physical token address. `reuseStep_some_of_capacityEvidence` consumes those
+two facts and invokes the existing in-place reuse refinement with no free
+capacity premise. The remaining syntax work is to preserve
+`ReuseCapacityValueRel` across constructor, reset, and reuse steps and attach
+it to `ConcreteCodeSimulation`; no FIR semantic contract or executable ABI
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
