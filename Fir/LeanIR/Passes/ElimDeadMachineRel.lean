@@ -6138,6 +6138,123 @@ theorem ReachableMachineReadyAt.related
     sourceFrameRoots, targetFrameRoots, programs, control.related, frames,
     runtime⟩
 
+/-- Hereditary counterpart of `ReachableControlReadyAt`.  Its code constructor
+packages one exact graph with its static binder certificate and only the
+dynamic obligation selected by the active compiler edge. -/
+inductive BinderReadyReachableControlReadyAt
+    (fuel : Nat) (rho : AddressRenaming)
+    (sourceState targetState : MachineState)
+    (sourceFrameRoots : List Value) :
+    Control → Control → List Value → List Value → Prop where
+  | code
+      (ready : BinderReadyShadowCodeReadyAt fuel used sourceState
+        (runtimeRoots sourceState.runtime
+          (envRootsOn used sourceState.env ++ sourceFrameRoots))
+        sourceCode targetCode)
+      (joins : BinderReadyShadowJoinEnvRelated fuel used
+        sourceState.joins targetState.joins)
+      (env : EnvRelOn rho used sourceState.env targetState.env) :
+      BinderReadyReachableControlReadyAt fuel rho sourceState targetState
+        sourceFrameRoots (.code sourceCode) (.code targetCode)
+        (envRootsOn used sourceState.env) (envRootsOn used targetState.env)
+  | yielded (value : ValueRel rho sourceValue targetValue) :
+      BinderReadyReachableControlReadyAt fuel rho sourceState targetState
+        sourceFrameRoots (.yielded sourceValue) (.yielded targetValue)
+        [sourceValue] [targetValue]
+  | invokeName (name : Name)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      BinderReadyReachableControlReadyAt fuel rho sourceState targetState
+        sourceFrameRoots
+        (.invokeName name sourceArguments) (.invokeName name targetArguments)
+        sourceArguments.toList targetArguments.toList
+  | invokeValue
+      (function : ValueRel rho sourceFunction targetFunction)
+      (arguments : ArrayRel (ValueRel rho)
+        sourceArguments targetArguments) :
+      BinderReadyReachableControlReadyAt fuel rho sourceState targetState
+        sourceFrameRoots
+        (.invokeValue sourceFunction sourceArguments)
+        (.invokeValue targetFunction targetArguments)
+        (sourceFunction :: sourceArguments.toList)
+        (targetFunction :: targetArguments.toList)
+
+/-- Forget only the active dynamic obligation, retaining hereditary exact
+provenance in the structural control relation. -/
+theorem BinderReadyReachableControlReadyAt.related
+    (ready : BinderReadyReachableControlReadyAt fuel rho
+      sourceState targetState sourceFrameRoots sourceControl targetControl
+      sourceControlRoots targetControlRoots) :
+    BinderReadyReachableControlRelated fuel rho
+      sourceState.env sourceState.joins sourceControl
+      targetState.env targetState.joins targetControl
+      sourceControlRoots targetControlRoots := by
+  cases ready with
+  | code exactReady joins env =>
+      rcases exactReady with
+        ⟨remaining, final, bounded, exact, subset, static, runtimeReady⟩
+      exact .code
+        ⟨remaining, final, bounded, exact, subset, static⟩ joins env
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
+
+/-- Forget hereditary provenance while reconstructing the operational graph
+and active readiness certificate consumed by the existing step dispatcher. -/
+theorem BinderReadyReachableControlReadyAt.readyAt
+    (ready : BinderReadyReachableControlReadyAt fuel rho
+      sourceState targetState sourceFrameRoots sourceControl targetControl
+      sourceControlRoots targetControlRoots) :
+    ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+      sourceControl targetControl sourceControlRoots targetControlRoots := by
+  cases ready with
+  | code exactReady joins env =>
+      rcases exactReady.reachableCodeReadyAt with ⟨graph, operationalReady⟩
+      exact .code graph joins.toShadowJoinEnvRelated env operationalReady
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
+
+/-- Full machine readiness retaining exact elimDead provenance at every live
+code-bearing location.  For active code, the only additional field beyond the
+hereditary machine relation is `ExactShadowCodeRuntimeReadyAt`. -/
+def BinderReadyReachableMachineReadyAt
+    (fuel : Nat) (source target : MachineState) : Prop :=
+  ∃ rho sourceControlRoots targetControlRoots
+      sourceFrameRoots targetFrameRoots,
+    ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        source.program target.program ∧
+    BinderReadyReachableControlReadyAt fuel rho source target sourceFrameRoots
+      source.control target.control sourceControlRoots targetControlRoots ∧
+    BinderReadyReachableFramesRelated fuel rho source.frames target.frames
+      sourceFrameRoots targetFrameRoots ∧
+    ShadowRuntimeRel rho source.runtime target.runtime
+      (sourceControlRoots ++ sourceFrameRoots)
+      (targetControlRoots ++ targetFrameRoots)
+
+/-- Dropping the active dynamic premise recovers the strong hereditary machine
+relation under the same renaming and root decomposition. -/
+theorem BinderReadyReachableMachineReadyAt.related
+    (ready : BinderReadyReachableMachineReadyAt fuel source target) :
+    SomeBinderReadyReachableMachineRelated fuel source target := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control.related, frames,
+    runtime⟩
+
+/-- The existing semantic-step dispatcher needs no new proof: hereditary
+readiness erases to its established operational readiness interface. -/
+theorem BinderReadyReachableMachineReadyAt.readyAt
+    (ready : BinderReadyReachableMachineReadyAt fuel source target) :
+    ReachableMachineReadyAt fuel source target := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots,
+    forgetBinderReadyShadowProgram programs, control.readyAt, frames.related,
+    runtime⟩
+
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
 to recover full machine readiness. -/
