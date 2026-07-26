@@ -5418,6 +5418,22 @@ theorem ReachableControlReadyAt.related
   | invokeName name arguments => exact .invokeName name arguments
   | invokeValue function arguments => exact .invokeValue function arguments
 
+/-- Structural yielded/invocation controls carry every fact required for
+operational readiness; only active code controls need a separate certificate. -/
+theorem ReachableControlRelated.readyAt_of_not_code
+    (related : ReachableControlRelated fuel rho
+      sourceState.env sourceState.joins sourceControl
+      targetState.env targetState.joins targetControl
+      sourceControlRoots targetControlRoots)
+    (notCode : ∀ sourceCode, sourceControl ≠ .code sourceCode) :
+    ReachableControlReadyAt fuel rho sourceState targetState sourceFrameRoots
+      sourceControl targetControl sourceControlRoots targetControlRoots := by
+  cases related with
+  | code graph joins env => exact (notCode _ rfl).elim
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
+
 /-- Pair-level form used by the eventual simulation laws.  Readiness is
 bundled existentially with the same renaming, roots, graph, environments, and
 runtime relation that it certifies.  This alignment is essential: the
@@ -5437,6 +5453,50 @@ def ReachableMachineReadyAt (fuel : Nat) (source target : MachineState) :
         (sourceControlRoots ++ sourceFrameRoots)
         (targetControlRoots ++ targetFrameRoots)
 
+/-- Pair-level exact-code entry constructor.  The transparent compiler run
+and canonical source facts discharge active code readiness; the remaining
+arguments are exactly the structural environment/runtime invariant already
+carried by a related machine pair. -/
+theorem ExactShadowCodeGraph.reachableMachineReadyAt_of_canonical
+    (exact :
+      ExactShadowCodeGraph fuel final sourceCode targetCode)
+    (wellFormed : ScopedCodeWellFormedTree index sourceCode)
+    (unique : BinderNamesUnique (codeBinderIds sourceCode))
+    (sourceControl : sourceState.control = .code sourceCode)
+    (targetControl : targetState.control = .code targetCode)
+    (programs :
+      ProgramRelated (ShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+    (frames :
+      ReachableFramesRelated fuel rho
+        sourceState.frames targetState.frames
+        sourceFrameRoots targetFrameRoots)
+    (joins :
+      ShadowJoinEnvRelated fuel final
+        sourceState.joins targetState.joins)
+    (env :
+      EnvRelOn rho final sourceState.env targetState.env)
+    (runtime :
+      ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+        (envRootsOn final sourceState.env ++ sourceFrameRoots)
+        (envRootsOn final targetState.env ++ targetFrameRoots))
+    (runtimeReady :
+      ExactShadowCodeRuntimeReadyAt sourceState
+        (runtimeRoots sourceState.runtime
+          (envRootsOn final sourceState.env ++ sourceFrameRoots))
+        exact.view) :
+    ReachableMachineReadyAt fuel sourceState targetState := by
+  refine ⟨rho, envRootsOn final sourceState.env,
+    envRootsOn final targetState.env, sourceFrameRoots, targetFrameRoots,
+    programs, ?_, frames, runtime⟩
+  rw [sourceControl, targetControl]
+  exact .code
+    (exact.view.toGraph.toShadowCodeGraph.mono
+      (UsedSubset.refl final))
+    joins env
+    (exact.reachableCodeReadyAt_of_canonical
+      wellFormed unique runtimeReady)
+
 /-- Forgetting operational readiness recovers the structural machine
 relation carried by the same exact graph, roots, and address renaming. -/
 theorem ReachableMachineReadyAt.related
@@ -5447,6 +5507,43 @@ theorem ReachableMachineReadyAt.related
   exact ⟨rho, sourceControlRoots, targetControlRoots,
     sourceFrameRoots, targetFrameRoots, programs, control.related, frames,
     runtime⟩
+
+/-- Invocation and yielded controls are ready directly from the structural
+relation.  Consequently a caller only has to discharge the active-code case
+to recover full machine readiness. -/
+theorem SomeReachableMachineRelated.reachableMachineReadyAt_of_code
+    (related : SomeReachableMachineRelated fuel source target)
+    (codeReady : ∀ sourceCode,
+      source.control = .code sourceCode →
+        ReachableMachineReadyAt fuel source target) :
+    ReachableMachineReadyAt fuel source target := by
+  have nonCodeReady
+      (notCode : ∀ sourceCode, source.control ≠ .code sourceCode) :
+      ReachableMachineReadyAt fuel source target := by
+    rcases related with
+      ⟨rho, sourceControlRoots, targetControlRoots,
+        sourceFrameRoots, targetFrameRoots,
+        programs, control, frames, runtime⟩
+    exact ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs,
+      control.readyAt_of_not_code notCode, frames, runtime⟩
+  cases sourceControl : source.control with
+  | code sourceCode => exact codeReady sourceCode sourceControl
+  | yielded sourceValue =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeName sourceName sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeValue sourceFunction sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
 
 /-- Canonical entry states are immediately ready.  Their invocation controls
 need no local operation certificate; program relatedness, related arguments,
@@ -5527,6 +5624,29 @@ def ReachablyReady (externals : ExternalSpec) (fuel : Nat)
     NonLockstep.Reaches externals target targetAfter →
     SomeReachableMachineRelated fuel sourceAfter targetAfter →
       ReachableMachineReadyAt fuel sourceAfter targetAfter
+
+/-- Compiler-facing hereditary obligation restricted to active code.  The
+structural relation already makes yielded and invocation controls ready, so
+no operation-specific certificate is required for those future states. -/
+def ReachablyCodeReady (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeReachableMachineRelated fuel sourceAfter targetAfter →
+      ∀ sourceCode, sourceAfter.control = .code sourceCode →
+        ReachableMachineReadyAt fuel sourceAfter targetAfter
+
+/-- Active-code hereditary readiness is sufficient for the canonical
+all-controls invariant used by the non-lockstep simulation. -/
+theorem ReachablyCodeReady.reachablyReady
+    (ready : ReachablyCodeReady externals fuel source target) :
+    ReachablyReady externals fuel source target := by
+  intro sourceAfter targetAfter sourcePath targetPath structural
+  apply structural.reachableMachineReadyAt_of_code
+  intro sourceCode sourceControl
+  exact ready sourceAfter targetAfter sourcePath targetPath structural
+    sourceCode sourceControl
 
 theorem reachablyReadyCompilerLaws :
     ReachableCompilerInvariantLaws externals fuel
@@ -14016,5 +14136,21 @@ theorem reachableProgram_loweringCorrect_reachablyReady
       (reachablePhaseSimulation externals) source target entries :=
   reachableProgram_loweringCorrect_of_compiler programs
     reachablyReadyCompilerLaws compatible initialReady
+
+/-- Whole-program correctness with the hereditary entry obligation reduced
+to future active-code states.  Yielded and invocation controls are discharged
+uniformly by the structural machine relation. -/
+theorem reachableProgram_loweringCorrect_reachablyCodeReady
+    (programs : ProgramRelated (ShadowCodeRelated fuel) source target)
+    (compatible : ReachableExternalSpecCompatible externals fuel)
+    (initialReady : ReachableInitialInvariantOn
+      (ReachablyCodeReady externals fuel) source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply reachableProgram_loweringCorrect_reachablyReady programs compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialReady entry member sourceArguments targetArguments arguments).reachablyReady
 
 end Fir.LeanIR.Passes.ElimDead
