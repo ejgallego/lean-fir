@@ -366,8 +366,9 @@ theorem ConstructorObjectRel.writeObjectField_targetFrame
     rw [usizeFieldFrame other otherValid]
     exact related.usizeFields other usize valueAt
 
-/-- Complete-heap refinement for successful one-field object mutation. -/
-theorem LiveHeapRel.writeObjectField_refines
+/-- Complete-heap refinement for successful one-field object mutation,
+including preservation of every mapped allocation's physical extent. -/
+theorem LiveHeapRel.writeObjectField_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
     {semantic : ConstructorObject} {info : LCNF.CtorInfo}
@@ -387,7 +388,8 @@ theorem LiveHeapRel.writeObjectField_refines
       writeObjectField state address index word = .ok result ∧
       Fir.LeanIR.Impure.setObjectField runtime (.object (.heap location)) index value =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -437,7 +439,11 @@ theorem LiveHeapRel.writeObjectField_refines
         rw [dif_pos indexValid]
         change setCell runtime location replacement = .ok nextRuntime
         exact semanticSet
-      exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated⟩
+      have capacity :=
+        related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
+          physicalFrame
+      exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
+        capacity⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -455,5 +461,31 @@ theorem LiveHeapRel.writeObjectField_refines
       obtain ⟨function, arity, captures, storedObjectEq⟩ := closureRelated.objectEq
       rw [objectEq] at storedObjectEq
       contradiction
+
+theorem LiveHeapRel.writeObjectField_refines
+    {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
+    {location : Location} {address : Word32} {cell : HeapCell}
+    {semantic : ConstructorObject} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? address =
+      some (.constructor info fieldKinds))
+    (index : Nat) (kind : AbiKind) (value : Value) (word : Word32)
+    (indexValid : index < semantic.objectFields.size)
+    (kindAt : fieldKinds[index]? = some kind)
+    (valueRelated : ValueRel witness kind (.word32 word) value) :
+    ∃ result nextRuntime,
+      writeObjectField state address index word = .ok result ∧
+      Fir.LeanIR.Impure.setObjectField runtime (.object (.heap location)) index value =
+        .ok nextRuntime ∧
+      LiveHeapRel result witness nextRuntime := by
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+    related.writeObjectField_refines_with_capacity mapped found live objectEq
+      descriptorFound index kind value word indexValid kindAt valueRelated
+  exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
 
 end Fir.Wasm.Concrete

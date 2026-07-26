@@ -298,6 +298,59 @@ theorem MemoryState.FrontierInvariant.writeByte
       subst actual
       rfl
 
+/-- A target-local payload mutation preserves the retained allocation word of
+every mapped semantic location. The target header is unchanged by definition;
+descriptor disjointness places every other mapped allocation inside the
+frame's preserved regions. -/
+theorem LiveHeapRel.mappedHeaderCapacity_of_targetMutation
+    {before after : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {targetAddress : Word32}
+    {targetDescriptor : AllocationDescriptor} {targetHeader : Header}
+    (related : LiveHeapRel before witness runtime)
+    (targetFound :
+      witness.descriptors.lookup? targetAddress = some targetDescriptor)
+    (targetRead :
+      Header.read before.memory targetAddress = .ok targetHeader)
+    (frame : before.TargetMutationFrame after targetAddress
+      targetHeader.allocationBytes.toNat) :
+    MappedHeaderCapacityTransport before after witness := by
+  intro address location header mapped headerRead owned
+  obtain ⟨cell, _, cellRelated⟩ :=
+    related.concreteToSemantic location address mapped
+  obtain ⟨descriptor, descriptorFound⟩ := cellRelated.descriptor
+  by_cases different : targetAddress.value ≠ address.value
+  · obtain ⟨regionHeader, regionRead, minimum, _, _⟩ :=
+      related.descriptorRegion address descriptor descriptorFound
+    rw [headerRead] at regionRead
+    have regionHeaderEq := Except.ok.inj regionRead
+    subst regionHeader
+    have disjoint := related.descriptorDisjoint targetAddress address
+      targetDescriptor descriptor targetFound descriptorFound different
+        targetHeader header targetRead headerRead
+    have allocationFrame :=
+      frame.other address header.allocationBytes.toNat disjoint
+    exact ⟨header, by
+      rw [allocationFrame.readHeader minimum]
+      exact headerRead,
+      rfl, by
+        rw [frame.cursor]
+        exact owned⟩
+  · have sameValue : targetAddress.value = address.value := by omega
+    have sameAddress : targetAddress = address := by
+      cases targetAddress
+      cases address
+      simp_all
+    subst address
+    rw [targetRead] at headerRead
+    have headerEq := Except.ok.inj headerRead
+    subst header
+    exact ⟨targetHeader, by
+      rw [frame.targetHeader]
+      exact targetRead,
+      rfl, by
+        rw [frame.cursor]
+        exact owned⟩
+
 /-- A target-mutation frame preserves the descriptor-region and pairwise
 disjointness invariants for the complete concrete heap. -/
 theorem LiveHeapRel.descriptorSpatial_of_targetMutation

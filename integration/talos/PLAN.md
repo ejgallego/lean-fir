@@ -3275,6 +3275,17 @@ preexisting refinement API. Only payload/header mutation transitions remain
 before `ReuseCapacityStateRelated` can be threaded syntax-directly. No FIR
 semantic contract or executable ABI changed.
 
+W6.6dn discharges mutation-transition transport. One generic theorem turns a
+`TargetMutationFrame` into mapped-header capacity preservation: the target
+header is unchanged, while descriptor disjointness frames every other mapped
+allocation. Object, `USize`, and all four packed-integer setters consume that
+theorem; constructor-tag mutation consumes the existing same-extent
+header-write theorem. Concrete heap and Talos operation refinements expose
+the transport, and compatibility wrappers preserve the preexisting APIs.
+The operation-level transport inventory is complete; the remaining capacity
+work is to thread `ReuseCapacityStateRelated` through syntax-directed
+execution. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

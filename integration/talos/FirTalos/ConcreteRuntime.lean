@@ -4743,6 +4743,45 @@ theorem modifyConstructor_heapOnly
 
 /-- Successful concrete constructor-tag mutation refines the semantic heap
 update and preserves all nonheap runtime components. -/
+theorem setTagStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {word : Word32} {tag : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 word)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (updated : setTag runtime (.object (.heap location)) tag = .ok nextRuntime)
+    (tagFits : tag < UInt32.size) :
+    ∃ heap,
+      setTagStep tag initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated, capacity⟩ :=
+            runtimeRelated.heap.writeTag_refines_with_capacity mapped found live
+              objectEq tag tagFits
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_, capacity⟩
+          · simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setTag] using updated
+
 theorem setTagStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -4762,24 +4801,10 @@ theorem setTagStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases objectRelated with
-  | object heapRelated =>
-      cases heapRelated with
-      | mapped mapped =>
-          obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.writeTag_refines mapped found live objectEq tag
-              tagFits
-          rw [updated] at semanticOperation
-          have afterEq := Except.ok.inj semanticOperation
-          subst semanticAfter
-          refine ⟨heap, ?_, ?_⟩
-          · simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
-              concreteOperation, replaceHeap]
-          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-              finalHeapRelated
-            apply modifyConstructor_heapOnly
-            simpa [setTag] using updated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    setTagStep_of_refines_with_capacity runtimeRelated objectRelated found live
+      objectEq updated tagFits
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- Stale tag mutation preserves the exact mapped dead-object fault and has no
 successor heap. -/
@@ -4810,6 +4835,55 @@ theorem setTagStep_deadObject_of_refines
 
 /-- Successful concrete object-slot mutation refines the matching semantic
 constructor update and preserves all nonheap runtime components. -/
+theorem objectSetStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord fieldWord : Word32} {fieldKind : AbiKind} {field : Value}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness fieldKind (.word32 fieldWord) field)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (indexValid : index < semantic.objectFields.size)
+    (kindAt : fieldKinds[index]? = some fieldKind)
+    (updated : setObjectField runtime (.object (.heap location)) index field =
+      .ok nextRuntime) :
+    ∃ heap,
+      objectSetStep index fieldKind initial
+          [.i32 (UInt32.ofNat objectWord.value),
+            .i32 (UInt32.ofNat fieldWord.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated, capacity⟩ :=
+            runtimeRelated.heap.writeObjectField_refines_with_capacity mapped
+              found live objectEq descriptorFound index fieldKind field fieldWord
+              indexValid kindAt fieldRelated
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_, capacity⟩
+          · simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setObjectField] using updated
+
 theorem objectSetStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -4838,28 +4912,55 @@ theorem objectSetStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    objectSetStep_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound indexValid kindAt updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+/-- Successful concrete `USize` mutation refines the matching semantic
+constructor update and preserves all nonheap runtime components. -/
+theorem usizeSetStep_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {field : UInt64} {index : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (slotStart : semantic.objectFields.size ≤ index)
+    (slotEnd : index < semantic.objectFields.size + semantic.usizeFields.size)
+    (updated : setUSizeSlot runtime (.object (.heap location)) index
+      (.usize field) = .ok nextRuntime) :
+    ∃ heap,
+      usizeSetStep index initial
+          [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases objectRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
           obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.writeObjectField_refines mapped found live
-              objectEq descriptorFound index fieldKind field fieldWord indexValid
-              kindAt fieldRelated
+              semanticOperation, finalHeapRelated, capacity⟩ :=
+            runtimeRelated.heap.writeUSizeSlot_refines_with_capacity mapped found
+              live objectEq index field slotStart slotEnd
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
-          refine ⟨heap, ?_, ?_⟩
-          · simp [objectSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+          refine ⟨heap, ?_, ?_, capacity⟩
+          · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
               concreteOperation, replaceHeap]
           · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
               finalHeapRelated
             apply modifyConstructor_heapOnly
-            simpa [setObjectField] using updated
+            simpa [setUSizeSlot] using updated
 
-/-- Successful concrete `USize` mutation refines the matching semantic
-constructor update and preserves all nonheap runtime components. -/
 theorem usizeSetStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -4882,24 +4983,10 @@ theorem usizeSetStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases objectRelated with
-  | object heapRelated =>
-      cases heapRelated with
-      | mapped mapped =>
-          obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.writeUSizeSlot_refines mapped found live
-              objectEq index field slotStart slotEnd
-          rw [updated] at semanticOperation
-          have afterEq := Except.ok.inj semanticOperation
-          subst semanticAfter
-          refine ⟨heap, ?_, ?_⟩
-          · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
-              concreteOperation, replaceHeap]
-          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-              finalHeapRelated
-            apply modifyConstructor_heapOnly
-            simpa [setUSizeSlot] using updated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    usizeSetStep_of_refines_with_capacity runtimeRelated objectRelated found live
+      objectEq slotStart slotEnd updated
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- An out-of-bounds object-slot mutation reaches the Talos boundary as the
 exact source-classified FIR bounds fault and leaves both runtimes unchanged. -/
@@ -5166,6 +5253,59 @@ theorem scalarSetStep_uint8_deadObject_of_refines
           simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
             encoded, concrete, ConcreteError.toTrap]
 
+theorem scalarSetStep_uint64_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord : Word32} {field : UInt64} {slotIndex byteOffset : Nat}
+    {info : Lean.Compiler.LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint64 (.word64 field)
+      (.scalar (.uint64 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 8 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 8 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.uint64 field)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .uint64 initial
+          [.i32 (UInt32.ofNat objectWord.value), .i64 field] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases fieldRelated
+  cases objectRelated with
+  | object heapRelated =>
+      cases heapRelated with
+      | mapped mapped =>
+          obtain ⟨heap, semanticAfter, concreteOperation,
+              semanticOperation, finalHeapRelated, capacity⟩ :=
+            runtimeRelated.heap.writeScalarUInt64Field_refines_with_capacity
+              mapped found live objectEq descriptorFound slotIndex byteOffset
+              field retainedDisjoint slotIndexEq fieldFits
+          rw [updated] at semanticOperation
+          have afterEq := Except.ok.inj semanticOperation
+          subst semanticAfter
+          refine ⟨heap, ?_, ?_, capacity⟩
+          · simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+              concreteOperation, replaceHeap]
+          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+              finalHeapRelated
+            apply modifyConstructor_heapOnly
+            simpa [setScalarField] using updated
+
 theorem scalarSetStep_uint64_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -5197,26 +5337,68 @@ theorem scalarSetStep_uint64_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases fieldRelated
-  cases objectRelated with
-  | object heapRelated =>
-      cases heapRelated with
-      | mapped mapped =>
-          obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated⟩ :=
-            runtimeRelated.heap.writeScalarUInt64Field_refines mapped found live
-              objectEq descriptorFound slotIndex byteOffset field
-              retainedDisjoint slotIndexEq fieldFits
-          rw [updated] at semanticOperation
-          have afterEq := Except.ok.inj semanticOperation
-          subst semanticAfter
-          refine ⟨heap, ?_, ?_⟩
-          · simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
-              concreteOperation, replaceHeap]
-          · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-              finalHeapRelated
-            apply modifyConstructor_heapOnly
-            simpa [setScalarField] using updated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    scalarSetStep_uint64_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+theorem scalarSetStep_uint32_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord fieldWord : Word32} {field : UInt32}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint32 (.word32 fieldWord)
+      (.scalar (.uint32 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 4 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 4 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.uint32 field)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .uint32 initial
+          [.i32 (UInt32.ofNat objectWord.value),
+            .i32 (UInt32.ofNat fieldWord.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases fieldRelated with
+  | uint32 encoded =>
+      cases objectRelated with
+      | object heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              obtain ⟨heap, semanticAfter, concreteOperation,
+                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.writeScalarUInt32Field_refines_with_capacity
+                  mapped found live objectEq descriptorFound slotIndex byteOffset
+                  field retainedDisjoint slotIndexEq fieldFits
+              rw [updated] at semanticOperation
+              have afterEq := Except.ok.inj semanticOperation
+              subst semanticAfter
+              refine ⟨heap, ?_, ?_, capacity⟩
+              · simp [scalarSetStep, clearFailure,
+                  Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
+                  replaceHeap]
+              · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
+                  finalHeapRelated
+                apply modifyConstructor_heapOnly
+                simpa [setScalarField] using updated
 
 theorem scalarSetStep_uint32_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
@@ -5251,21 +5433,61 @@ theorem scalarSetStep_uint32_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    scalarSetStep_uint32_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+theorem scalarSetStep_uint16_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord fieldWord : Word32} {field : UInt16}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint16 (.word32 fieldWord)
+      (.scalar (.uint16 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 2 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 2 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.uint16 field)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .uint16 initial
+          [.i32 (UInt32.ofNat objectWord.value),
+            .i32 (UInt32.ofNat fieldWord.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases fieldRelated with
-  | uint32 encoded =>
+  | uint16 encoded =>
       cases objectRelated with
       | object heapRelated =>
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.writeScalarUInt32Field_refines mapped found
-                  live objectEq descriptorFound slotIndex byteOffset field
-                  retainedDisjoint slotIndexEq fieldFits
+                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.writeScalarUInt16Field_refines_with_capacity
+                  mapped found live objectEq descriptorFound slotIndex byteOffset
+                  field retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_⟩
+              refine ⟨heap, ?_, ?_, capacity⟩
               · simp [scalarSetStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
                   replaceHeap]
@@ -5307,21 +5529,61 @@ theorem scalarSetStep_uint16_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    scalarSetStep_uint16_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
+
+theorem scalarSetStep_uint8_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {cell : HeapCell} {semantic : ConstructorObject}
+    {objectWord fieldWord : Word32} {field : UInt8}
+    {slotIndex byteOffset : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated : ValueRel witness .object (.word32 objectWord)
+      (.object (.heap location)))
+    (fieldRelated : ValueRel witness .uint8 (.word32 fieldWord)
+      (.scalar (.uint8 field)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .ctor semantic)
+    (descriptorFound : witness.descriptors.lookup? objectWord =
+      some (.constructor info fieldKinds))
+    (retainedDisjoint : ∀ old ∈ semantic.scalarFields,
+      old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+      old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+        byteOffset + 1 ≤ old.offset)
+    (slotIndexEq : slotIndex = info.size + info.usize)
+    (fieldFits : byteOffset + 1 ≤ info.ssize)
+    (updated : setScalarField runtime (.object (.heap location)) slotIndex
+      byteOffset (.scalar (.uint8 field)) = .ok nextRuntime) :
+    ∃ heap,
+      scalarSetStep slotIndex byteOffset .uint8 initial
+          [.i32 (UInt32.ofNat objectWord.value),
+            .i32 (UInt32.ofNat fieldWord.value)] =
+        .Return [] (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+        nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases fieldRelated with
-  | uint16 encoded =>
+  | uint8 encoded =>
       cases objectRelated with
       | object heapRelated =>
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.writeScalarUInt16Field_refines mapped found
-                  live objectEq descriptorFound slotIndex byteOffset field
-                  retainedDisjoint slotIndexEq fieldFits
+                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                runtimeRelated.heap.writeScalarUInt8Field_refines_with_capacity
+                  mapped found live objectEq descriptorFound slotIndex byteOffset
+                  field retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_⟩
+              refine ⟨heap, ?_, ?_, capacity⟩
               · simp [scalarSetStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
                   replaceHeap]
@@ -5363,28 +5625,11 @@ theorem scalarSetStep_uint8_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  cases fieldRelated with
-  | uint8 encoded =>
-      cases objectRelated with
-      | object heapRelated =>
-          cases heapRelated with
-          | mapped mapped =>
-              obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated⟩ :=
-                runtimeRelated.heap.writeScalarUInt8Field_refines mapped found
-                  live objectEq descriptorFound slotIndex byteOffset field
-                  retainedDisjoint slotIndexEq fieldFits
-              rw [updated] at semanticOperation
-              have afterEq := Except.ok.inj semanticOperation
-              subst semanticAfter
-              refine ⟨heap, ?_, ?_⟩
-              · simp [scalarSetStep, clearFailure,
-                  Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
-                  replaceHeap]
-              · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
-                  finalHeapRelated
-                apply modifyConstructor_heapOnly
-                simpa [setScalarField] using updated
+  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+    scalarSetStep_uint8_of_refines_with_capacity runtimeRelated objectRelated
+      fieldRelated found live objectEq descriptorFound retainedDisjoint
+      slotIndexEq fieldFits updated
+  exact ⟨heap, concrete, finalRelated⟩
 
 /-- The complete concrete state relation used by W6.6 composition: host-owned
 memory/effects refine FIR runtime state, the failure channel is clear, and

@@ -262,10 +262,12 @@ and Talos operation theorems. Unique reset now composes bounded prefix writes
 with recursive ownership-release transport and carries the retained object
 bound to the returned token. Empty constructors now cover both immediate
 tagged identity transitions and fresh promoted-tag prefix extensions through
-the same transport boundary. Ownership and mutation families still need
-transport instances, and the syntax-directed simulation still has to carry
-the strengthened state. Native unreachability losing its source fault is
-tracked separately by
+the same transport boundary. Ownership operations now expose transport for
+increment, recursive decrement, and deletion. Mutation operations expose it
+for constructor tags, object fields, `USize` fields, and every supported packed
+integer width. The operation-level transport inventory is complete; the
+syntax-directed simulation still has to carry the strengthened state. Native
+unreachability losing its source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
@@ -335,10 +337,11 @@ acceptance tests pass.
    transport, in-place reuse carries mapped-header transport through the
    validator-backed operation theorem, and unique reset carries the same
    transport through prefix clearing and recursive child release. Empty
-   constructor allocation/reuse covers immediate and promoted tagged results.
-   Ownership and mutation operations must still supply transport before the
-   syntax certificate can carry the strengthened state. Structured
-   unreachability remains the shared-contract blocker.
+   constructor allocation/reuse covers immediate and promoted tagged results;
+   ownership and mutation operations now supply transport across every
+   admitted successful effect. The syntax certificate must still carry the
+   strengthened state. Structured unreachability remains the shared-contract
+   blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.
