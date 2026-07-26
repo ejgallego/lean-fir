@@ -1,4 +1,5 @@
 import Fir.Wasm.Lower
+import Fir.Wasm.Concrete.Layout
 
 namespace Fir.Wasm
 
@@ -481,6 +482,246 @@ def closureFlowSafeProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=
     | .code code => closureFlowSafeCode program [] code
     | .extern _ => true
 
+/--
+Static evidence carried from a constructor value through `reset` to `reuse`.
+
+`emptyToken` means that resetting the value can only produce the zero reuse
+token. `retainedAtLeast bytes` means that every nonzero token produced by
+reset retains an allocation of at least `bytes`; reset may still produce zero
+for a shared or persistent object.
+-/
+inductive ReuseCapacityEvidence where
+  | emptyToken
+  | retainedAtLeast (bytes : Nat)
+  deriving Inhabited, BEq, Repr
+
+abbrev ReuseCapacityFacts := List (FVarId × ReuseCapacityEvidence)
+
+def eraseReuseCapacityFact (facts : ReuseCapacityFacts) (fvarId : FVarId) :
+    ReuseCapacityFacts :=
+  facts.filter fun entry => entry.fst.name != fvarId.name
+
+def insertReuseCapacityFact (facts : ReuseCapacityFacts) (fvarId : FVarId)
+    (evidence : ReuseCapacityEvidence) : ReuseCapacityFacts :=
+  (fvarId, evidence) :: eraseReuseCapacityFact facts fvarId
+
+def findReuseCapacityEvidence? : ReuseCapacityFacts → FVarId →
+    Option ReuseCapacityEvidence
+  | [], _ => none
+  | (candidate, evidence) :: rest, fvarId =>
+      if candidate.name == fvarId.name then some evidence
+      else findReuseCapacityEvidence? rest fvarId
+
+def constructorAllocatesHeap (info : LCNF.CtorInfo) : Bool :=
+  info.size != 0 || info.usize != 0 || info.ssize != 0
+
+def constructorReuseCapacityEvidence (info : LCNF.CtorInfo) :
+    ReuseCapacityEvidence :=
+  if constructorAllocatesHeap info then
+    .retainedAtLeast (Concrete.ConstructorLayout.ofInfo info).allocationBytes
+  else
+    .emptyToken
+
+/--
+An empty token always allocates fresh storage. A nonempty token is safe only
+when the replacement fits the lower bound carried from its reset source.
+-/
+def ReuseCapacityEvidence.fits (evidence : ReuseCapacityEvidence)
+    (info : LCNF.CtorInfo) : Bool :=
+  match evidence with
+  | .emptyToken => true
+  | .retainedAtLeast bytes =>
+      decide ((Concrete.ConstructorLayout.ofInfo info).allocationBytes ≤ bytes)
+
+/--
+Capacity evidence for the value returned by a successful reuse. A definitely
+empty token follows ordinary constructor allocation. Otherwise either the
+operation allocated fresh storage or it retained a fitting old allocation, so
+the replacement layout is a valid lower bound for subsequent reuse.
+-/
+def ReuseCapacityEvidence.afterReuse (evidence : ReuseCapacityEvidence)
+    (info : LCNF.CtorInfo) : ReuseCapacityEvidence :=
+  match evidence with
+  | .emptyToken => constructorReuseCapacityEvidence info
+  | .retainedAtLeast _ =>
+      .retainedAtLeast (Concrete.ConstructorLayout.ofInfo info).allocationBytes
+
+def findFittingReuseCapacityEvidence? (facts : ReuseCapacityFacts)
+    (tokenId : FVarId) (info : LCNF.CtorInfo) :
+    Option ReuseCapacityEvidence := do
+  let evidence ← findReuseCapacityEvidence? facts tokenId
+  if evidence.fits info then some evidence else none
+
+/-
+Conservative wasm32 retained-capacity analysis for reset/reuse.
+
+Facts are created by direct constructor allocation and preserved through
+successful fitting reuse. Unknown object-producing operations remain
+admissible, but a later reuse of a token reset from such an object is rejected
+until a stronger provenance theorem is supplied. Join parameters likewise do
+not inherit facts implicitly.
+-/
+
+private theorem reuseCapacity_caseAlts_sizeOf_lt (cases : LCNF.Cases .impure) :
+    sizeOf cases.alts.toList < sizeOf (LCNF.Code.cases cases) := by
+  rcases cases with ⟨typeName, resultType, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  simp [LCNF.Cases.alts]
+  omega
+
+private theorem reuseCapacity_funDeclValue_sizeOf_lt
+    (declaration : LCNF.FunDecl .impure)
+    (continuation : LCNF.Code .impure) :
+    sizeOf declaration.value <
+      sizeOf (LCNF.Code.jp declaration continuation) := by
+  cases declaration
+  simp_wf
+  simp only [LCNF.FunDecl.value]
+  omega
+
+mutual
+
+def reuseCapacitySafeCode (facts : ReuseCapacityFacts) :
+    LCNF.Code .impure → Bool
+  | .let decl continuation =>
+      match decl.value with
+      | .ctor info _ =>
+          reuseCapacitySafeCode
+            (insertReuseCapacityFact facts decl.fvarId
+              (constructorReuseCapacityEvidence info))
+            continuation
+      | .reset _ objectId =>
+          let facts :=
+            match findReuseCapacityEvidence? facts objectId with
+            | some evidence => insertReuseCapacityFact facts decl.fvarId evidence
+            | none => eraseReuseCapacityFact facts decl.fvarId
+          reuseCapacitySafeCode facts continuation
+      | .reuse tokenId info _ _ =>
+          match findFittingReuseCapacityEvidence? facts tokenId info with
+          | some evidence =>
+              reuseCapacitySafeCode
+                (insertReuseCapacityFact facts decl.fvarId
+                  (evidence.afterReuse info))
+                continuation
+          | none => false
+      | _ =>
+          reuseCapacitySafeCode
+            (eraseReuseCapacityFact facts decl.fvarId) continuation
+  | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      reuseCapacitySafeCode facts decl.value &&
+        reuseCapacitySafeCode facts continuation
+  | .cases cases => reuseCapacitySafeAlts facts cases.alts.toList
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation => reuseCapacitySafeCode facts continuation
+  | .jmp .. | .return .. | .unreach .. => true
+
+termination_by code => sizeOf code
+decreasing_by
+  all_goals simp_all <;> try omega
+  all_goals first
+    | apply reuseCapacity_caseAlts_sizeOf_lt
+    | apply reuseCapacity_funDeclValue_sizeOf_lt
+
+def reuseCapacitySafeAlts (facts : ReuseCapacityFacts) :
+    List (LCNF.Alt .impure) → Bool
+  | [] => true
+  | .ctorAlt _ code :: rest
+  | .default code :: rest =>
+      reuseCapacitySafeCode facts code && reuseCapacitySafeAlts facts rest
+  | .alt _ _ _ h :: _ => nomatch h
+
+termination_by alts => sizeOf alts
+decreasing_by all_goals simp_all <;> omega
+
+end
+
+def reuseCapacitySafeProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=
+  program.decls.all fun decl =>
+    match decl.value with
+    | .code code => reuseCapacitySafeCode [] code
+    | .extern _ => true
+
+theorem ReuseCapacityEvidence.retainedAtLeast_fits_iff
+    (available : Nat) (info : LCNF.CtorInfo) :
+    (ReuseCapacityEvidence.retainedAtLeast available).fits info = true ↔
+      (Concrete.ConstructorLayout.ofInfo info).allocationBytes ≤ available := by
+  simp [ReuseCapacityEvidence.fits]
+
+/--
+The reuse gate can return evidence only when it came from the token's tracked
+provenance and fits the concrete replacement layout.
+-/
+theorem findFittingReuseCapacityEvidence?_eq_some
+    (facts : ReuseCapacityFacts) (tokenId : FVarId)
+    (info : LCNF.CtorInfo) (evidence : ReuseCapacityEvidence)
+    (found :
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence) :
+    findReuseCapacityEvidence? facts tokenId = some evidence ∧
+      evidence.fits info = true := by
+  cases trackedEq : findReuseCapacityEvidence? facts tokenId with
+  | none =>
+      simp [findFittingReuseCapacityEvidence?, trackedEq] at found
+  | some tracked =>
+      by_cases fits : tracked.fits info = true
+      · simp [findFittingReuseCapacityEvidence?, trackedEq, fits] at found
+        subst tracked
+        exact ⟨rfl, fits⟩
+      · simp [findFittingReuseCapacityEvidence?, trackedEq, fits] at found
+
+theorem findFittingReuseCapacityEvidence?_retained_layoutFits
+    (facts : ReuseCapacityFacts) (tokenId : FVarId)
+    (info : LCNF.CtorInfo) (available : Nat)
+    (found : findFittingReuseCapacityEvidence? facts tokenId info =
+      some (.retainedAtLeast available)) :
+    (Concrete.ConstructorLayout.ofInfo info).allocationBytes ≤ available := by
+  have fits :=
+    (findFittingReuseCapacityEvidence?_eq_some facts tokenId info
+      (.retainedAtLeast available) found).2
+  exact
+    (ReuseCapacityEvidence.retainedAtLeast_fits_iff available info).mp fits
+
+/--
+Every reuse at the head of an accepted code spine has tracked, fitting
+capacity evidence. This is the decomposition rule used by the
+syntax-directed concrete simulation.
+-/
+theorem reuseCapacitySafeCode_reuse_head
+    (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure)
+    (continuation : LCNF.Code .impure) (tokenId : FVarId)
+    (info : LCNF.CtorInfo) (updateHeader : Bool)
+    (args : Array (LCNF.Arg .impure))
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
+    ∃ evidence,
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence ∧
+        findReuseCapacityEvidence? facts tokenId = some evidence ∧
+        evidence.fits info = true := by
+  simp only [reuseCapacitySafeCode, valueEq] at safe
+  split at safe
+  next evidence found =>
+    have tracked :=
+      findFittingReuseCapacityEvidence?_eq_some facts tokenId info evidence found
+    exact ⟨evidence, found, tracked⟩
+  next missing =>
+    contradiction
+
+theorem reuseCapacitySafeProgram_code
+    (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)
+    (code : LCNF.Code .impure)
+    (safe : reuseCapacitySafeProgram program = true)
+    (member : decl ∈ program.decls)
+    (valueEq : decl.value = .code code) :
+    reuseCapacitySafeCode [] code = true := by
+  unfold reuseCapacitySafeProgram at safe
+  have declSafe := (Array.all_eq_true'.mp safe) decl member
+  simpa [valueEq] using declSafe
+
 def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) : Bool :=
   abiTypeKnown decl.type &&
@@ -491,11 +732,19 @@ def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     | _, _ => false
 
 def supportedProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=
-  program.decls.all (supportedDecl program) && closureFlowSafeProgram program
+  program.decls.all (supportedDecl program) &&
+    closureFlowSafeProgram program &&
+    reuseCapacitySafeProgram program
 
 /-- Proposition used as the domain of the initial lowering theorem. -/
 def WasmSupported (program : Fir.LeanIR.ImpureProgram) : Prop :=
   supportedProgram program = true
+
+theorem WasmSupported.reuseCapacitySafe
+    {program : Fir.LeanIR.ImpureProgram} (supported : WasmSupported program) :
+    reuseCapacitySafeProgram program = true := by
+  simp [WasmSupported, supportedProgram] at supported
+  exact supported.2
 
 inductive ValidationError where
   | externalDeclaration (name : Name)
@@ -508,8 +757,8 @@ def validateSupportedDecl (program : Fir.LeanIR.ImpureProgram)
   | .extern _ =>
       unless supportedDecl program decl do
         throw (.externalDeclaration decl.name)
-  | .code _ =>
-      unless supportedDecl program decl do
+  | .code code =>
+      unless supportedDecl program decl && reuseCapacitySafeCode [] code do
         throw (.unsupportedCode decl.name)
 
 def validateSupported (program : Fir.LeanIR.ImpureProgram) : Except ValidationError Unit :=

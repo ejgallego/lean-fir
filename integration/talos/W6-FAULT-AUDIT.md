@@ -73,7 +73,7 @@ the premise that derives its operation equation remains to be packaged.
 | box | `expectedScalar` | admitted scalar relations exclude it; allocation resource failures are T4S |
 | unbox | `expectedObject`, `expectedScalar`, `deadObject`, unknown scalar type `malformed` | `expectedScalar` and `deadObject` exact terminal leaves complete; the admitted `.tobject` relation excludes `expectedObject`, and supported boxed kinds exclude unknown-type faults |
 | reset | `expectedObject`, `deadObject`, `expectedConstructor`, object bounds, decrement/child faults | dead-object, unique-nonconstructor, unique-constructor bounds, nonunique fallback decrement, and non-`expectedObject` unique-constructor child-fault leaves complete; `.tobject` excludes operand-shape `expectedObject`; every mapped branch excludes release-fuel target traps, while erased child source release is tracked by `FIR-BUG-wasm-none-reset-erased-child-release` |
-| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; retained-capacity failure is T4S and tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap` |
+| reuse | `expectedReuseToken`, malformed arity, `deadObject`, `expectedConstructor` | dead-object and live-nonconstructor terminal leaves complete; admitted token/static-arity gates exclude the first two; the wasm32 capacity analysis now supplies either definitely-empty-token evidence or the retained-layout inequality required by T4S |
 | partial application | unknown declaration and saturated/malformed partial application | excluded by the supported static call gate; allocation and metadata failures are T4S |
 | closure application | `expectedClosure`, `deadObject`, declaration/arity faults | closure-flow gate excludes declaration/arity and untracked closure shapes; expected-closure/dead terminal packaging and closure-metadata T4S remain |
 | exact external call | arbitrary `RuntimeFault` returned by the installed implementation | arbitrary-arity terminal leaf complete |
@@ -90,8 +90,6 @@ traps for malformed source code.
 - `FIR-BUG-wasm-none-unreachable-fault-classification`: explicit
   unreachability and a missing case alternative both become the same native
   Wasm trap with an empty structured-failure channel.
-- `FIR-BUG-wasm-none-reuse-capacity-semantic-gap`: an accepted reset/reuse
-  program succeeds in FIR and fails the concrete retained-capacity check.
 - `FIR-BUG-wasm-none-uninitialized-scalar-projection`: FIR faults on an
   unwritten packed coordinate while zero-filled concrete storage returns zero.
 - `FIR-BUG-wasm-none-constructor-arity-fault-classification`: the two runtimes
@@ -105,7 +103,8 @@ traps for malformed source code.
 
 1. Resolve the structured `unreachable` transport as an isolated semantic
    Wasm ABI change, then rebase both tracks.
-2. Decide the clean retained-capacity invariant for reset/reuse and make the
-   validator or semantic contract establish it.
+2. Carry `reuseCapacitySafeProgram` evidence through the syntax-directed
+   simulation so each nonempty reuse invokes the existing layout-fit theorem
+   without a caller-supplied invariant.
 3. State and prove T4S per operation, including explicit wasm32 allocation
    capacity, then compose it syntax-directly alongside T2/T4.

@@ -140,9 +140,9 @@ private def unreachableTrapHasNoStructuredFailure : Bool :=
 #guard unreachableTrapHasNoStructuredFailure
 
 /-- A retained one-field allocation is too small for an in-place two-field
-replacement. FIR's allocation-agnostic semantic heap nevertheless succeeds,
-so this accepted program is the target-safety counterexample tracked by
-`FIR-BUG-wasm-none-reuse-capacity-semantic-gap`. -/
+replacement. FIR's allocation-agnostic semantic heap nevertheless succeeds;
+the wasm32 retained-capacity analysis must reject this program before
+lowering it as supported. -/
 private def oversizedReuseProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 70))) <|
@@ -155,10 +155,37 @@ private def oversizedReuseProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl s LCNF.ImpureType.tobject (.oproj 0 z)) <|
       .return s)] }
 
-#guard Fir.Wasm.supportedProgram oversizedReuseProgram
+#guard !Fir.Wasm.supportedProgram oversizedReuseProgram
+
+#guard match Fir.Wasm.validateSupported oversizedReuseProgram with
+  | .error (.unsupportedCode `main) => true
+  | _ => false
 
 #guard returned? (runMain oversizedReuseProgram) (.object (.tagged 71))
 
+/-- A definitely empty reset token takes the fresh-allocation branch, so it
+may safely grow to a nonempty constructor without a retained extent. -/
+private def emptyTokenGrowthProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[] LCNF.ImpureType.tobject (.code <|
+      .let (letDecl p taggedType (.ctor falseInfo #[])) <|
+      .let (letDecl r objType (.reset 0 p)) <|
+      .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 91))) <|
+      .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 92))) <|
+      .let (letDecl z objType
+        (.reuse r pairInfo false #[.fvar x, .fvar y])) <|
+      .let (letDecl s LCNF.ImpureType.tobject (.oproj 0 z)) <|
+      .return s)] }
+
+#guard Fir.Wasm.supportedProgram emptyTokenGrowthProgram
+
+#guard Fir.Wasm.validateSupported emptyTokenGrowthProgram matches .ok _
+
+#guard returned? (runMain emptyTokenGrowthProgram) (.object (.tagged 91))
+
+#guard fixtureReturnsWord? emptyTokenGrowthProgram 183
+
+/-- Raw lowering remains useful as a regression oracle: bypassing the
+supported-fragment gate reaches the exact concrete capacity trap. -/
 private def oversizedReuseTrapsOnConcreteCapacity : Bool :=
   (runtimeFixture? oversizedReuseProgram).any fun fixture =>
     fixture.importsResolveExactly &&

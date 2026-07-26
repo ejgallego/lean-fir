@@ -3166,6 +3166,22 @@ zero-fuel primitive regression remains intentional; only public related
 operations receive the adequacy guarantee. No shared semantic contract or
 executable ABI changed.
 
+W6.6df establishes a workable retained-capacity boundary for admitted
+reset/reuse code. A conservative wasm32 analysis records direct constructor
+allocations as either definitely producing an empty reset token or retaining
+at least their concrete aligned allocation size. Reset transports that
+evidence to the token; reuse is admitted only for an empty token or when the
+replacement layout fits the retained lower bound, and a fitting result carries
+the replacement bound into subsequent reuse. The extraction theorem exposes
+the exact inequality already required by
+`LiveHeapRel.reuseObject_some_refines`. Both `WasmSupported` and
+`validateSupported` reject the recorded one-field-to-two-field
+counterexample, while raw lowering retains its exact target-trap regression;
+the fitting and shared-reset programs remain admitted. Unknown provenance and
+join-parameter token transport are conservatively rejected for now. This is
+an intentionally unstable proof boundary that may be widened with stronger
+provenance results; no FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

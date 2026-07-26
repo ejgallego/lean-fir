@@ -243,9 +243,11 @@ wasm32 resource premises.
 
 Allocation capacity and retained reuse capacity must be visible hypotheses or
 validated invariants. FIR's semantic heap is unbounded, so unconditional
-target totality would be false. The current reset/reuse counterexample is
-tracked by `FIR-BUG-wasm-none-reuse-capacity-semantic-gap`; native
-unreachability losing its source fault is tracked separately by
+target totality would be false. `reuseCapacitySafeProgram` now rejects unknown
+token provenance and records the exact retained-layout inequality for every
+admitted nonempty reuse; syntax-directed simulation still has to transport
+that static fact to the operation theorem. Native unreachability losing its
+source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
 ### T5. Wasm-resident runtime linking
@@ -309,8 +311,9 @@ acceptance tests pass.
 5. In progress: populate the completed T4 syntax induction with terminal
    leaves for every structured failure admitted by the supported fragment,
    using `W6-FAULT-AUDIT.md` as the exact checklist.
-6. In progress: discharge T4S, first resolving the admitted unreachable and
-   retained-reuse-capacity counterexamples.
+6. In progress: discharge T4S. Retained reuse capacity is now validated and
+   needs program-proof transport; structured unreachability remains the
+   shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.
