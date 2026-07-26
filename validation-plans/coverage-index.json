@@ -83,13 +83,14 @@
     },
     "machine": {
       "minimumCases": 100,
-      "minimumInterpreterSteps": 1696,
+      "minimumInterpreterSteps": 1697,
       "requiredStaticForms": [
         "box",
         "cases",
         "ctor",
         "dec",
         "del",
+        "erased",
         "extern",
         "fap",
         "fvar",
@@ -117,6 +118,7 @@
         "ctor",
         "dec",
         "del",
+        "erased",
         "extern",
         "fap",
         "fvar",

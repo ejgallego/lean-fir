@@ -15,6 +15,7 @@ private def x : FVarId := ⟨`x⟩
 private def y : FVarId := ⟨`y⟩
 private def z : FVarId := ⟨`z⟩
 private def c : FVarId := ⟨`c⟩
+private def e : FVarId := ⟨`e⟩
 private def p : FVarId := ⟨`p⟩
 private def r : FVarId := ⟨`r⟩
 
@@ -131,7 +132,8 @@ private def payloadOwnerInfo : LCNF.CtorInfo :=
   { name := `NativePayloadOwner.mk, cidx := 0, size := 1, usize := 0, ssize := 0 }
 
 private def resetErasedFieldCode : LCNF.Code .impure :=
-  .let (letDecl p (.ctor erasedOwnerInfo #[.erased])) <|
+  .let (letDecl e .erased) <|
+  .let (letDecl p (.ctor erasedOwnerInfo #[.fvar e])) <|
   .let (letDecl r (.reset 1 p)) <|
   .let (letDecl y (.lit (.nat 72))) <|
   .let (letDecl z (.reuse r payloadOwnerInfo true #[.fvar y])) <|
@@ -142,7 +144,7 @@ private def resetErasedFieldProgram : ImpureProgram := {
   decls := #[decl `directResetErasedField #[] (.code resetErasedFieldCode)] }
 
 private def resetErasedFieldFormTrace : Array String :=
-  #["ctor", "reset", "lit", "reuse", "oproj", "return"]
+  #["erased", "ctor", "reset", "lit", "reuse", "oproj", "return"]
 
 def cases : Array Case := #[
   { validationCase := {
@@ -199,10 +201,12 @@ def cases : Array Case := #[
       tags :=
         #["direct-lcnf", "machine", "ownership", "constructor", "reset", "reuse",
           "erased", "boundary"]
-      requiredLcnfForms := #["ctor", "reset", "lit", "reuse", "oproj", "return"]
+      requiredLcnfForms :=
+        #["erased", "ctor", "reset", "lit", "reuse", "oproj", "return"]
       requiredExecutedLcnfForms :=
-        #["ctor", "reset", "lit", "reuse", "oproj", "return"]
+        #["erased", "ctor", "reset", "lit", "reuse", "oproj", "return"]
       requiredExecutedLcnfFormCounts := #[
+        { form := "erased", minimum := 1, maximum := some 1 },
         { form := "ctor", minimum := 1, maximum := some 1 },
         { form := "reset", minimum := 1, maximum := some 1 },
         { form := "lit", minimum := 1, maximum := some 1 },

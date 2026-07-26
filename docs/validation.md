@@ -333,10 +333,11 @@ also retain contribution counts and the exact items unique to that tier. In the
 current baseline, the 97 source cases are shared by the source-LCNF and V8
 tiers, the three direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
-The erased-reset fixture also makes `reset` and `reuse` direct-tier-only static
-and executed forms. The source tier uniquely contributes 16 static forms, 16
-executed forms, and all nine interpreter externals. Attribution is derived from
-the same verified inputs and policy and is covered by the index identity.
+The erased-reset fixture also makes `erased`, `reset`, and `reuse`
+direct-tier-only static and executed forms. The source tier uniquely
+contributes 16 static forms, 16 executed forms, and all nine interpreter
+externals. Attribution is derived from the same verified inputs and policy and
+is covered by the index identity.
 
 Two retained coverage baselines can be compared without their original build
 directories:
