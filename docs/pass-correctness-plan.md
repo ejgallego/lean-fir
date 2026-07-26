@@ -529,102 +529,206 @@ the real `foldAlphaEquivalent` fixture observationally equivalent at the
 `alphaLeft`. The existing command regression still executes Lean's actual
 pass and confirms the resulting syntax.
 
-All three local rewrite families now expose `CodeEquivalentAt` interfaces.
-The singleton-default fixture eliminates directly; the unreachable-filter
-fixture first proves the compiler-shape dead arm removable and then eliminates
-the surviving singleton constructor; the alpha-fold fixture uses the
-bidirectional checker theorem. Thus every actual-pass fixture has both an
-executed syntax regression and a kernel-checked observational-equivalence
-proof at its valid runtime tag. This deliberately separates local semantic
-correctness from the still-missing compiler traversal graph.
+All three local rewrite families expose `CodeEquivalentAt` interfaces. The
+singleton-default fixture eliminates directly; the unreachable-filter fixture
+first proves the compiler-shape dead arm removable and then eliminates the
+surviving singleton constructor; the alpha-fold fixture uses the bidirectional
+checker theorem. Thus every original actual-pass fixture has both an executed
+syntax regression and a kernel-checked observational-equivalence proof at its
+valid runtime tag.
 
-Attempting to replace that command bridge with a kernel theorem exposed a
-second upstream proof-interface gap. Lean 4.32 keeps `filterUnreachable`,
-`addDefaultAlt`, `simplifyCases`, and recursive `Code.simpCase` module-private;
-downstream code cannot even name the transparent first kernel, while the
-recursive traversal is additionally an opaque `partial def`.
-`FIR-BUG-impure-simpCase-private-proof-interface` records the failed minimal
-statement and the required public graph/equation interface. FIR retains the
-proved specification plus actual-pass regression without duplicating the
-effectful compiler or adding another axiom.
+The execution relation also supports passes whose machines do not advance in
+lockstep. `NonLockstep.Reaches` existentially hides a finite target step count,
+and `StutteringSimulation` allows one source step to match zero or more target
+steps while preserving a caller-chosen machine relation. Two such simulations
+form a `StutteringBisimulation`, which proves equivalence of every terminating
+observation without requiring equal programs or equal step counts.
+`SamePhaseCorrectOn`, `InitialInvariantOn`, and `MachineRelatedWith` expose the
+typed/admissible entry boundary required by control-flow simplifications.
 
-The execution relation now also supports passes whose machines do not advance
-in lockstep. `NonLockstep.Reaches` existentially hides a finite target step
-count, and `StutteringSimulation` allows one source step to match zero or more
-target steps while preserving a user-chosen relation between machine states.
-Its soundness proof inducts over the source execution, and its composition law
-transports the first pass's matching path through the second pass. Two such
-simulations form a `StutteringBisimulation`, which proves equivalence of every
-terminating observation without requiring equal programs or equal step counts.
-`InitialStatesRelated` and `samePhaseCorrect_of_stuttering` isolate the remaining
-pass obligation: relate the two programs' entry states.
+### Consolidated whole-program `simpCase` endpoint
 
-`InternalPrefixOrEq` is the first genuinely non-lockstep regression. It relates
-a state to itself or to the state after one deterministic internal step. In the
-forward proof, that internal source step is matched by zero target steps; the
-reverse proof replays it. The selected-arm case rewrite instantiates this
-relation at a real `simpCase` boundary, proving the original case state and its
-chosen branch observationally equivalent. The next proof slice should replace
-this local one-step witness with a relation spanning the transformed program's
-recursive traversal and declarations.
+The initially missing recursive compiler graph is now represented locally.
+`SimpCaseCompilerBridge.shadowCode?` is a transparent, fuel-indexed copy of
+the output-producing portion of Lean 4.32's private traversal. It recursively
+covers every impure code constructor and deliberately omits only compiler
+bookkeeping calls that do not affect returned syntax. `shadowProgram?` lifts
+that traversal through declarations and programs. `checkActualAgreement`
+executes the pinned upstream pass and the shadow on the same input and rejects
+any returned-syntax mismatch.
 
-`NonLockstepExamples.ProgramStateRel` now supplies that first program-aware
-slice. Its source and target contain different `main` declaration bodies: the
-actual pass recursively traverses two `let`s and eliminates a closed singleton
-case. The relation follows both machines from declaration invocation through
-those continuations, permits the target to stutter at the eliminated case, and
-rejoins them for return, nullary global caching, and extra-argument failure.
-The resulting bisimulation relates every initial argument array and therefore
-closes `SamePhaseCorrect` for the two distinct programs. An executable command
-also confirms that Lean's actual 4.32 pass produces the proved target syntax.
+`SimpCaseScopedBridge` composes structural traversal, alpha-equivalent branch
+folding, and structural traversal again. Its
+`ScopedProgramPhaseEndpointCertifiedTrace` carries the recursive source and
+target certificates needed by the semantic relation.
+`SimpCaseWellFormed.ProgramWellFormed` packages:
 
-The fixture constructs its discriminant internally. This is important:
-singleton elimination is not observationally correct for every untyped raw
-discriminant value, because the source inspects the value while the eliminated
-target does not. Generalizing the program-aware relation to open case inputs
-therefore requires the planned typed-entry/runtime invariant; it should not be
-hidden by weakening the simulation or by silently restricting
-`SamePhaseCorrect`.
+- the shared impure phase invariant;
+- the transparent scope check;
+- deterministic case-table normalization;
+- canonical runtime-observed type metadata.
 
-`NonLockstep.Structural` now factors the fixture's reusable shape out of the
-example. A caller supplies the relation on code bodies; FIR lifts it through
-top-level declarations with identical ABIs, arbitrary-length ordered programs,
-join declarations, saved bind continuations, control states, and finally the
-whole machine. Pointwise program relatedness proves that every named lookup
-returns related declarations, and it relates all initial machine states
-without repeating entry plumbing. A concrete two-declaration regression pairs
-the transformed `main` with an unchanged `helper` and checks both lookup and
-arbitrary entry-state construction.
+The preferred theorem
+`shadowProgram_samePhaseCorrectOn_reachableCaseTag_of_programWellFormed`
+takes that well-formedness package, a successful transparent run, and an
+`UpstreamBridge`, then returns `SamePhaseCorrectOn` for the trace's explicit
+admissible entry arguments. This is the first assembled whole-program
+`simpCase` theorem for the transparent executable traversal.
 
-The same module introduces `SamePhaseCorrectOn`, `InitialInvariantOn`, and
-`MachineRelatedWith`. Together they express the missing typed boundary without
-changing the existing unrestricted correctness contract: admissible entry
-arguments establish a relational machine invariant, the future non-lockstep
-proof preserves it, and the generic lifting theorem returns correctness for
-exactly those arguments. The next slice is to define the recursive
-`simpCase` code relation and prove its core-step closure using this structural
-machine relation.
+Two boundaries remain explicit:
 
-The remaining bounded work is:
+1. Lean 4.32 keeps the actual recursive traversal and its case simplifiers
+   private/opaque. Actual-pass agreement is therefore executable,
+   source-hash-guarded evidence rather than a universal kernel equation.
+   `FIR-BUG-impure-simpCase-private-proof-interface` records the missing public
+   equation/graph interface.
+2. The compiler-facing alpha-equivalence specialization instantiates
+   `UpstreamBridge` with the single audited
+   `AlphaEqvTrusted.lean432UpstreamBridge` axiom. The transparent local-checker
+   soundness theorems themselves remain axiom-free.
 
-1. refactor FIR's opaque hygiene/binder traversals into transparent total
-   definitions with equation lemmas, then derive `ProgramBodiesRelated` from
-   `CheckedImpureProgram`/`ImpureHygienic`;
-2. derive the two orientations of `CodeSideConditions`, environment coverage,
-   and declaration-body coverage from the public checked-program boundary;
-3. prove the transparent local checker sound for each newly added declarative
-   code constructor, discharge or refine the exact runtime-type premises at
-   the impure phase boundary, and eventually replace the audited upstream
-   correspondence axiom with a kernel theorem;
-4. once Lean exports a pass graph/equation interface, connect
-   `filterUnreachable`, `addDefaultAlt`, `simplifyCases`, and recursive
-   `Code.simpCase` directly to the local rewrite theorems;
-5. lift the resulting theorem through declarations and program entry
-   evaluation;
-6. expand the compiler-generated conformance corpus around the whole pass;
-7. in parallel, continue the Talos runtime work and run
-   the constructor/projection examples end to end.
+## Current `elimDeadVars` proof
 
-Completing those items finishes the first whole-pass theorem and the first
-non-scalar Wasm differential test without forcing either track to wait for the
-other.
+`elimDeadVars` is the active proof lane after `simpCase`. It requires a
+reachability-aware relation because deleting an unused allocation changes the
+raw heap while preserving every observable root.
+
+### Transparent compiler graph and static certificates
+
+`ElimDead.shadowCode?` is an audited, fuel-indexed copy of Lean 4.32's impure
+backwards liveness/elimination traversal. It records the final used-local set,
+retained/deleted let decisions, retained/deleted join decisions, and
+retained/deleted write decisions. The traversal lifts through declaration
+groups and whole programs.
+
+`ExactShadowCodeGraph` and `ExactShadowCodeView` retain the proof-relevant
+branch selected by that run. The hygiene layer proves:
+
+- lexical scope and canonical binder uniqueness for every code subtree;
+- absence of every deleted binder from the ambient live set;
+- hereditary exact provenance for live join bodies, saved continuations,
+  declaration bodies, and active code;
+- projection of that exact provenance to the monotone operational graph.
+
+`ProgramElimDeadWellFormed` combines the shared `ProgramWellFormed` package
+with transparent binder uniqueness. A successful `shadowProgram?` run then
+constructs `ProgramRelated (BinderReadyShadowCodeRelated fuel)`.
+
+### Reachable-runtime simulation
+
+`ShadowRuntimeRel` compares only heap cells reachable from published roots,
+modulo an injective partial address renaming. Unreachable source garbage may
+therefore be absent from the target. The machine relation carries:
+
+- related live environments and join tables;
+- related declaration bodies and saved frames;
+- reference-count, persistence, cache, reset/reuse, and runtime-fault facts;
+- related external requests and suspended machines.
+
+The operational dispatcher `match_codeStep_of_ready` covers every executable
+impure code constructor and all fourteen impure let-value families. Deleted
+nodes take a source-only step; retained nodes advance together, possibly
+extending the address renaming. Terminal faults and returned observations are
+covered separately. `ReachableMachineRelatedWith.simulation` lifts these
+local results to a finite-stuttering forward simulation.
+
+At program level, `shadowProgram_loweringCorrect_reachablyCodeReady` proves
+`LoweringCorrect` for a successful transparent `elimDeadVars` run from:
+
+- `ProgramElimDeadWellFormed`;
+- an address-parametric `ReachableExternalSpecCompatible` contract;
+- hereditary active-code readiness at admissible entry states.
+
+Thus the observable/runtime proof and program lifting are complete. The
+remaining goal is to derive hereditary active-code readiness from the exact
+compiler graph instead of accepting it as an entry premise.
+
+### Hereditary preservation progress
+
+The strong preservation layer retains exact compiler provenance after each
+matched step. It is complete for:
+
+- retained and deleted join declarations;
+- cases, jumps, returns, and declaration entry;
+- retained and deleted object, `USize`, and scalar writes;
+- tag updates, increments, decrements, and deletion;
+- retained and deleted erased lets;
+- retained and deleted literal lets, including fresh-address extension for
+  heap-backed literals.
+
+All stepping non-let code forms are therefore covered; `.unreach` is terminal.
+For impure let values, two of fourteen families have their exact hereditary
+wrappers. The remaining families are:
+
+1. `.ctor`;
+2. `.oproj`, `.uproj`, and `.sproj`;
+3. `.pap`, `.box`, `.unbox`, and `.isShared`;
+4. `.reset` and `.reuse`;
+5. retained `.fvar`/`.fap` applications and the deleted nullary-`.fap`
+   boundary.
+
+After those families, assemble the strong active-code dispatcher, prove
+hereditary readiness stable across matched finite paths, and discharge
+`BinderReadyReachablyCodeReady` for compiler-produced entry states. That
+closes the transparent whole-program forward theorem modulo the explicit
+foreign-semantics and nullary-constant contracts.
+
+### Open semantic boundaries
+
+- `FIR-BUG-impure-elimDeadVars-nullary-fap-effects` is a real mismatch under
+  FIR's current unrestricted external semantics: Lean treats a nullary full
+  application as removable, while FIR permits it to emit observable effects.
+  Whole-pass correctness must either exclude such programs, record the
+  compiler's constant-purity invariant, or require a semantic stuttering
+  certificate.
+- `FIR-BUG-impure-none-external-spec-address-parametricity` is represented by
+  the explicit `ReachableExternalSpecCompatible` premise. Arbitrary foreign
+  semantics may inspect raw heap addresses and cannot be transported across a
+  renaming.
+- `FIR-BUG-impure-elimDeadVars-reuse-token-root-gap` is locally isolated by
+  `RetainedLetReadyAt`, which requires a concrete reuse token's cell to be
+  reachable. The compiler-facing proof must derive and preserve that
+  capability.
+- `FIR-BUG-impure-elimDeadVars-full-heap-observation` motivated the
+  `ObservationRel`/`LoweringCorrect` endpoint. The active proof no longer
+  compares raw heaps, although the shared unrestricted same-phase contract
+  remains a separate cleanup target.
+
+Actual-pass fixtures compare the transparent `elimDeadVars` shadow with Lean
+4.32 and preserve every discovered mismatch as a textual bug card and
+regression.
+
+## Immediate proof queue
+
+1. Add retained/deleted constructor-let hereditary matchers and exact-view
+   wrappers.
+2. Add the three projection-let families.
+3. Add the runtime-neutral allocation/read families: partial application,
+   box, unbox, and `isShared`.
+4. Add reset and reuse while preserving the token capability.
+5. Add retained call/application cases and resolve the nullary-`.fap`
+   admissibility contract.
+6. Assemble the hereditary code-step dispatcher and its finite-path
+   preservation law.
+7. Derive entry readiness from `ProgramElimDeadWellFormed` plus the successful
+   compiler graph, then specialize the program theorem.
+8. Expand actual-pass conformance fixtures around each completed family.
+
+In parallel, the Wasm lane continues from the same final-impure semantic
+boundary and runs constructor/projection artifacts through the shared
+validation protocol.
+
+## Trust and checked status
+
+The Lean proof sources are fully elaborated without proof holes. The sole
+registered project axiom is the pinned Lean 4.32 upstream-to-local
+alpha-equivalence correspondence in `AlphaEqvTrusted`; `elimDeadVars` adds no
+trusted axiom. `make check` validates the Lean build, executable examples,
+differential matrices, bug-card format, source hashes, and the exact
+trusted-axiom count.
+
+Completing the immediate queue yields the first reachability-aware
+whole-program proof for a behavior-changing final-impure pass. The remaining
+reverse campaign then continues through projection movement, ownership,
+late-mono lowering, SCC/lambda transformations, and finally the base/frontend
+passes in the order above.
