@@ -13,9 +13,23 @@ from validation_harness import (
     PROTOCOL_VERSION,
     ValidationError,
     checked_sha256,
+    compare_success,
+    manifest_from_output as parse_corpus_manifest,
+    records_from_output,
     resolve_lake_command,
+    result_map,
     run,
     validate_backend_name,
+)
+from validation_lcnf import (
+    diagnostic_name_trace,
+    diagnostic_named_counts,
+    named_count_items,
+    positive_int_diagnostic,
+    prepare_manifest as prepare_lcnf_manifest,
+    step_trace_inventory,
+    trace_name_counts,
+    unsatisfied_count_requirements,
 )
 
 
@@ -131,14 +145,200 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
     return descriptors
 
 
+def execute_backend_case(
+    executable: Path,
+    backend: str,
+    case_id: str,
+    root: Path,
+) -> dict:
+    command = [str(executable), "--case", case_id]
+    completed = run(command, root)
+    if completed.returncode != 0:
+        raise ValidationError(
+            f"{backend}/{case_id}: process exited {completed.returncode}:\n"
+            f"{completed.stderr}"
+        )
+    results = result_map(records_from_output(completed.stdout, command), backend)
+    if set(results) != {case_id}:
+        raise ValidationError(
+            f"{backend}/{case_id}: backend returned {sorted(results)}"
+        )
+    return results[case_id]
+
+
+def direct_path_evidence(
+    descriptor: dict,
+    native_result: dict,
+    lcnf_result: dict,
+) -> tuple[dict, list[str]]:
+    case_id = descriptor["id"]
+    failures: list[str] = []
+
+    observation_matches, native_observation, lcnf_observation = compare_success(
+        native_result, lcnf_result
+    )
+    if not observation_matches:
+        failures.append(
+            f"{case_id}: direct native and LCNF observations differ"
+        )
+
+    expected_trace = descriptor["requiredExecutedLcnfFormTrace"]
+    trace_present, observed_trace_value = diagnostic_name_trace(
+        lcnf_result, "executed-lcnf-form-trace"
+    )
+    trace_valid = trace_present and observed_trace_value is not None
+    observed_trace = observed_trace_value if trace_valid else []
+    trace_matches = (
+        trace_valid
+        and expected_trace is not None
+        and observed_trace == expected_trace
+    )
+    if not trace_matches:
+        failures.append(
+            f"{case_id}: direct LCNF executed form trace does not match its contract"
+        )
+
+    counts_present, observed_counts_value = diagnostic_named_counts(
+        lcnf_result,
+        "executed-lcnf-form-counts",
+        "form",
+    )
+    counts_valid = counts_present and observed_counts_value is not None
+    observed_counts = observed_counts_value if counts_valid else {}
+    trace_counts = trace_name_counts(observed_trace)
+    counts_match_trace = counts_valid and observed_counts == trace_counts
+    if not counts_match_trace:
+        failures.append(
+            f"{case_id}: direct LCNF form counts disagree with its executed trace"
+        )
+    unsatisfied_counts = unsatisfied_count_requirements(
+        descriptor["requiredExecutedLcnfFormCounts"],
+        observed_counts,
+        "form",
+    )
+    if unsatisfied_counts:
+        failures.append(
+            f"{case_id}: direct LCNF form counts violate their contract"
+        )
+
+    step_trace_present, step_trace_value = diagnostic_name_trace(
+        lcnf_result, "executed-step-trace"
+    )
+    step_trace_valid = step_trace_present and step_trace_value is not None
+    step_trace = step_trace_value if step_trace_valid else []
+    projected_forms, administrative_counts, unknown_steps = (
+        step_trace_inventory(step_trace)
+    )
+    step_forms_match = step_trace_valid and projected_forms == observed_trace
+    if not step_forms_match:
+        failures.append(
+            f"{case_id}: direct LCNF step trace does not project to its form trace"
+        )
+    if unknown_steps:
+        failures.append(
+            f"{case_id}: direct LCNF step trace contains unknown transitions"
+        )
+    required_administrative = descriptor["requiredAdministrativeStepKinds"]
+    missing_administrative = [
+        kind
+        for kind in required_administrative
+        if administrative_counts.get(kind, 0) == 0
+    ]
+    if missing_administrative:
+        failures.append(
+            f"{case_id}: direct LCNF step trace omits required administrative transitions"
+        )
+
+    interpreter_steps_present, interpreter_steps = positive_int_diagnostic(
+        lcnf_result, "interpreter-steps"
+    )
+    step_count_matches = (
+        interpreter_steps_present
+        and interpreter_steps is not None
+        and interpreter_steps == len(step_trace)
+    )
+    if not step_count_matches:
+        failures.append(
+            f"{case_id}: direct LCNF interpreter-step count disagrees with its trace"
+        )
+
+    evidence = {
+        "nativeBackend": native_result["backend"],
+        "lcnfBackend": lcnf_result["backend"],
+        "observationMatches": observation_matches,
+        "nativeObservation": native_observation,
+        "lcnfObservation": lcnf_observation,
+        "requiredExecutedLcnfFormTrace": expected_trace,
+        "executedLcnfFormTrace": observed_trace,
+        "formTraceMatches": trace_matches,
+        "requiredExecutedLcnfFormCounts": descriptor[
+            "requiredExecutedLcnfFormCounts"
+        ],
+        "executedLcnfFormCounts": named_count_items(
+            observed_counts, "form", "count"
+        ),
+        "formCountsMatchTrace": counts_match_trace,
+        "unsatisfiedFormCounts": unsatisfied_counts,
+        "executedStepTrace": step_trace,
+        "stepFormsMatch": step_forms_match,
+        "unknownStepKinds": unknown_steps,
+        "requiredAdministrativeStepKinds": required_administrative,
+        "executedAdministrativeStepCounts": named_count_items(
+            administrative_counts, "kind", "count"
+        ),
+        "missingAdministrativeStepKinds": missing_administrative,
+        "interpreterSteps": interpreter_steps,
+        "stepCountMatches": step_count_matches,
+        "matches": not failures,
+        "failures": failures,
+    }
+    return evidence, failures
+
+
+def collect_direct_path_evidence(
+    descriptors: list[dict],
+    selected_ids: list[str],
+    native_executable: Path,
+    lcnf_executable: Path,
+    root: Path,
+) -> dict[str, dict]:
+    descriptor_by_id = {
+        descriptor["id"]: descriptor for descriptor in descriptors
+    }
+    unknown = sorted(set(selected_ids) - set(descriptor_by_id))
+    if unknown:
+        raise ValidationError(
+            f"native IR attestation case(s) missing from direct manifest: "
+            f"{','.join(unknown)}"
+        )
+    evidence_by_id: dict[str, dict] = {}
+    for case_id in selected_ids:
+        native_result = execute_backend_case(
+            native_executable, "direct-native", case_id, root
+        )
+        lcnf_result = execute_backend_case(
+            lcnf_executable, "direct-lcnf", case_id, root
+        )
+        evidence, _ = direct_path_evidence(
+            descriptor_by_id[case_id],
+            native_result,
+            lcnf_result,
+        )
+        evidence_by_id[case_id] = evidence
+    return evidence_by_id
+
+
 def attest_artifacts(
     descriptors: list[dict],
     out_dir: Path,
     selected: list[str] | None = None,
     verify_digest: bool = True,
+    direct_path_evidence_by_id: dict[str, dict] | None = None,
 ) -> tuple[list[dict], list[str]]:
     descriptor_by_id = {item["caseId"]: item for item in descriptors}
     selected_ids = selected or sorted(descriptor_by_id)
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValidationError("native IR attestation cases must be unique")
     unknown = sorted(set(selected_ids) - set(descriptor_by_id))
     if unknown:
         raise ValidationError(
@@ -202,6 +402,14 @@ def attest_artifacts(
         ]
         claim_matches = not missing_fragments
         matches = artifact_matches and claim_matches
+        direct_path = None
+        if direct_path_evidence_by_id is not None:
+            direct_path = direct_path_evidence_by_id.get(case_id)
+            if direct_path is None:
+                raise ValidationError(
+                    f"{case_id}: missing direct structural path evidence"
+                )
+            matches = matches and direct_path["matches"]
         record = {
             "version": PROTOCOL_VERSION,
             "caseId": case_id,
@@ -220,12 +428,28 @@ def attest_artifacts(
             "declarations": declarations,
             "forms": forms,
         }
+        if direct_path is not None:
+            record["directPath"] = direct_path
         case_dir.mkdir(parents=True, exist_ok=True)
         (case_dir / "attestation.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         records.append(record)
+        if direct_path is not None and not direct_path["matches"]:
+            direct_failures = direct_path.get("failures")
+            if (
+                not isinstance(direct_failures, list)
+                or not direct_failures
+                or any(
+                    not isinstance(failure, str) or not failure
+                    for failure in direct_failures
+                )
+            ):
+                direct_failures = [
+                    f"{case_id}: direct structural path evidence failed"
+                ]
+            failures.extend(direct_failures)
         if missing_fragments:
             failures.append(
                 f"{case_id}: native IR no longer supports its semantic claim; "
@@ -260,7 +484,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--no-build",
         action="store_true",
-        help="reuse existing Lean modules and direct-native executable",
+        help="reuse existing Lean modules and direct executables",
     )
     result.add_argument(
         "--record",
@@ -278,20 +502,51 @@ def main(argv: list[str] | None = None) -> int:
         out_dir = root / out_dir
     if not args.no_build:
         built = run(
-            ["lake", "build", "Fir.Validation.DirectLCNF", "fir-direct-native"],
+            [
+                "lake",
+                "build",
+                "Fir.Validation.DirectLCNF",
+                "fir-direct-native",
+                "fir-direct-lcnf",
+            ],
             root,
         )
         if built.returncode != 0:
             sys.stderr.write(built.stdout + built.stderr)
             raise ValidationError("failed to build direct native IR recorder inputs")
-    executable = resolve_lake_command(root, "fir-direct-native")
-    manifest_command = [str(executable), "--native-oracle-manifest"]
+    native_executable = resolve_lake_command(root, "fir-direct-native")
+    lcnf_executable = resolve_lake_command(root, "fir-direct-lcnf")
+    manifest_command = [str(native_executable), "--native-oracle-manifest"]
     manifest = run(manifest_command, root)
     if manifest.returncode != 0:
         raise ValidationError(
             "failed to read direct native IR manifest:\n" + manifest.stderr
         )
     descriptors = parse_manifest(manifest.stdout, manifest_command)
+    descriptor_by_id = {
+        descriptor["caseId"]: descriptor for descriptor in descriptors
+    }
+    selected_ids = args.cases or sorted(descriptor_by_id)
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValidationError("native IR attestation cases must be unique")
+    unknown = sorted(set(selected_ids) - set(descriptor_by_id))
+    if unknown:
+        raise ValidationError(
+            f"unknown native IR attestation case(s): {','.join(unknown)}"
+        )
+    corpus_manifest_command = [str(native_executable), "--manifest"]
+    corpus_manifest = run(corpus_manifest_command, root)
+    if corpus_manifest.returncode != 0:
+        raise ValidationError(
+            "failed to read direct LCNF corpus manifest:\n"
+            + corpus_manifest.stderr
+        )
+    corpus_descriptors = prepare_lcnf_manifest(
+        parse_corpus_manifest(
+            corpus_manifest.stdout,
+            corpus_manifest_command,
+        )
+    )
     lean = resolve_lake_command(root, "lean")
     lean_path = run(["lake", "env", "printenv", "LEAN_PATH"], root)
     if lean_path.returncode != 0 or not lean_path.stdout.strip():
@@ -308,11 +563,19 @@ def main(argv: list[str] | None = None) -> int:
     if recorded.returncode != 0:
         sys.stderr.write(recorded.stdout + recorded.stderr)
         raise ValidationError("failed to record direct native final-impure LCNF")
+    direct_path_evidence_by_id = collect_direct_path_evidence(
+        corpus_descriptors,
+        selected_ids,
+        native_executable,
+        lcnf_executable,
+        root,
+    )
     records, failures = attest_artifacts(
         descriptors,
         out_dir,
-        args.cases,
+        selected_ids,
         verify_digest=not args.record,
+        direct_path_evidence_by_id=direct_path_evidence_by_id,
     )
     for record in records:
         status = "RECORDED" if args.record else ("PASS" if record["matches"] else "FAIL")

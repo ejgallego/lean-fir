@@ -311,6 +311,15 @@ semantic claim. Normal mode writes per-case `attestation.json` and aggregate
 `attestations.json` evidence, retains the claim and its missing-fragment
 diagnostics, and fails when the final-impure artifact changes.
 
+Each attestation also executes the direct native oracle and the explicit LCNF
+machine program. Its `directPath` evidence requires equal semantic
+observations, the exact case-declared executed form trace, consistent form
+counts, a fully classified step trace whose form projection agrees, coverage of
+the required administrative transitions, and an interpreter-step count equal
+to the retained step trace. The direct `reset`/`reuse` path and the compiler's
+lowered `isShared`/`dec`/`oset` path are therefore checked against one semantic
+claim without incorrectly requiring their operation inventories to be equal.
+
 The initial audited set separates four ownership paths: releasing both slots of
 a repeated alias from a unique owner, stopping recursive release at a shared
 nested child, taking the shared-owner allocation path without releasing its

@@ -7869,6 +7869,49 @@ class DirectNativeIrTests(unittest.TestCase):
             "expectedArtifactSha256": digest,
         }
 
+    def direct_descriptor(self) -> dict:
+        return {
+            "id": "native-ir-case",
+            "requiredExecutedLcnfFormTrace": ["reset", "reuse"],
+            "requiredExecutedLcnfFormCounts": [
+                {"form": "reset", "minimum": 1, "maximum": 1},
+                {"form": "reuse", "minimum": 1, "maximum": 1},
+            ],
+            "requiredAdministrativeStepKinds": ["admin:yield-cache"],
+        }
+
+    def direct_lcnf_result(self, value: int = 42) -> dict:
+        record = success("native-ir-case", "direct-lcnf", value)
+        record["diagnostics"] = [
+            {
+                "key": "executed-lcnf-form-trace",
+                "value": json.dumps(["reset", "reuse"]),
+            },
+            {
+                "key": "executed-lcnf-form-counts",
+                "value": json.dumps(
+                    [
+                        {"form": "reset", "count": 1},
+                        {"form": "reuse", "count": 1},
+                    ]
+                ),
+            },
+            {
+                "key": "executed-step-trace",
+                "value": json.dumps(
+                    [
+                        "admin:invoke-name",
+                        "form:reset",
+                        "form:reuse",
+                        "admin:yield-cache",
+                        "admin:yield-done",
+                    ]
+                ),
+            },
+            {"key": "interpreter-steps", "value": "5"},
+        ]
+        return record
+
     def test_native_ir_manifest_is_strict_and_preserves_roots(self) -> None:
         artifact = b"def nativeIrCase := return\n"
         descriptor = self.native_ir_descriptor(native_ir.sha256_bytes(artifact))
@@ -7925,17 +7968,36 @@ class DirectNativeIrTests(unittest.TestCase):
                 "return\n", encoding="utf-8"
             )
 
+            direct_path = {"matches": True, "observationMatches": True}
             records, failures = native_ir.attest_artifacts(
-                [descriptor], out_dir
+                [descriptor],
+                out_dir,
+                direct_path_evidence_by_id={
+                    descriptor["caseId"]: direct_path
+                },
             )
             self.assertEqual(failures, [])
             self.assertTrue(records[0]["matches"])
+            self.assertEqual(records[0]["directPath"], direct_path)
             self.assertEqual(records[0]["artifactSha256"], digest)
             self.assertEqual(records[0]["claim"], descriptor["claim"])
             self.assertTrue(records[0]["claimMatches"])
             self.assertEqual(records[0]["missingArtifactFragments"], [])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
+
+            records, failures = native_ir.attest_artifacts(
+                [descriptor],
+                out_dir,
+                direct_path_evidence_by_id={
+                    descriptor["caseId"]: {
+                        "matches": False,
+                        "failures": ["direct structural mismatch"],
+                    }
+                },
+            )
+            self.assertFalse(records[0]["matches"])
+            self.assertEqual(failures, ["direct structural mismatch"])
 
             missing_claim = {
                 **descriptor,
@@ -7987,6 +8049,48 @@ class DirectNativeIrTests(unittest.TestCase):
                 core.ValidationError, "omits rooted declarations"
             ):
                 native_ir.attest_artifacts([descriptor], out_dir)
+
+    def test_direct_path_evidence_binds_observation_and_machine_trace(self) -> None:
+        descriptor = self.direct_descriptor()
+        native_result = success("native-ir-case", "direct-native")
+        lcnf_result = self.direct_lcnf_result()
+        evidence, failures = native_ir.direct_path_evidence(
+            descriptor,
+            native_result,
+            lcnf_result,
+        )
+        self.assertEqual(failures, [])
+        self.assertTrue(evidence["matches"])
+        self.assertTrue(evidence["observationMatches"])
+        self.assertTrue(evidence["formTraceMatches"])
+        self.assertTrue(evidence["formCountsMatchTrace"])
+        self.assertTrue(evidence["stepFormsMatch"])
+        self.assertTrue(evidence["stepCountMatches"])
+        self.assertEqual(evidence["missingAdministrativeStepKinds"], [])
+
+        changed_result = self.direct_lcnf_result(43)
+        evidence, failures = native_ir.direct_path_evidence(
+            descriptor,
+            native_result,
+            changed_result,
+        )
+        self.assertFalse(evidence["matches"])
+        self.assertFalse(evidence["observationMatches"])
+        self.assertEqual(len(failures), 1)
+
+        changed_trace = self.direct_lcnf_result()
+        changed_trace["diagnostics"][0]["value"] = json.dumps(
+            ["reuse", "reset"]
+        )
+        evidence, failures = native_ir.direct_path_evidence(
+            descriptor,
+            native_result,
+            changed_trace,
+        )
+        self.assertFalse(evidence["matches"])
+        self.assertFalse(evidence["formTraceMatches"])
+        self.assertFalse(evidence["stepFormsMatch"])
+        self.assertEqual(evidence["failures"], failures)
 
 
 class CoverageIndexTests(unittest.TestCase):
