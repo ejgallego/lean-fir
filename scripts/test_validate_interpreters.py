@@ -8166,6 +8166,287 @@ class CoverageIndexTests(unittest.TestCase):
         self.assertTrue(first["attribution"]["summary"]["complete"])
         self.assertTrue(first["summary"]["complete"])
 
+    def test_verified_index_comparison_reports_gains_and_regressions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build"
+            plan_dir.mkdir()
+            build_dir.mkdir()
+            matrix_path = build_dir / "matrix.json"
+            plan = {
+                "version": 2,
+                "tiers": [
+                    {
+                        "id": "source",
+                        "kind": "source-compiled",
+                        "matrix": "../_build/matrix.json",
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"}
+                        ],
+                        "machineCoverage": None,
+                    }
+                ],
+                "policy": self.policy(
+                    "source",
+                    ["native", "lcnf"],
+                    require_machine=False,
+                ),
+            }
+            plan_path = plan_dir / "coverage-index.json"
+            plan_path.write_bytes(json_bytes(plan))
+
+            def build(case_ids: list[str]) -> dict:
+                matrix = self.matrix(
+                    case_ids,
+                    ["native", "lcnf"],
+                    [("native", "lcnf")],
+                )
+                matrix_path.write_bytes(json_bytes(matrix))
+                with mock.patch.object(
+                    coverage_index,
+                    "verify_matrix_artifact",
+                    return_value=matrix,
+                ):
+                    return coverage_index.build_coverage_index(
+                        plan_path, root
+                    )
+
+            before = build(["case"])
+            after = build(["case", "new-case"])
+            snapshots = root / "relocated" / "snapshots"
+            before_path = snapshots / "before.json"
+            after_path = snapshots / "after.json"
+            coverage_index.write_coverage_index(before_path, before)
+            coverage_index.write_coverage_index(after_path, after)
+
+            gain = coverage_index.compare_verified_coverage_indexes(
+                before_path, after_path
+            )
+            regression = coverage_index.compare_verified_coverage_indexes(
+                after_path, before_path
+            )
+
+        self.assertTrue(gain["classification"]["coverageGained"])
+        self.assertFalse(gain["classification"]["coverageRegressed"])
+        self.assertFalse(gain["classification"]["regressionDetected"])
+        self.assertEqual(gain["coverage"]["cases"]["added"], ["new-case"])
+        self.assertEqual(gain["summary"]["observedItemAddedCount"], 1)
+        self.assertGreater(gain["summary"]["policySlackIncreaseCount"], 0)
+        self.assertEqual(
+            set(gain["before"]), {"index", "plan"}
+        )
+        self.assertNotIn(
+            "relocated",
+            json.dumps(gain, sort_keys=True),
+        )
+
+        self.assertTrue(regression["classification"]["coverageRegressed"])
+        self.assertTrue(regression["classification"]["regressionDetected"])
+        self.assertEqual(
+            regression["coverage"]["cases"]["removed"], ["new-case"]
+        )
+        self.assertEqual(
+            regression["summary"]["observedItemRemovedCount"], 1
+        )
+        self.assertGreater(
+            regression["summary"]["policySlackDecreaseCount"], 0
+        )
+
+    def test_snapshot_verification_recomputes_derived_claims(self) -> None:
+        matrix = self.matrix(
+            ["case"], ["native", "lcnf"], [("native", "lcnf")]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build"
+            plan_dir.mkdir()
+            build_dir.mkdir()
+            matrix_path = build_dir / "matrix.json"
+            matrix_path.write_bytes(json_bytes(matrix))
+            plan = {
+                "version": 2,
+                "tiers": [
+                    {
+                        "id": "source",
+                        "kind": "source-compiled",
+                        "matrix": "../_build/matrix.json",
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"}
+                        ],
+                        "machineCoverage": None,
+                    }
+                ],
+                "policy": self.policy(
+                    "source",
+                    ["native", "lcnf"],
+                    require_machine=False,
+                ),
+            }
+            plan_path = plan_dir / "coverage-index.json"
+            plan_path.write_bytes(json_bytes(plan))
+            with mock.patch.object(
+                coverage_index,
+                "verify_matrix_artifact",
+                return_value=matrix,
+            ):
+                report = coverage_index.build_coverage_index(plan_path, root)
+            tampered = json.loads(json.dumps(report))
+            tampered["summary"]["uniqueCaseCount"] += 1
+            provisional = dict(tampered)
+            provisional.pop("identity")
+            tampered["identity"]["index"] = (
+                core.canonical_json_sha256(provisional)
+            )
+            path = root / "relocated.json"
+            path.write_bytes(json_bytes(tampered))
+            with self.assertRaisesRegex(
+                core.ValidationError, "derivatives disagree"
+            ):
+                coverage_index.verify_coverage_index_snapshot(path)
+
+    def test_index_comparison_tracks_attribution_and_new_policy_gaps(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build"
+            plan_dir.mkdir()
+            build_dir.mkdir()
+            matrix_paths = {
+                tier_id: build_dir / f"{tier_id}.json"
+                for tier_id in ("source", "direct")
+            }
+            tier_requirements = [
+                {
+                    "id": tier_id,
+                    "minimumCases": 1,
+                    "minimumComparisons": 1,
+                    "requiredBackends": ["lcnf", "native"],
+                    "requireMachineCoverage": False,
+                }
+                for tier_id in ("source", "direct")
+            ]
+            plan = {
+                "version": 2,
+                "tiers": [
+                    {
+                        "id": tier_id,
+                        "kind": f"{tier_id}-kind",
+                        "matrix": f"../_build/{tier_id}.json",
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"}
+                        ],
+                        "machineCoverage": None,
+                    }
+                    for tier_id in ("source", "direct")
+                ],
+                "policy": {
+                    "tiers": tier_requirements,
+                    "aggregate": {
+                        "minimumUniqueCases": 2,
+                        "minimumTierCases": 2,
+                        "minimumComparisons": 2,
+                    },
+                    "machine": {
+                        "minimumCases": 0,
+                        "minimumInterpreterSteps": 0,
+                        "requiredStaticForms": [],
+                        "requiredExecutedForms": [],
+                        "requiredAdministrativeKinds": [],
+                        "requiredExternals": [],
+                    },
+                },
+            }
+            plan_path = plan_dir / "coverage-index.json"
+
+            def build(source_cases: list[str], direct_cases: list[str]) -> dict:
+                for tier_id, case_ids in (
+                    ("source", source_cases),
+                    ("direct", direct_cases),
+                ):
+                    matrix_paths[tier_id].write_bytes(
+                        json_bytes(
+                            self.matrix(
+                                case_ids,
+                                ["native", "lcnf"],
+                                [("native", "lcnf")],
+                            )
+                        )
+                    )
+                plan_path.write_bytes(json_bytes(plan))
+                with mock.patch.object(
+                    coverage_index,
+                    "verify_matrix_artifact",
+                    side_effect=lambda path: json.loads(
+                        Path(path).read_text(encoding="utf-8")
+                    ),
+                ):
+                    return coverage_index.build_coverage_index(
+                        plan_path, root
+                    )
+
+            before = build(["shared"], ["direct-only"])
+            shared = build(
+                ["shared"], ["direct-only", "shared"]
+            )
+            attribution_gain = coverage_index.compare_coverage_indexes(
+                before, shared
+            )
+            attribution_loss = coverage_index.compare_coverage_indexes(
+                shared, before
+            )
+
+            plan["policy"]["machine"]["requiredStaticForms"] = ["return"]
+            strict = build(["shared"], ["direct-only"])
+            policy_gap = coverage_index.compare_coverage_indexes(
+                before, strict
+            )
+
+        shared_change = attribution_gain["coverage"]["cases"][
+            "attributionChanged"
+        ]
+        self.assertEqual(
+            shared_change,
+            [
+                {
+                    "name": "shared",
+                    "beforeTiers": ["source"],
+                    "afterTiers": ["source", "direct"],
+                    "addedTiers": ["direct"],
+                    "removedTiers": [],
+                }
+            ],
+        )
+        self.assertEqual(
+            attribution_gain["summary"]["observedItemAddedCount"], 0
+        )
+        self.assertTrue(attribution_gain["classification"]["coverageGained"])
+        self.assertFalse(
+            attribution_gain["classification"]["coverageRegressed"]
+        )
+        self.assertEqual(
+            attribution_loss["summary"]["attributionTierLossCount"], 1
+        )
+        self.assertTrue(
+            attribution_loss["classification"]["regressionDetected"]
+        )
+
+        static_forms = policy_gap["coverage"]["staticForms"]
+        self.assertEqual(static_forms["policyAdded"], ["return"])
+        self.assertEqual(
+            static_forms["newlyUncoveredRequired"], ["return"]
+        )
+        self.assertTrue(
+            policy_gap["classification"]["policyRequirementsChanged"]
+        )
+        self.assertTrue(
+            policy_gap["classification"]["policyFailuresIncreased"]
+        )
+        self.assertTrue(policy_gap["classification"]["regressionDetected"])
+
     def test_policy_reports_monotone_floor_and_inventory_regressions(self) -> None:
         matrix = self.matrix(
             ["case"], ["native", "lcnf"], [("native", "lcnf")]

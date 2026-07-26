@@ -303,8 +303,12 @@ matrices, and machine reports. Its summary reports both per-tier and unique
 case counts, equal semantic comparisons, the union and summed counts of static
 and executed LCNF forms, all observed administrative transitions, external
 dispatches, interpreter steps, and any obligation or telemetry failures.
-`--verify-index` recomputes the identity and rebuilds the index from its current
-inputs.
+`--verify-index` first checks the retained snapshot and then rebuilds the index
+from its current inputs. Snapshot checking validates the content identity and
+recomputes the aggregate machine coverage, policy evaluation, attribution, and
+summary from the retained tier claims. The live-input rebuild remains the
+stronger check: it also reopens the plan, matrices, evidence, and machine
+telemetry.
 
 The plan's required `policy` turns those observations into monotone regression
 checks. Each tier declares minimum case and comparison counts, its required
@@ -332,6 +336,30 @@ tiers, the two direct cases are unique to the direct tier, and
 The source tier uniquely contributes 18 static forms, 18 executed forms, and
 all nine interpreter externals. Attribution is derived from the same verified
 inputs and policy and is covered by the index identity.
+
+Two retained coverage baselines can be compared without their original build
+directories:
+
+```sh
+python3 scripts/validation_coverage_index.py \
+  --compare-index <before-index.json> <after-index.json>
+
+python3 scripts/validation_coverage_index.py \
+  --compare-index <before-index.json> <after-index.json> --json
+```
+
+Both inputs pass the relocatable snapshot check before comparison. The stable
+comparison contains only content identities, never the supplied filesystem
+paths. It reports added, removed, and changed tiers; inventory gains and losses
+for cases, static and executed forms, administrative transitions, and
+externals; changes in the tiers responsible for an existing observation;
+newly covered or uncovered policy requirements; and signed slack changes for
+every tier, aggregate, and machine-coverage floor. A regression classification
+distinguishes actual coverage or attribution loss, increased policy failures,
+and shrinking headroom even while a floor remains satisfied. The command
+returns success after two valid snapshots are compared; differences are data
+for the caller, matching the immutable-evidence comparator. Use
+`--verify-index` when the current source artifacts must also be reverified.
 
 The driver discovers the corpus from the plan-selected manifest backend
 (`native` by default), then composes named backend adapters and optional

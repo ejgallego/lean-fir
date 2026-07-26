@@ -12,6 +12,7 @@ from validation_harness import (
     PROTOCOL_VERSION,
     ValidationError,
     canonical_json_sha256,
+    checked_sha256,
     sha256_bytes,
     validate_backend_name,
     verify_matrix_artifact,
@@ -1119,35 +1120,382 @@ def _tier_from_config(
     )
 
 
-def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
-    plan_path = plan_path.resolve()
-    root = root.resolve()
-    try:
-        plan_name = plan_path.relative_to(root).as_posix()
-    except ValueError as error:
-        raise ValidationError(
-            "coverage index plan escapes the repository root"
-        ) from error
-    plan, plan_content = _read_json(plan_path, "coverage index plan")
-    if set(plan) != {"version", "tiers", "policy"}:
-        raise ValidationError(
-            "coverage index plan must contain exactly version, tiers, and policy"
+def _checked_snapshot_tiers(value: object) -> list[dict]:
+    """Check retained tier claims before recomputing snapshot derivatives."""
+    if not isinstance(value, list) or not value:
+        raise ValidationError("coverage index snapshot tiers must be nonempty")
+    checked: list[dict] = []
+    tier_ids: list[str] = []
+    for raw_tier in value:
+        if not isinstance(raw_tier, dict) or set(raw_tier) != {
+            "id",
+            "kind",
+            "matrix",
+            "caseIds",
+            "caseCount",
+            "backends",
+            "pairs",
+            "providers",
+            "consumers",
+            "findingCount",
+            "machineCoverageInput",
+            "machineCoverage",
+            "complete",
+        }:
+            raise ValidationError(
+                "coverage index snapshot contains a malformed tier"
+            )
+        tier_id = validate_backend_name(
+            raw_tier["id"], "coverage index snapshot tier id"
         )
-    if plan["version"] != PROTOCOL_VERSION or isinstance(plan["version"], bool):
-        raise ValidationError("unsupported coverage index plan version")
-    raw_tiers = plan["tiers"]
-    if not isinstance(raw_tiers, list) or not raw_tiers:
-        raise ValidationError("coverage index plan tiers must be nonempty")
-    tiers: list[dict] = []
-    case_domains: list[set[str]] = []
-    for raw_tier in raw_tiers:
-        tier, cases = _tier_from_config(raw_tier, plan_path, root)
-        tiers.append(tier)
-        case_domains.append(cases)
-    tier_ids = [tier["id"] for tier in tiers]
-    if len(set(tier_ids)) != len(tier_ids):
-        raise ValidationError("coverage index plan repeats a tier id")
+        validate_backend_name(
+            raw_tier["kind"], f"coverage index snapshot tier {tier_id} kind"
+        )
+        tier_ids.append(tier_id)
 
+        matrix = raw_tier["matrix"]
+        if (
+            not isinstance(matrix, dict)
+            or set(matrix) != {"name", "sha256", "run", "selection"}
+            or not isinstance(matrix["name"], str)
+            or not matrix["name"]
+        ):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} matrix is malformed"
+            )
+        checked_sha256(
+            matrix["sha256"],
+            f"coverage index snapshot tier {tier_id} matrix",
+        )
+        checked_sha256(
+            matrix["run"],
+            f"coverage index snapshot tier {tier_id} run identity",
+        )
+        checked_sha256(
+            matrix["selection"],
+            f"coverage index snapshot tier {tier_id} selection identity",
+        )
+
+        case_ids = _checked_string_list(
+            raw_tier["caseIds"],
+            f"coverage index snapshot tier {tier_id} caseIds",
+        )
+        case_count = _checked_nat(
+            raw_tier["caseCount"],
+            f"coverage index snapshot tier {tier_id} caseCount",
+        )
+        if case_count != len(case_ids):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} case count disagrees "
+                "with its retained case domain"
+            )
+
+        backends = raw_tier["backends"]
+        if not isinstance(backends, list) or not backends:
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} backends must be nonempty"
+            )
+        backend_names: list[str] = []
+        for backend in backends:
+            if not isinstance(backend, dict) or set(backend) != {
+                "backend",
+                "selectedCaseCount",
+                "resultCaseCount",
+                "successfulCaseCount",
+                "comparisonCount",
+                "equalComparisonCount",
+                "findingCount",
+            }:
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} has malformed "
+                    "backend coverage"
+                )
+            backend_name = validate_backend_name(
+                backend["backend"],
+                f"coverage index snapshot tier {tier_id} backend",
+            )
+            backend_names.append(backend_name)
+            for field in (
+                "selectedCaseCount",
+                "resultCaseCount",
+                "successfulCaseCount",
+                "comparisonCount",
+                "equalComparisonCount",
+                "findingCount",
+            ):
+                _checked_nat(
+                    backend[field],
+                    f"coverage index snapshot tier {tier_id} backend "
+                    f"{backend_name} {field}",
+                )
+            if backend["selectedCaseCount"] != case_count:
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} backend "
+                    f"{backend_name} has the wrong selected case count"
+                )
+        if len(set(backend_names)) != len(backend_names):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} repeats a backend"
+            )
+
+        pairs = raw_tier["pairs"]
+        if not isinstance(pairs, list) or not pairs:
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} pairs must be nonempty"
+            )
+        pair_names: list[tuple[str, str]] = []
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {
+                "reference",
+                "candidate",
+                "artifact",
+                "sha256",
+                "comparedCases",
+                "equalCases",
+                "findingCount",
+            }:
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} has a malformed pair"
+                )
+            reference = validate_backend_name(
+                pair["reference"],
+                f"coverage index snapshot tier {tier_id} pair reference",
+            )
+            candidate = validate_backend_name(
+                pair["candidate"],
+                f"coverage index snapshot tier {tier_id} pair candidate",
+            )
+            if reference == candidate:
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} has a self-pair"
+                )
+            if (
+                reference not in backend_names
+                or candidate not in backend_names
+                or not isinstance(pair["artifact"], str)
+                or not pair["artifact"]
+            ):
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} pair binding "
+                    "is malformed"
+                )
+            checked_sha256(
+                pair["sha256"],
+                f"coverage index snapshot tier {tier_id} pair evidence",
+            )
+            for field in ("comparedCases", "equalCases", "findingCount"):
+                _checked_nat(
+                    pair[field],
+                    f"coverage index snapshot tier {tier_id} pair {field}",
+                )
+            pair_names.append((reference, candidate))
+        if len(set(pair_names)) != len(pair_names):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} repeats a pair"
+            )
+
+        for field in ("providers", "consumers"):
+            items = raw_tier[field]
+            if not isinstance(items, list) or not all(
+                isinstance(item, dict) for item in items
+            ):
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} {field} "
+                    "must be an array of objects"
+                )
+
+        finding_count = _checked_nat(
+            raw_tier["findingCount"],
+            f"coverage index snapshot tier {tier_id} findingCount",
+        )
+        machine_input = raw_tier["machineCoverageInput"]
+        machine = raw_tier["machineCoverage"]
+        if (machine_input is None) != (machine is None):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} machine input "
+                "and coverage disagree"
+            )
+        if machine_input is not None:
+            if (
+                not isinstance(machine_input, dict)
+                or set(machine_input) != {"name", "sha256"}
+                or not isinstance(machine_input["name"], str)
+                or not machine_input["name"]
+            ):
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} machine input "
+                    "is malformed"
+                )
+            checked_sha256(
+                machine_input["sha256"],
+                f"coverage index snapshot tier {tier_id} machine input",
+            )
+            if not isinstance(machine, dict):
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} machine coverage "
+                    "is malformed"
+                )
+            if _checked_nat(
+                machine.get("caseCount"),
+                f"coverage index snapshot tier {tier_id} machine caseCount",
+            ) != case_count:
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} machine case "
+                    "domain has the wrong size"
+                )
+            if not isinstance(machine.get("complete"), bool):
+                raise ValidationError(
+                    f"coverage index snapshot tier {tier_id} machine "
+                    "completion is malformed"
+                )
+
+        complete = raw_tier["complete"]
+        if not isinstance(complete, bool):
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} completion is malformed"
+            )
+        semantic_complete = (
+            finding_count == 0
+            and all(
+                backend["resultCaseCount"] == case_count
+                and backend["successfulCaseCount"] == case_count
+                and backend["findingCount"] == 0
+                for backend in backends
+            )
+            and all(
+                pair["comparedCases"] == case_count
+                and pair["equalCases"] == case_count
+                and pair["findingCount"] == 0
+                for pair in pairs
+            )
+        )
+        expected_complete = semantic_complete and (
+            machine is None or machine["complete"]
+        )
+        if complete != expected_complete:
+            raise ValidationError(
+                f"coverage index snapshot tier {tier_id} completion "
+                "disagrees with its retained claims"
+            )
+        checked.append(raw_tier)
+    if len(set(tier_ids)) != len(tier_ids):
+        raise ValidationError("coverage index snapshot repeats a tier id")
+    return checked
+
+
+def coverage_policy_declaration(report: object) -> dict:
+    """Recover the monotone policy declaration from its evaluated report."""
+    if not isinstance(report, dict) or set(report) != {
+        "tiers",
+        "aggregate",
+        "machine",
+        "failureCount",
+        "satisfied",
+    }:
+        raise ValidationError("coverage index snapshot policy is malformed")
+    tier_reports = report["tiers"]
+    if not isinstance(tier_reports, list):
+        raise ValidationError("coverage index snapshot tier policy is malformed")
+    tier_keys = {
+        "id",
+        "minimumCases",
+        "observedCases",
+        "caseDeficit",
+        "minimumComparisons",
+        "observedComparisons",
+        "comparisonDeficit",
+        "requiredBackends",
+        "observedBackends",
+        "missingBackends",
+        "requireMachineCoverage",
+        "machineCoveragePresent",
+        "failureCount",
+        "satisfied",
+    }
+    if any(
+        not isinstance(item, dict) or set(item) != tier_keys
+        for item in tier_reports
+    ):
+        raise ValidationError("coverage index snapshot tier policy is malformed")
+    aggregate = report["aggregate"]
+    aggregate_keys = {
+        "minimumUniqueCases",
+        "observedUniqueCases",
+        "uniqueCaseDeficit",
+        "minimumTierCases",
+        "observedTierCases",
+        "tierCaseDeficit",
+        "minimumComparisons",
+        "observedComparisons",
+        "comparisonDeficit",
+        "failureCount",
+        "satisfied",
+    }
+    if not isinstance(aggregate, dict) or set(aggregate) != aggregate_keys:
+        raise ValidationError(
+            "coverage index snapshot aggregate policy is malformed"
+        )
+    machine = report["machine"]
+    machine_keys = {
+        "minimumCases",
+        "observedCases",
+        "caseDeficit",
+        "minimumInterpreterSteps",
+        "observedInterpreterSteps",
+        "interpreterStepDeficit",
+        "requiredStaticForms",
+        "observedStaticForms",
+        "missingStaticForms",
+        "requiredExecutedForms",
+        "observedExecutedForms",
+        "missingExecutedForms",
+        "requiredAdministrativeKinds",
+        "observedAdministrativeKinds",
+        "missingAdministrativeKinds",
+        "requiredExternals",
+        "observedExternals",
+        "missingExternals",
+        "failureCount",
+        "satisfied",
+    }
+    if not isinstance(machine, dict) or set(machine) != machine_keys:
+        raise ValidationError("coverage index snapshot machine policy is malformed")
+    return {
+        "tiers": [
+            {
+                "id": item["id"],
+                "minimumCases": item["minimumCases"],
+                "minimumComparisons": item["minimumComparisons"],
+                "requiredBackends": item["requiredBackends"],
+                "requireMachineCoverage": item["requireMachineCoverage"],
+            }
+            for item in tier_reports
+        ],
+        "aggregate": {
+            "minimumUniqueCases": aggregate["minimumUniqueCases"],
+            "minimumTierCases": aggregate["minimumTierCases"],
+            "minimumComparisons": aggregate["minimumComparisons"],
+        },
+        "machine": {
+            "minimumCases": machine["minimumCases"],
+            "minimumInterpreterSteps": machine["minimumInterpreterSteps"],
+            "requiredStaticForms": machine["requiredStaticForms"],
+            "requiredExecutedForms": machine["requiredExecutedForms"],
+            "requiredAdministrativeKinds": machine[
+                "requiredAdministrativeKinds"
+            ],
+            "requiredExternals": machine["requiredExternals"],
+        },
+    }
+
+
+def _coverage_index_from_components(
+    plan: dict,
+    tiers: list[dict],
+    raw_policy: object,
+) -> dict:
+    """Derive the complete content-addressed index from retained components."""
+    case_domains = [set(tier["caseIds"]) for tier in tiers]
     machine_coverages = [
         tier["machineCoverage"]
         for tier in tiers
@@ -1183,7 +1531,7 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
         "findingCount": sum(tier["findingCount"] for tier in tiers),
         "machine": machine,
     }
-    policy = coverage_policy_report(plan["policy"], tiers, summary)
+    policy = coverage_policy_report(raw_policy, tiers, summary)
     attribution = coverage_attribution(tiers, policy)
     summary["policyFailureCount"] = policy["failureCount"]
     summary["attributionUncoveredRequiredItemCount"] = attribution["summary"][
@@ -1197,10 +1545,7 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
     )
     provisional = {
         "version": PROTOCOL_VERSION,
-        "plan": {
-            "name": plan_name,
-            "sha256": sha256_bytes(plan_content),
-        },
+        "plan": plan,
         "tiers": tiers,
         "policy": policy,
         "attribution": attribution,
@@ -1220,6 +1565,42 @@ def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
     }
 
 
+def build_coverage_index(plan_path: Path, root: Path = ROOT) -> dict:
+    plan_path = plan_path.resolve()
+    root = root.resolve()
+    try:
+        plan_name = plan_path.relative_to(root).as_posix()
+    except ValueError as error:
+        raise ValidationError(
+            "coverage index plan escapes the repository root"
+        ) from error
+    plan, plan_content = _read_json(plan_path, "coverage index plan")
+    if set(plan) != {"version", "tiers", "policy"}:
+        raise ValidationError(
+            "coverage index plan must contain exactly version, tiers, and policy"
+        )
+    if plan["version"] != PROTOCOL_VERSION or isinstance(plan["version"], bool):
+        raise ValidationError("unsupported coverage index plan version")
+    raw_tiers = plan["tiers"]
+    if not isinstance(raw_tiers, list) or not raw_tiers:
+        raise ValidationError("coverage index plan tiers must be nonempty")
+    tiers: list[dict] = []
+    for raw_tier in raw_tiers:
+        tier, _ = _tier_from_config(raw_tier, plan_path, root)
+        tiers.append(tier)
+    tier_ids = [tier["id"] for tier in tiers]
+    if len(set(tier_ids)) != len(tier_ids):
+        raise ValidationError("coverage index plan repeats a tier id")
+    return _coverage_index_from_components(
+        {
+            "name": plan_name,
+            "sha256": sha256_bytes(plan_content),
+        },
+        tiers,
+        plan["policy"],
+    )
+
+
 def write_coverage_index(path: Path, report: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -1228,7 +1609,8 @@ def write_coverage_index(path: Path, report: dict) -> None:
     )
 
 
-def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
+def verify_coverage_index_snapshot(path: Path) -> dict:
+    """Verify a relocatable index snapshot from its retained claims alone."""
     report, _ = _read_json(path, "coverage index")
     if set(report) != {
         "version",
@@ -1249,6 +1631,7 @@ def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
         or identity["algorithm"] != "sha256"
     ):
         raise ValidationError("coverage index identity is malformed")
+    checked_sha256(identity["index"], "coverage index identity")
     provisional = dict(report)
     provisional.pop("identity")
     if identity["index"] != canonical_json_sha256(provisional):
@@ -1258,12 +1641,532 @@ def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
         not isinstance(plan, dict)
         or set(plan) != {"name", "sha256"}
         or not isinstance(plan["name"], str)
+        or not plan["name"]
+        or Path(plan["name"]).is_absolute()
+        or ".." in Path(plan["name"]).parts
     ):
         raise ValidationError("coverage index plan identity is malformed")
+    checked_sha256(plan["sha256"], "coverage index plan identity")
+    tiers = _checked_snapshot_tiers(report["tiers"])
+    raw_policy = coverage_policy_declaration(report["policy"])
+    try:
+        rebuilt = _coverage_index_from_components(plan, tiers, raw_policy)
+    except ValidationError:
+        raise
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError(
+            "coverage index snapshot retained claims are malformed"
+        ) from error
+    if rebuilt != report:
+        raise ValidationError(
+            "coverage index snapshot derivatives disagree with retained claims"
+        )
+    return report
+
+
+def verify_coverage_index(path: Path, root: Path = ROOT) -> dict:
+    """Verify a snapshot and then rederive it from all current source inputs."""
+    report = verify_coverage_index_snapshot(path)
+    plan = report["plan"]
     rebuilt = build_coverage_index(root / plan["name"], root)
     if rebuilt != report:
         raise ValidationError("coverage index disagrees with its current inputs")
     return report
+
+
+def _attribution_dimension_delta(before: dict, after: dict) -> dict:
+    before_items = {
+        item["name"]: item for item in before["items"]
+    }
+    after_items = {
+        item["name"]: item for item in after["items"]
+    }
+    before_observed = {
+        name for name, item in before_items.items() if item["tiers"]
+    }
+    after_observed = {
+        name for name, item in after_items.items() if item["tiers"]
+    }
+    before_required = {
+        name
+        for name, item in before_items.items()
+        if item["requiredByPolicy"]
+    }
+    after_required = {
+        name
+        for name, item in after_items.items()
+        if item["requiredByPolicy"]
+    }
+    before_uncovered_required = before_required - before_observed
+    after_uncovered_required = after_required - after_observed
+    attribution_changed = []
+    for name in sorted(before_observed & after_observed):
+        before_tiers = before_items[name]["tiers"]
+        after_tiers = after_items[name]["tiers"]
+        if before_tiers != after_tiers:
+            attribution_changed.append(
+                {
+                    "name": name,
+                    "beforeTiers": before_tiers,
+                    "afterTiers": after_tiers,
+                    "addedTiers": sorted(
+                        set(after_tiers) - set(before_tiers)
+                    ),
+                    "removedTiers": sorted(
+                        set(before_tiers) - set(after_tiers)
+                    ),
+                }
+            )
+    return {
+        "added": sorted(after_observed - before_observed),
+        "removed": sorted(before_observed - after_observed),
+        "policyAdded": sorted(after_required - before_required),
+        "policyRemoved": sorted(before_required - after_required),
+        "newlyCoveredRequired": sorted(
+            (
+                before_uncovered_required - after_uncovered_required
+            )
+            & after_required
+            & after_observed
+        ),
+        "newlyUncoveredRequired": sorted(
+            after_uncovered_required - before_uncovered_required
+        ),
+        "attributionChanged": attribution_changed,
+    }
+
+
+def _tier_comparison(before: dict, after: dict) -> dict:
+    before_cases = set(before["caseIds"])
+    after_cases = set(after["caseIds"])
+    before_backends = {
+        item["backend"] for item in before["backends"]
+    }
+    after_backends = {
+        item["backend"] for item in after["backends"]
+    }
+    before_pairs = {
+        (item["reference"], item["candidate"]) for item in before["pairs"]
+    }
+    after_pairs = {
+        (item["reference"], item["candidate"]) for item in after["pairs"]
+    }
+
+    def rendered_pairs(pairs: set[tuple[str, str]]) -> list[dict]:
+        return [
+            {"reference": reference, "candidate": candidate}
+            for reference, candidate in sorted(pairs)
+        ]
+
+    before_comparisons = sum(
+        item["comparedCases"] for item in before["pairs"]
+    )
+    after_comparisons = sum(
+        item["comparedCases"] for item in after["pairs"]
+    )
+    return {
+        "id": before["id"],
+        "retainedClaimsChanged": before != after,
+        "kind": {
+            "before": before["kind"],
+            "after": after["kind"],
+            "changed": before["kind"] != after["kind"],
+        },
+        "cases": {
+            "before": before["caseCount"],
+            "after": after["caseCount"],
+            "delta": after["caseCount"] - before["caseCount"],
+            "added": sorted(after_cases - before_cases),
+            "removed": sorted(before_cases - after_cases),
+        },
+        "comparisons": {
+            "before": before_comparisons,
+            "after": after_comparisons,
+            "delta": after_comparisons - before_comparisons,
+        },
+        "backends": {
+            "added": sorted(after_backends - before_backends),
+            "removed": sorted(before_backends - after_backends),
+        },
+        "pairs": {
+            "added": rendered_pairs(after_pairs - before_pairs),
+            "removed": rendered_pairs(before_pairs - after_pairs),
+        },
+        "matrixChanged": before["matrix"] != after["matrix"],
+        "providerCoverageChanged": (
+            before["providers"] != after["providers"]
+            or before["consumers"] != after["consumers"]
+        ),
+        "machineCoverageChanged": (
+            before["machineCoverageInput"]
+            != after["machineCoverageInput"]
+            or before["machineCoverage"] != after["machineCoverage"]
+        ),
+        "findings": {
+            "before": before["findingCount"],
+            "after": after["findingCount"],
+            "delta": after["findingCount"] - before["findingCount"],
+        },
+        "complete": {
+            "before": before["complete"],
+            "after": after["complete"],
+            "changed": before["complete"] != after["complete"],
+        },
+    }
+
+
+def coverage_policy_slack(policy: dict) -> dict:
+    """Expose signed distance from every numeric and set-valued policy floor."""
+    return {
+        "tiers": [
+            {
+                "id": tier["id"],
+                "cases": tier["observedCases"] - tier["minimumCases"],
+                "comparisons": (
+                    tier["observedComparisons"]
+                    - tier["minimumComparisons"]
+                ),
+                "requiredBackends": -len(tier["missingBackends"]),
+                "machineCoverage": (
+                    -1
+                    if tier["requireMachineCoverage"]
+                    and not tier["machineCoveragePresent"]
+                    else 0
+                ),
+            }
+            for tier in policy["tiers"]
+        ],
+        "aggregate": {
+            "uniqueCases": (
+                policy["aggregate"]["observedUniqueCases"]
+                - policy["aggregate"]["minimumUniqueCases"]
+            ),
+            "tierCases": (
+                policy["aggregate"]["observedTierCases"]
+                - policy["aggregate"]["minimumTierCases"]
+            ),
+            "comparisons": (
+                policy["aggregate"]["observedComparisons"]
+                - policy["aggregate"]["minimumComparisons"]
+            ),
+        },
+        "machine": {
+            "cases": (
+                policy["machine"]["observedCases"]
+                - policy["machine"]["minimumCases"]
+            ),
+            "interpreterSteps": (
+                policy["machine"]["observedInterpreterSteps"]
+                - policy["machine"]["minimumInterpreterSteps"]
+            ),
+            "staticForms": -len(policy["machine"]["missingStaticForms"]),
+            "executedForms": -len(
+                policy["machine"]["missingExecutedForms"]
+            ),
+            "administrativeKinds": -len(
+                policy["machine"]["missingAdministrativeKinds"]
+            ),
+            "externals": -len(policy["machine"]["missingExternals"]),
+        },
+    }
+
+
+def _slack_field_delta(before: int | None, after: int | None) -> dict:
+    return {
+        "before": before,
+        "after": after,
+        "delta": (
+            None if before is None or after is None else after - before
+        ),
+    }
+
+
+def _policy_slack_comparison(before: dict, after: dict) -> dict:
+    before_tiers = {item["id"]: item for item in before["tiers"]}
+    after_tiers = {item["id"]: item for item in after["tiers"]}
+    tier_fields = (
+        "cases",
+        "comparisons",
+        "requiredBackends",
+        "machineCoverage",
+    )
+    tiers = []
+    comparable_deltas: list[int] = []
+    for tier_id in sorted(before_tiers.keys() | after_tiers.keys()):
+        before_tier = before_tiers.get(tier_id)
+        after_tier = after_tiers.get(tier_id)
+        fields = {
+            field: _slack_field_delta(
+                None if before_tier is None else before_tier[field],
+                None if after_tier is None else after_tier[field],
+            )
+            for field in tier_fields
+        }
+        comparable_deltas.extend(
+            item["delta"]
+            for item in fields.values()
+            if item["delta"] is not None
+        )
+        tiers.append({"id": tier_id, **fields})
+
+    def compared_group(
+        before_group: dict, after_group: dict
+    ) -> dict:
+        result = {
+            field: _slack_field_delta(
+                before_group[field], after_group[field]
+            )
+            for field in before_group
+        }
+        comparable_deltas.extend(item["delta"] for item in result.values())
+        return result
+
+    return {
+        "before": before,
+        "after": after,
+        "tiers": tiers,
+        "aggregate": compared_group(
+            before["aggregate"], after["aggregate"]
+        ),
+        "machine": compared_group(before["machine"], after["machine"]),
+        "increaseCount": sum(delta > 0 for delta in comparable_deltas),
+        "decreaseCount": sum(delta < 0 for delta in comparable_deltas),
+    }
+
+
+def compare_coverage_indexes(before: dict, after: dict) -> dict:
+    """Classify changes between two independently verified index snapshots."""
+    before_tiers = {tier["id"]: tier for tier in before["tiers"]}
+    after_tiers = {tier["id"]: tier for tier in after["tiers"]}
+    added_tiers = sorted(after_tiers.keys() - before_tiers.keys())
+    removed_tiers = sorted(before_tiers.keys() - after_tiers.keys())
+    changed_tiers = [
+        _tier_comparison(before_tiers[tier_id], after_tiers[tier_id])
+        for tier_id in sorted(before_tiers.keys() & after_tiers.keys())
+        if before_tiers[tier_id] != after_tiers[tier_id]
+    ]
+    dimension_names = (
+        "cases",
+        "staticForms",
+        "executedForms",
+        "administrativeKinds",
+        "externals",
+    )
+    dimensions = {
+        name: _attribution_dimension_delta(
+            before["attribution"][name],
+            after["attribution"][name],
+        )
+        for name in dimension_names
+    }
+    observed_added = sum(
+        len(dimension["added"]) for dimension in dimensions.values()
+    )
+    observed_removed = sum(
+        len(dimension["removed"]) for dimension in dimensions.values()
+    )
+    attribution_gains = sum(
+        len(change["addedTiers"])
+        for dimension in dimensions.values()
+        for change in dimension["attributionChanged"]
+    )
+    attribution_losses = sum(
+        len(change["removedTiers"])
+        for dimension in dimensions.values()
+        for change in dimension["attributionChanged"]
+    )
+    attribution_changes = sum(
+        len(dimension["attributionChanged"])
+        for dimension in dimensions.values()
+    )
+    newly_covered = sum(
+        len(dimension["newlyCoveredRequired"])
+        for dimension in dimensions.values()
+    )
+    newly_uncovered = sum(
+        len(dimension["newlyUncoveredRequired"])
+        for dimension in dimensions.values()
+    )
+    before_slack = coverage_policy_slack(before["policy"])
+    after_slack = coverage_policy_slack(after["policy"])
+    slack = _policy_slack_comparison(before_slack, after_slack)
+    failure_delta = (
+        after["policy"]["failureCount"]
+        - before["policy"]["failureCount"]
+    )
+    requirements_changed = (
+        coverage_policy_declaration(before["policy"])
+        != coverage_policy_declaration(after["policy"])
+    )
+    coverage_regressed = bool(
+        removed_tiers
+        or observed_removed
+        or attribution_losses
+        or newly_uncovered
+    )
+    coverage_gained = bool(
+        added_tiers
+        or observed_added
+        or attribution_gains
+        or newly_covered
+    )
+    regression_signals = (
+        len(removed_tiers)
+        + observed_removed
+        + attribution_losses
+        + newly_uncovered
+        + slack["decreaseCount"]
+        + max(0, failure_delta)
+    )
+    gain_signals = (
+        len(added_tiers)
+        + observed_added
+        + attribution_gains
+        + newly_covered
+        + slack["increaseCount"]
+        + max(0, -failure_delta)
+    )
+    return {
+        "version": PROTOCOL_VERSION,
+        "before": {
+            "index": before["identity"]["index"],
+            "plan": before["plan"]["sha256"],
+        },
+        "after": {
+            "index": after["identity"]["index"],
+            "plan": after["plan"]["sha256"],
+        },
+        "classification": {
+            "indexChanged": (
+                before["identity"]["index"] != after["identity"]["index"]
+            ),
+            "planChanged": (
+                before["plan"]["sha256"] != after["plan"]["sha256"]
+            ),
+            "tierClaimsChanged": bool(
+                added_tiers or removed_tiers or changed_tiers
+            ),
+            "coverageGained": coverage_gained,
+            "coverageRegressed": coverage_regressed,
+            "attributionChanged": attribution_changes > 0,
+            "policyRequirementsChanged": requirements_changed,
+            "policySatisfactionChanged": (
+                before["policy"]["satisfied"]
+                != after["policy"]["satisfied"]
+            ),
+            "policyFailuresIncreased": failure_delta > 0,
+            "policySlackRegressed": slack["decreaseCount"] > 0,
+            "regressionDetected": regression_signals > 0,
+        },
+        "summary": {
+            "tierAddedCount": len(added_tiers),
+            "tierRemovedCount": len(removed_tiers),
+            "tierChangedCount": len(changed_tiers),
+            "observedItemAddedCount": observed_added,
+            "observedItemRemovedCount": observed_removed,
+            "attributionChangeCount": attribution_changes,
+            "attributionTierGainCount": attribution_gains,
+            "attributionTierLossCount": attribution_losses,
+            "newlyCoveredRequiredItemCount": newly_covered,
+            "newlyUncoveredRequiredItemCount": newly_uncovered,
+            "policyFailureCountBefore": before["policy"]["failureCount"],
+            "policyFailureCountAfter": after["policy"]["failureCount"],
+            "policyFailureCountDelta": failure_delta,
+            "policySlackIncreaseCount": slack["increaseCount"],
+            "policySlackDecreaseCount": slack["decreaseCount"],
+            "gainSignalCount": gain_signals,
+            "regressionSignalCount": regression_signals,
+        },
+        "tiers": {
+            "added": added_tiers,
+            "removed": removed_tiers,
+            "changed": changed_tiers,
+        },
+        "coverage": dimensions,
+        "policy": {
+            "beforeSatisfied": before["policy"]["satisfied"],
+            "afterSatisfied": after["policy"]["satisfied"],
+            "requirementsChanged": requirements_changed,
+            "slack": slack,
+        },
+    }
+
+
+def compare_verified_coverage_indexes(
+    before_path: Path,
+    after_path: Path,
+) -> dict:
+    """Verify two relocatable snapshots and compare their retained claims."""
+    return compare_coverage_indexes(
+        verify_coverage_index_snapshot(before_path),
+        verify_coverage_index_snapshot(after_path),
+    )
+
+
+def render_coverage_index_comparison(comparison: dict) -> list[str]:
+    """Render a concise stable report from a coverage-index comparison."""
+    before = comparison["before"]
+    after = comparison["after"]
+    classification = comparison["classification"]
+    summary = comparison["summary"]
+
+    def state(field: str) -> str:
+        return "yes" if classification[field] else "no"
+
+    lines = [
+        f"coverage index comparison: {before['index']} -> {after['index']}",
+        "classification: "
+        f"tiers changed {state('tierClaimsChanged')}, "
+        f"coverage gained {state('coverageGained')}, "
+        f"coverage regressed {state('coverageRegressed')}, "
+        f"policy slack regressed {state('policySlackRegressed')}, "
+        f"regression detected {state('regressionDetected')}",
+        "tiers: "
+        f"+{summary['tierAddedCount']} "
+        f"-{summary['tierRemovedCount']} "
+        f"~{summary['tierChangedCount']}",
+        "coverage inventory: "
+        f"+{summary['observedItemAddedCount']} "
+        f"-{summary['observedItemRemovedCount']}, "
+        f"attribution ~{summary['attributionChangeCount']} "
+        f"(tier +{summary['attributionTierGainCount']} "
+        f"-{summary['attributionTierLossCount']}), "
+        f"required covered +{summary['newlyCoveredRequiredItemCount']} "
+        f"-{summary['newlyUncoveredRequiredItemCount']}",
+        "policy: "
+        f"satisfied {comparison['policy']['beforeSatisfied']} -> "
+        f"{comparison['policy']['afterSatisfied']}, "
+        f"failures {summary['policyFailureCountBefore']} -> "
+        f"{summary['policyFailureCountAfter']}, "
+        f"slack fields +{summary['policySlackIncreaseCount']} "
+        f"-{summary['policySlackDecreaseCount']}",
+    ]
+    for tier in comparison["tiers"]["changed"]:
+        lines.append(
+            f"tier {tier['id']}: "
+            f"cases {tier['cases']['before']} -> {tier['cases']['after']}, "
+            f"comparisons {tier['comparisons']['before']} -> "
+            f"{tier['comparisons']['after']}, "
+            f"findings {tier['findings']['before']} -> "
+            f"{tier['findings']['after']}"
+        )
+    for name, dimension in comparison["coverage"].items():
+        if (
+            dimension["added"]
+            or dimension["removed"]
+            or dimension["attributionChanged"]
+            or dimension["newlyCoveredRequired"]
+            or dimension["newlyUncoveredRequired"]
+        ):
+            lines.append(
+                f"{name}: +{len(dimension['added'])} "
+                f"-{len(dimension['removed'])} "
+                f"attribution ~{len(dimension['attributionChanged'])}, "
+                f"required covered "
+                f"+{len(dimension['newlyCoveredRequired'])} "
+                f"-{len(dimension['newlyUncoveredRequired'])}"
+            )
+    return lines
 
 
 def render_coverage_index(report: dict) -> list[str]:
@@ -1391,15 +2294,50 @@ def main() -> int:
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--verify-index", type=Path)
+    parser.add_argument(
+        "--compare-index",
+        nargs=2,
+        type=Path,
+        metavar=("BEFORE", "AFTER"),
+        help="structurally verify and compare two relocatable index snapshots",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit --compare-index as stable JSON",
+    )
     args = parser.parse_args()
-    if args.verify_index is not None:
-        if args.plan is not None or args.out is not None:
+    inspection_modes = sum(
+        int(option is not None)
+        for option in (args.verify_index, args.compare_index)
+    )
+    if inspection_modes:
+        if (
+            inspection_modes != 1
+            or args.plan is not None
+            or args.out is not None
+            or (args.json and args.compare_index is None)
+        ):
             raise ValidationError(
-                "--verify-index cannot be combined with --plan or --out"
+                "index inspection options are mutually exclusive and cannot "
+                "be combined with index creation options"
             )
+        if args.compare_index is not None:
+            before_path, after_path = args.compare_index
+            comparison = compare_verified_coverage_indexes(
+                before_path, after_path
+            )
+            if args.json:
+                print(json.dumps(comparison, indent=2, sort_keys=True))
+            else:
+                for line in render_coverage_index_comparison(comparison):
+                    print(line)
+            return 0
         report = verify_coverage_index(args.verify_index)
         print(f"verified validation coverage index {args.verify_index}")
     else:
+        if args.json:
+            raise ValidationError("--json requires --compare-index")
         if args.plan is None or args.out is None:
             raise ValidationError("--plan and --out are required together")
         report = build_coverage_index(args.plan)
