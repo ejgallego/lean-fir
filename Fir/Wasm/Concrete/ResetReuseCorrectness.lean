@@ -1430,7 +1430,7 @@ theorem OwnershipValuesRel.foldlM_public_refines
     (related : OwnershipValuesRel witness words values)
     (heap : LiveHeapRel state witness runtime)
     (semanticOperation : values.foldlM (init := runtime) (fun next value =>
-      Fir.LeanIR.Impure.decValueOnce next value true) = .ok finalRuntime) :
+      Fir.LeanIR.Impure.releaseResetField next value) = .ok finalRuntime) :
     ∃ finalState,
       words.foldlM (init := state) (fun next child =>
         decrementReferenceOnce next child true witness.closureDescriptors) =
@@ -1444,7 +1444,8 @@ theorem OwnershipValuesRel.foldlM_public_refines
       exact ⟨state, rfl, heap⟩
   | @cons word value words values head tail ih =>
       simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation ⊢
-      cases headSemantic : Fir.LeanIR.Impure.decValueOnce runtime value true with
+      cases headSemantic :
+          Fir.LeanIR.Impure.releaseResetField runtime value with
       | error fault =>
           rw [headSemantic] at semanticOperation
           contradiction
@@ -1457,7 +1458,8 @@ theorem OwnershipValuesRel.foldlM_public_refines
             subst value
             have semanticHead : Fir.LeanIR.Impure.decLocation runtime location =
                 .ok middleRuntime := by
-              simpa [Fir.LeanIR.Impure.decValueOnce] using headSemantic
+              simpa [Fir.LeanIR.Impure.releaseResetField,
+                Fir.LeanIR.Impure.decValueOnce] using headSemantic
             obtain ⟨middleState, concreteHead, middleHeap⟩ :=
               heap.decrementReferenceOnce_refines mapped true semanticHead
             obtain ⟨finalState, concreteTail, finalHeap⟩ :=
@@ -1474,17 +1476,25 @@ theorem OwnershipValuesRel.foldlM_public_refines
                         have operation :
                             (Except.ok runtime : Except RuntimeFault RuntimeState) =
                               .ok middleRuntime := by
-                          simpa [Fir.LeanIR.Impure.decValueOnce] using headSemantic
+                          simpa [Fir.LeanIR.Impure.releaseResetField,
+                            Fir.LeanIR.Impure.decValueOnce] using headSemantic
                         exact Except.ok.inj operation
                       exact equal.symm
               | usize value =>
-                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+                  simp [Fir.LeanIR.Impure.releaseResetField,
+                    Fir.LeanIR.Impure.decValueOnce] at headSemantic
               | scalar value =>
-                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+                  simp [Fir.LeanIR.Impure.releaseResetField,
+                    Fir.LeanIR.Impure.decValueOnce] at headSemantic
               | erased =>
-                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+                  have equal :
+                      (Except.ok runtime : Except RuntimeFault RuntimeState) =
+                        .ok middleRuntime := by
+                    simpa [Fir.LeanIR.Impure.releaseResetField] using headSemantic
+                  exact (Except.ok.inj equal).symm
               | reuseToken location =>
-                  simp [Fir.LeanIR.Impure.decValueOnce] at headSemantic
+                  simp [Fir.LeanIR.Impure.releaseResetField,
+                    Fir.LeanIR.Impure.decValueOnce] at headSemantic
             subst middleRuntime
             have concreteHead :
                 decrementReferenceOnce state word true witness.closureDescriptors =
@@ -1974,7 +1984,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         setCell_spec_of_find runtime location cell replacement found
       have semanticFold :
           (object.objectFields.extract 0 count).foldlM
-              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              (fun next value => Fir.LeanIR.Impure.releaseResetField next value)
               middleRuntime = .ok nextRuntime := by
         unfold Fir.LeanIR.Impure.reset at semanticOperation
         simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
@@ -1986,7 +1996,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         have semanticOperation' : (do
             let next ← setCell runtime location replacement
             let next ← (object.objectFields.extract 0 count).foldlM
-              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+              (fun next value => Fir.LeanIR.Impure.releaseResetField next value)
               next
             return (next, Value.reuseToken (some location))) =
               .ok (nextRuntime, Value.reuseToken (some location)) := by
@@ -1995,7 +2005,7 @@ theorem LiveHeapRel.resetObject_refines_unique
         rw [semanticSet] at semanticOperation'
         simp only [Bind.bind, Except.bind] at semanticOperation'
         cases foldEq : (object.objectFields.extract 0 count).foldlM
-            (fun next value => Fir.LeanIR.Impure.decValueOnce next value true)
+            (fun next value => Fir.LeanIR.Impure.releaseResetField next value)
             middleRuntime with
         | error fault =>
             rw [foldEq] at semanticOperation'
@@ -2037,7 +2047,7 @@ theorem LiveHeapRel.resetObject_refines_unique
       have semanticFoldList :
           (object.objectFields.extract 0 count).toList.foldlM
               (init := middleRuntime)
-              (fun next value => Fir.LeanIR.Impure.decValueOnce next value true) =
+              (fun next value => Fir.LeanIR.Impure.releaseResetField next value) =
             .ok nextRuntime := by
         simpa only [Array.foldlM_toList] using semanticFold
       have protocolOwnership := ownershipRelated.rebindConstructor address info

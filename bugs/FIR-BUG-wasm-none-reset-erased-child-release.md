@@ -99,3 +99,8 @@ concrete Wasm runtime.
 The validation-owned `machine-reset-erased-field` case independently compares
 the exact final-impure `ctor`/`reset`/`reuse` path with a native Lean
 replacement and pins its executed form trace and multiplicities.
+
+The concrete reset refinement consumes the same `releaseResetField` fold.
+Its ordered ownership theorem treats erased/physical-zero slots as matching
+no-ops while preserving the existing checked decrement proof for every
+non-erased slot.
