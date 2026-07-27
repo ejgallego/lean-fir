@@ -2102,6 +2102,32 @@ def cases : Array Case := #[
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "First negative Int requiring a heap object" },
+  { id := "int-multi-limb-positive-roundtrip"
+    entry := ``Source.idInt
+    args := #[.int 340282366920938463463374607431768211473]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.idInt 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "boundary", "heap", "multi-limb",
+      "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip positive 2^128 + 17 without an external" },
+  { id := "int-multi-limb-negative-roundtrip"
+    entry := ``Source.idInt
+    args := #[.int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.idInt (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "negative", "boundary", "heap",
+      "multi-limb", "roundtrip"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip negative 2^128 + 17 through negSucc without an external" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
