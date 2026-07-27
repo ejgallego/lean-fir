@@ -9124,6 +9124,46 @@ theorem BinderReadySourceRuntimeOwnershipInvariant.ready
   related.binderReadyReachableMachineReadyAt_of_sourceRuntime
     (invariant sourceAfter targetAfter sourcePath targetPath related)
 
+/-- Hereditary source readiness is stable under any already matched source
+and target prefixes.  The proof is path composition; no compiler or runtime
+fact is reproved at the destination pair. -/
+theorem BinderReadySourceRuntimeOwnershipInvariant.stable
+    (invariant :
+      BinderReadySourceRuntimeOwnershipInvariant
+        externals fuel source target)
+    (sourcePath : NonLockstep.Reaches externals source sourceAfter)
+    (targetPath : NonLockstep.Reaches externals target targetAfter) :
+    BinderReadySourceRuntimeOwnershipInvariant
+      externals fuel sourceAfter targetAfter := by
+  intro sourceFuture targetFuture sourceTail targetTail futureRelated
+  exact invariant sourceFuture targetFuture
+    (sourcePath.trans sourceTail) (targetPath.trans targetTail)
+    futureRelated
+
+/-- Canonical strong simulation relation.  It retains hereditary exact
+compiler provenance and the source runtime/ownership invariant needed to
+activate that provenance at every future code state. -/
+structure BinderReadyReachableMachineRelatedWith
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop where
+  structural :
+    SomeBinderReadyReachableMachineRelated fuel source target
+  sourceRuntime :
+    BinderReadySourceRuntimeOwnershipInvariant
+      externals fuel source target
+
+/-- The strong simulation package is ready at its current pair by reflexive
+specialization of its hereditary source invariant. -/
+theorem BinderReadyReachableMachineRelatedWith.ready
+    (related :
+      BinderReadyReachableMachineRelatedWith
+        externals fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target :=
+  related.sourceRuntime.ready source target
+    (NonLockstep.reaches_refl source)
+    (NonLockstep.reaches_refl target)
+    related.structural
+
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
 to recover full machine readiness. -/
@@ -22588,6 +22628,49 @@ theorem SomeBinderReadyReachableMachineRelated.matchExternalStep_of_ready
           (.external targetTransition targetExternal),
         resumedRelated⟩
 
+/-- Every semantic source step has a finite matching target path while the
+strong structural relation and hereditary source runtime invariant are both
+preserved.  Internal steps use the hereditary compiler dispatcher; external
+steps additionally use the strong foreign-response contract. -/
+theorem BinderReadyReachableMachineRelatedWith.advance
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (related :
+      BinderReadyReachableMachineRelatedWith
+        externals fuel source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      BinderReadyReachableMachineRelatedWith
+        externals fuel sourceAfter targetAfter := by
+  have ready : BinderReadyReachableMachineReadyAt fuel source target :=
+    related.ready
+  cases step with
+  | internal transition =>
+      rcases related.structural.matchNextStep_of_ready ready transition with
+        ⟨targetAfter, targetPath, afterStructural⟩
+      have sourcePath :
+          NonLockstep.Reaches externals source sourceAfter :=
+        NonLockstep.reaches_of_step (.internal transition)
+      exact ⟨targetAfter, targetPath, {
+        structural := afterStructural
+        sourceRuntime :=
+          related.sourceRuntime.stable sourcePath targetPath
+      }⟩
+  | @external waiting request response transition externalProof =>
+      rcases related.structural.matchExternalStep_of_ready compatible ready
+          transition externalProof with
+        ⟨targetAfter, targetPath, afterStructural⟩
+      have sourcePath : NonLockstep.Reaches externals source
+          (resumeExternal request waiting response) :=
+        NonLockstep.reaches_of_step
+          (.external transition externalProof)
+      exact ⟨targetAfter, targetPath, {
+        structural := afterStructural
+        sourceRuntime :=
+          related.sourceRuntime.stable sourcePath targetPath
+      }⟩
+
 /-- Unified semantic-step dispatcher for an active related code graph.
 `ReachableCodeReadyAt` supplies the exact ownership certificate required by
 conditionally deleted or concrete-token operations; every syntactic family
@@ -25367,6 +25450,21 @@ theorem ReachableMachineRelatedWith.simulation
   advance related step :=
     ReachableMachineRelatedWith.advance laws related step
 
+/-- The canonical strong package is an observation-relational stuttering
+simulation.  Terminal behavior uses the established operational dispatcher
+after forgetting hereditary provenance; advancing retains that provenance
+directly, so no weak relation has to be strengthened after a step. -/
+theorem BinderReadyReachableMachineRelatedWith.simulation
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel) :
+    RelationalStutteringSimulation externals ObservationRel
+      (BinderReadyReachableMachineRelatedWith externals fuel) where
+  terminal related done :=
+    related.structural.related.terminal related.ready.readyAt done
+  advance related step :=
+    BinderReadyReachableMachineRelatedWith.advance
+      compatible related step
+
 /-- Compiler-facing value and observation relation for the reachable-runtime
 proof.  Canonical entry states have empty heaps, so their admissible values
 are precisely those related by the empty address renaming. -/
@@ -25389,6 +25487,42 @@ def ReachableInitialInvariantOn
     invariant
       (initialState source entry sourceArguments)
       (initialState target entry targetArguments)
+
+/-- Whole-program forward correctness through the canonical strong
+simulation.  The compiler supplies hereditary exact program provenance, the
+source proof supplies runtime/ownership readiness along related executions,
+and the foreign environment preserves the same strong relation on resume. -/
+theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialSourceRuntime : ReachableInitialInvariantOn
+      (BinderReadySourceRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  intro entry member sourceArguments targetArguments arguments
+    sourceObservation sourceEvaluation
+  have initialStructural :
+      SomeBinderReadyReachableMachineRelated fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) :=
+    (initialState_binderReadyReachableMachineReadyAt
+      programs arguments).related
+  have initialRelated :
+      BinderReadyReachableMachineRelatedWith externals fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) := {
+    structural := initialStructural
+    sourceRuntime :=
+      initialSourceRuntime entry member sourceArguments
+        targetArguments arguments
+  }
+  exact
+    (BinderReadyReachableMachineRelatedWith.simulation
+      compatible).evaluatesState initialRelated sourceEvaluation
 
 /-- Program-level forward correctness for a transparent `elimDeadVars` graph.
 The operational proof is complete: clients supply program relatedness plus
@@ -25515,5 +25649,24 @@ theorem shadowProgram_loweringCorrect_reachablyCodeReady
   binderReadyProgram_loweringCorrect_reachablyCodeReady
     (shadowProgram_binderReadyShadowRelated wellFormed run)
     compatible initialReady
+
+/-- Checked compiler-run endpoint using the canonical strong simulation.
+After a successful transparent traversal, the only compiler-client premise
+is hereditary source runtime/ownership readiness; external resumptions use
+the separately audited strong compatibility contract. -/
+theorem shadowProgram_loweringCorrect_sourceRuntimeOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (run : shadowProgram? fuel source = some target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialSourceRuntime : ReachableInitialInvariantOn
+      (BinderReadySourceRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
+    (shadowProgram_binderReadyShadowRelated wellFormed run)
+    compatible initialSourceRuntime
 
 end Fir.LeanIR.Passes.ElimDead
