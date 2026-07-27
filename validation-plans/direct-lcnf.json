@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "corpusBackend": "direct-native",
   "adapterConfigs": [],
   "pairs": [

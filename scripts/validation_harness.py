@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 MANIFEST_FIELDS = {
     "version",
     "id",

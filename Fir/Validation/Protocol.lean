@@ -5,7 +5,7 @@ namespace Fir.Validation
 open Lean
 
 /-- Version of the JSONL protocol shared by validation backends and the runner. -/
-def protocolVersion : Nat := 2
+def protocolVersion : Nat := 3
 
 /--
 A backend-neutral semantic value.
@@ -29,16 +29,16 @@ inductive ValidationDatum where
   deriving Inhabited, BEq, Repr
 
 /--
-The protocol-v2 wire representation. Arbitrary source naturals use canonical
-decimal strings so JSON consumers with an IEEE-754 numeric type cannot silently
-round them. The remaining natural fields are structural metadata or bytes and
-retain their compact numeric representation.
+The protocol-v3 wire representation. Arbitrary source naturals and signed
+integers use canonical decimal strings so JSON consumers with an IEEE-754
+numeric type cannot silently round them. The remaining natural fields are
+structural metadata or bytes and retain their compact numeric representation.
 -/
 private inductive ValidationDatumWire where
   | unit
   | bool (value : Bool)
   | nat (value : String)
-  | int (value : Int)
+  | int (value : String)
   | usize (value : UInt64)
   | bits (width : Nat) (value : UInt64)
   | string (value : String)
@@ -51,7 +51,7 @@ private partial def ValidationDatum.toWire : ValidationDatum → ValidationDatum
   | .unit => .unit
   | .bool value => .bool value
   | .nat value => .nat s!"{value}"
-  | .int value => .int value
+  | .int value => .int s!"{value}"
   | .usize value => .usize value
   | .bits width value => .bits width value
   | .string value => .string value
@@ -68,7 +68,12 @@ private partial def ValidationDatumWire.decode : ValidationDatumWire → Except 
       unless s!"{value}" == text do
         throw s!"natural payload is not canonical decimal: {text}"
       return .nat value
-  | .int value => return .int value
+  | .int text => do
+      let some value := text.toInt?
+        | throw s!"integer payload is not a decimal string: {text}"
+      unless s!"{value}" == text do
+        throw s!"integer payload is not canonical decimal: {text}"
+      return .int value
   | .usize value => return .usize value
   | .bits width value => return .bits width value
   | .string value => return .string value
@@ -255,6 +260,8 @@ private def protocolRoundTripRequest : CaseRequest := {
     .nat 18446744073709551617,
     .int (-2147483648),
     .int (-2147483649),
+    .int 340282366920938463463374607431768211473,
+    .int (-340282366920938463463374607431768211473),
     .usize 18446744073709551615,
     .bits 64 18446744073709551615,
     .ctor "Prod.mk" 0 #[.bool true, .bytes #[0, 127, 255]]]
@@ -277,6 +284,30 @@ private def protocolRoundTripRequest : CaseRequest := {
 
 #guard match (fromJson?
     (Json.mkObj [("nat", Json.mkObj [("value", Json.num 42)])]) :
+    Except String ValidationDatum) with
+  | .error _ => true
+  | .ok _ => false
+
+#guard toJson (.int (-340282366920938463463374607431768211473) :
+    ValidationDatum) ==
+  Json.mkObj [("int", Json.mkObj [
+    ("value", "-340282366920938463463374607431768211473")])]
+
+#guard match (fromJson?
+    (Json.mkObj [("int", Json.mkObj [
+      ("value", "-0340282366920938463463374607431768211473")])]) :
+    Except String ValidationDatum) with
+  | .error _ => true
+  | .ok _ => false
+
+#guard match (fromJson?
+    (Json.mkObj [("int", Json.mkObj [("value", "-0")])]) :
+    Except String ValidationDatum) with
+  | .error _ => true
+  | .ok _ => false
+
+#guard match (fromJson?
+    (Json.mkObj [("int", Json.mkObj [("value", Json.num 42)])]) :
     Except String ValidationDatum) with
   | .error _ => true
   | .ok _ => false

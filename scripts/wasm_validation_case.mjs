@@ -7,7 +7,7 @@ const SCALAR_KINDS = new Map([
   [64, "uint64"],
 ]);
 
-export const VALIDATION_PROTOCOL_VERSION = 2;
+export const VALIDATION_PROTOCOL_VERSION = 3;
 
 export const SEMANTIC_WASM_CONTRACT = Object.freeze({
   format: "wasm",
@@ -21,11 +21,9 @@ function jsonNatural(value, context) {
   return value.toString();
 }
 
-function exactJsonInteger(value, context) {
-  const result = Number(value);
-  assert.ok(Number.isSafeInteger(result) && BigInt(result) === value,
-    `${context} cannot be represented exactly by the validation JSON protocol`);
-  return result;
+function jsonInteger(value, context) {
+  assert.equal(typeof value, "bigint", `${context} must be an integer`);
+  return value.toString();
 }
 
 export function semanticDatum(schema, value, host, context, validationExternals) {
@@ -56,7 +54,7 @@ export function semanticDatum(schema, value, host, context, validationExternals)
       case "int":
         return {
           int: {
-            value: exactJsonInteger(
+            value: jsonInteger(
               validationExternals.integerValue(host, value, context), context),
           },
         };

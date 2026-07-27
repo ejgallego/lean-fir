@@ -23,7 +23,7 @@ import validation_lcnf as lcnf
 
 def success(case_id: str, backend: str, value: int = 42) -> dict:
     return {
-        "version": 2,
+        "version": 3,
         "caseId": case_id,
         "backend": backend,
         "diagnostics": [],
@@ -68,7 +68,7 @@ def fixture_provider_config(
 ) -> dict:
     python = Path(sys.executable).name
     return {
-        "version": 2,
+        "version": 3,
         "name": name,
         "contract": contract.to_json(),
         "buildCommand": [python, "-c", "pass"],
@@ -128,7 +128,7 @@ def descriptor(
     effect_projections: list[dict] | None = None,
 ) -> dict:
     item = {
-        "version": 2,
+        "version": 3,
         "id": case_id,
         "entry": f"Fir.Validation.Source.{case_id}",
         "dependencies": [],
@@ -580,7 +580,7 @@ class HarnessTests(unittest.TestCase):
 
     def test_wrong_version_rejected(self) -> None:
         record = success("case", "native")
-        record["version"] = 3
+        record["version"] = 4
         with self.assertRaises(harness.ValidationError):
             harness.checked_record(record, "native")
 
@@ -1196,8 +1196,8 @@ class HarnessTests(unittest.TestCase):
 
     def test_manifest_protocol_version_rejected(self) -> None:
         item = descriptor("case")
-        item["version"] = 3
-        with self.assertRaisesRegex(harness.ValidationError, "protocol version 3"):
+        item["version"] = 4
+        with self.assertRaisesRegex(harness.ValidationError, "protocol version 4"):
             harness.manifest_from_output(json.dumps(item), ["native", "--manifest"])
 
     def test_manifest_argument_arity_rejected(self) -> None:
@@ -1225,7 +1225,7 @@ class HarnessTests(unittest.TestCase):
             harness.write_corpus_manifest(out_dir, manifest)
             self.assertEqual(first, (out_dir / "corpus.json").read_bytes())
             artifact = json.loads(first)
-            self.assertEqual(artifact, {"version": 2, "cases": manifest})
+            self.assertEqual(artifact, {"version": 3, "cases": manifest})
 
     def test_evidence_blobs_are_append_only_and_content_addressed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1801,7 +1801,7 @@ class HarnessTests(unittest.TestCase):
                         )
                     )
                 manifest_value = {
-                    "version": 2,
+                    "version": 3,
                     "contract": contract.to_json(),
                     "products": [
                         {"kind": product.kind, "path": product.name}
@@ -3618,7 +3618,7 @@ class HarnessTests(unittest.TestCase):
             module.write_bytes(b"wasm product")
             manifest = backend_dir / "products.json"
             manifest_value = {
-                "version": 2,
+                "version": 3,
                 "products": [
                     {"kind": "wasm-module", "path": "modules/module.wasm"}
                 ],
@@ -3664,16 +3664,16 @@ class HarnessTests(unittest.TestCase):
                     "unsupported version",
                 ),
                 (
-                    {"version": 2, "products": []},
+                    {"version": 3, "products": []},
                     "nonempty array",
                 ),
                 (
-                    {"version": 2, "products": [], "extra": True},
+                    {"version": 3, "products": [], "extra": True},
                     "must contain version and products",
                 ),
                 (
                     {
-                        "version": 2,
+                        "version": 3,
                         "products": [
                             {"kind": "wasm-module", "path": "module.wasm"},
                             {"kind": "debug-info", "path": "module.wasm"},
@@ -3683,7 +3683,7 @@ class HarnessTests(unittest.TestCase):
                 ),
                 (
                     {
-                        "version": 2,
+                        "version": 3,
                         "products": [
                             {
                                 "kind": "wasm-module",
@@ -3857,7 +3857,7 @@ class HarnessTests(unittest.TestCase):
                 manifest.write_text(
                     json.dumps(
                         {
-                            "version": 2,
+                            "version": 3,
                             "scope": "reported-loaded",
                             "inputs": [
                                 {
@@ -3958,7 +3958,7 @@ class HarnessTests(unittest.TestCase):
             def manifest(inputs: list[dict], **extra: object) -> bytes:
                 return json.dumps(
                     {
-                        "version": 2,
+                        "version": 3,
                         "scope": "reported-loaded",
                         "inputs": inputs,
                         **extra,
@@ -3980,15 +3980,15 @@ class HarnessTests(unittest.TestCase):
 
             malformed = (
                 {"version": 1, "scope": "reported-loaded", "inputs": [valid]},
-                {"version": 2, "scope": "exact", "inputs": [valid]},
-                {"version": 2, "scope": "reported-loaded", "inputs": []},
+                {"version": 3, "scope": "exact", "inputs": [valid]},
+                {"version": 3, "scope": "reported-loaded", "inputs": []},
                 {
-                    "version": 2,
+                    "version": 3,
                     "scope": "reported-loaded",
                     "inputs": [valid, valid],
                 },
                 {
-                    "version": 2,
+                    "version": 3,
                     "scope": "reported-loaded",
                     "inputs": [
                         valid,
@@ -4000,7 +4000,7 @@ class HarnessTests(unittest.TestCase):
                     ],
                 },
                 {
-                    "version": 2,
+                    "version": 3,
                     "scope": "reported-loaded",
                     "inputs": [valid | {"path": "relative.olean"}],
                 },
@@ -4043,7 +4043,7 @@ class HarnessTests(unittest.TestCase):
             source = root / "compiler.input"
             source.write_bytes(b"original input")
             raw_manifest = {
-                "version": 2,
+                "version": 3,
                 "scope": "reported-loaded",
                 "inputs": [
                     {
@@ -4118,7 +4118,7 @@ class HarnessTests(unittest.TestCase):
             backend_dir.mkdir()
             content = json.dumps(
                 {
-                    "version": 2,
+                    "version": 3,
                     "products": [
                         {"kind": "wasm-module", "path": "module.wasm"}
                     ],
@@ -4266,7 +4266,7 @@ class HarnessTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
-                        "version": 2,
+                        "version": 3,
                         "corpusBackend": "direct-native",
                         "adapterConfigs": [
                             "../adapters/v8.json",
@@ -4522,7 +4522,7 @@ class HarnessTests(unittest.TestCase):
                 "root=pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR']);"
                 "(root/'module.wasm').write_bytes(b'fixture-wasm');"
                 f"contract=json.loads({json.dumps(json.dumps(contract))});"
-                "manifest={'version':2,'contract':contract,'products':["
+                "manifest={'version':3,'contract':contract,'products':["
                 "{'kind':'wasm-module','path':'module.wasm'}],'cases':["
                 "{'caseId':'case','products':[{'kind':'wasm-module',"
                 "'path':'module.wasm'}]}]};"
@@ -4530,7 +4530,7 @@ class HarnessTests(unittest.TestCase):
             )
             provider_path = root / "provider.json"
             provider_value = {
-                "version": 2,
+                "version": 3,
                 "name": "fixture-wasm",
                 "contract": contract,
                 "buildCommand": [
@@ -4594,7 +4594,7 @@ class HarnessTests(unittest.TestCase):
                 "'bundleSha256':bundle['bundleSha256'],'products':["
                 "{'kind':item['kind'],'name':item['name'],'sha256':item['sha256']}"
                 " for item in binding]};"
-                "record={'version':2,'caseId':'case','backend':backend,"
+                "record={'version':3,'caseId':'case','backend':backend,"
                 "'diagnostics':[{'key':'validation-product-bundle','value':"
                 "json.dumps(receipt,separators=(',',':'),sort_keys=True)}],"
                 "'outcome':{'success':{'observation':{'termination':"
@@ -4702,7 +4702,7 @@ class HarnessTests(unittest.TestCase):
             plan_path.write_text(
                 json.dumps(
                     {
-                        "version": 2,
+                        "version": 3,
                         "providerConfigs": ["provider.json"],
                         "adapterConfigs": ["v8.json"],
                         "pairs": [
@@ -4789,7 +4789,7 @@ class HarnessTests(unittest.TestCase):
                     harness.sha256_bytes(module_content),
                 )
                 manifest_value = {
-                    "version": 2,
+                    "version": 3,
                     "contract": contract.to_json(),
                     "products": [
                         {"kind": module.kind, "path": module.name}
@@ -4908,7 +4908,7 @@ class HarnessTests(unittest.TestCase):
             plan_path.write_text(
                 json.dumps(
                     {
-                        "version": 2,
+                        "version": 3,
                         "providerConfigs": ["provider.json"],
                         "adapterConfigs": ["v8.json", "talos.json"],
                         "pairs": [
@@ -5043,7 +5043,7 @@ class HarnessTests(unittest.TestCase):
                     out_dir, "inputs", digest, content
                 )
                 run_value = {
-                    "version": 2,
+                    "version": 3,
                     "selectionSha256": tampered["identity"]["selection"],
                     "backends": tampered["backends"],
                     "pairs": [
@@ -5330,7 +5330,7 @@ class HarnessTests(unittest.TestCase):
                 "'modules','validation.wasm');"
                 "path.parent.mkdir(parents=True,exist_ok=True);"
                 f"path.write_bytes({product_bytes!r});"
-                "closure={'version':2,'scope':'reported-loaded','inputs':["
+                "closure={'version':3,'scope':'reported-loaded','inputs':["
                 "{'kind':'fixture-source','name':'compiler.input','path':"
                 f"{str(material_path)!r}" "}]};"
                 "pathlib.Path(os.environ['FIR_VALIDATION_OUT_DIR'],"
@@ -5423,7 +5423,7 @@ class HarnessTests(unittest.TestCase):
             plan_path.write_text(
                 json.dumps(
                     {
-                        "version": 2,
+                        "version": 3,
                         "adapterConfigs": ["v8.json"],
                         "pairs": [
                             {"reference": "native", "candidate": "v8"}
@@ -7872,7 +7872,7 @@ class AttestationEnvelopeTests(unittest.TestCase):
             not isinstance(value, dict)
             or set(value)
             != {"version", "identity", "caseId", "claim", "observation"}
-            or value["version"] != 2
+            or value["version"] != 3
             or not isinstance(value["claim"], str)
             or not isinstance(value["observation"], int)
             or isinstance(value["observation"], bool)
@@ -7884,7 +7884,7 @@ class AttestationEnvelopeTests(unittest.TestCase):
     def record(case_id: str, claim: str, observation: int) -> dict:
         return attestation.with_record_identity(
             {
-                "version": 2,
+                "version": 3,
                 "caseId": case_id,
                 "claim": claim,
                 "observation": observation,
@@ -8008,7 +8008,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
 
     def matrix(self, run_sha256: str = "2" * 64) -> dict:
         return {
-            "version": 2,
+            "version": 3,
             "identity": {
                 "algorithm": "sha256",
                 "selection": "1" * 64,
@@ -8027,7 +8027,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         equal: tuple[bool, bool] = (True, True),
     ) -> bytes:
         value = {
-            "version": 2,
+            "version": 3,
             "reference": reference,
             "candidate": candidate,
             "comparisons": [
@@ -8036,7 +8036,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
                     "reference": reference,
                     "candidate": candidate,
                     "equal": case_equal,
-                    "case": {"version": 2, "id": case_id},
+                    "case": {"version": 3, "id": case_id},
                 }
                 for case_id, case_equal in zip(
                     self.selected_cases, equal, strict=True
@@ -8125,7 +8125,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         minimum_cases: int = 2,
     ) -> dict:
         return {
-            "version": 2,
+            "version": 3,
             "kind": "fir-backend-comparison-oracle-policy",
             "oracle": "native",
             "requiredCandidates": candidates or ["lcnf", "v8"],
@@ -8368,7 +8368,7 @@ class DirectNativeIrTests(unittest.TestCase):
 
     def native_ir_descriptor(self, digest: str) -> dict:
         return {
-            "version": 2,
+            "version": 3,
             "caseId": "native-ir-case",
             "entry": "Fir.Validation.nativeIrCase",
             "dependencies": ["Fir.Validation.nativeIrHelper"],
@@ -8877,7 +8877,7 @@ class CoverageIndexTests(unittest.TestCase):
         pairs: list[tuple[str, str]],
     ) -> dict:
         return {
-            "version": 2,
+            "version": 3,
             "identity": {
                 "algorithm": "sha256",
                 "run": "1" * 64,
@@ -8927,7 +8927,7 @@ class CoverageIndexTests(unittest.TestCase):
     ) -> dict:
         case_count = len(case_ids)
         return {
-            "version": 2,
+            "version": 3,
             "backend": backend,
             "caseCount": case_count,
             "cases": [{"caseId": case_id} for case_id in case_ids],
@@ -9137,7 +9137,7 @@ class CoverageIndexTests(unittest.TestCase):
             matrix_path.write_bytes(json_bytes(matrix))
             coverage_path.write_bytes(json_bytes(machine))
             plan = {
-                "version": 2,
+                "version": 3,
                 "tiers": [
                     {
                         "id": "source",
@@ -9188,7 +9188,7 @@ class CoverageIndexTests(unittest.TestCase):
             build_dir.mkdir()
             matrix_path = build_dir / "matrix.json"
             plan = {
-                "version": 2,
+                "version": 3,
                 "tiers": [
                     {
                         "id": "source",
@@ -9279,7 +9279,7 @@ class CoverageIndexTests(unittest.TestCase):
             matrix_path = build_dir / "matrix.json"
             matrix_path.write_bytes(json_bytes(matrix))
             plan = {
-                "version": 2,
+                "version": 3,
                 "tiers": [
                     {
                         "id": "source",
@@ -9343,7 +9343,7 @@ class CoverageIndexTests(unittest.TestCase):
                 for tier_id in ("source", "direct")
             ]
             plan = {
-                "version": 2,
+                "version": 3,
                 "tiers": [
                     {
                         "id": tier_id,
@@ -9576,7 +9576,7 @@ class CoverageIndexTests(unittest.TestCase):
             matrix_path = build_dir / "matrix.json"
             matrix_path.write_bytes(json_bytes(matrix))
             plan = {
-                "version": 2,
+                "version": 3,
                 "tiers": [
                     {
                         "id": "source",
@@ -9607,7 +9607,7 @@ class CoverageIndexTests(unittest.TestCase):
 
     def test_index_identity_detects_tampering(self) -> None:
         report = {
-            "version": 2,
+            "version": 3,
             "identity": {"algorithm": "sha256", "index": "0" * 64},
             "plan": {
                 "name": "validation-plans/coverage-index.json",

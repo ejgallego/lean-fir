@@ -259,7 +259,7 @@ Talos without changing this comparison model:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "corpusBackend": "native",
   "providerConfigs": ["../validation-providers/lean-wasm-semantic.json"],
   "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
@@ -699,7 +699,7 @@ reported-loaded inventory distinct from both tools and products:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "scope": "reported-loaded",
   "inputs": [
     {
@@ -857,7 +857,7 @@ harness did not observe.
 
 The optional static `products` array or dynamic `productManifest` declares
 regular build outputs whose bytes affect the backend's semantics.  A dynamic
-manifest is a strict `{"version":2,"products":[...]}` object emitted by the
+manifest is a strict `{"version":3,"products":[...]}` object emitted by the
 current build; the harness retains it as a `product-manifest` product and
 verifies that its declarations exactly match the matrix products for that
 backend.  Each declaration has a restricted lowercase `kind` and a normalized
@@ -912,7 +912,7 @@ reported-input, strace, and sealed-replay machinery as an external adapter:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "name": "example-wasm-provider",
   "contract": {
     "format": "wasm",
@@ -948,7 +948,7 @@ and products may be shared by many cases:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "contract": {
     "format": "wasm",
     "target": "wasm32",
@@ -1049,7 +1049,7 @@ even when several engines consume it:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "providerConfigs": ["../validation-providers/example-wasm.json"],
   "adapterConfigs": [
     "../validation-adapters/example-v8.json",
@@ -1428,12 +1428,12 @@ in-place ByteArray updates.  Native Lean and LCNF must preserve the original,
 intermediate, and final byte arrays in the correct argument/result positions,
 even though all runtime references point at the same uniquely owned location.
 
-Protocol v2 encodes arbitrary `Nat` datum payloads as canonical decimal
-strings; structural tags, widths, and bytes remain compact JSON numbers. This
-keeps Lean's semantic type as `Nat` while making every backend observation
-exact in Python and JavaScript. The protocol also has recursive data, signed
-integers, scalar-bit, `USize`, output, and controlled effect fields. The LCNF
-codec intentionally supports only the shapes needed by the checked corpus.
+Protocol v3 encodes arbitrary `Nat` and `Int` datum payloads as canonical
+decimal strings; structural tags, widths, and bytes remain compact JSON
+numbers. This keeps Lean's semantic types while making every backend observation
+exact in Python and JavaScript. The protocol also has recursive data,
+scalar-bit, `USize`, output, and controlled effect fields. The LCNF codec
+intentionally supports only the shapes needed by the checked corpus.
 Immediate signed integers use
 Lean's signed-32-bit payload ABI; larger values use the interpreter's semantic
 signed-integer heap object.  Externally supplied packed constructors,
@@ -1518,7 +1518,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 95 corpus cases, including a natural
+The default native-to-V8 matrix covers all 103 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
 five mixed-layout projections. `make validate-v8` delegates whole-corpus
