@@ -462,6 +462,37 @@ run_cmd do
   | .error error =>
       throwError
         "failed to write resident partial-application Format module: {repr error}"
+  let setters := residentPartialApplicationArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentMutation.isSetter
+  unless setters.size == 11 do
+    throwError "resident Format setter inventory changed"
+  let residentSetterArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeSetters
+        residentPartialApplicationArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident setter Format facade: {repr error}"
+  unless residentSetterArtifact.module.imports.size == 54 &&
+      residentSetterArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentMutation.isSetter operation do
+    throwError "resident Format setter frontier changed"
+  unless residentSetterArtifact.module.imports.size + setters.size ==
+      residentPartialApplicationArtifact.module.imports.size do
+    throwError "resident Format setter import accounting changed"
+  unless residentSetterArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch &&
+      residentSetterArtifact.module.closureDescriptors ==
+        moduleArtifact.module.closureDescriptors do
+    throwError "resident setter linking changed stable closure metadata"
+  unless (List.range setters.size).all fun ordinal =>
+      residentSetterArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentMutation.setterName ordinal) do
+    throwError "resident Format setter helper exports changed"
+  match ← residentSetterArtifact.write
+      "_build/source-pretty-format-resident-setters.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident setter Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

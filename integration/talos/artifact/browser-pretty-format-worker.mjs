@@ -15,6 +15,9 @@ import {
 import {
   checkFetchedResidentLiterals,
 } from "./resident-literal-client.mjs";
+import {
+  checkFetchedResidentSetters,
+} from "./resident-setter-client.mjs";
 import { checkFetchedConcretePrettyFormat } from "./fetch-concrete-pretty-format.mjs";
 import {
   checkFetchedConcretePrettyFormatTrace,
@@ -41,6 +44,7 @@ try {
       "./_build/resident-closure-allocation.wasm",
     ),
     checkFetchedResidentLiterals("./_build/resident-literals.wasm"),
+    checkFetchedResidentSetters("./_build/resident-setters.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-get-tag.wasm",
@@ -64,10 +68,10 @@ try {
       "./_build/source-pretty-format-resident-constructors.wasm",
     ),
     checkFetchedConcretePrettyFormat(
-      "./_build/source-pretty-format-resident-partial-applications.wasm",
+      "./_build/source-pretty-format-resident-setters.wasm",
     ),
     checkFetchedConcretePrettyFormatTrace(
-      "./_build/source-pretty-format-trace-resident-partial-applications.wasm",
+      "./_build/source-pretty-format-trace-resident-setters.wasm",
     ),
     checkFetchedResidentGetTag("./_build/resident-get-tag.wasm"),
     checkFetchedResidentIsShared("./_build/resident-is-shared.wasm"),

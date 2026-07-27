@@ -93,6 +93,9 @@ node run-resident-closure-allocation.mjs \
 lake exe fir-wasm-artifact resident-literals \
   _build/resident-literals.wasm
 node run-resident-literals.mjs _build/resident-literals.wasm
+lake exe fir-wasm-artifact resident-setters \
+  _build/resident-setters.wasm
+node run-resident-setters.mjs _build/resident-setters.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -157,6 +160,14 @@ checks immediate `Nat` encodings plus empty and Unicode/newline strings,
 including the exact versioned W6 header, canonical UTF-8 payload, aligned zero
 padding, frontier movement, scratch preservation, and direct `ConcreteHost`
 decoding.
+
+The 486-byte resident-setter module likewise has zero imports and owns its
+memory. It performs guarded object-slot and packed-`UInt8` writes against an
+exact raw W6 constructor header, traps on zero, misaligned, dead, out-of-bounds,
+and width-mismatched inputs, preserves the scratch word, and lets
+`ConcreteHost` independently project the written fields. These helpers perform
+only the requested direct write; the LCNF's separate `inc` and `dec` operations
+remain explicit.
 
 Remaining JavaScript runtime operations can use that module-owned heap without
 a facade. Construct the concrete host before instantiation as usual, then
@@ -351,7 +362,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-allocator.wasm \
   _build/source-pretty-format-resident-constructors.wasm \
   _build/source-pretty-format-resident-naturals.wasm \
-  _build/source-pretty-format-resident-partial-applications.wasm
+  _build/source-pretty-format-resident-partial-applications.wasm \
+  _build/source-pretty-format-resident-setters.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -513,6 +525,22 @@ captures fail closed until the resident symbolic surface has typed float
 stores. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65`.
 
+The following checkpoint internalizes all direct constructor mutations:
+seven `objectSet` plus four `scalarSet` operations in the text facade, and ten
+total setters in the exact-event facade. The checked helpers validate the
+resident constructor header and its object/scalar bounds before writing, while
+leaving ownership changes to the adjacent explicit reference-count operations:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-setters.wasm
+```
+
+Final LCNF and both retained closure tables remain byte-identical. Text
+`prettyM` advances from 65 to 54 imports, while styled `prettyM` advances from
+66 to 56. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -527,8 +555,8 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 66 function imports: one more than
-the text-only 65-import checkpoint in order to preserve the exact
+memory and allocator and currently has 56 function imports: two more than
+the text-only 54-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare

@@ -4,6 +4,7 @@ import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
+import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentRuntime
 
 open Fir.Wasm
@@ -125,6 +126,20 @@ def emitResidentLiterals (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-literals: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentSetters (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentMutation.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident setter encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentMutation.manifest.compress
+  IO.println
+    s!"resident-setters: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentIsShared (path : System.FilePath) : IO Unit := do
   let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
     Fir.Wasm.Emit.ResidentRuntime.isSharedModule).mapError fun error =>
@@ -189,6 +204,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-literals <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-setters <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
     "       fir-wasm-artifact resident-read-projections <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-projections <output.wasm>\n" ++
@@ -223,6 +239,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-literals", output] =>
         emitResidentLiterals output
+        return 0
+    | ["resident-setters", output] =>
+        emitResidentSetters output
         return 0
     | ["resident-is-shared", output] =>
         emitResidentIsShared output

@@ -3,6 +3,7 @@ import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
+import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentRuntime
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -76,6 +77,20 @@ def internalizePartialApplications (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident partial applications: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeSetters (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentMutation.internalizeSetters artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident setters: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -194,9 +209,18 @@ def compilePartialApplicationModule (entry : Name) :
   let result ← compileImmediateNaturalModule entry
   return result.bind internalizePartialApplications
 
+/--
+Continue from closure allocation and internalize the object-slot and packed
+scalar writes reachable from `prettyM`.
+-/
+def compileSetterModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compilePartialApplicationModule entry
+  return result.bind internalizeSetters
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compilePartialApplicationModule entry
+  compileSetterModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

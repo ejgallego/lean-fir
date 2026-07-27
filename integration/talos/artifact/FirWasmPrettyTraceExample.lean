@@ -141,3 +141,34 @@ run_cmd do
   | .error error =>
       throwError
         "failed to write resident styled partial-application module: {repr error}"
+  let setters := partialApplicationArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentMutation.isSetter
+  unless setters.size == 10 do
+    throwError "resident styled Format setter inventory changed"
+  let setterArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeSetters
+        partialApplicationArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled setters: {repr error}"
+  unless setterArtifact.module.imports.size == 56 &&
+      setterArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentMutation.isSetter operation do
+    throwError "resident styled Format setter frontier changed"
+  unless setterArtifact.module.imports.size + setters.size ==
+      partialApplicationArtifact.module.imports.size do
+    throwError "resident styled setter import accounting changed"
+  unless setterArtifact.module.closureDispatch ==
+      partialApplicationArtifact.module.closureDispatch &&
+      setterArtifact.module.closureDescriptors ==
+        partialApplicationArtifact.module.closureDescriptors do
+    throwError "resident styled setters changed closure metadata"
+  unless (List.range setters.size).all fun ordinal =>
+      setterArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentMutation.setterName ordinal) do
+    throwError "resident styled setter helper exports changed"
+  match ← setterArtifact.write
+      "_build/source-pretty-format-trace-resident-setters.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled setter module: {repr error}"
