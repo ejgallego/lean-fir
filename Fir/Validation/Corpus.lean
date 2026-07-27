@@ -604,6 +604,14 @@ def negateInt (value : Int) : Int :=
   -value
 
 @[noinline]
+def intOfNat (value : Nat) : Int :=
+  Int.ofNat value
+
+@[noinline]
+def negIntOfNat (value : Nat) : Int :=
+  -(Int.ofNat value)
+
+@[noinline]
 def intPosImmediate : Int :=
   2147483647
 
@@ -1035,6 +1043,12 @@ private def scalarEnumFormTrace : Array String :=
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
     "fap", "extern", "cases", "lit", "return"]
+
+private def intOfNatFormTrace : Array String :=
+  #["fap", "extern", "return"]
+
+private def negIntOfNatFormTrace : Array String :=
+  #["fap", "extern", "fap", "extern", "dec", "return"]
 
 private def conditionalExternalTakenFormTrace : Array String :=
   #["cases", "lit", "fap", "extern", "return"]
@@ -2168,6 +2182,44 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.neg]
     provenance := firProvenance
       "Negate negative 2^128 + 17 back to a positive multi-limb Int" },
+  { id := "int-of-nat-multi-limb-positive"
+    entry := ``Source.intOfNat
+    args := #[.nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.intOfNat 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "nat", "signed", "heap", "multi-limb",
+      "external", "conversion"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intOfNatFormTrace
+    requiredExternals := #[``Int.ofNat]
+    requiredExecutedExternals := #[``Int.ofNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat]
+    requiredExecutedExternalTrace := some #[``Int.ofNat]
+    provenance := firProvenance
+      "Convert positive Nat 2^128 + 17 to an exact multi-limb Int" },
+  { id := "int-of-nat-multi-limb-negative"
+    entry := ``Source.negIntOfNat
+    args := #[.nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.negIntOfNat 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "nat", "signed", "negative", "heap",
+      "multi-limb", "external", "conversion"]
+    requiredLcnfForms := #["fap", "extern", "dec", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "dec", "return"]
+    requiredExecutedLcnfFormTrace := some negIntOfNatFormTrace
+    requiredExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.neg]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.neg]
+    provenance := firProvenance
+      "Convert Nat 2^128 + 17 then negate it through exact externals" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
