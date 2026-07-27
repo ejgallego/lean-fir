@@ -363,10 +363,12 @@ acceptance tests pass.
    result families reduce to named tracked transfer, heap-preserving erasure,
    or prefix-extending erasure. The recursive capacity-aware certificate is
    defined for all existing simulation constructors and conservatively erases
-   to `ConcreteCodeSimulation`. The remaining syntax work is to construct it
-   from the operation lemmas, close its interprocedural call case, and lift it
-   to supported exports. Structured unreachability remains the shared-contract
-   blocker.
+   to `ConcreteCodeSimulation`. An empty fact map now seeds that certificate
+   from the ordinary initial relation, and a completed certificate lifts to the
+   supported-export theorem while exposing the selected return state's final
+   fact interpretation. The remaining syntax work is to construct the
+   certificate from the operation lemmas and close its interprocedural call
+   case. Structured unreachability remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

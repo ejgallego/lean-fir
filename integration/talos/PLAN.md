@@ -3343,6 +3343,17 @@ the operation-specific result/effect transitions and close the
 interprocedural call transition, then lift it to the supported export theorem.
 No FIR semantic contract or executable ABI changed.
 
+W6.6ds connects that certificate to the generated-export boundary. The empty
+validator fact map adds no obligation beyond the ordinary initial concrete
+state relation. A completed `ReuseCapacityCodeSimulation` can therefore erase
+to the existing successful-declaration theorem, while the strengthened export
+theorem additionally exposes the selected return state's exact final fact-map
+interpretation. This lift deliberately consumes, rather than postulates the
+automatic construction of, the syntax certificate. The remaining proof work
+is to assemble its operation-specific nodes and state the capacity-preserving
+interprocedural call condition explicitly. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

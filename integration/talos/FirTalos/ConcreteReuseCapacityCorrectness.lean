@@ -663,6 +663,22 @@ def ReuseCapacityStateRelated
     ReuseCapacityFactsRel facts (functionBindings sourceFunction) sourceEnv
       targetLocals targetStore.host.runtime.heap witness
 
+/-- The empty validator fact map adds no obligation to W6's ordinary state
+relation. This is the initial bridge for a validated function body. -/
+theorem StateRelated.withEmptyReuseCapacity
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness) :
+    ReuseCapacityStateRelated [] sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness := by
+  refine ⟨related, ?_⟩
+  intro fvarId evidence found
+  simp [findReuseCapacityEvidence?] at found
+
 theorem ReuseCapacityStateRelated.stateRelated
     {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
