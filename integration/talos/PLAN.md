@@ -3367,6 +3367,21 @@ certificate boilerplate. The next call slice must obtain those three facts
 from the concrete callee theorem rather than weakening the capacity relation.
 No FIR semantic contract or executable ABI changed.
 
+W6.6du proves the first hereditary interprocedural instance. Every recursive
+capacity certificate now composes its per-step witness and retained-header
+transports into one end-to-end frame theorem. A
+`CapacityPreservingSuccessfulDeclaration` packages that frame with the
+existing exact declaration execution theorem, and supported exports obtain
+the package directly from their capacity-aware body certificate. The direct
+named-call constructor uses argument assembly, exact callee termination, the
+checked result-local write, and the callee frame to build both the ordinary
+call simulation and its validator-selected erasure result step; a companion
+builder inserts it into the recursive certificate. The remaining
+interprocedural work is to instantiate the same hereditary boundary for
+closure dispatch, lazy caches, and external calls, then finish automatic
+syntax-directed certificate construction. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

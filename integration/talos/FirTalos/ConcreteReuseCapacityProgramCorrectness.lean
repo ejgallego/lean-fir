@@ -37,6 +37,10 @@ structure ReuseCapacityResultStep
   nextRelated :
     ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
       (bind sourceEnv result sourceValue) nextStore nextLocals afterWitness
+  witnessTransport : WitnessTransport beforeWitness afterWitness
+  capacityTransport :
+    HeaderCapacityTransport targetStore.host.runtime.heap
+      nextStore.host.runtime.heap beforeWitness
 
 /-- Direct-result instantiation of `ReuseCapacityResultStep`. -/
 abbrev ReuseCapacityLetStepSimulates
@@ -158,7 +162,8 @@ theorem ReuseCapacityResultStep.ofErase
       ordinaryStep :=
   ⟨ordinary, initialRelated,
     initialRelated.eraseResult finalRelated resultFound localUpdate
-      witnessTransport capacityTransport⟩
+      witnessTransport capacityTransport,
+    witnessTransport, capacityTransport⟩
 
 /-- Tracked-result counterpart of `ofErase`. The caller supplies exactly the
 new evidence selected by the validator and its concrete value interpretation.
@@ -200,7 +205,8 @@ theorem ReuseCapacityResultStep.ofBind
       ordinaryStep :=
   ⟨ordinary, initialRelated,
     initialRelated.bindResult finalRelated resultFound kindAt localUpdate
-      witnessTransport capacityTransport valueRelated⟩
+      witnessTransport capacityTransport valueRelated,
+    witnessTransport, capacityTransport⟩
 
 /-- Construct the interprocedural call boundary for the validator's ordinary
 result transfer. These three transport premises are exactly what the existing
@@ -440,6 +446,10 @@ inductive ReuseCapacityCodeSimulation
         EffectStepSimulates context sourceModule sourceFunction labels module
           hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
           targetRest targetStore nextStore targetLocals witness nextWitness)
+      (witnessTransport : WitnessTransport witness nextWitness)
+      (capacityTransport :
+        HeaderCapacityTransport targetStore.host.runtime.heap
+          nextStore.host.runtime.heap witness)
       (continued :
         ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
           module hostEnv sourceExternals facts nextRuntime sourceEnv continuation
@@ -588,7 +598,8 @@ theorem ReuseCapacityCodeSimulation.effectOfTransport
       module hostEnv sourceExternals facts sourceRuntime sourceEnv code target
       targetStore targetLocals witness resultFacts resultRuntime resultValue
       resultKind resultStore resultWitness physical :=
-  .effect safe target targetRest related step
+  .effect safe target targetRest related step witnessTransport
+    capacityTransport
     (continued
       (related.ofEffectStep step witnessTransport capacityTransport))
 
@@ -636,7 +647,7 @@ theorem ReuseCapacityCodeSimulation.erase
         continued
   | caseOf _ target selectedTarget _ step _ continued =>
       exact .caseOf target selectedTarget step continued
-  | effect _ target targetRest _ step _ continued =>
+  | effect _ target targetRest _ step _ _ _ continued =>
       exact .effect target targetRest step continued
 
 /-- The selected return leaf still carries the dynamic meaning of its final
@@ -670,7 +681,53 @@ theorem ReuseCapacityCodeSimulation.finalRelated
   | externalLet _ _ _ _ _ _ _ continued => exact continued
   | lazyLet _ _ _ _ _ _ _ _ continued => exact continued
   | caseOf _ _ _ _ _ _ continued => exact continued
-  | effect _ _ _ _ _ _ continued => exact continued
+  | effect _ _ _ _ _ _ _ _ continued => exact continued
+
+/-- Every capacity-aware code certificate is also an end-to-end frame theorem
+for arbitrary caller values and retained allocation headers. This is the
+hereditary fact needed to reuse a proved declaration under another function's
+validator fact map. -/
+theorem ReuseCapacityCodeSimulation.frameTransport
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure} {target : Wasm.Program}
+    {targetStore resultStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness resultWitness : RefinementWitness}
+    {resultValue : Value} {resultKind : AbiKind} {physical : Wasm.Value}
+    (simulation :
+      ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
+        module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
+        target targetStore targetLocals witness resultFacts resultRuntime
+        resultValue resultKind resultStore resultWitness physical) :
+    WitnessTransport witness resultWitness ∧
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        resultStore.host.runtime.heap witness := by
+  induction simulation with
+  | ret =>
+      exact ⟨WitnessTransport.refl _,
+        HeaderCapacityTransport.refl _ _⟩
+  | letValue _ _ _ _ _ step _ continued
+  | callLet _ _ _ _ _ step _ continued
+  | externalLet _ _ _ _ _ step _ continued =>
+      exact ⟨WitnessTransport.trans step.witnessTransport continued.1,
+        HeaderCapacityTransport.transAcross step.capacityTransport
+          step.witnessTransport continued.2⟩
+  | lazyLet _ _ _ _ _ _ step _ continued =>
+      exact ⟨WitnessTransport.trans step.witnessTransport continued.1,
+        HeaderCapacityTransport.transAcross step.capacityTransport
+          step.witnessTransport continued.2⟩
+  | caseOf _ _ _ _ _ _ continued =>
+      exact continued
+  | effect _ _ _ _ _ witnessTransport capacityTransport _ continued =>
+      exact ⟨WitnessTransport.trans witnessTransport continued.1,
+        HeaderCapacityTransport.transAcross capacityTransport witnessTransport
+          continued.2⟩
 
 /-- Capacity certification is a conservative strengthening of the existing
 code-to-Wasm weakest-precondition theorem. -/

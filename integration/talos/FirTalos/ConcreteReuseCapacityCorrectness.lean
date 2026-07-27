@@ -21,6 +21,54 @@ theorem HeaderCapacityTransport.refl
   intro address location header mapped headerRead owned
   exact ⟨header, headerRead, rfl, owned⟩
 
+/-- Representation transport composes across successive concrete steps. -/
+theorem WitnessTransport.trans
+    {first second third : RefinementWitness}
+    (firstSecond : WitnessTransport first second)
+    (secondThird : WitnessTransport second third) :
+    WitnessTransport first third := by
+  intro kind lane semantic related
+  exact secondThird (firstSecond related)
+
+/-- The value-polymorphic witness transport in particular preserves every
+previously mapped semantic heap location. -/
+theorem WitnessTransport.location
+    {before after : RefinementWitness}
+    (transport : WitnessTransport before after)
+    {location : Location} {address : Word32}
+    (found : before.locations.lookup? location = some address) :
+    after.locations.lookup? location = some address := by
+  have beforeRelated :
+      ValueRel before .object (.word32 address)
+        (.object (.heap location)) :=
+    .object (.mapped found)
+  have afterRelated := transport beforeRelated
+  cases afterRelated with
+  | object related =>
+      cases related with
+      | mapped nextFound => exact nextFound
+
+/-- Header-capacity transport composes even when the intermediate operation
+extends or rebinds proof-only representation metadata. -/
+theorem HeaderCapacityTransport.transAcross
+    {first second third : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    (firstSecond :
+      HeaderCapacityTransport first second beforeWitness)
+    (witnessTransport :
+      WitnessTransport beforeWitness afterWitness)
+    (secondThird :
+      HeaderCapacityTransport second third afterWitness) :
+    HeaderCapacityTransport first third beforeWitness := by
+  intro address location header mapped headerRead owned
+  obtain ⟨middleHeader, middleRead, middleExtent, middleOwned⟩ :=
+    firstSecond address location header mapped headerRead owned
+  have middleMapped := witnessTransport.location mapped
+  obtain ⟨finalHeader, finalRead, finalExtent, finalOwned⟩ :=
+    secondThird address location middleHeader middleMapped middleRead
+      middleOwned
+  exact ⟨finalHeader, finalRead, finalExtent.trans middleExtent, finalOwned⟩
+
 /-- Fresh allocation is the common capacity-preserving heap transition: every
 previously owned header remains byte-for-byte readable below the extended
 frontier. -/
