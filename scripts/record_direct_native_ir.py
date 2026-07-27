@@ -28,6 +28,8 @@ from validation_lcnf import (
     named_count_items,
     positive_int_diagnostic,
     prepare_manifest as prepare_lcnf_manifest,
+    required_count_observations,
+    render_count_violations,
     step_trace_inventory,
     trace_name_counts,
     unsatisfied_count_requirements,
@@ -42,6 +44,7 @@ MANIFEST_FIELDS = {
     "claim",
     "requiredArtifactFragments",
     "requiredOwnershipFacts",
+    "requiredOwnershipFactCounts",
     "expectedArtifactSha256",
 }
 ARTIFACT_FILES = (
@@ -138,6 +141,45 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"{case_id}: required ownership facts must be unique nonempty strings"
             )
+        required_ownership_fact_counts = value["requiredOwnershipFactCounts"]
+        if not isinstance(required_ownership_fact_counts, list):
+            raise ValidationError(
+                f"{case_id}: required ownership fact counts must be a list"
+            )
+        count_facts: set[str] = set()
+        for requirement in required_ownership_fact_counts:
+            if (
+                not isinstance(requirement, dict)
+                or set(requirement) != {"fact", "minimum", "maximum"}
+            ):
+                raise ValidationError(
+                    f"{case_id}: ownership fact count requirement is malformed"
+                )
+            fact = requirement["fact"]
+            minimum = requirement["minimum"]
+            maximum = requirement["maximum"]
+            if not isinstance(fact, str) or not fact or fact in count_facts:
+                raise ValidationError(
+                    f"{case_id}: ownership fact count names must be unique "
+                    "nonempty strings"
+                )
+            count_facts.add(fact)
+            if (
+                isinstance(minimum, bool)
+                or not isinstance(minimum, int)
+                or minimum < 0
+                or (
+                    maximum is not None
+                    and (
+                        isinstance(maximum, bool)
+                        or not isinstance(maximum, int)
+                        or maximum < minimum
+                    )
+                )
+            ):
+                raise ValidationError(
+                    f"{case_id}: ownership fact count bounds are invalid for {fact}"
+                )
         digest = checked_sha256(
             value["expectedArtifactSha256"],
             f"{case_id} expected native IR artifact",
@@ -151,6 +193,7 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
                 "claim": claim,
                 "requiredArtifactFragments": required_fragments,
                 "requiredOwnershipFacts": required_ownership_facts,
+                "requiredOwnershipFactCounts": required_ownership_fact_counts,
                 "expectedArtifactSha256": digest,
             }
         )
@@ -634,8 +677,27 @@ def attest_artifacts(
             for fact in required_ownership_facts
             if fact not in observed_ownership_facts
         ]
+        observed_ownership_fact_counts = {
+            item["fact"]: item["count"]
+            for item in inventory["factCounts"]
+        }
+        required_ownership_fact_counts = descriptor[
+            "requiredOwnershipFactCounts"
+        ]
+        ownership_fact_count_observations = required_count_observations(
+            required_ownership_fact_counts,
+            observed_ownership_fact_counts,
+            "fact",
+        )
+        unsatisfied_ownership_fact_counts = unsatisfied_count_requirements(
+            required_ownership_fact_counts,
+            observed_ownership_fact_counts,
+            "fact",
+        )
+        ownership_fact_counts_match = not unsatisfied_ownership_fact_counts
         ownership_matches = (
             not missing_ownership_facts
+            and ownership_fact_counts_match
             and not inventory["unknownAttributes"]
         )
         matches = artifact_matches and claim_matches and ownership_matches
@@ -658,6 +720,12 @@ def attest_artifacts(
             "claimMatches": claim_matches,
             "requiredOwnershipFacts": required_ownership_facts,
             "missingOwnershipFacts": missing_ownership_facts,
+            "requiredOwnershipFactCounts": required_ownership_fact_counts,
+            "observedOwnershipFactCounts": ownership_fact_count_observations,
+            "unsatisfiedOwnershipFactCounts": (
+                unsatisfied_ownership_fact_counts
+            ),
+            "ownershipFactCountsMatch": ownership_fact_counts_match,
             "ownershipMatches": ownership_matches,
             "ownershipInventory": inventory,
             "artifact": "program.lcnf",
@@ -700,6 +768,14 @@ def attest_artifacts(
             failures.append(
                 f"{case_id}: native IR ownership inventory omits required facts "
                 f"{missing_ownership_facts!r}"
+            )
+        if unsatisfied_ownership_fact_counts:
+            violations = render_count_violations(
+                unsatisfied_ownership_fact_counts, "fact"
+            )
+            failures.append(
+                f"{case_id}: native IR ownership fact counts violate their "
+                f"contract: {violations}"
             )
         if inventory["unknownAttributes"]:
             failures.append(

@@ -61,12 +61,19 @@ A validation case whose candidate is an explicit final-impure program rather
 than source compiled by Lean. These cases cover machine transitions that the
 current source compiler does not emit.
 -/
+structure OwnershipFactCountRequirement where
+  fact : String
+  minimum : Nat
+  maximum : Option Nat := none
+  deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
+
 structure NativeOracleAttestation where
   entry : Name
   dependencies : Array Name := #[]
   claim : String
   requiredArtifactFragments : Array String := #[]
   requiredOwnershipFacts : Array String := #[]
+  requiredOwnershipFactCounts : Array OwnershipFactCountRequirement := #[]
   expectedArtifactSha256 : String
   deriving Inhabited
 
@@ -78,6 +85,7 @@ structure NativeOracleDescriptor where
   claim : String
   requiredArtifactFragments : Array String
   requiredOwnershipFacts : Array String
+  requiredOwnershipFactCounts : Array OwnershipFactCountRequirement
   expectedArtifactSha256 : String
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -682,6 +690,16 @@ def cases : Array Case := #[
         #["inc:owner:amount=1:persistent=false:reference=true",
           "isShared:owner", "dec:owner:reference=false",
           "ctor:NativeReplacement.mk", "oset:index=0"]
+      requiredOwnershipFactCounts := #[
+        { fact := "inc:owner:amount=1:persistent=false:reference=true",
+          minimum := 1, maximum := some 1 },
+        { fact := "isShared:owner", minimum := 1, maximum := some 1 },
+        { fact := "dec:owner:reference=false",
+          minimum := 1, maximum := some 1 },
+        { fact := "ctor:NativeReplacement.mk",
+          minimum := 1, maximum := some 1 },
+        { fact := "oset:index=0", minimum := 1, maximum := some 1 }
+      ]
       expectedArtifactSha256 :=
         "4e45f9af8557f2f90ce7ff564fc0fdd2d6eea4faa3d29f85ce0d9b708f9064b5"
     } },
@@ -734,7 +752,26 @@ def cases : Array Case := #[
           "ctor:NativeMixedOwner.mk", "ctor:NativeHeapChild.mk",
           "ctor:NativeReplacement.mk",
           "declaration:nativePersistentMixedOwner._closed_1",
-          "declaration:nativePersistentMixedOwner._closed_0"]
+          "declaration:nativePersistentMixedOwner._closed_0",
+          "oset:index=0"]
+      requiredOwnershipFactCounts := #[
+        { fact := "inc:owner:amount=1:persistent=true:reference=true",
+          minimum := 2, maximum := some 2 },
+        { fact := "isShared:owner", minimum := 1, maximum := some 1 },
+        { fact := "dec:owner:reference=false",
+          minimum := 1, maximum := some 1 },
+        { fact := "ctor:NativeMixedOwner.mk",
+          minimum := 1, maximum := some 1 },
+        { fact := "ctor:NativeHeapChild.mk",
+          minimum := 1, maximum := some 1 },
+        { fact := "ctor:NativeReplacement.mk",
+          minimum := 1, maximum := some 1 },
+        { fact := "declaration:nativePersistentMixedOwner._closed_1",
+          minimum := 1, maximum := some 1 },
+        { fact := "declaration:nativePersistentMixedOwner._closed_0",
+          minimum := 1, maximum := some 1 },
+        { fact := "oset:index=0", minimum := 1, maximum := some 1 }
+      ]
       expectedArtifactSha256 :=
         "81560717dd22a90fc4b40e2d41f5a1cad8ed8c08f8824a9ccec37d82b6ee96d7"
     } },
@@ -820,6 +857,16 @@ def cases : Array Case := #[
         #["inc:grandchild:amount=1:persistent=false:reference=true",
           "inc:child:amount=1:persistent=false:reference=true",
           "isShared:owner", "project-dec:owner:index=0", "oset:index=0"]
+      requiredOwnershipFactCounts := #[
+        { fact := "inc:grandchild:amount=1:persistent=false:reference=true",
+          minimum := 1, maximum := some 1 },
+        { fact := "inc:child:amount=1:persistent=false:reference=true",
+          minimum := 1, maximum := some 1 },
+        { fact := "isShared:owner", minimum := 1, maximum := some 1 },
+        { fact := "project-dec:owner:index=0",
+          minimum := 1, maximum := some 1 },
+        { fact := "oset:index=0", minimum := 1, maximum := some 1 }
+      ]
       expectedArtifactSha256 :=
         "97aee3e462f7ba25269a1a449d56f478d215b0681af63c1f980e5518016f7ab3"
     } },
@@ -869,6 +916,19 @@ def cases : Array Case := #[
           "project-dec:owner:index=1", "project-dec:owner:index=0",
           "oset:index=2", "oset:index=1", "oset:index=0",
           "ctor:NativeRepeatedReplacement.mk"]
+      requiredOwnershipFactCounts := #[
+        { fact := "inc:child:amount=2:persistent=false:reference=true",
+          minimum := 1, maximum := some 1 },
+        { fact := "project-dec:owner:index=1",
+          minimum := 1, maximum := some 1 },
+        { fact := "project-dec:owner:index=0",
+          minimum := 1, maximum := some 1 },
+        { fact := "oset:index=2", minimum := 1, maximum := some 1 },
+        { fact := "oset:index=1", minimum := 1, maximum := some 1 },
+        { fact := "oset:index=0", minimum := 1, maximum := some 1 },
+        { fact := "ctor:NativeRepeatedReplacement.mk",
+          minimum := 1, maximum := some 1 }
+      ]
       expectedArtifactSha256 :=
         "34469861bd43393e0c221989ea0f71a3a58431d8c92cb82144f48843dc83f721"
     } }
@@ -894,6 +954,7 @@ def nativeOracleDescriptors : Array NativeOracleDescriptor :=
       claim := attestation.claim
       requiredArtifactFragments := attestation.requiredArtifactFragments
       requiredOwnershipFacts := attestation.requiredOwnershipFacts
+      requiredOwnershipFactCounts := attestation.requiredOwnershipFactCounts
       expectedArtifactSha256 := attestation.expectedArtifactSha256
     }
 

@@ -325,9 +325,13 @@ formatted LCNF. It normalizes local-name suffixes and records structured
 constructor, increment, decrement, projection, projection-decrement,
 `isShared`, reuse-write, and declaration operations with canonical fact IDs and
 occurrence counts. Case-local `requiredOwnershipFacts` are checked against that
-inventory, and unknown reference-count attributes fail closed. The exact
-artifact hash remains the broad drift detector; normalized facts now carry all
-four ownership claims without relying on raw artifact fragments.
+inventory. Inclusive `requiredOwnershipFactCounts` additionally constrain
+dynamic occurrences in the retained compiler artifact and record the observed
+count for every obligation, including zero; lower- and upper-bound violations
+are retained separately. Unknown reference-count attributes fail closed. The
+exact artifact hash remains the broad drift detector; normalized facts and
+counts now carry all four ownership claims without relying on raw artifact
+fragments.
 
 The initial audited set separates four ownership paths: releasing both slots of
 a repeated alias from a unique owner, stopping recursive release at a shared
@@ -336,8 +340,10 @@ child, and loading a closed persistent owner graph through
 `inc[persistent][ref]` before the shared reset path. This opt-in audit therefore
 pins the native compiler path underlying each semantic comparison and can
 distinguish resetting the intended owner from an optimizer choosing ordinary
-destruction or reusing one of the owner's projected children. It is not a CI
-tier and does not claim additional native/LCNF/V8 comparisons.
+destruction or reusing one of the owner's projected children. Exact count
+requirements pin both repeated-alias release slots, every audited reuse write,
+the shared-nested increments, and the persistent-owner increments. It is not a
+CI tier and does not claim additional native/LCNF/V8 comparisons.
 
 Only the first two tiers attach LCNF machine telemetry. The V8 matrix contains
 the source native–LCNF edge for triangular consistency, but the index selects

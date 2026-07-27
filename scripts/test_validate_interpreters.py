@@ -7867,6 +7867,13 @@ class DirectNativeIrTests(unittest.TestCase):
             "claim": "the native helper takes the intended ownership path",
             "requiredArtifactFragments": ["return"],
             "requiredOwnershipFacts": [],
+            "requiredOwnershipFactCounts": [
+                {
+                    "fact": "declaration:nativeIrCase",
+                    "minimum": 1,
+                    "maximum": 1,
+                }
+            ],
             "expectedArtifactSha256": digest,
         }
 
@@ -7956,6 +7963,35 @@ class DirectNativeIrTests(unittest.TestCase):
                 json.dumps(malformed_facts), ["native-ir-manifest"]
             )
 
+        malformed_count_names = {
+            **descriptor,
+            "requiredOwnershipFactCounts": [
+                {"fact": "isShared:owner", "minimum": 1, "maximum": 1},
+                {"fact": "isShared:owner", "minimum": 2, "maximum": 2},
+            ],
+        }
+        with self.assertRaisesRegex(
+            core.ValidationError, "count names must be unique"
+        ):
+            native_ir.parse_manifest(
+                json.dumps(malformed_count_names), ["native-ir-manifest"]
+            )
+
+        malformed_count_bounds = {
+            **descriptor,
+            "requiredOwnershipFactCounts": [
+                {
+                    "fact": "isShared:owner",
+                    "minimum": 2,
+                    "maximum": 1,
+                }
+            ],
+        }
+        with self.assertRaisesRegex(core.ValidationError, "bounds are invalid"):
+            native_ir.parse_manifest(
+                json.dumps(malformed_count_bounds), ["native-ir-manifest"]
+            )
+
     def test_native_ir_attestation_records_evidence_and_mismatch(self) -> None:
         artifact = b"def nativeIrCase := return\n"
         digest = native_ir.sha256_bytes(artifact)
@@ -7995,6 +8031,12 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertEqual(records[0]["missingArtifactFragments"], [])
             self.assertTrue(records[0]["ownershipMatches"])
             self.assertEqual(records[0]["missingOwnershipFacts"], [])
+            self.assertTrue(records[0]["ownershipFactCountsMatch"])
+            self.assertEqual(
+                records[0]["observedOwnershipFactCounts"],
+                [{"fact": "declaration:nativeIrCase", "count": 1}],
+            )
+            self.assertEqual(records[0]["unsatisfiedOwnershipFactCounts"], [])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
 
@@ -8035,6 +8077,64 @@ class DirectNativeIrTests(unittest.TestCase):
                 records[0]["missingOwnershipFacts"], ["isShared:owner"]
             )
             self.assertEqual(len(failures), 1)
+
+            missing_ownership_count = {
+                **descriptor,
+                "requiredOwnershipFactCounts": [
+                    {
+                        "fact": "isShared:owner",
+                        "minimum": 1,
+                        "maximum": 1,
+                    }
+                ],
+            }
+            records, failures = native_ir.attest_artifacts(
+                [missing_ownership_count], out_dir, verify_digest=False
+            )
+            self.assertEqual(
+                records[0]["observedOwnershipFactCounts"],
+                [{"fact": "isShared:owner", "count": 0}],
+            )
+            self.assertEqual(
+                records[0]["unsatisfiedOwnershipFactCounts"],
+                [
+                    {
+                        "fact": "isShared:owner",
+                        "minimum": 1,
+                        "maximum": 1,
+                        "observed": 0,
+                    }
+                ],
+            )
+            self.assertRegex(failures[0], r"isShared:owner=0<1")
+
+            wrong_ownership_count = {
+                **descriptor,
+                "requiredOwnershipFactCounts": [
+                    {
+                        "fact": "declaration:nativeIrCase",
+                        "minimum": 0,
+                        "maximum": 0,
+                    }
+                ],
+            }
+            records, failures = native_ir.attest_artifacts(
+                [wrong_ownership_count], out_dir, verify_digest=False
+            )
+            self.assertFalse(records[0]["ownershipFactCountsMatch"])
+            self.assertFalse(records[0]["ownershipMatches"])
+            self.assertEqual(
+                records[0]["unsatisfiedOwnershipFactCounts"],
+                [
+                    {
+                        "fact": "declaration:nativeIrCase",
+                        "minimum": 0,
+                        "maximum": 0,
+                        "observed": 1,
+                    }
+                ],
+            )
+            self.assertRegex(failures[0], r"declaration:nativeIrCase=1>0")
 
             mismatch = {
                 **descriptor,
