@@ -654,17 +654,18 @@ matched step. It is complete for:
 - tag updates, increments, decrements, and deletion;
 - retained and deleted erased lets;
 - retained and deleted literal lets, including fresh-address extension for
-  heap-backed literals.
+  heap-backed literals;
+- retained and deleted constructor lets, including fresh-address extension
+  for paired live allocations and source-only unreachable garbage;
+- retained and deleted object, `USize`, and packed-scalar projection lets.
 
 All stepping non-let code forms are therefore covered; `.unreach` is terminal.
-For impure let values, two of fourteen families have their exact hereditary
+For impure let values, six of fourteen families have their exact hereditary
 wrappers. The remaining families are:
 
-1. `.ctor`;
-2. `.oproj`, `.uproj`, and `.sproj`;
-3. `.pap`, `.box`, `.unbox`, and `.isShared`;
-4. `.reset` and `.reuse`;
-5. retained `.fvar`/`.fap` applications and the deleted nullary-`.fap`
+1. `.pap`, `.box`, `.unbox`, and `.isShared`;
+2. `.reset` and `.reuse`;
+3. retained `.fvar`/`.fap` applications and the deleted nullary-`.fap`
    boundary.
 
 After those families, assemble the strong active-code dispatcher, prove
@@ -700,19 +701,16 @@ regression.
 
 ## Immediate proof queue
 
-1. Add retained/deleted constructor-let hereditary matchers and exact-view
-   wrappers.
-2. Add the three projection-let families.
-3. Add the runtime-neutral allocation/read families: partial application,
+1. Add the remaining local allocation/read families: partial application,
    box, unbox, and `isShared`.
-4. Add reset and reuse while preserving the token capability.
-5. Add retained call/application cases and resolve the nullary-`.fap`
+2. Add reset and reuse while preserving the token capability.
+3. Add retained call/application cases and resolve the nullary-`.fap`
    admissibility contract.
-6. Assemble the hereditary code-step dispatcher and its finite-path
+4. Assemble the hereditary code-step dispatcher and its finite-path
    preservation law.
-7. Derive entry readiness from `ProgramElimDeadWellFormed` plus the successful
+5. Derive entry readiness from `ProgramElimDeadWellFormed` plus the successful
    compiler graph, then specialize the program theorem.
-8. Expand actual-pass conformance fixtures around each completed family.
+6. Expand actual-pass conformance fixtures around each completed family.
 
 In parallel, the Wasm lane continues from the same final-impure semantic
 boundary and runs constructor/projection artifacts through the shared
