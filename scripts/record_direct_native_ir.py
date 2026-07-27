@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -40,6 +41,7 @@ MANIFEST_FIELDS = {
     "dependencies",
     "claim",
     "requiredArtifactFragments",
+    "requiredOwnershipFacts",
     "expectedArtifactSha256",
 }
 ARTIFACT_FILES = (
@@ -123,6 +125,19 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(
                 f"{case_id}: required native IR fragments must be unique nonempty strings"
             )
+        required_ownership_facts = value["requiredOwnershipFacts"]
+        if (
+            not isinstance(required_ownership_facts, list)
+            or any(
+                not isinstance(fact, str) or not fact
+                for fact in required_ownership_facts
+            )
+            or len(required_ownership_facts)
+            != len(set(required_ownership_facts))
+        ):
+            raise ValidationError(
+                f"{case_id}: required ownership facts must be unique nonempty strings"
+            )
         digest = checked_sha256(
             value["expectedArtifactSha256"],
             f"{case_id} expected native IR artifact",
@@ -135,6 +150,7 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
                 "dependencies": dependencies,
                 "claim": claim,
                 "requiredArtifactFragments": required_fragments,
+                "requiredOwnershipFacts": required_ownership_facts,
                 "expectedArtifactSha256": digest,
             }
         )
@@ -143,6 +159,215 @@ def parse_manifest(output: str, command: list[str]) -> list[dict]:
             f"native IR manifest emitted no descriptors: {' '.join(command)}"
         )
     return descriptors
+
+
+INC_PATTERN = re.compile(
+    r"^\s*inc(?P<attributes>(?:\[[^\]]+\])*)\s+(?P<target>[^;]+);$"
+)
+DEC_PATTERN = re.compile(
+    r"^\s*dec(?P<attributes>(?:\[[^\]]+\])*)\s+(?P<target>[^;]+);$"
+)
+ATTRIBUTE_PATTERN = re.compile(r"\[([^\]]+)\]")
+PROJECT_PATTERN = re.compile(
+    r"^\s*let\s+(?P<result>\S+)\s+:=\s+"
+    r"oproj\[(?P<index>\d+)\]\s+(?P<subject>[^;]+);$"
+)
+IS_SHARED_PATTERN = re.compile(
+    r"^\s*let\s+(?P<result>\S+)\s+:=\s+"
+    r"isShared\s+(?P<subject>[^;]+);$"
+)
+OSET_PATTERN = re.compile(
+    r"^\s*oset\s+(?P<storage>\S+)\s+\[(?P<index>\d+)\]\s+:="
+)
+CTOR_PATTERN = re.compile(
+    r"^\s*let\s+(?P<result>\S+)\s+:=\s+"
+    r"ctor_\d+\[(?P<constructor>[^\]]+)\]"
+)
+DECLARATION_PATTERN = re.compile(r"^def\s+(?P<name>\S+)")
+
+
+def normalized_local(value: str) -> str:
+    value = value.strip()
+    if value.startswith("◾"):
+        value = value[1:].strip()
+    return re.sub(r"\.\d+$", "", value)
+
+
+def constructor_suffix(name: str) -> str:
+    parts = name.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else name
+
+
+def ownership_inventory(artifact_text: str) -> dict:
+    operations: list[dict] = []
+    fact_counts: dict[str, int] = {}
+    projections: dict[str, tuple[str, int]] = {}
+    unknown_attributes: set[str] = set()
+
+    def add_fact(fact: str) -> None:
+        fact_counts[fact] = fact_counts.get(fact, 0) + 1
+
+    for line_number, line in enumerate(artifact_text.splitlines(), start=1):
+        match = DECLARATION_PATTERN.match(line)
+        if match is not None:
+            projections.clear()
+            declaration = constructor_suffix(match["name"])
+            fact = f"declaration:{declaration}"
+            operations.append(
+                {
+                    "kind": "declaration",
+                    "line": line_number,
+                    "name": declaration,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            continue
+
+        match = PROJECT_PATTERN.match(line)
+        if match is not None:
+            result = match["result"]
+            subject = normalized_local(match["subject"])
+            index = int(match["index"])
+            projections[result] = (subject, index)
+            fact = f"project:{subject}:index={index}"
+            operations.append(
+                {
+                    "kind": "project",
+                    "line": line_number,
+                    "result": normalized_local(result),
+                    "subject": subject,
+                    "index": index,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            continue
+
+        match = IS_SHARED_PATTERN.match(line)
+        if match is not None:
+            subject = normalized_local(match["subject"])
+            fact = f"isShared:{subject}"
+            operations.append(
+                {
+                    "kind": "isShared",
+                    "line": line_number,
+                    "subject": subject,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            continue
+
+        match = INC_PATTERN.match(line)
+        if match is not None:
+            attributes = ATTRIBUTE_PATTERN.findall(match["attributes"])
+            numeric = [value for value in attributes if value.isdecimal()]
+            amount = int(numeric[0]) if numeric else 1
+            if len(numeric) > 1:
+                unknown_attributes.update(numeric[1:])
+            named_attributes = {
+                value for value in attributes if not value.isdecimal()
+            }
+            unknown_attributes.update(
+                named_attributes - {"persistent", "ref"}
+            )
+            target = normalized_local(match["target"])
+            persistent = "persistent" in named_attributes
+            reference = "ref" in named_attributes
+            fact = (
+                f"inc:{target}:amount={amount}:persistent="
+                f"{str(persistent).lower()}:reference={str(reference).lower()}"
+            )
+            operations.append(
+                {
+                    "kind": "inc",
+                    "line": line_number,
+                    "target": target,
+                    "amount": amount,
+                    "persistent": persistent,
+                    "reference": reference,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            continue
+
+        match = DEC_PATTERN.match(line)
+        if match is not None:
+            attributes = ATTRIBUTE_PATTERN.findall(match["attributes"])
+            unknown_attributes.update(set(attributes) - {"ref"})
+            raw_target = match["target"].strip()
+            target = normalized_local(raw_target)
+            reference = "ref" in attributes
+            fact = f"dec:{target}:reference={str(reference).lower()}"
+            operations.append(
+                {
+                    "kind": "dec",
+                    "line": line_number,
+                    "target": target,
+                    "reference": reference,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            projection = projections.get(raw_target)
+            if projection is not None:
+                subject, index = projection
+                project_dec_fact = f"project-dec:{subject}:index={index}"
+                operations.append(
+                    {
+                        "kind": "project-dec",
+                        "line": line_number,
+                        "subject": subject,
+                        "index": index,
+                        "fact": project_dec_fact,
+                    }
+                )
+                add_fact(project_dec_fact)
+            continue
+
+        match = OSET_PATTERN.match(line)
+        if match is not None:
+            index = int(match["index"])
+            fact = f"oset:index={index}"
+            operations.append(
+                {
+                    "kind": "oset",
+                    "line": line_number,
+                    "storage": normalized_local(match["storage"]),
+                    "index": index,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+            continue
+
+        match = CTOR_PATTERN.match(line)
+        if match is not None:
+            constructor = constructor_suffix(match["constructor"])
+            fact = f"ctor:{constructor}"
+            operations.append(
+                {
+                    "kind": "ctor",
+                    "line": line_number,
+                    "result": normalized_local(match["result"]),
+                    "constructor": constructor,
+                    "fact": fact,
+                }
+            )
+            add_fact(fact)
+
+    return {
+        "version": 1,
+        "operations": operations,
+        "facts": sorted(fact_counts),
+        "factCounts": [
+            {"fact": fact, "count": count}
+            for fact, count in sorted(fact_counts.items())
+        ],
+        "unknownAttributes": sorted(unknown_attributes),
+    }
 
 
 def execute_backend_case(
@@ -401,7 +626,19 @@ def attest_artifacts(
             if fragment not in artifact_text
         ]
         claim_matches = not missing_fragments
-        matches = artifact_matches and claim_matches
+        inventory = ownership_inventory(artifact_text)
+        required_ownership_facts = descriptor["requiredOwnershipFacts"]
+        observed_ownership_facts = set(inventory["facts"])
+        missing_ownership_facts = [
+            fact
+            for fact in required_ownership_facts
+            if fact not in observed_ownership_facts
+        ]
+        ownership_matches = (
+            not missing_ownership_facts
+            and not inventory["unknownAttributes"]
+        )
+        matches = artifact_matches and claim_matches and ownership_matches
         direct_path = None
         if direct_path_evidence_by_id is not None:
             direct_path = direct_path_evidence_by_id.get(case_id)
@@ -419,6 +656,10 @@ def attest_artifacts(
             "requiredArtifactFragments": required_fragments,
             "missingArtifactFragments": missing_fragments,
             "claimMatches": claim_matches,
+            "requiredOwnershipFacts": required_ownership_facts,
+            "missingOwnershipFacts": missing_ownership_facts,
+            "ownershipMatches": ownership_matches,
+            "ownershipInventory": inventory,
             "artifact": "program.lcnf",
             "artifactBytes": len(artifact),
             "artifactSha256": actual_digest,
@@ -454,6 +695,16 @@ def attest_artifacts(
             failures.append(
                 f"{case_id}: native IR no longer supports its semantic claim; "
                 f"missing artifact fragments {missing_fragments!r}"
+            )
+        if missing_ownership_facts:
+            failures.append(
+                f"{case_id}: native IR ownership inventory omits required facts "
+                f"{missing_ownership_facts!r}"
+            )
+        if inventory["unknownAttributes"]:
+            failures.append(
+                f"{case_id}: native IR ownership inventory has unknown attributes "
+                f"{inventory['unknownAttributes']!r}"
             )
         if verify_digest and not artifact_matches:
             failures.append(

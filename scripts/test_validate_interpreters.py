@@ -7866,6 +7866,7 @@ class DirectNativeIrTests(unittest.TestCase):
             "dependencies": ["Fir.Validation.nativeIrHelper"],
             "claim": "the native helper takes the intended ownership path",
             "requiredArtifactFragments": ["return"],
+            "requiredOwnershipFacts": [],
             "expectedArtifactSha256": digest,
         }
 
@@ -7946,6 +7947,15 @@ class DirectNativeIrTests(unittest.TestCase):
                 json.dumps(malformed_fragments), ["native-ir-manifest"]
             )
 
+        malformed_facts = {
+            **descriptor,
+            "requiredOwnershipFacts": ["isShared:owner", "isShared:owner"],
+        }
+        with self.assertRaisesRegex(core.ValidationError, "ownership facts"):
+            native_ir.parse_manifest(
+                json.dumps(malformed_facts), ["native-ir-manifest"]
+            )
+
     def test_native_ir_attestation_records_evidence_and_mismatch(self) -> None:
         artifact = b"def nativeIrCase := return\n"
         digest = native_ir.sha256_bytes(artifact)
@@ -7983,6 +7993,8 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertEqual(records[0]["claim"], descriptor["claim"])
             self.assertTrue(records[0]["claimMatches"])
             self.assertEqual(records[0]["missingArtifactFragments"], [])
+            self.assertTrue(records[0]["ownershipMatches"])
+            self.assertEqual(records[0]["missingOwnershipFacts"], [])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
 
@@ -8009,6 +8021,19 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertFalse(records[0]["claimMatches"])
             self.assertTrue(records[0]["artifactMatches"])
             self.assertFalse(records[0]["matches"])
+            self.assertEqual(len(failures), 1)
+
+            missing_ownership = {
+                **descriptor,
+                "requiredOwnershipFacts": ["isShared:owner"],
+            }
+            records, failures = native_ir.attest_artifacts(
+                [missing_ownership], out_dir, verify_digest=False
+            )
+            self.assertFalse(records[0]["ownershipMatches"])
+            self.assertEqual(
+                records[0]["missingOwnershipFacts"], ["isShared:owner"]
+            )
             self.assertEqual(len(failures), 1)
 
             mismatch = {
@@ -8091,6 +8116,42 @@ class DirectNativeIrTests(unittest.TestCase):
         self.assertFalse(evidence["formTraceMatches"])
         self.assertFalse(evidence["stepFormsMatch"])
         self.assertEqual(evidence["failures"], failures)
+
+    def test_ownership_inventory_normalizes_reference_count_paths(self) -> None:
+        artifact = """
+  let child := ctor_0[Example.NativeHeapChild.mk] first second;
+  inc[2][ref] child;
+  inc[persistent][ref] owner;
+  let isSharedCheck.7 := isShared owner;
+  let unused.9 := oproj[1] owner;
+  dec unused.9;
+  oset _x.2 [1] := marker;
+def second : obj :=
+  dec unused.9;
+  return owner
+"""
+        inventory = native_ir.ownership_inventory(artifact)
+        self.assertEqual(inventory["unknownAttributes"], [])
+        self.assertEqual(
+            set(inventory["facts"]),
+            {
+                "ctor:NativeHeapChild.mk",
+                "inc:child:amount=2:persistent=false:reference=true",
+                "inc:owner:amount=1:persistent=true:reference=true",
+                "isShared:owner",
+                "project:owner:index=1",
+                "dec:unused:reference=false",
+                "project-dec:owner:index=1",
+                "oset:index=1",
+                "declaration:second",
+            },
+        )
+        fact_counts = {
+            item["fact"]: item["count"] for item in inventory["factCounts"]
+        }
+        self.assertEqual(fact_counts["project-dec:owner:index=1"], 1)
+        unknown = native_ir.ownership_inventory("  inc[mystery] owner;\n")
+        self.assertEqual(unknown["unknownAttributes"], ["mystery"])
 
 
 class CoverageIndexTests(unittest.TestCase):

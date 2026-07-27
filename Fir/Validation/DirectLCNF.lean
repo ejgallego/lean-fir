@@ -66,6 +66,7 @@ structure NativeOracleAttestation where
   dependencies : Array Name := #[]
   claim : String
   requiredArtifactFragments : Array String := #[]
+  requiredOwnershipFacts : Array String := #[]
   expectedArtifactSha256 : String
   deriving Inhabited
 
@@ -76,6 +77,7 @@ structure NativeOracleDescriptor where
   dependencies : Array String
   claim : String
   requiredArtifactFragments : Array String
+  requiredOwnershipFacts : Array String
   expectedArtifactSha256 : String
   deriving Inhabited, BEq, Repr, Lean.ToJson, Lean.FromJson
 
@@ -676,8 +678,10 @@ def cases : Array Case := #[
       dependencies := #[``replaceMixedOwner]
       claim :=
         "shared owner reset decrements only the owner and allocates the replacement"
-      requiredArtifactFragments :=
-        #["inc[ref] owner;", "isShared owner;", "dec owner;", "reuseFailAlloc"]
+      requiredOwnershipFacts :=
+        #["inc:owner:amount=1:persistent=false:reference=true",
+          "isShared:owner", "dec:owner:reference=false",
+          "ctor:NativeReplacement.mk", "oset:index=0"]
       expectedArtifactSha256 :=
         "4e45f9af8557f2f90ce7ff564fc0fdd2d6eea4faa3d29f85ce0d9b708f9064b5"
     } },
@@ -724,9 +728,13 @@ def cases : Array Case := #[
       dependencies := #[``nativePersistentMixedOwner, ``replaceMixedOwner]
       claim :=
         "cached persistent owner stays shared while reset allocates a replacement and preserves its child"
-      requiredArtifactFragments :=
-        #["inc[persistent][ref] owner;", "nativePersistentMixedOwner._closed_1",
-          "nativePersistentMixedOwner._closed_0", "reuseFailAlloc"]
+      requiredOwnershipFacts :=
+        #["inc:owner:amount=1:persistent=true:reference=true",
+          "isShared:owner", "dec:owner:reference=false",
+          "ctor:NativeMixedOwner.mk", "ctor:NativeHeapChild.mk",
+          "ctor:NativeReplacement.mk",
+          "declaration:nativePersistentMixedOwner._closed_1",
+          "declaration:nativePersistentMixedOwner._closed_0"]
       expectedArtifactSha256 :=
         "81560717dd22a90fc4b40e2d41f5a1cad8ed8c08f8824a9ccec37d82b6ee96d7"
     } },
@@ -808,9 +816,10 @@ def cases : Array Case := #[
       dependencies := #[``replaceNestedOwner]
       claim :=
         "unique owner reset decrements a shared child without recursively releasing its grandchild"
-      requiredArtifactFragments :=
-        #["inc[ref] grandchild;", "inc[ref] child;", "isShared owner;",
-          "dec unused"]
+      requiredOwnershipFacts :=
+        #["inc:grandchild:amount=1:persistent=false:reference=true",
+          "inc:child:amount=1:persistent=false:reference=true",
+          "isShared:owner", "project-dec:owner:index=0", "oset:index=0"]
       expectedArtifactSha256 :=
         "97aee3e462f7ba25269a1a449d56f478d215b0681af63c1f980e5518016f7ab3"
     } },
@@ -855,9 +864,11 @@ def cases : Array Case := #[
       dependencies := #[``replaceRepeatedOwner]
       claim :=
         "unique owner reset releases both aliased child slots before reusing its storage"
-      requiredArtifactFragments :=
-        #["inc[2][ref] child;", "oproj[1] owner;", "oproj[0] owner;",
-          "oset"]
+      requiredOwnershipFacts :=
+        #["inc:child:amount=2:persistent=false:reference=true",
+          "project-dec:owner:index=1", "project-dec:owner:index=0",
+          "oset:index=2", "oset:index=1", "oset:index=0",
+          "ctor:NativeRepeatedReplacement.mk"]
       expectedArtifactSha256 :=
         "34469861bd43393e0c221989ea0f71a3a58431d8c92cb82144f48843dc83f721"
     } }
@@ -882,6 +893,7 @@ def nativeOracleDescriptors : Array NativeOracleDescriptor :=
       dependencies := attestation.dependencies.map toString
       claim := attestation.claim
       requiredArtifactFragments := attestation.requiredArtifactFragments
+      requiredOwnershipFacts := attestation.requiredOwnershipFacts
       expectedArtifactSha256 := attestation.expectedArtifactSha256
     }
 

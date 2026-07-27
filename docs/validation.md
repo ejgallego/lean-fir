@@ -320,6 +320,15 @@ to the retained step trace. The direct `reset`/`reuse` path and the compiler's
 lowered `isShared`/`dec`/`oset` path are therefore checked against one semantic
 claim without incorrectly requiring their operation inventories to be equal.
 
+The native side additionally derives a versioned `ownershipInventory` from the
+formatted LCNF. It normalizes local-name suffixes and records structured
+constructor, increment, decrement, projection, projection-decrement,
+`isShared`, reuse-write, and declaration operations with canonical fact IDs and
+occurrence counts. Case-local `requiredOwnershipFacts` are checked against that
+inventory, and unknown reference-count attributes fail closed. The exact
+artifact hash remains the broad drift detector; normalized facts now carry all
+four ownership claims without relying on raw artifact fragments.
+
 The initial audited set separates four ownership paths: releasing both slots of
 a repeated alias from a unique owner, stopping recursive release at a shared
 nested child, taking the shared-owner allocation path without releasing its
