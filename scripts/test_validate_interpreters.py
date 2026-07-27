@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import validate_interpreters as harness
+import record_backend_comparisons as comparison_attestations
 import record_direct_native_ir as native_ir
 import validation_attestation as attestation
 import validation_coverage_index as coverage_index
@@ -8000,6 +8001,188 @@ class AttestationEnvelopeTests(unittest.TestCase):
             attestation.build_envelope(
                 self.spec, [mutating_record], mutating_validator
             )
+
+
+class BackendComparisonAttestationTests(unittest.TestCase):
+    selected_cases = ["case-a", "case-b"]
+
+    def matrix(self, run_sha256: str = "2" * 64) -> dict:
+        return {
+            "version": 2,
+            "identity": {
+                "algorithm": "sha256",
+                "selection": "1" * 64,
+                "run": run_sha256,
+            },
+            "selectedCases": self.selected_cases,
+            "pairs": [],
+        }
+
+    def comparison_content(
+        self,
+        reference: str = "native",
+        candidate: str = "v8",
+        equal: tuple[bool, bool] = (True, True),
+    ) -> bytes:
+        value = {
+            "version": 2,
+            "reference": reference,
+            "candidate": candidate,
+            "comparisons": [
+                {
+                    "caseId": case_id,
+                    "reference": reference,
+                    "candidate": candidate,
+                    "equal": case_equal,
+                    "case": {"version": 2, "id": case_id},
+                }
+                for case_id, case_equal in zip(
+                    self.selected_cases, equal, strict=True
+                )
+            ],
+            "findings": [],
+            "summary": {
+                "selectedCases": 2,
+                "comparedCases": 2,
+                "equalCases": sum(int(item) for item in equal),
+                "findingCount": 0,
+            },
+        }
+        return (
+            json.dumps(value, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+    def pair(
+        self,
+        content: bytes,
+        reference: str = "native",
+        candidate: str = "v8",
+        equal_cases: int = 2,
+    ) -> dict:
+        digest = core.sha256_bytes(content)
+        return {
+            "reference": reference,
+            "candidate": candidate,
+            "artifact": f"evidence/comparisons/{digest}",
+            "sha256": digest,
+            "comparedCases": 2,
+            "equalCases": equal_cases,
+            "findingCount": 0,
+        }
+
+    def record(
+        self,
+        equal: tuple[bool, bool] = (True, True),
+        run_sha256: str = "2" * 64,
+    ) -> dict:
+        content = self.comparison_content(equal=equal)
+        return comparison_attestations.record_from_verified_pair(
+            self.matrix(run_sha256),
+            self.pair(content, equal_cases=sum(int(item) for item in equal)),
+            content,
+        )
+
+    def test_matrix_adapter_retains_exact_edge_evidence_offline(self) -> None:
+        content = self.comparison_content()
+        matrix = self.matrix()
+        pair = self.pair(content)
+        matrix["pairs"] = [pair]
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            matrix_path = out_dir / "source" / "matrix.json"
+            with (
+                mock.patch.object(
+                    comparison_attestations.core,
+                    "verify_matrix_artifact",
+                    return_value=matrix,
+                ) as verify_matrix,
+                mock.patch.object(
+                    comparison_attestations.core,
+                    "verify_evidence_file",
+                    return_value=content,
+                ) as verify_comparison,
+            ):
+                manifest = comparison_attestations.attest_matrix(
+                    matrix_path, out_dir
+                )
+            verify_matrix.assert_called_once_with(matrix_path)
+            verify_comparison.assert_called_once_with(
+                matrix_path.parent,
+                pair["artifact"],
+                pair["sha256"],
+                "backend comparison attestation native->v8",
+            )
+            record = manifest["records"][0]
+            self.assertEqual(record["comparisonArtifact"], content.decode())
+            self.assertEqual(record["comparisonArtifactBytes"], len(content))
+            self.assertTrue(record["matches"])
+            retained = (
+                out_dir
+                / "evidence"
+                / "runs"
+                / manifest["identity"]["contract"]
+                / f"{manifest['identity']['evidence']}.json"
+            )
+            self.assertEqual(
+                comparison_attestations.verify_attestation_manifest(retained),
+                manifest,
+            )
+            moved = out_dir / "moved.json"
+            shutil.copyfile(retained, moved)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(
+                    comparison_attestations.main(
+                        ["--verify-attestations", str(moved)]
+                    ),
+                    0,
+                )
+            self.assertIn("matching edges 1/1", stdout.getvalue())
+
+    def test_comparison_contract_is_separate_from_observed_evidence(self) -> None:
+        original = comparison_attestations.build_attestation_manifest(
+            [self.record()]
+        )
+        evidence_drift = comparison_attestations.build_attestation_manifest(
+            [self.record(equal=(True, False))]
+        )
+        self.assertEqual(
+            original["identity"]["contract"],
+            evidence_drift["identity"]["contract"],
+        )
+        self.assertNotEqual(
+            original["identity"]["evidence"],
+            evidence_drift["identity"]["evidence"],
+        )
+        self.assertFalse(evidence_drift["records"][0]["matches"])
+
+        contract_drift = comparison_attestations.build_attestation_manifest(
+            [self.record(run_sha256="3" * 64)]
+        )
+        self.assertNotEqual(
+            original["identity"]["contract"],
+            contract_drift["identity"]["contract"],
+        )
+
+    def test_comparison_attestation_rejects_tampered_derivatives(self) -> None:
+        record = self.record()
+        malformed = dict(record)
+        malformed.pop("identity")
+        malformed["equalCases"] = 1
+        malformed = attestation.with_record_identity(malformed)
+        with self.assertRaisesRegex(
+            core.ValidationError, "comparison derivatives disagree"
+        ):
+            comparison_attestations.verify_attestation_record(malformed)
+
+        malformed = dict(record)
+        malformed.pop("identity")
+        malformed["comparisonArtifact"] += " "
+        malformed = attestation.with_record_identity(malformed)
+        with self.assertRaisesRegex(
+            core.ValidationError, "artifact derivatives disagree"
+        ):
+            comparison_attestations.verify_attestation_record(malformed)
 
 
 class DirectNativeIrTests(unittest.TestCase):

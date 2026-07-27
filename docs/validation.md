@@ -341,12 +341,47 @@ contract. The generic layer owns canonical record identities, deterministic
 record ordering, separate contract/evidence identities, strict envelope
 verification, relocatable reads, and append-only retention. A producer supplies
 only its records and a semantic record validator. The native-LCNF recorder is
-the first adapter; a native-Wasm/V8 producer or a Talos-vs-Wasm consumer can use
-the same `records` envelope without importing LCNF ownership logic or changing
-the Wasm compiler.
+the first adapter.
 
-Each attestation also executes the direct native oracle and the explicit LCNF
-machine program. Its `directPath` evidence requires equal semantic
+`scripts/record_backend_comparisons.py` is the backend-neutral matrix adapter.
+It first applies the full matrix verifier, including the retained backend
+results and every directed comparison artifact, and then emits one attestation
+record per matrix edge:
+
+```sh
+python3 scripts/record_backend_comparisons.py \
+  --matrix _build/validation-v8/matrix.json
+```
+
+This command does not build or execute a backend. Each record's contract binds
+the matrix selection and run identities, ordered selected cases, and directed
+backend names. Its evidence retains the exact UTF-8 comparison artifact,
+recomputable source SHA-256 and byte count, per-case equality claims, findings,
+derived counts, and full-coverage match status. A changed result therefore
+changes the evidence identity while the same run contract remains recognizable.
+The aggregate is written to
+`_build/validation-comparison-attestations/attestations.json` and retained
+append-only under `evidence/runs/<contract>/<evidence>.json`.
+
+The retained aggregate can be moved and checked without the source matrix or
+any backend:
+
+```sh
+python3 scripts/record_backend_comparisons.py \
+  --verify-attestations \
+  _build/validation-comparison-attestations/evidence/runs/<contract>/<evidence>.json
+```
+
+Offline checking reconstructs every exact comparison artifact digest, validates
+its edge and ordered case set, re-derives its summary and match result, and then
+checks the record, contract, and evidence identities. The initial native/LCNF/V8
+matrix is one producer of this format. Once the Wasm compiler lane supplies a
+real-engine matrix edge, native-to-V8 evidence uses the same adapter without
+compiler-side changes; a later Talos-to-real-Wasm validator can consume the same
+envelope contract independently.
+
+Each native-IR attestation also executes the direct native oracle and the
+explicit LCNF machine program. Its `directPath` evidence requires equal semantic
 observations, the exact case-declared executed form trace, consistent form
 counts, a fully classified step trace whose form projection agrees, coverage of
 the required administrative transitions, and an interpreter-step count equal
