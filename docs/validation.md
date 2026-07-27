@@ -350,7 +350,8 @@ record per matrix edge:
 
 ```sh
 python3 scripts/record_backend_comparisons.py \
-  --matrix _build/validation-v8/matrix.json
+  --matrix _build/validation-v8/matrix.json \
+  --policy validation-plans/native-oracle-attestations.json
 ```
 
 This command does not build or execute a backend. Each record's contract binds
@@ -371,7 +372,8 @@ any backend:
 ```sh
 python3 scripts/record_backend_comparisons.py \
   --verify-attestations \
-  _build/validation-comparison-attestations/evidence/runs/<contract>/<evidence>.json
+  _build/validation-comparison-attestations/evidence/runs/<contract>/<evidence>.json \
+  --policy validation-plans/native-oracle-attestations.json
 ```
 
 Offline checking reconstructs every exact comparison artifact digest, validates
@@ -382,6 +384,16 @@ initial native/LCNF/V8 matrix is one producer of this format. Once the Wasm
 compiler lane supplies a real-engine matrix edge, native-to-V8 evidence uses the
 same adapter without compiler-side changes; a later Talos-to-real-Wasm validator
 can consume the same envelope contract independently.
+
+`validation-plans/native-oracle-attestations.json` makes the source of truth
+explicit. It requires complete matching `native -> lcnf` and `native -> v8`
+edges over at least 97 cases. Required oracle edges must share one matrix
+selection, run identity, and ordered case set; every case must have an equal
+observation witness and there may be no comparison findings. Additional edges
+remain available as triangulation, but do not contribute to oracle acceptance.
+Consequently `lcnf -> v8` can never substitute for a missing or incomplete
+native comparison. Policy checking works in both recording and offline modes
+and prints its own canonical SHA-256 alongside the accepted counts.
 
 Each native-IR attestation also executes the direct native oracle and the
 explicit LCNF machine program. Its `directPath` evidence requires equal semantic

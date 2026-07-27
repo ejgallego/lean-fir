@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "kind": "fir-backend-comparison-oracle-policy",
+  "oracle": "native",
+  "requiredCandidates": [
+    "lcnf",
+    "v8"
+  ],
+  "minimumCases": 97
+}

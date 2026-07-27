@@ -8057,6 +8057,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
     def result_artifacts(
         self,
         equal: tuple[bool, bool] = (True, True),
+        candidate: str = "v8",
     ) -> dict[tuple[str, str], tuple[str, dict]]:
         result: dict[tuple[str, str], tuple[str, dict]] = {}
         for case_id, case_equal in zip(
@@ -8064,11 +8065,11 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         ):
             reference_record = success(case_id, "native", 42)
             candidate_record = success(
-                case_id, "v8", 42 if case_equal else 43
+                case_id, candidate, 42 if case_equal else 43
             )
             for backend, record in (
                 ("native", reference_record),
-                ("v8", candidate_record),
+                (candidate, candidate_record),
             ):
                 content = (
                     json.dumps(record, indent=2, sort_keys=True) + "\n"
@@ -8101,14 +8102,35 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         self,
         equal: tuple[bool, bool] = (True, True),
         run_sha256: str = "2" * 64,
+        candidate: str = "v8",
     ) -> dict:
-        content = self.comparison_content(equal=equal)
+        content = self.comparison_content(
+            candidate=candidate,
+            equal=equal,
+        )
         return comparison_attestations.record_from_verified_pair(
             self.matrix(run_sha256),
-            self.pair(content, equal_cases=sum(int(item) for item in equal)),
+            self.pair(
+                content,
+                candidate=candidate,
+                equal_cases=sum(int(item) for item in equal),
+            ),
             content,
-            self.result_artifacts(equal),
+            self.result_artifacts(equal, candidate),
         )
+
+    @staticmethod
+    def policy(
+        candidates: list[str] | None = None,
+        minimum_cases: int = 2,
+    ) -> dict:
+        return {
+            "version": 2,
+            "kind": "fir-backend-comparison-oracle-policy",
+            "oracle": "native",
+            "requiredCandidates": candidates or ["lcnf", "v8"],
+            "minimumCases": minimum_cases,
+        }
 
     def test_matrix_adapter_retains_exact_edge_evidence_offline(self) -> None:
         content = self.comparison_content()
@@ -8190,15 +8212,29 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             )
             moved = out_dir / "moved.json"
             shutil.copyfile(retained, moved)
+            policy_path = out_dir / "policy.json"
+            policy_path.write_text(
+                json.dumps(self.policy(["v8"])) + "\n",
+                encoding="utf-8",
+            )
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 self.assertEqual(
                     comparison_attestations.main(
-                        ["--verify-attestations", str(moved)]
+                        [
+                            "--verify-attestations",
+                            str(moved),
+                            "--policy",
+                            str(policy_path),
+                        ]
                     ),
                     0,
                 )
             self.assertIn("matching edges 1/1", stdout.getvalue())
+            self.assertIn(
+                "accepted native comparison oracle for v8",
+                stdout.getvalue(),
+            )
 
     def test_comparison_contract_is_separate_from_observed_evidence(self) -> None:
         original = comparison_attestations.build_attestation_manifest(
@@ -8256,6 +8292,73 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             "witnesses disagree with retained comparison evidence",
         ):
             comparison_attestations.verify_attestation_record(malformed)
+
+    def test_native_oracle_policy_requires_complete_matching_edges(self) -> None:
+        manifest = comparison_attestations.build_attestation_manifest(
+            [
+                self.record(candidate="lcnf"),
+                self.record(candidate="v8"),
+            ]
+        )
+        summary = comparison_attestations.verify_oracle_policy(
+            manifest,
+            self.policy(),
+        )
+        self.assertEqual(summary["oracle"], "native")
+        self.assertEqual(summary["requiredCandidates"], ["lcnf", "v8"])
+        self.assertEqual(summary["selectedCaseCount"], 2)
+        self.assertEqual(summary["comparisonCount"], 4)
+        self.assertEqual(summary["witnessCount"], 4)
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "missing required edge native->v8"
+        ):
+            comparison_attestations.verify_oracle_policy(
+                comparison_attestations.build_attestation_manifest(
+                    [self.record(candidate="lcnf")]
+                ),
+                self.policy(),
+            )
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "edge does not match: native->v8"
+        ):
+            comparison_attestations.verify_oracle_policy(
+                comparison_attestations.build_attestation_manifest(
+                    [
+                        self.record(candidate="lcnf"),
+                        self.record(
+                            candidate="v8",
+                            equal=(True, False),
+                        ),
+                    ]
+                ),
+                self.policy(),
+            )
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "disagree on their matrix"
+        ):
+            comparison_attestations.verify_oracle_policy(
+                comparison_attestations.build_attestation_manifest(
+                    [
+                        self.record(candidate="lcnf"),
+                        self.record(
+                            candidate="v8",
+                            run_sha256="3" * 64,
+                        ),
+                    ]
+                ),
+                self.policy(),
+            )
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "fewer than 3"
+        ):
+            comparison_attestations.verify_oracle_policy(
+                manifest,
+                self.policy(minimum_cases=3),
+            )
 
 
 class DirectNativeIrTests(unittest.TestCase):

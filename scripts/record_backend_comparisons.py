@@ -79,6 +79,14 @@ WITNESS_FIELDS = {
     "candidateObservation",
     "equal",
 }
+ORACLE_POLICY_KIND = "fir-backend-comparison-oracle-policy"
+ORACLE_POLICY_FIELDS = {
+    "version",
+    "kind",
+    "oracle",
+    "requiredCandidates",
+    "minimumCases",
+}
 
 
 def checked_count(value: object, context: str) -> int:
@@ -550,6 +558,137 @@ def verify_attestation_manifest(path: Path) -> dict:
     )
 
 
+def validate_oracle_policy(value: object) -> dict:
+    if (
+        not isinstance(value, dict)
+        or set(value) != ORACLE_POLICY_FIELDS
+        or value["version"] != core.PROTOCOL_VERSION
+        or isinstance(value["version"], bool)
+        or value["kind"] != ORACLE_POLICY_KIND
+    ):
+        raise core.ValidationError(
+            "backend comparison oracle policy has an unsupported schema"
+        )
+    oracle = core.validate_backend_name(
+        value["oracle"], "comparison oracle"
+    )
+    raw_candidates = value["requiredCandidates"]
+    if not isinstance(raw_candidates, list) or not raw_candidates:
+        raise core.ValidationError(
+            "comparison oracle policy requires candidate backends"
+        )
+    candidates = [
+        core.validate_backend_name(
+            candidate, "comparison oracle candidate"
+        )
+        for candidate in raw_candidates
+    ]
+    if (
+        candidates != sorted(candidates)
+        or len(candidates) != len(set(candidates))
+        or oracle in candidates
+    ):
+        raise core.ValidationError(
+            "comparison oracle candidates must be sorted, unique, and "
+            "different from the oracle"
+        )
+    minimum_cases = value["minimumCases"]
+    if (
+        isinstance(minimum_cases, bool)
+        or not isinstance(minimum_cases, int)
+        or minimum_cases <= 0
+    ):
+        raise core.ValidationError(
+            "comparison oracle minimumCases must be a positive integer"
+        )
+    return value
+
+
+def read_oracle_policy(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise core.ValidationError(
+            f"cannot read backend comparison oracle policy {path}: {error}"
+        ) from error
+    return validate_oracle_policy(value)
+
+
+def verify_oracle_policy(manifest: object, policy: object) -> dict:
+    checked_manifest = verify_attestation_manifest_value(manifest)
+    checked_policy = validate_oracle_policy(policy)
+    oracle = checked_policy["oracle"]
+    candidates = checked_policy["requiredCandidates"]
+    minimum_cases = checked_policy["minimumCases"]
+    record_by_id = {
+        record["recordId"]: record
+        for record in checked_manifest["records"]
+    }
+    required: list[dict] = []
+    for candidate in candidates:
+        record_id = f"{oracle}->{candidate}"
+        record = record_by_id.get(record_id)
+        if record is None:
+            raise core.ValidationError(
+                f"comparison oracle policy is missing required edge "
+                f"{record_id}"
+            )
+        if not record["matches"]:
+            raise core.ValidationError(
+                f"comparison oracle edge does not match: {record_id}"
+            )
+        if len(record["selectedCases"]) < minimum_cases:
+            raise core.ValidationError(
+                f"comparison oracle edge {record_id} covers "
+                f"{len(record['selectedCases'])} cases, fewer than "
+                f"{minimum_cases}"
+            )
+        required.append(record)
+
+    first = required[0]
+    contract = (
+        first["matrixSelectionSha256"],
+        first["matrixRunSha256"],
+        first["selectedCases"],
+    )
+    for record in required[1:]:
+        if (
+            record["matrixSelectionSha256"],
+            record["matrixRunSha256"],
+            record["selectedCases"],
+        ) != contract:
+            raise core.ValidationError(
+                "comparison oracle edges disagree on their matrix "
+                "selection, run, or ordered case set"
+            )
+    selected_cases = first["selectedCases"]
+    for record in required:
+        if (
+            record["comparedCases"] != len(selected_cases)
+            or record["equalCases"] != len(selected_cases)
+            or record["findingCount"] != 0
+            or len(record["witnesses"]) != len(selected_cases)
+        ):
+            raise core.ValidationError(
+                f"comparison oracle edge is not complete: "
+                f"{record['recordId']}"
+            )
+    return {
+        "policySha256": core.canonical_json_sha256(checked_policy),
+        "attestationContractSha256": checked_manifest["identity"]["contract"],
+        "attestationEvidenceSha256": checked_manifest["identity"]["evidence"],
+        "oracle": oracle,
+        "requiredCandidates": candidates,
+        "matrixSelectionSha256": first["matrixSelectionSha256"],
+        "matrixRunSha256": first["matrixRunSha256"],
+        "selectedCaseCount": len(selected_cases),
+        "comparisonCount": sum(
+            record["comparedCases"] for record in required
+        ),
+        "witnessCount": sum(len(record["witnesses"]) for record in required),
+    }
+
+
 def attest_matrix(path: Path, out_dir: Path) -> dict:
     manifest = build_attestation_manifest(records_from_matrix(path))
     attestation.write_retained_envelope(
@@ -584,17 +723,45 @@ def parser() -> argparse.ArgumentParser:
         default=Path("_build/validation-comparison-attestations"),
         help="artifact directory relative to the repository root",
     )
+    result.add_argument(
+        "--policy",
+        type=Path,
+        help=(
+            "offline oracle-acceptance policy relative to the repository root"
+        ),
+    )
     return result
+
+
+def print_oracle_acceptance(summary: dict) -> None:
+    candidates = ",".join(summary["requiredCandidates"])
+    print(
+        f"accepted {summary['oracle']} comparison oracle for "
+        f"{candidates}: {summary['selectedCaseCount']} cases, "
+        f"{summary['comparisonCount']} comparisons, "
+        f"{summary['witnessCount']} witnesses, "
+        f"policy {summary['policySha256']}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     root = Path(__file__).resolve().parent.parent
+    policy = None
+    if args.policy is not None:
+        policy_path = args.policy
+        if not policy_path.is_absolute():
+            policy_path = root / policy_path
+        policy = read_oracle_policy(policy_path)
     if args.verify_attestations is not None:
         path = args.verify_attestations
         if not path.is_absolute():
             path = root / path
         manifest = verify_attestation_manifest(path)
+        if policy is not None:
+            print_oracle_acceptance(
+                verify_oracle_policy(manifest, policy)
+            )
         matches = sum(int(record["matches"]) for record in manifest["records"])
         print(
             "verified backend comparison attestations "
@@ -611,6 +778,8 @@ def main(argv: list[str] | None = None) -> int:
     if not out_dir.is_absolute():
         out_dir = root / out_dir
     manifest = attest_matrix(matrix_path, out_dir)
+    if policy is not None:
+        print_oracle_acceptance(verify_oracle_policy(manifest, policy))
     failures = 0
     for record in manifest["records"]:
         status = "PASS" if record["matches"] else "FAIL"
