@@ -10,15 +10,14 @@ import re
 import sys
 from pathlib import Path
 
+import validation_attestation as attestation
 from validation_harness import (
     PROTOCOL_VERSION,
     ValidationError,
-    canonical_json_sha256,
     checked_sha256,
     compare_success,
     manifest_from_output as parse_corpus_manifest,
     records_from_output,
-    retain_evidence_bundle,
     resolve_lake_command,
     result_map,
     run,
@@ -66,6 +65,11 @@ ATTESTATION_CONTRACT_FIELDS = (
     "requiredOwnershipFacts",
     "requiredOwnershipFactCounts",
     "expectedArtifactSha256",
+)
+ATTESTATION_SPEC = attestation.EnvelopeSpec(
+    kind=ATTESTATION_KIND,
+    contract_kind=ATTESTATION_CONTRACT_KIND,
+    contract_fields=ATTESTATION_CONTRACT_FIELDS,
 )
 ATTESTATION_RECORD_FIELDS = {
     "version",
@@ -630,20 +634,6 @@ def collect_direct_path_evidence(
     return evidence_by_id
 
 
-def with_attestation_identity(record: dict) -> dict:
-    if "identity" in record:
-        raise ValidationError(
-            f"{record.get('caseId', 'native IR')}: attestation already has an identity"
-        )
-    return {
-        **record,
-        "identity": {
-            "algorithm": "sha256",
-            "attestation": canonical_json_sha256(record),
-        },
-    }
-
-
 def verify_attestation_record(record: object) -> dict:
     if not isinstance(record, dict):
         raise ValidationError("native IR attestation record must be an object")
@@ -677,22 +667,7 @@ def verify_attestation_record(record: object) -> dict:
         raise ValidationError(
             f"{case_id}: retained native IR contract is not canonical"
         )
-    identity = record.get("identity")
-    if (
-        not isinstance(identity, dict)
-        or set(identity) != {"algorithm", "attestation"}
-        or identity["algorithm"] != "sha256"
-    ):
-        raise ValidationError(f"{case_id}: attestation identity is malformed")
-    digest = checked_sha256(
-        identity["attestation"], f"{case_id} attestation identity"
-    )
-    provisional = dict(record)
-    provisional.pop("identity")
-    if digest != canonical_json_sha256(provisional):
-        raise ValidationError(
-            f"{case_id}: attestation identity does not match its content"
-        )
+    attestation.verify_record_identity(record, f"{case_id} attestation")
     checked_sha256(
         record["artifactSha256"], f"{case_id} native IR artifact"
     )
@@ -860,118 +835,22 @@ def verify_attestation_record(record: object) -> dict:
     return record
 
 
-def attestation_contract(records: list[dict]) -> dict:
-    ordered = sorted(records, key=lambda record: record["caseId"])
-    return {
-        "version": PROTOCOL_VERSION,
-        "kind": ATTESTATION_CONTRACT_KIND,
-        "cases": [
-            {
-                field: record[field]
-                for field in ATTESTATION_CONTRACT_FIELDS
-            }
-            for record in ordered
-        ],
-    }
-
-
 def build_attestation_manifest(records: list[dict]) -> dict:
-    if not records:
-        raise ValidationError("native IR attestation bundle must be nonempty")
-    verified = [verify_attestation_record(record) for record in records]
-    ordered = sorted(verified, key=lambda record: record["caseId"])
-    case_ids = [record["caseId"] for record in ordered]
-    if len(case_ids) != len(set(case_ids)):
-        raise ValidationError("native IR attestation bundle repeats a case")
-    contract_sha256 = canonical_json_sha256(attestation_contract(ordered))
-    provisional = {
-        "version": PROTOCOL_VERSION,
-        "kind": ATTESTATION_KIND,
-        "contractSha256": contract_sha256,
-        "attestations": ordered,
-    }
-    return {
-        "version": PROTOCOL_VERSION,
-        "identity": {
-            "algorithm": "sha256",
-            "contract": contract_sha256,
-            "evidence": canonical_json_sha256(provisional),
-        },
-        "kind": ATTESTATION_KIND,
-        "attestations": ordered,
-    }
+    return attestation.build_envelope(
+        ATTESTATION_SPEC, records, verify_attestation_record
+    )
 
 
 def verify_attestation_manifest_value(value: object) -> dict:
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"version", "identity", "kind", "attestations"}
-        or value["version"] != PROTOCOL_VERSION
-        or value["kind"] != ATTESTATION_KIND
-    ):
-        raise ValidationError("native IR attestation bundle has unsupported schema")
-    identity = value["identity"]
-    if (
-        not isinstance(identity, dict)
-        or set(identity) != {"algorithm", "contract", "evidence"}
-        or identity["algorithm"] != "sha256"
-    ):
-        raise ValidationError("native IR attestation bundle identity is malformed")
-    contract_sha256 = checked_sha256(
-        identity["contract"], "native IR attestation contract identity"
+    return attestation.verify_envelope_value(
+        value, ATTESTATION_SPEC, verify_attestation_record
     )
-    evidence_sha256 = checked_sha256(
-        identity["evidence"], "native IR attestation evidence identity"
-    )
-    records = value["attestations"]
-    if not isinstance(records, list) or not records:
-        raise ValidationError("native IR attestation bundle must be nonempty")
-    case_ids: list[str] = []
-    for record in records:
-        verified = verify_attestation_record(record)
-        case_ids.append(verified["caseId"])
-    if case_ids != sorted(case_ids) or len(case_ids) != len(set(case_ids)):
-        raise ValidationError(
-            "native IR attestation bundle cases must be sorted and unique"
-        )
-    actual_contract_sha256 = canonical_json_sha256(
-        attestation_contract(records)
-    )
-    if contract_sha256 != actual_contract_sha256:
-        raise ValidationError(
-            "native IR attestation contract identity does not match its content"
-        )
-    provisional = {
-        "version": PROTOCOL_VERSION,
-        "kind": ATTESTATION_KIND,
-        "contractSha256": contract_sha256,
-        "attestations": records,
-    }
-    if evidence_sha256 != canonical_json_sha256(provisional):
-        raise ValidationError(
-            "native IR attestation evidence identity does not match its content"
-        )
-    return value
 
 
 def verify_attestation_manifest(path: Path) -> dict:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as error:
-        raise ValidationError(
-            f"cannot read native IR attestation bundle {path}: {error}"
-        ) from error
-    except json.JSONDecodeError as error:
-        raise ValidationError(
-            f"native IR attestation bundle is not valid JSON: {path}"
-        ) from error
-    return verify_attestation_manifest_value(value)
-
-
-def attestation_manifest_bytes(manifest: dict) -> bytes:
-    return (
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
+    return attestation.read_envelope(
+        path, ATTESTATION_SPEC, verify_attestation_record
+    )
 
 
 def attest_artifacts(
@@ -1117,7 +996,7 @@ def attest_artifacts(
         }
         if direct_path is not None:
             record["directPath"] = direct_path
-        record = with_attestation_identity(record)
+        record = attestation.with_record_identity(record)
         case_dir.mkdir(parents=True, exist_ok=True)
         (case_dir / "attestation.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -1167,13 +1046,12 @@ def attest_artifacts(
                 f"does not match {expected_digest}"
             )
     manifest = build_attestation_manifest(records)
-    content = attestation_manifest_bytes(manifest)
-    (out_dir / "attestations.json").write_bytes(content)
-    retain_evidence_bundle(
+    attestation.write_retained_envelope(
         out_dir,
-        manifest["identity"]["contract"],
-        manifest["identity"]["evidence"],
-        content,
+        "attestations.json",
+        manifest,
+        ATTESTATION_SPEC,
+        verify_attestation_record,
     )
     return manifest, failures
 
@@ -1226,7 +1104,7 @@ def main(argv: list[str] | None = None) -> int:
             "verified native IR attestations "
             f"{manifest['identity']['evidence']}: "
             f"contract {manifest['identity']['contract']}, "
-            f"cases {len(manifest['attestations'])}"
+            f"cases {len(manifest['records'])}"
         )
         return 0
     out_dir = args.out_dir
@@ -1309,7 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_digest=not args.record,
         direct_path_evidence_by_id=direct_path_evidence_by_id,
     )
-    records = attestation_manifest["attestations"]
+    records = attestation_manifest["records"]
     for record in records:
         status = "RECORDED" if args.record else ("PASS" if record["matches"] else "FAIL")
         print(

@@ -14,6 +14,7 @@ from unittest import mock
 
 import validate_interpreters as harness
 import record_direct_native_ir as native_ir
+import validation_attestation as attestation
 import validation_coverage_index as coverage_index
 import validation_harness as core
 import validation_lcnf as lcnf
@@ -7857,10 +7858,154 @@ class HarnessTests(unittest.TestCase):
             harness.diagnostics(duplicate)
 
 
+class AttestationEnvelopeTests(unittest.TestCase):
+    spec = attestation.EnvelopeSpec(
+        kind="test-validation-evidence",
+        contract_kind="test-validation-contract",
+        contract_fields=("caseId", "claim"),
+    )
+
+    @staticmethod
+    def validate_record(value: object) -> dict:
+        if (
+            not isinstance(value, dict)
+            or set(value)
+            != {"version", "identity", "caseId", "claim", "observation"}
+            or value["version"] != 2
+            or not isinstance(value["claim"], str)
+            or not isinstance(value["observation"], int)
+            or isinstance(value["observation"], bool)
+        ):
+            raise core.ValidationError("test attestation record is malformed")
+        return value
+
+    @staticmethod
+    def record(case_id: str, claim: str, observation: int) -> dict:
+        return attestation.with_record_identity(
+            {
+                "version": 2,
+                "caseId": case_id,
+                "claim": claim,
+                "observation": observation,
+            }
+        )
+
+    def test_generic_envelope_is_ordered_retained_and_relocatable(self) -> None:
+        first = self.record("a-case", "returns the input", 41)
+        second = self.record("b-case", "increments the input", 42)
+        envelope = attestation.build_envelope(
+            self.spec,
+            [second, first],
+            self.validate_record,
+        )
+        self.assertEqual(
+            [record["caseId"] for record in envelope["records"]],
+            ["a-case", "b-case"],
+        )
+        self.assertEqual(
+            attestation.verify_envelope_value(
+                envelope, self.spec, self.validate_record
+            ),
+            envelope,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            out_dir = Path(directory)
+            retained = attestation.write_retained_envelope(
+                out_dir,
+                "attestations.json",
+                envelope,
+                self.spec,
+                self.validate_record,
+            )
+            expected = (
+                "evidence/runs/"
+                f"{envelope['identity']['contract']}/"
+                f"{envelope['identity']['evidence']}.json"
+            )
+            self.assertEqual(retained, expected)
+            self.assertEqual(
+                attestation.read_envelope(
+                    out_dir / retained,
+                    self.spec,
+                    self.validate_record,
+                ),
+                envelope,
+            )
+            moved = out_dir / "moved.json"
+            shutil.copyfile(out_dir / retained, moved)
+            self.assertEqual(
+                attestation.read_envelope(
+                    moved, self.spec, self.validate_record
+                ),
+                envelope,
+            )
+
+    def test_generic_envelope_separates_contract_and_evidence_drift(self) -> None:
+        original_record = self.record("case", "returns the input", 41)
+        original = attestation.build_envelope(
+            self.spec, [original_record], self.validate_record
+        )
+        changed_observation = self.record("case", "returns the input", 42)
+        evidence_drift = attestation.build_envelope(
+            self.spec, [changed_observation], self.validate_record
+        )
+        self.assertEqual(
+            original["identity"]["contract"],
+            evidence_drift["identity"]["contract"],
+        )
+        self.assertNotEqual(
+            original["identity"]["evidence"],
+            evidence_drift["identity"]["evidence"],
+        )
+        changed_claim = self.record("case", "increments the input", 42)
+        contract_drift = attestation.build_envelope(
+            self.spec, [changed_claim], self.validate_record
+        )
+        self.assertNotEqual(
+            original["identity"]["contract"],
+            contract_drift["identity"]["contract"],
+        )
+
+        tampered = json.loads(json.dumps(original))
+        tampered["records"][0]["observation"] = 99
+        with self.assertRaisesRegex(
+            core.ValidationError, "record identity does not match"
+        ):
+            attestation.verify_envelope_value(
+                tampered, self.spec, self.validate_record
+            )
+
+        invalid_spec = attestation.EnvelopeSpec(
+            kind="test",
+            contract_kind="test-contract",
+            contract_fields=("claim", "claim"),
+        )
+        with self.assertRaisesRegex(
+            core.ValidationError, "unique and include the record ID"
+        ):
+            attestation.build_envelope(
+                invalid_spec, [original_record], self.validate_record
+            )
+
+        mutating_record = json.loads(json.dumps(original_record))
+
+        def mutating_validator(value: object) -> dict:
+            assert isinstance(value, dict)
+            value["observation"] = 99
+            return value
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "validator must preserve its input"
+        ):
+            attestation.build_envelope(
+                self.spec, [mutating_record], mutating_validator
+            )
+
+
 class DirectNativeIrTests(unittest.TestCase):
     def attest_records(self, *args, **kwargs) -> tuple[list[dict], list[str]]:
         manifest, failures = native_ir.attest_artifacts(*args, **kwargs)
-        return manifest["attestations"], failures
+        return manifest["records"], failures
 
     def native_ir_descriptor(self, digest: str) -> dict:
         return {
@@ -8026,7 +8171,7 @@ class DirectNativeIrTests(unittest.TestCase):
                     descriptor["caseId"]: direct_path
                 },
             )
-            records = manifest["attestations"]
+            records = manifest["records"]
             self.assertEqual(failures, [])
             self.assertTrue(records[0]["matches"])
             self.assertEqual(records[0]["directPath"], direct_path)
@@ -8084,14 +8229,14 @@ class DirectNativeIrTests(unittest.TestCase):
                 second_record["entry"],
                 *second_record["dependencies"],
             ]
-            second_record = native_ir.with_attestation_identity(second_record)
+            second_record = attestation.with_record_identity(second_record)
             ordered_manifest = native_ir.build_attestation_manifest(
                 [second_record, records[0]]
             )
             self.assertEqual(
                 [
                     record["caseId"]
-                    for record in ordered_manifest["attestations"]
+                    for record in ordered_manifest["records"]
                 ],
                 ["native-ir-case", "z-native-ir-case"],
             )
@@ -8102,25 +8247,25 @@ class DirectNativeIrTests(unittest.TestCase):
                 ),
             )
             with self.assertRaisesRegex(
-                core.ValidationError, "repeats a case"
+                core.ValidationError, "repeats a record ID"
             ):
                 native_ir.build_attestation_manifest(
                     [records[0], records[0]]
                 )
 
             tampered_evidence = json.loads(json.dumps(manifest))
-            tampered_evidence["attestations"][0]["ownershipInventory"][
+            tampered_evidence["records"][0]["ownershipInventory"][
                 "facts"
             ].append("tampered")
             with self.assertRaisesRegex(
-                core.ValidationError, "attestation identity does not match"
+                core.ValidationError, "record identity does not match"
             ):
                 native_ir.verify_attestation_manifest_value(tampered_evidence)
 
-            provisional_record = dict(tampered_evidence["attestations"][0])
+            provisional_record = dict(tampered_evidence["records"][0])
             provisional_record.pop("identity")
-            tampered_evidence["attestations"][0] = (
-                native_ir.with_attestation_identity(provisional_record)
+            tampered_evidence["records"][0] = (
+                attestation.with_record_identity(provisional_record)
             )
             with self.assertRaisesRegex(
                 core.ValidationError, "ownership inventory derivatives disagree"
@@ -8128,11 +8273,11 @@ class DirectNativeIrTests(unittest.TestCase):
                 native_ir.verify_attestation_manifest_value(tampered_evidence)
 
             tampered_evidence = json.loads(json.dumps(manifest))
-            provisional_record = dict(tampered_evidence["attestations"][0])
+            provisional_record = dict(tampered_evidence["records"][0])
             provisional_record.pop("identity")
             provisional_record["artifactBytes"] += 1
-            tampered_evidence["attestations"][0] = (
-                native_ir.with_attestation_identity(provisional_record)
+            tampered_evidence["records"][0] = (
+                attestation.with_record_identity(provisional_record)
             )
             with self.assertRaisesRegex(
                 core.ValidationError, "evidence identity does not match"
@@ -8140,11 +8285,11 @@ class DirectNativeIrTests(unittest.TestCase):
                 native_ir.verify_attestation_manifest_value(tampered_evidence)
 
             tampered_contract = json.loads(json.dumps(manifest))
-            provisional_record = dict(tampered_contract["attestations"][0])
+            provisional_record = dict(tampered_contract["records"][0])
             provisional_record.pop("identity")
             provisional_record["claim"] = "a different ownership claim"
-            tampered_contract["attestations"][0] = (
-                native_ir.with_attestation_identity(provisional_record)
+            tampered_contract["records"][0] = (
+                attestation.with_record_identity(provisional_record)
             )
             with self.assertRaisesRegex(
                 core.ValidationError, "contract identity does not match"

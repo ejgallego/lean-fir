@@ -310,7 +310,7 @@ a new hash cannot silently bless an artifact that no longer supports its
 semantic claim. Normal mode writes per-case `attestation.json` and aggregate
 `attestations.json` evidence, retains the claim and its missing-fragment
 diagnostics, and fails when the final-impure artifact changes. Each case has a
-canonical `identity.attestation`. The aggregate has distinct
+canonical `identity.record`. The aggregate has distinct
 `identity.contract` and `identity.evidence` SHA-256 values: the contract covers
 the ordered oracle claims, roots, ownership obligations, and expected compiler
 artifact hashes, while the evidence additionally covers the observed
@@ -333,6 +333,17 @@ Consumers can therefore accept the contract/evidence pair as a
 content-addressed native-oracle product and detect modifications to claims,
 normalized ownership evidence, or direct-path evidence without access to the
 producer's build tree.
+
+The envelope mechanics are backend-neutral and live in
+`scripts/validation_attestation.py`. An `EnvelopeSpec` supplies a product kind,
+a contract kind, the record ID field, and the fields projected into the
+contract. The generic layer owns canonical record identities, deterministic
+record ordering, separate contract/evidence identities, strict envelope
+verification, relocatable reads, and append-only retention. A producer supplies
+only its records and a semantic record validator. The native-LCNF recorder is
+the first adapter; a native-Wasm/V8 producer or a Talos-vs-Wasm consumer can use
+the same `records` envelope without importing LCNF ownership logic or changing
+the Wasm compiler.
 
 Each attestation also executes the direct native oracle and the explicit LCNF
 machine program. Its `directPath` evidence requires equal semantic
