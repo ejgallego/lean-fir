@@ -9014,6 +9014,116 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
       rw [sourceControl] at codeEq
       cases codeEq
 
+/-- Source-side dynamic contract at one active code state.  For every exact
+compiler residual compatible with the active source code, it supplies only
+the runtime/ownership component missing from hereditary structural
+provenance.  Saved-frame roots are explicit because deleted writes, reset,
+and concrete reuse must be unreachable from the whole live continuation. -/
+def SourceRuntimeOwnershipReadyAt
+    (fuel : Nat) (state : MachineState) (sourceFrameRoots : List Value)
+    (sourceCode : LCNF.Code .impure) : Prop :=
+  ∀ {used targetCode},
+    BinderReadyShadowCodeGraph fuel used sourceCode targetCode →
+      BinderReadyShadowCodeReadyAt fuel used state
+        (runtimeRoots state.runtime
+          (envRootsOn used state.env ++ sourceFrameRoots))
+        sourceCode targetCode
+
+/-- Pair-indexed source invariant at the current state.  A complete strong
+machine decomposition selects the exact residual and its actual saved-frame
+roots; every demanded fact in the conclusion is about source evaluation,
+liveness, or ownership. -/
+def BinderReadySourceRuntimeOwnershipReadyAt
+    (fuel : Nat) (source target : MachineState) : Prop :=
+  ∀ {rho sourceControlRoots targetControlRoots
+      sourceFrameRoots targetFrameRoots},
+    ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        source.program target.program →
+    BinderReadyReachableControlRelated fuel rho
+      source.env source.joins source.control
+      target.env target.joins target.control
+      sourceControlRoots targetControlRoots →
+    BinderReadyReachableFramesRelated fuel rho
+      source.frames target.frames sourceFrameRoots targetFrameRoots →
+    ShadowRuntimeRel rho source.runtime target.runtime
+      (sourceControlRoots ++ sourceFrameRoots)
+      (targetControlRoots ++ targetFrameRoots) →
+    ∀ sourceCode, source.control = .code sourceCode →
+      SourceRuntimeOwnershipReadyAt fuel source
+        sourceFrameRoots sourceCode
+
+/-- A source runtime/ownership certificate upgrades hereditary structural
+provenance to full binder-ready machine readiness.  Non-code controls remain
+automatic; the active-code branch uses the exact graph already stored in the
+strong control relation and adds only its source dynamic certificate. -/
+theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyAt_of_sourceRuntime
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (sourceReady :
+      BinderReadySourceRuntimeOwnershipReadyAt fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target := by
+  apply related.binderReadyReachableMachineReadyAt_of_code
+  intro sourceCode sourceControl
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  unfold BinderReadySourceRuntimeOwnershipReadyAt at sourceReady
+  have runtimeReady :
+      SourceRuntimeOwnershipReadyAt fuel source
+        sourceFrameRoots sourceCode :=
+    sourceReady (sourceFrameRoots := sourceFrameRoots)
+      programs control frames runtime sourceCode sourceControl
+  have readyControl :
+      BinderReadyReachableControlReadyAt fuel rho source target
+        sourceFrameRoots source.control target.control
+        sourceControlRoots targetControlRoots := by
+    cases targetControl : target.control with
+    | code targetCode =>
+        rw [sourceControl, targetControl] at control
+        cases control with
+        | code graph joins env =>
+            rw [sourceControl]
+            exact .code (runtimeReady graph) joins env
+    | yielded targetValue =>
+        rw [sourceControl, targetControl] at control
+        cases control
+    | invokeName targetName targetArguments =>
+        rw [sourceControl, targetControl] at control
+        cases control
+    | invokeValue targetFunction targetArguments =>
+        rw [sourceControl, targetControl] at control
+        cases control
+  refine ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, readyControl,
+    frames, runtime⟩
+
+/-- Hereditary source runtime/ownership contract along related strong paths.
+It is the compiler-client obligation that must be proved from source typing,
+ownership, constant purity, and the chosen foreign semantics. -/
+def BinderReadySourceRuntimeOwnershipInvariant
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeBinderReadyReachableMachineRelated fuel sourceAfter targetAfter →
+      BinderReadySourceRuntimeOwnershipReadyAt fuel
+        sourceAfter targetAfter
+
+/-- The source runtime/ownership invariant supplies full hereditary readiness
+for every strongly related future pair. -/
+theorem BinderReadySourceRuntimeOwnershipInvariant.ready
+    (invariant :
+      BinderReadySourceRuntimeOwnershipInvariant
+        externals fuel source target)
+    (sourceAfter targetAfter : MachineState)
+    (sourcePath : NonLockstep.Reaches externals source sourceAfter)
+    (targetPath : NonLockstep.Reaches externals target targetAfter)
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel sourceAfter targetAfter) :
+    BinderReadyReachableMachineReadyAt fuel sourceAfter targetAfter :=
+  related.binderReadyReachableMachineReadyAt_of_sourceRuntime
+    (invariant sourceAfter targetAfter sourcePath targetPath related)
+
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
 to recover full machine readiness. -/
