@@ -272,10 +272,13 @@ effects. Generic result-binding rules now insert tracked evidence or erase a
 shadowed stale fact across the checked local write and the same transport
 boundary. Constructor, reset, and reuse supply their exact validator-selected
 result evidence in every successful physical branch; nonunique and unique
-reset also preserve unrelated mapped-header facts. The remaining
-result-producing syntax work is to instantiate those rules for every
-direct-let lowering and ordinary result family before branch and call
-propagation. Native
+reset also preserve unrelated mapped-header facts. The direct-let transfer
+surface now has named constructor/reset/reuse adapters plus two exhaustive
+ordinary-result shapes: heap preservation for reads and fresh-prefix
+extension for allocation. Boxing, natural, string, and partial-application
+allocation instantiate the latter across all admitted representations. The
+remaining syntax work is to assemble these transitions in the recursive
+capacity-aware code certificate before branch and call propagation. Native
 unreachability losing its source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
@@ -351,10 +354,11 @@ acceptance tests pass.
    admitted successful effect. The complete no-result effect spine carries the
    strengthened state through generic effect-step adapters. Result bindings
    now have generic insert/erase adapters, and constructor/reset/reuse supply
-   their exact tracked evidence plus old-fact transport. The remaining syntax
-   work is direct-let instantiation for tracked and ordinary result families,
-   followed by branch/call propagation. Structured unreachability remains the
-   shared-contract blocker.
+   their exact tracked evidence plus old-fact transport. All current direct
+   result families reduce to named tracked transfer, heap-preserving erasure,
+   or prefix-extending erasure. The remaining syntax work is the recursive
+   capacity-aware code certificate, followed by branch/call propagation.
+   Structured unreachability remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

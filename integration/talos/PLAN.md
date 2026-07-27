@@ -3313,6 +3313,21 @@ unrelated facts. The remaining syntax work is to instantiate these adapters
 for each direct-let lowering, then propagate the strengthened state through
 branches and calls. No FIR semantic contract or executable ABI changed.
 
+W6.6dq normalizes the direct-result syntax boundary. A generic tracked-source
+resolver now identifies the exact concrete lane for any fact, with fitting
+reuse as a specialization. Constructor, reset, and reuse each have a named
+`LetStepSimulates` adapter whose post-state facts exactly match the static
+validator transfer; constructor and tracked/untracked reset heads expose the
+corresponding continuation-safety premise. Ordinary result lets share two
+erasure adapters: one for a heap-preserving step and one for a fresh prefix
+extension. Boxing and natural literals prove capacity transport uniformly
+across immediate, promoted, and heap representations; string literals and
+partial applications instantiate fresh-prefix transport. This covers every
+current direct-let result family without adding transport to the shared
+`LetStepSimulates` contract. The remaining proof is the recursive
+capacity-aware code certificate, followed by its branch and interprocedural
+cases. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

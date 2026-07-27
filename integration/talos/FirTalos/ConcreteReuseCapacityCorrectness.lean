@@ -118,6 +118,90 @@ theorem HeaderCapacityTransport.reuseObject_none_nonempty
     valid arity nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit
     allocated
 
+/-- Boxing either encodes a tagged payload (immediate or promoted) or
+allocates a fresh heap box. Both branches preserve all old mapped extents. -/
+theorem HeaderCapacityTransport.boxScalar
+    (state result : MemoryState) (witness : RefinementWitness)
+    (scalar : BoxedScalar) (word : Word32)
+    (valid : state.FrontierInvariant)
+    (boxed : boxScalar state scalar = .ok (result, word)) :
+    HeaderCapacityTransport state result witness := by
+  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  · have encoded :
+        encodeTagged state scalar.payload = .ok (result, word) := by
+      rw [← boxScalar_of_tagged state scalar tagged]
+      exact boxed
+    exact MappedHeaderCapacityTransport.encodeTagged state result witness
+      scalar.payload word valid encoded
+  · have large : maxTaggedPayload < scalar.payload.toNat :=
+      Nat.lt_of_not_ge tagged
+    have allocated :
+        allocateBoxedScalar state scalar = .ok (result, word) := by
+      rw [← boxScalar_of_heap state scalar large]
+      exact boxed
+    exact .ofPrefixExtension witness
+      (allocateBoxedScalar_prefixExtension state result scalar word valid
+        allocated)
+
+/-- Natural literals use the same immediate/promoted tagged split below the
+semantic limit and fresh limb allocation above it. -/
+theorem HeaderCapacityTransport.allocateNatural
+    (state result : MemoryState) (witness : RefinementWitness)
+    (value : Nat) (word : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : Fir.Wasm.Concrete.allocateNatural state value =
+      .ok (result, word)) :
+    HeaderCapacityTransport state result witness := by
+  by_cases tagged : value ≤ maxTaggedPayload
+  · have encoded :
+        encodeTagged state (UInt64.ofNat value) = .ok (result, word) := by
+      simpa [Fir.Wasm.Concrete.allocateNatural, tagged] using allocated
+    exact MappedHeaderCapacityTransport.encodeTagged state result witness
+      (UInt64.ofNat value) word valid encoded
+  · have large : maxTaggedPayload < value := Nat.lt_of_not_ge tagged
+    exact .ofPrefixExtension witness
+      (allocateNatural_heap_prefixExtension state result value word valid large
+        allocated)
+
+/-- String literals are fresh prefix extensions. -/
+theorem HeaderCapacityTransport.allocateString
+    (state result : MemoryState) (witness : RefinementWitness)
+    (value : String) (word : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : Fir.Wasm.Concrete.allocateString state value =
+      .ok (result, word)) :
+    HeaderCapacityTransport state result witness :=
+  .ofPrefixExtension witness
+    (allocateString_prefixExtension state result value word valid allocated)
+
+/-- Partial application allocates one fresh closure above the old frontier. -/
+theorem HeaderCapacityTransport.allocateClosure
+    (state result : MemoryState) (witness : RefinementWitness)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (captures : Array LaneValue) (address : Word32)
+    (targetId descriptorId : UInt32)
+    (valid : state.FrontierInvariant)
+    (count : captureKinds.size = captures.size)
+    (capturesLtArity : captures.size < arity)
+    (targetIdEq : closureTargetId dispatch function = .ok targetId)
+    (descriptorIdEq :
+      closureDescriptorId descriptors captureKinds = .ok descriptorId)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      captureKinds[index]? = some kind →
+      captures[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (allocated : Fir.Wasm.Concrete.allocateClosure state dispatch descriptors
+      function arity captureKinds captures = .ok (result, address)) :
+    HeaderCapacityTransport state result witness :=
+  .ofPrefixExtension witness
+    (allocateClosure_prefixExtension state result dispatch descriptors function
+      arity captureKinds captures address targetId descriptorId valid count
+      capturesLtArity targetIdEq descriptorIdEq arityFits fixedFits
+      captureTyped allocated)
+
 /--
 Dynamic meaning of the validator's reset/reuse capacity evidence.
 
@@ -289,6 +373,48 @@ theorem findReuseCapacityEvidence?_insert_other
   simp [insertReuseCapacityFact, findReuseCapacityEvidence?, different,
     findReuseCapacityEvidence?_erase_other facts inserted query different]
 
+/-- The constructor head of the static validator passes its exact newly
+inserted fact to the continuation. -/
+theorem reuseCapacitySafeCode_constructor_head
+    {facts : ReuseCapacityFacts} {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure} {info : LCNF.CtorInfo}
+    {args : Array (LCNF.Arg .impure)}
+    (valueEq : decl.value = .ctor info args)
+    (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
+    reuseCapacitySafeCode
+      (insertReuseCapacityFact facts decl.fvarId
+        (constructorReuseCapacityEvidence info))
+      continuation = true := by
+  simpa only [reuseCapacitySafeCode, valueEq] using safe
+
+/-- When reset's source is tracked, the validator transfers that same fact to
+the result binding and checks the continuation under it. -/
+theorem reuseCapacitySafeCode_reset_tracked_head
+    {facts : ReuseCapacityFacts} {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure} {count : Nat}
+    {objectId : FVarId} {evidence : ReuseCapacityEvidence}
+    (valueEq : decl.value = .reset count objectId)
+    (tracked :
+      findReuseCapacityEvidence? facts objectId = some evidence)
+    (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
+    reuseCapacitySafeCode
+      (insertReuseCapacityFact facts decl.fvarId evidence) continuation =
+        true := by
+  simpa only [reuseCapacitySafeCode, valueEq, tracked] using safe
+
+/-- When reset's source is untracked, the validator erases any shadowed
+destination fact before checking the continuation. -/
+theorem reuseCapacitySafeCode_reset_untracked_head
+    {facts : ReuseCapacityFacts} {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure} {count : Nat}
+    {objectId : FVarId}
+    (valueEq : decl.value = .reset count objectId)
+    (untracked : findReuseCapacityEvidence? facts objectId = none)
+    (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
+    reuseCapacitySafeCode
+      (eraseReuseCapacityFact facts decl.fvarId) continuation = true := by
+  simpa only [reuseCapacitySafeCode, valueEq, untracked] using safe
+
 /-- Dynamic interpretation of every fact carried by the static analysis.
 Each tracked source binding is resolved at the compiler-assigned local and
 related to the current concrete heap by `ReuseCapacityValueRel`. -/
@@ -322,6 +448,40 @@ theorem ReuseCapacityFactsRel.resolve
       targetLocals.get index = some (physicalOfLane lane) ∧
       ReuseCapacityValueRel heap witness evidence kind lane semantic :=
   related fvarId evidence found
+
+/-- Resolve one tracked static fact against a known source binding and its
+compiler-assigned local. This is the operation-independent lookup boundary
+used by reset; fitting reuse is the reuse-token specialization below. -/
+theorem ReuseCapacityFactsRel.resolveTracked
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals : Wasm.Locals} {heap : MemoryState}
+    {witness : RefinementWitness} {fvarId : FVarId}
+    {evidence : ReuseCapacityEvidence} {index : Nat} {kind : AbiKind}
+    {semantic : Value}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals heap witness)
+    (tracked :
+      findReuseCapacityEvidence? facts fvarId = some evidence)
+    (sourceLookup : lookup sourceEnv fvarId = some semantic)
+    (localFound : findFVar? bindings fvarId = some index)
+    (kindAt : bindings[index]?.map Prod.snd = some kind) :
+    ∃ lane,
+      targetLocals.get index = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel heap witness evidence kind lane semantic := by
+  obtain ⟨actualIndex, actualKind, lane, actualSemantic,
+      actualSourceLookup, actualLocalFound, actualKindAt, targetLookup,
+      capacityRelated⟩ := related.resolve tracked
+  rw [sourceLookup] at actualSourceLookup
+  have semanticEq := Option.some.inj actualSourceLookup
+  subst actualSemantic
+  rw [localFound] at actualLocalFound
+  have indexEq := Option.some.inj actualLocalFound
+  subst actualIndex
+  rw [kindAt] at actualKindAt
+  have kindEq := Option.some.inj actualKindAt
+  subst actualKind
+  exact ⟨lane, targetLookup, capacityRelated⟩
 
 /-- All existing facts survive a heap/witness transition that preserves
 allocation extents. Source bindings and concrete locals are unchanged. -/
@@ -486,19 +646,7 @@ theorem ReuseCapacityFactsRel.resolveFittingToken
   have tracked :=
     (findFittingReuseCapacityEvidence?_eq_some facts tokenId info evidence
       fitting).1
-  obtain ⟨index, kind, lane, semantic, actualSourceLookup, actualLocalFound,
-      actualKindAt, targetLookup, capacityRelated⟩ :=
-    related.resolve tracked
-  rw [sourceLookup] at actualSourceLookup
-  have semanticEq := Option.some.inj actualSourceLookup
-  subst semantic
-  rw [localFound] at actualLocalFound
-  have indexEq := Option.some.inj actualLocalFound
-  subst index
-  rw [kindAt] at actualKindAt
-  have kindEq := Option.some.inj actualKindAt
-  subst kind
-  exact ⟨lane, targetLookup, capacityRelated⟩
+  exact related.resolveTracked tracked sourceLookup localFound kindAt
 
 /-- Strengthening of W6's ordinary concrete state invariant with the dynamic
 meaning of the static capacity-analysis state at the current code node. -/
@@ -523,6 +671,30 @@ theorem ReuseCapacityStateRelated.stateRelated
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
       witness :=
   related.1
+
+/-- Resolve a tracked source binding from the strengthened state. -/
+theorem ReuseCapacityStateRelated.resolveTracked
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {fvarId : FVarId}
+    {evidence : ReuseCapacityEvidence} {index : Nat} {kind : AbiKind}
+    {semantic : Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (tracked :
+      findReuseCapacityEvidence? facts fvarId = some evidence)
+    (sourceLookup : lookup sourceEnv fvarId = some semantic)
+    (localFound :
+      findFVar? (functionBindings sourceFunction) fvarId = some index)
+    (kindAt :
+      (functionBindings sourceFunction)[index]?.map Prod.snd = some kind) :
+    ∃ lane,
+      targetLocals.get index = some (physicalOfLane lane) ∧
+      ReuseCapacityValueRel targetStore.host.runtime.heap witness evidence kind
+        lane semantic :=
+  related.2.resolveTracked tracked sourceLookup localFound kindAt
 
 /-- Bind a result whose capacity evidence is known. This is the generic
 result-producing counterpart of `transport`: the ordinary state theorem owns
@@ -762,6 +934,219 @@ theorem ReuseCapacityStateRelated.ofLetStepEraseOfSet
   related.ofLetStepErase step resultFound
     (FirTalos.Correctness.localUpdate_of_set? targetSet) witnessTransport
     capacityTransport
+
+/-- Direct constructor-result specialization. Its fact is exactly the one
+inserted by `reuseCapacitySafeCode`, independently of whether the concrete
+representation is immediate, promoted, or an ordinary heap object. -/
+theorem ReuseCapacityStateRelated.ofConstructorLetStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {info : LCNF.CtorInfo}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {kind : AbiKind} {word : Word32}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness
+        (constructorReuseCapacityEvidence info) kind (.word32 word)
+        sourceValue) :
+    ReuseCapacityStateRelated
+      (insertReuseCapacityFact facts decl.fvarId
+        (constructorReuseCapacityEvidence info))
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness :=
+  related.ofWord32LetStepBind step resultFound kindAt targetSet
+    witnessTransport capacityTransport valueRelated
+
+/-- Direct reset-result specialization. Static reset transfers the source
+fact unchanged to the reuse-token destination. -/
+theorem ReuseCapacityStateRelated.ofResetLetStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceToken : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {word : Word32} {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceToken targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some .reuseToken)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness evidence
+        .reuseToken (.word32 word) sourceToken) :
+    ReuseCapacityStateRelated
+      (insertReuseCapacityFact facts decl.fvarId evidence)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceToken) nextStore
+      nextLocals afterWitness :=
+  related.ofWord32LetStepBind step resultFound kindAt targetSet
+    witnessTransport capacityTransport valueRelated
+
+/-- Direct reuse-result specialization. Static reuse records the replacement
+layout selected by `ReuseCapacityEvidence.afterReuse`. -/
+theorem ReuseCapacityStateRelated.ofReuseLetStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {info : LCNF.CtorInfo}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {kind : AbiKind} {word : Word32}
+    {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness
+        (evidence.afterReuse info) kind (.word32 word) sourceValue) :
+    ReuseCapacityStateRelated
+      (insertReuseCapacityFact facts decl.fvarId
+        (evidence.afterReuse info))
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness :=
+  related.ofWord32LetStepBind step resultFound kindAt targetSet
+    witnessTransport capacityTransport valueRelated
+
+/-- Ordinary heap-preserving result operations erase the destination fact and
+transport every other fact reflexively. This covers projections, unboxing,
+sharing tests, and every scalar result whose concrete host leaves the heap
+unchanged. -/
+theorem ReuseCapacityStateRelated.ofHeapPreservingLetStepErase
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {physical : Wasm.Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (targetSet :
+      targetLocals.set? resultIndex physical = some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (heapEq :
+      nextStore.host.runtime.heap = targetStore.host.runtime.heap) :
+    ReuseCapacityStateRelated (eraseReuseCapacityFact facts decl.fvarId)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness := by
+  apply related.ofLetStepEraseOfSet step resultFound targetSet
+    witnessTransport
+  rw [heapEq]
+  exact .refl _ beforeWitness
+
+/-- Ordinary allocating result operations erase the destination fact while
+transporting all older facts through their fresh-prefix heap extension. This
+covers boxing, literals, and closure allocation. -/
+theorem ReuseCapacityStateRelated.ofPrefixExtendingLetStepErase
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {physical : Wasm.Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (targetSet :
+      targetLocals.set? resultIndex physical = some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (heapExtension :
+      targetStore.host.runtime.heap.PrefixExtension
+        nextStore.host.runtime.heap) :
+    ReuseCapacityStateRelated (eraseReuseCapacityFact facts decl.fvarId)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness :=
+  related.ofLetStepEraseOfSet step resultFound targetSet witnessTransport
+    (.ofPrefixExtension beforeWitness heapExtension)
 
 /-- A successful concrete transition lifts the ordinary final state relation
 to the strengthened capacity invariant whenever it transports witnesses and
