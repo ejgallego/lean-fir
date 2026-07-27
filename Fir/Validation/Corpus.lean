@@ -600,6 +600,10 @@ def idInt (value : Int) : Int :=
   value
 
 @[noinline]
+def negateInt (value : Int) : Int :=
+  -value
+
+@[noinline]
 def intPosImmediate : Int :=
   2147483647
 
@@ -2128,6 +2132,42 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance
       "Round-trip negative 2^128 + 17 through negSucc without an external" },
+  { id := "int-multi-limb-positive-negate"
+    entry := ``Source.negateInt
+    args := #[.int 340282366920938463463374607431768211473]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.negateInt 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "negative", "heap", "multi-limb",
+      "external", "arithmetic"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Int.neg]
+    requiredExecutedExternals := #[``Int.neg]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.neg]
+    requiredExecutedExternalTrace := some #[``Int.neg]
+    provenance := firProvenance
+      "Negate positive 2^128 + 17 through the modeled runtime primitive" },
+  { id := "int-multi-limb-negative-negate"
+    entry := ``Source.negateInt
+    args := #[.int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int]
+    resultSchema := .int
+    native := fun _ =>
+      .int (Source.negateInt (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "negative", "heap", "multi-limb",
+      "external", "arithmetic"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExternals := #[``Int.neg]
+    requiredExecutedExternals := #[``Int.neg]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.neg]
+    requiredExecutedExternalTrace := some #[``Int.neg]
+    provenance := firProvenance
+      "Negate negative 2^128 + 17 back to a positive multi-limb Int" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
@@ -2244,6 +2284,42 @@ def cases : Array Case := #[
       exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
     requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
     provenance := firProvenance "Classify the first negative heap Int" },
+  { id := "int-classify-multi-limb-positive"
+    entry := ``Source.classifyInt
+    args := #[.int 340282366920938463463374607431768211473]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ =>
+      .nat (Source.classifyInt 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "cases", "external", "heap",
+      "multi-limb"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify a positive multi-limb heap Int" },
+  { id := "int-classify-multi-limb-negative"
+    entry := ``Source.classifyInt
+    args := #[.int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ =>
+      .nat (Source.classifyInt (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "negative", "cases", "external",
+      "heap", "multi-limb"]
+    requiredLcnfForms := #["fap", "cases", "lit", "return", "extern"]
+    requiredExecutedLcnfForms := #["fap", "lit", "extern", "return", "cases"]
+    requiredExecutedLcnfFormTrace := some intClassifyFormTrace
+    requiredExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternals := #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ofNat, ``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.decLt]
+    provenance := firProvenance "Classify a negative multi-limb heap Int" },
   { id := "nat-add-small"
     entry := ``Source.addNat
     args := #[.nat 20, .nat 22]

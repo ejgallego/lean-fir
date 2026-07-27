@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 105 cases. Required oracle edges must share one matrix
+edges over at least 109 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,7 +469,7 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 105 source cases are shared by the source-LCNF and V8
+current baseline, the 109 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1309,15 +1309,16 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 105 cases. Direct identity cases
+The compiler-generated corpus currently has 109 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
-`negSucc` representation. Empty `String` and `ByteArray` values exercise
-zero-length heap representations, while a string containing an embedded NUL, a
-multibyte BMP character, and a non-BMP character exercises the full
-JSON/native/interpreter text path. None can hide ABI encoding or decoding behind
-an external implementation. Beyond literals,
+`negSucc` representation; operation cases negate that magnitude in both
+directions and classify both constructors through exact external dispatch.
+Empty `String` and `ByteArray` values exercise zero-length heap representations,
+while a string containing an embedded NUL, a multibyte BMP character, and a
+non-BMP character exercises the full JSON/native/interpreter text path. None can
+hide ABI encoding or decoding behind an external implementation. Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -1511,6 +1512,8 @@ compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and
 negative immediates, both exact 32-bit boundaries, and the first positive and
 negative values represented by heap integer objects.  A heap-backed
+Multi-limb signed identities, negation in both directions, and constructor
+classification extend those checks through `2^128 + 17`. A heap-backed
 `ByteArray → ByteArray` identity preserves zero, signed-boundary, and maximum
 byte payloads.  Exact `ByteArray.size` and `ByteArray.get!` external handlers
 also cover zero, high-bit, and maximum-byte reads without changing heap state
@@ -1520,7 +1523,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 105 corpus cases, including a natural
+The default native-to-V8 matrix covers all 109 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, all three controlled-effect programs, and all
 five mixed-layout projections. `make validate-v8` delegates whole-corpus
