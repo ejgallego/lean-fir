@@ -9140,6 +9140,56 @@ theorem BinderReadySourceRuntimeOwnershipInvariant.stable
     (sourcePath.trans sourceTail) (targetPath.trans targetTail)
     futureRelated
 
+/-- Source-only projection of the saved-frame root decomposition carried by
+the strong machine relation.  Target frames, roots, and the address renaming
+are existential implementation witnesses; clients proving source safety do
+not have to mention them. -/
+def BinderReadySourceFramesRooted
+    (fuel : Nat) (sourceFrames : List Frame)
+    (sourceRoots : List Value) : Prop :=
+  ∃ rho targetFrames targetRoots,
+    BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceRoots targetRoots
+
+/-- Source-state runtime/ownership safety at every compiler-derived active
+code edge and every saved-frame root decomposition that can occur in the
+strong simulation. -/
+def SourceRuntimeOwnershipMachineReadyAt
+    (fuel : Nat) (state : MachineState) : Prop :=
+  ∀ {sourceFrameRoots sourceCode},
+    BinderReadySourceFramesRooted
+      fuel state.frames sourceFrameRoots →
+    state.control = .code sourceCode →
+      SourceRuntimeOwnershipReadyAt
+        fuel state sourceFrameRoots sourceCode
+
+/-- Hereditary source-only runtime/ownership contract.  Unlike the pair
+invariant, it quantifies over one execution and contains no target path,
+target state, observation relation, or address renaming. -/
+def SourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (fuel : Nat)
+    (source : MachineState) : Prop :=
+  ∀ sourceAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+      SourceRuntimeOwnershipMachineReadyAt fuel sourceAfter
+
+/-- A source-only machine invariant supplies the pair-indexed readiness
+needed by the strong simulation.  The related frame witness is used solely
+to recover the actual source saved-frame roots. -/
+theorem SourceRuntimeOwnershipMachineInvariant.binderReady
+    (invariant :
+      SourceRuntimeOwnershipMachineInvariant externals fuel source) :
+    BinderReadySourceRuntimeOwnershipInvariant
+      externals fuel source target := by
+  intro sourceAfter targetAfter sourcePath targetPath related
+  unfold BinderReadySourceRuntimeOwnershipReadyAt
+  intro rho sourceControlRoots targetControlRoots
+    sourceFrameRoots targetFrameRoots
+    programs control frames runtime sourceCode sourceControl
+  exact invariant sourceAfter sourcePath
+    ⟨rho, targetAfter.frames, targetFrameRoots, frames⟩
+    sourceControl
+
 /-- Canonical strong simulation relation.  It retains hereditary exact
 compiler provenance and the source runtime/ownership invariant needed to
 activate that provenance at every future code state. -/
@@ -25488,6 +25538,16 @@ def ReachableInitialInvariantOn
       (initialState source entry sourceArguments)
       (initialState target entry targetArguments)
 
+/-- Entry contract for the source-only runtime/ownership invariant.  Target
+arguments are absent: their only role is in the structural value relation
+already established by the strong compiler simulation. -/
+def SourceRuntimeOwnershipInitialInvariantOn
+    (externals : ExternalSpec) (fuel : Nat)
+    (source : ImpureProgram) (entries : Array Name) : Prop :=
+  ∀ entry, entry ∈ entries → ∀ sourceArguments,
+    SourceRuntimeOwnershipMachineInvariant externals fuel
+      (initialState source entry sourceArguments)
+
 /-- Whole-program forward correctness through the canonical strong
 simulation.  The compiler supplies hereditary exact program provenance, the
 source proof supplies runtime/ownership readiness along related executions,
@@ -25668,5 +25728,26 @@ theorem shadowProgram_loweringCorrect_sourceRuntimeOwnership
   binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
     (shadowProgram_binderReadyShadowRelated wellFormed run)
     compatible initialSourceRuntime
+
+/-- Most source-oriented checked compiler endpoint.  The semantic client
+proves a one-machine runtime/ownership invariant for each selected entry;
+the theorem projects the target-independent contract into the strong
+non-lockstep simulation automatically. -/
+theorem shadowProgram_loweringCorrect_sourceMachineInvariant
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (run : shadowProgram? fuel source = some target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialSourceRuntime :
+      SourceRuntimeOwnershipInitialInvariantOn
+        externals fuel source entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply shadowProgram_loweringCorrect_sourceRuntimeOwnership
+    wellFormed run compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialSourceRuntime entry member sourceArguments).binderReady
 
 end Fir.LeanIR.Passes.ElimDead
