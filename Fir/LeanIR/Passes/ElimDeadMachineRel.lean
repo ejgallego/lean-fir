@@ -6437,6 +6437,66 @@ theorem coreStep_deletedReuse_of_ready
         coreStep_deletedLet_reachableRelated sourceState targetState
           programs frames continuation joins env absent evaluated next⟩
 
+/-- Hereditary deleted-reuse rule.  A `none` token allocates only source
+garbage; a concrete token overwrites only a certified unreachable constructor
+cell.  Exact compiler provenance survives either source-only step. -/
+theorem coreStep_deletedReuse_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedReuseReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      token info arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .reuse token info updateHeader arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  cases ready with
+  | none values tokenRead argumentsRead arity =>
+      rcases runtime.evalLetValueReuseNoneLeftGarbage
+          (fvarId := fvarId) (binderName := binderName) (type := type)
+          tokenRead argumentsRead arity with
+        ⟨nextRuntime, value, evaluated, next⟩
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next⟩
+  | some location cell oldObject values tokenRead argumentsRead found live
+      objectEq arity unreachable =>
+      rcases runtime.evalLetValueReuseSomeLeftUnreachable
+          (fvarId := fvarId) (binderName := binderName) (type := type)
+          tokenRead argumentsRead found live objectEq unreachable arity with
+        ⟨nextRuntime, evaluated, next⟩
+      exact ⟨nextRuntime, .object (.heap location),
+        coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next⟩
+
 /-- Proof-visible ownership contract for deleting a `reset`.  The interpreter
 effect must succeed and preserve every heap cell reachable from the active
 runtime roots; recursively adjusted garbage remains unconstrained. -/
@@ -13951,17 +14011,13 @@ theorem match_retainedReuseLetStep
                               simp [reuse, allocCtor, mismatch, Bind.bind,
                                 Except.bind] at sourceReuseEq
                         | object ref =>
-                            simp [reuse, Bind.bind, Except.bind]
-                              at sourceReuseEq
+                            simp [reuse] at sourceReuseEq
                         | usize value =>
-                            simp [reuse, Bind.bind, Except.bind]
-                              at sourceReuseEq
+                            simp [reuse] at sourceReuseEq
                         | scalar value =>
-                            simp [reuse, Bind.bind, Except.bind]
-                              at sourceReuseEq
+                            simp [reuse] at sourceReuseEq
                         | erased =>
-                            simp [reuse, Bind.bind, Except.bind]
-                              at sourceReuseEq
+                            simp [reuse] at sourceReuseEq
                       have publishedArguments :=
                         runtime.publishEvalArgs covered sourceArgumentsEq
                           targetArgumentsEq argumentsRelated
@@ -14030,6 +14086,405 @@ theorem match_retainedReuseLetStep
                         match_internalCoreSteps sourceTransition
                           targetTransition afterRelated
                           (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary retained-reuse matcher.  A failed token allocates paired fresh
+constructors; a concrete token consumes its reachability capability and
+overwrites the mapped live cells in place.  Both branches preserve exact
+compiler provenance. -/
+theorem match_retainedReuseLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (tokenMember : used.contains token = true)
+    (covered : ArgsCovered used arguments)
+    (ready : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceTokenRead :
+    lookupValue sourceState.env token = sourceTokenResult
+  cases sourceTokenResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceTokenRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceToken =>
+      have sourceTokenLookup :=
+        lookupValue_eq_ok_iff.mp sourceTokenRead
+      have tokens := env token tokenMember
+      rw [sourceTokenLookup] at tokens
+      generalize targetTokenLookup :
+        lookup targetState.env token = targetTokenOption at tokens
+      cases tokens with
+      | some tokenValues =>
+          rename_i targetToken
+          have targetTokenRead :
+              lookupValue targetState.env token = .ok targetToken :=
+            lookupValue_eq_ok_iff.mpr targetTokenLookup
+          generalize sourceArgumentsEq :
+            evalArgs sourceState.env arguments = sourceEvaluation
+          cases sourceEvaluation with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceTokenRead, sourceArgumentsEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceArguments =>
+              have evaluated := evalArgs_relOn env covered
+              rw [sourceArgumentsEq] at evaluated
+              generalize targetArgumentsEq :
+                evalArgs targetState.env arguments = targetEvaluation
+                  at evaluated
+              cases evaluated with
+              | ok argumentsRelated =>
+                  rename_i targetArguments
+                  generalize sourceReuseEq :
+                    reuse sourceState.runtime sourceToken info updateHeader
+                      sourceArguments = sourceReuseResult
+                  cases sourceReuseResult with
+                  | error fault =>
+                      have done : coreStep sourceCurrent =
+                          .done (observe sourceCurrent (.fault fault)) := by
+                        simp [sourceCurrent, coreStep, evalLetValue,
+                          sourceTokenRead, sourceArgumentsEq, sourceReuseEq,
+                          fail, Bind.bind, Except.bind]
+                      exact (noStep done).elim
+                  | ok sourcePair =>
+                      obtain ⟨sourceRuntime, sourceValue⟩ := sourcePair
+                      have arity :
+                          sourceArguments.size = info.size := by
+                        apply Classical.byContradiction
+                        intro mismatch
+                        cases sourceToken with
+                        | reuseToken location? =>
+                            cases location? <;>
+                              simp [reuse, allocCtor, mismatch, Bind.bind,
+                                Except.bind] at sourceReuseEq
+                        | object ref =>
+                            simp [reuse] at sourceReuseEq
+                        | usize value =>
+                            simp [reuse] at sourceReuseEq
+                        | scalar value =>
+                            simp [reuse] at sourceReuseEq
+                        | erased =>
+                            simp [reuse] at sourceReuseEq
+                      have publishedArguments :=
+                        runtime.publishEvalArgs covered sourceArgumentsEq
+                          targetArgumentsEq argumentsRelated
+                      have tail : ListRel (ValueRel rho)
+                          (envRootsOn used sourceState.env ++
+                            sourceFrameRoots)
+                          (envRootsOn used targetState.env ++
+                            targetFrameRoots) :=
+                        listRel_append (envRootsOn_related env) frames.roots
+                      have tokenReachable : ∀ location,
+                          sourceToken = .reuseToken (some location) →
+                            Reachable sourceState.runtime.heap
+                              (runtimeRoots sourceState.runtime
+                                (sourceArguments.toList ++
+                                  (envRootsOn used sourceState.env ++
+                                    sourceFrameRoots))) location := by
+                        intro location tokenEq
+                        have base : Reachable sourceState.runtime.heap
+                            (runtimeRoots sourceState.runtime
+                              (envRootsOn used sourceState.env ++
+                                sourceFrameRoots)) location := by
+                          apply ready location
+                          rw [sourceTokenRead, tokenEq]
+                        exact reachable_monoRoots
+                          (runtimeRoots_monoExtra (by
+                            intro value member
+                            exact List.mem_append_right _ member))
+                          base
+                      rcases publishedArguments.reuseBoth_of_related
+                          tokenValues argumentsRelated tail tokenReachable
+                          arity sourceReuseEq with
+                        ⟨larger, targetRuntime, targetValue, extension,
+                          targetReuseEq, values, reusedRuntime⟩
+                      let sourceExpected := {
+                        sourceState with
+                        runtime := sourceRuntime
+                        env := bind sourceState.env fvarId sourceValue
+                        control := .code sourceContinuation }
+                      let targetExpected := {
+                        targetState with
+                        runtime := targetRuntime
+                        env := bind targetState.env fvarId targetValue
+                        control := .code targetContinuation }
+                      have sourceTransition :
+                          coreStep sourceCurrent = .next sourceExpected := by
+                        simp [sourceCurrent, sourceExpected, coreStep,
+                          evalLetValue, sourceTokenRead, sourceArgumentsEq,
+                          sourceReuseEq, Bind.bind, Except.bind,
+                          Pure.pure, Except.pure]
+                      have targetTransition :
+                          coreStep targetCurrent = .next targetExpected := by
+                        simp [targetCurrent, targetExpected, coreStep,
+                          evalLetValue, targetTokenRead, targetArgumentsEq,
+                          targetReuseEq, Bind.bind, Except.bind,
+                          Pure.pure, Except.pure]
+                      have afterRelated :
+                          BinderReadyReachableMachineRelated fuel larger
+                            sourceExpected targetExpected := by
+                        exact retainedLetValue_binderReadyReachableRelated
+                          sourceState targetState sourceRuntime targetRuntime
+                          programs (frames.monoRenaming extension)
+                          continuation joins
+                          (envRelOn_monoRenaming extension env)
+                          values reusedRuntime
+                      exact ⟨larger, targetExpected, extension,
+                        match_internalCoreSteps_binderReady sourceTransition
+                          targetTransition afterRelated
+                          (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary deleted-reuse matcher.  Dynamic readiness certifies either a
+fresh source-only garbage allocation or an overwrite of an unreachable
+compiler-owned constructor cell. -/
+theorem match_deletedReuseLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact match_deletedRuntimeNeutralLetStep_binderReady
+        sourceState targetState programs frames continuation joins env absent
+        runtime evaluated step
+  | reuse fvarId binderName type token info updateHeader arguments ready =>
+      rcases coreStep_deletedReuse_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime ready with
+        ⟨nextRuntime, value, transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+      exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Exact retained reuse provenance supplies the hereditary continuation and
+compiler-collected coverage of the token and all constructor arguments.  The
+dynamic readiness premise retains the concrete-token reachability capability. -/
+theorem ExactShadowCodeBinderReady.match_retainedReuseLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId token : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim
+          (LCNF.LetValue.reuse token info updateHeader arguments :
+            LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reuse token info updateHeader arguments :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (retainedReady : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have valueCovered : LetValueCovered ambient
+      (LCNF.LetValue.reuse token info updateHeader arguments :
+        LCNF.LetValue .impure) :=
+    (collectLetValue_covers continuationUsed
+      (LCNF.LetValue.reuse token info updateHeader arguments :
+        LCNF.LetValue .impure)).mono usedBound
+  exact match_retainedReuseLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env valueCovered.1 valueCovered.2 retainedReady runtime step
+
+/-- Exact deleted reuse provenance supplies binder absence and the hereditary
+continuation; dynamic readiness isolates any allocation or overwrite from all
+published roots. -/
+theorem ExactShadowCodeBinderReady.match_deletedReuseLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId token : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim
+        (LCNF.LetValue.reuse token info updateHeader arguments :
+          LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedReuseLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
 
 /-- Complete graph-level matcher for reuse lets.  The retained branch consumes
 the concrete-token ownership readiness above; deleted reuse keeps its
