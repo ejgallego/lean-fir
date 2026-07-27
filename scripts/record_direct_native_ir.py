@@ -13,10 +13,12 @@ from pathlib import Path
 from validation_harness import (
     PROTOCOL_VERSION,
     ValidationError,
+    canonical_json_sha256,
     checked_sha256,
     compare_success,
     manifest_from_output as parse_corpus_manifest,
     records_from_output,
+    retain_evidence_bundle,
     resolve_lake_command,
     result_map,
     run,
@@ -53,6 +55,38 @@ ARTIFACT_FILES = (
     "forms.txt",
     "entry.txt",
 )
+ATTESTATION_KIND = "fir-native-oracle-attestations"
+ATTESTATION_CONTRACT_KIND = "fir-native-oracle-attestation-contract"
+ATTESTATION_CONTRACT_FIELDS = (
+    "caseId",
+    "entry",
+    "dependencies",
+    "claim",
+    "requiredArtifactFragments",
+    "requiredOwnershipFacts",
+    "requiredOwnershipFactCounts",
+    "expectedArtifactSha256",
+)
+ATTESTATION_RECORD_FIELDS = {
+    "version",
+    "identity",
+    *ATTESTATION_CONTRACT_FIELDS,
+    "missingArtifactFragments",
+    "claimMatches",
+    "missingOwnershipFacts",
+    "observedOwnershipFactCounts",
+    "unsatisfiedOwnershipFactCounts",
+    "ownershipFactCountsMatch",
+    "ownershipMatches",
+    "ownershipInventory",
+    "artifact",
+    "artifactBytes",
+    "artifactSha256",
+    "artifactMatches",
+    "matches",
+    "declarations",
+    "forms",
+}
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -596,15 +630,359 @@ def collect_direct_path_evidence(
     return evidence_by_id
 
 
+def with_attestation_identity(record: dict) -> dict:
+    if "identity" in record:
+        raise ValidationError(
+            f"{record.get('caseId', 'native IR')}: attestation already has an identity"
+        )
+    return {
+        **record,
+        "identity": {
+            "algorithm": "sha256",
+            "attestation": canonical_json_sha256(record),
+        },
+    }
+
+
+def verify_attestation_record(record: object) -> dict:
+    if not isinstance(record, dict):
+        raise ValidationError("native IR attestation record must be an object")
+    fields = set(record)
+    if fields not in (
+        ATTESTATION_RECORD_FIELDS,
+        ATTESTATION_RECORD_FIELDS | {"directPath"},
+    ):
+        raise ValidationError(
+            "native IR attestation record has an unsupported schema"
+        )
+    case_id = validate_backend_name(
+        record["caseId"], "native IR attestation case ID"
+    )
+    if record.get("version") != PROTOCOL_VERSION:
+        raise ValidationError(
+            f"{case_id}: native IR attestation has unsupported version"
+        )
+    contract_record = {
+        "version": PROTOCOL_VERSION,
+        **{
+            field: record[field]
+            for field in ATTESTATION_CONTRACT_FIELDS
+        },
+    }
+    parsed_contract = parse_manifest(
+        json.dumps(contract_record),
+        ["retained-native-ir-attestation", case_id],
+    )
+    if parsed_contract != [contract_record]:
+        raise ValidationError(
+            f"{case_id}: retained native IR contract is not canonical"
+        )
+    identity = record.get("identity")
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"algorithm", "attestation"}
+        or identity["algorithm"] != "sha256"
+    ):
+        raise ValidationError(f"{case_id}: attestation identity is malformed")
+    digest = checked_sha256(
+        identity["attestation"], f"{case_id} attestation identity"
+    )
+    provisional = dict(record)
+    provisional.pop("identity")
+    if digest != canonical_json_sha256(provisional):
+        raise ValidationError(
+            f"{case_id}: attestation identity does not match its content"
+        )
+    checked_sha256(
+        record["artifactSha256"], f"{case_id} native IR artifact"
+    )
+    checked_sha256(
+        record["expectedArtifactSha256"],
+        f"{case_id} expected native IR artifact",
+    )
+    inventory = record["ownershipInventory"]
+    if (
+        not isinstance(inventory, dict)
+        or set(inventory)
+        != {
+            "version",
+            "operations",
+            "facts",
+            "factCounts",
+            "unknownAttributes",
+        }
+        or inventory["version"] != 1
+        or not isinstance(inventory["operations"], list)
+        or not isinstance(inventory["facts"], list)
+        or not isinstance(inventory["factCounts"], list)
+        or not isinstance(inventory["unknownAttributes"], list)
+    ):
+        raise ValidationError(
+            f"{case_id}: ownership inventory has an unsupported schema"
+        )
+    derived_fact_counts: dict[str, int] = {}
+    for operation in inventory["operations"]:
+        if (
+            not isinstance(operation, dict)
+            or not isinstance(operation.get("fact"), str)
+            or not operation["fact"]
+        ):
+            raise ValidationError(
+                f"{case_id}: ownership inventory operation is malformed"
+            )
+        fact = operation["fact"]
+        derived_fact_counts[fact] = derived_fact_counts.get(fact, 0) + 1
+    derived_facts = sorted(derived_fact_counts)
+    derived_fact_count_items = [
+        {"fact": fact, "count": count}
+        for fact, count in sorted(derived_fact_counts.items())
+    ]
+    if (
+        inventory["facts"] != derived_facts
+        or inventory["factCounts"] != derived_fact_count_items
+        or any(
+            not isinstance(attribute, str) or not attribute
+            for attribute in inventory["unknownAttributes"]
+        )
+        or inventory["unknownAttributes"]
+        != sorted(set(inventory["unknownAttributes"]))
+    ):
+        raise ValidationError(
+            f"{case_id}: ownership inventory derivatives disagree"
+        )
+    missing_ownership_facts = [
+        fact
+        for fact in record["requiredOwnershipFacts"]
+        if fact not in derived_fact_counts
+    ]
+    if record["missingOwnershipFacts"] != missing_ownership_facts:
+        raise ValidationError(
+            f"{case_id}: missing ownership facts disagree with inventory"
+        )
+    observed_ownership_fact_counts = required_count_observations(
+        record["requiredOwnershipFactCounts"],
+        derived_fact_counts,
+        "fact",
+    )
+    unsatisfied_ownership_fact_counts = unsatisfied_count_requirements(
+        record["requiredOwnershipFactCounts"],
+        derived_fact_counts,
+        "fact",
+    )
+    if (
+        record["observedOwnershipFactCounts"]
+        != observed_ownership_fact_counts
+        or record["unsatisfiedOwnershipFactCounts"]
+        != unsatisfied_ownership_fact_counts
+    ):
+        raise ValidationError(
+            f"{case_id}: ownership fact count derivatives disagree"
+        )
+    ownership_fact_counts_match = not unsatisfied_ownership_fact_counts
+    ownership_matches = (
+        not missing_ownership_facts
+        and ownership_fact_counts_match
+        and not inventory["unknownAttributes"]
+    )
+    if (
+        record["ownershipFactCountsMatch"]
+        is not ownership_fact_counts_match
+        or record["ownershipMatches"] is not ownership_matches
+    ):
+        raise ValidationError(
+            f"{case_id}: ownership match derivatives disagree"
+        )
+    missing_fragments = record["missingArtifactFragments"]
+    if (
+        not isinstance(missing_fragments, list)
+        or any(
+            not isinstance(fragment, str)
+            or fragment not in record["requiredArtifactFragments"]
+            for fragment in missing_fragments
+        )
+        or len(missing_fragments) != len(set(missing_fragments))
+        or record["claimMatches"] is not (not missing_fragments)
+    ):
+        raise ValidationError(
+            f"{case_id}: native IR claim derivatives disagree"
+        )
+    artifact_matches = (
+        record["artifactSha256"] == record["expectedArtifactSha256"]
+    )
+    if (
+        record["artifact"] != "program.lcnf"
+        or isinstance(record["artifactBytes"], bool)
+        or not isinstance(record["artifactBytes"], int)
+        or record["artifactBytes"] <= 0
+        or record["artifactMatches"] is not artifact_matches
+    ):
+        raise ValidationError(
+            f"{case_id}: native IR artifact derivatives disagree"
+        )
+    if (
+        not isinstance(record["declarations"], list)
+        or any(
+            not isinstance(declaration, str) or not declaration
+            for declaration in record["declarations"]
+        )
+        or any(
+            declaration not in record["declarations"]
+            for declaration in [record["entry"], *record["dependencies"]]
+        )
+        or not isinstance(record["forms"], list)
+        or not record["forms"]
+        or any(not isinstance(form, str) or not form for form in record["forms"])
+    ):
+        raise ValidationError(
+            f"{case_id}: native IR rooted artifact inventory is malformed"
+        )
+    direct_matches = True
+    if "directPath" in record:
+        direct_path = record["directPath"]
+        if (
+            not isinstance(direct_path, dict)
+            or not isinstance(direct_path.get("matches"), bool)
+        ):
+            raise ValidationError(
+                f"{case_id}: direct path evidence is malformed"
+            )
+        direct_matches = direct_path["matches"]
+    matches = (
+        artifact_matches
+        and not missing_fragments
+        and ownership_matches
+        and direct_matches
+    )
+    if record["matches"] is not matches:
+        raise ValidationError(
+            f"{case_id}: native IR attestation match derivative disagrees"
+        )
+    return record
+
+
+def attestation_contract(records: list[dict]) -> dict:
+    ordered = sorted(records, key=lambda record: record["caseId"])
+    return {
+        "version": PROTOCOL_VERSION,
+        "kind": ATTESTATION_CONTRACT_KIND,
+        "cases": [
+            {
+                field: record[field]
+                for field in ATTESTATION_CONTRACT_FIELDS
+            }
+            for record in ordered
+        ],
+    }
+
+
+def build_attestation_manifest(records: list[dict]) -> dict:
+    if not records:
+        raise ValidationError("native IR attestation bundle must be nonempty")
+    verified = [verify_attestation_record(record) for record in records]
+    ordered = sorted(verified, key=lambda record: record["caseId"])
+    case_ids = [record["caseId"] for record in ordered]
+    if len(case_ids) != len(set(case_ids)):
+        raise ValidationError("native IR attestation bundle repeats a case")
+    contract_sha256 = canonical_json_sha256(attestation_contract(ordered))
+    provisional = {
+        "version": PROTOCOL_VERSION,
+        "kind": ATTESTATION_KIND,
+        "contractSha256": contract_sha256,
+        "attestations": ordered,
+    }
+    return {
+        "version": PROTOCOL_VERSION,
+        "identity": {
+            "algorithm": "sha256",
+            "contract": contract_sha256,
+            "evidence": canonical_json_sha256(provisional),
+        },
+        "kind": ATTESTATION_KIND,
+        "attestations": ordered,
+    }
+
+
+def verify_attestation_manifest_value(value: object) -> dict:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"version", "identity", "kind", "attestations"}
+        or value["version"] != PROTOCOL_VERSION
+        or value["kind"] != ATTESTATION_KIND
+    ):
+        raise ValidationError("native IR attestation bundle has unsupported schema")
+    identity = value["identity"]
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"algorithm", "contract", "evidence"}
+        or identity["algorithm"] != "sha256"
+    ):
+        raise ValidationError("native IR attestation bundle identity is malformed")
+    contract_sha256 = checked_sha256(
+        identity["contract"], "native IR attestation contract identity"
+    )
+    evidence_sha256 = checked_sha256(
+        identity["evidence"], "native IR attestation evidence identity"
+    )
+    records = value["attestations"]
+    if not isinstance(records, list) or not records:
+        raise ValidationError("native IR attestation bundle must be nonempty")
+    case_ids: list[str] = []
+    for record in records:
+        verified = verify_attestation_record(record)
+        case_ids.append(verified["caseId"])
+    if case_ids != sorted(case_ids) or len(case_ids) != len(set(case_ids)):
+        raise ValidationError(
+            "native IR attestation bundle cases must be sorted and unique"
+        )
+    actual_contract_sha256 = canonical_json_sha256(
+        attestation_contract(records)
+    )
+    if contract_sha256 != actual_contract_sha256:
+        raise ValidationError(
+            "native IR attestation contract identity does not match its content"
+        )
+    provisional = {
+        "version": PROTOCOL_VERSION,
+        "kind": ATTESTATION_KIND,
+        "contractSha256": contract_sha256,
+        "attestations": records,
+    }
+    if evidence_sha256 != canonical_json_sha256(provisional):
+        raise ValidationError(
+            "native IR attestation evidence identity does not match its content"
+        )
+    return value
+
+
+def verify_attestation_manifest(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ValidationError(
+            f"cannot read native IR attestation bundle {path}: {error}"
+        ) from error
+    except json.JSONDecodeError as error:
+        raise ValidationError(
+            f"native IR attestation bundle is not valid JSON: {path}"
+        ) from error
+    return verify_attestation_manifest_value(value)
+
+
+def attestation_manifest_bytes(manifest: dict) -> bytes:
+    return (
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
 def attest_artifacts(
     descriptors: list[dict],
     out_dir: Path,
     selected: list[str] | None = None,
     verify_digest: bool = True,
     direct_path_evidence_by_id: dict[str, dict] | None = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[dict, list[str]]:
     descriptor_by_id = {item["caseId"]: item for item in descriptors}
-    selected_ids = selected or sorted(descriptor_by_id)
+    selected_ids = sorted(selected or descriptor_by_id)
     if len(selected_ids) != len(set(selected_ids)):
         raise ValidationError("native IR attestation cases must be unique")
     unknown = sorted(set(selected_ids) - set(descriptor_by_id))
@@ -739,6 +1117,7 @@ def attest_artifacts(
         }
         if direct_path is not None:
             record["directPath"] = direct_path
+        record = with_attestation_identity(record)
         case_dir.mkdir(parents=True, exist_ok=True)
         (case_dir / "attestation.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -787,11 +1166,16 @@ def attest_artifacts(
                 f"{case_id}: native IR SHA-256 {actual_digest} "
                 f"does not match {expected_digest}"
             )
-    (out_dir / "attestations.json").write_text(
-        json.dumps(records, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    manifest = build_attestation_manifest(records)
+    content = attestation_manifest_bytes(manifest)
+    (out_dir / "attestations.json").write_bytes(content)
+    retain_evidence_bundle(
+        out_dir,
+        manifest["identity"]["contract"],
+        manifest["identity"]["evidence"],
+        content,
     )
-    return records, failures
+    return manifest, failures
 
 
 def parser() -> argparse.ArgumentParser:
@@ -818,12 +1202,33 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="record and print actual digests without failing on mismatches",
     )
+    result.add_argument(
+        "--verify-attestations",
+        type=Path,
+        help="verify a retained attestation bundle without rerunning Lean",
+    )
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     root = Path(__file__).resolve().parent.parent
+    if args.verify_attestations is not None:
+        if args.cases or args.record:
+            raise ValidationError(
+                "--verify-attestations cannot be combined with --case or --record"
+            )
+        path = args.verify_attestations
+        if not path.is_absolute():
+            path = root / path
+        manifest = verify_attestation_manifest(path)
+        print(
+            "verified native IR attestations "
+            f"{manifest['identity']['evidence']}: "
+            f"contract {manifest['identity']['contract']}, "
+            f"cases {len(manifest['attestations'])}"
+        )
+        return 0
     out_dir = args.out_dir
     if not out_dir.is_absolute():
         out_dir = root / out_dir
@@ -897,19 +1302,25 @@ def main(argv: list[str] | None = None) -> int:
         lcnf_executable,
         root,
     )
-    records, failures = attest_artifacts(
+    attestation_manifest, failures = attest_artifacts(
         descriptors,
         out_dir,
         selected_ids,
         verify_digest=not args.record,
         direct_path_evidence_by_id=direct_path_evidence_by_id,
     )
+    records = attestation_manifest["attestations"]
     for record in records:
         status = "RECORDED" if args.record else ("PASS" if record["matches"] else "FAIL")
         print(
             f"{status} {record['caseId']} "
             f"native-ir sha256={record['artifactSha256']}"
         )
+    print(
+        "native IR attestation evidence "
+        f"{attestation_manifest['identity']['evidence']}: "
+        f"contract {attestation_manifest['identity']['contract']}"
+    )
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)

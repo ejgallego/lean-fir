@@ -309,7 +309,30 @@ failure. Both modes verify the case's required artifact fragments, so recording
 a new hash cannot silently bless an artifact that no longer supports its
 semantic claim. Normal mode writes per-case `attestation.json` and aggregate
 `attestations.json` evidence, retains the claim and its missing-fragment
-diagnostics, and fails when the final-impure artifact changes.
+diagnostics, and fails when the final-impure artifact changes. Each case has a
+canonical `identity.attestation`. The aggregate has distinct
+`identity.contract` and `identity.evidence` SHA-256 values: the contract covers
+the ordered oracle claims, roots, ownership obligations, and expected compiler
+artifact hashes, while the evidence additionally covers the observed
+inventories, count results, and direct-path traces. This makes contract drift
+distinguishable from a new observation of the same contract.
+
+The aggregate is retained append-only at
+`evidence/runs/<contract>/<evidence>.json`. It is relocatable and can be checked
+without Lean, the native compiler, or the interpreter:
+
+```sh
+python3 scripts/record_direct_native_ir.py \
+  --verify-attestations \
+  _build/validation-direct-native-ir/evidence/runs/<contract>/<evidence>.json
+```
+
+Offline verification checks every per-case identity, sorted unique case set,
+the reconstructed contract identity, and the complete evidence identity.
+Consumers can therefore accept the contract/evidence pair as a
+content-addressed native-oracle product and detect modifications to claims,
+normalized ownership evidence, or direct-path evidence without access to the
+producer's build tree.
 
 Each attestation also executes the direct native oracle and the explicit LCNF
 machine program. Its `directPath` evidence requires equal semantic

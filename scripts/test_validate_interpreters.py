@@ -7858,6 +7858,10 @@ class HarnessTests(unittest.TestCase):
 
 
 class DirectNativeIrTests(unittest.TestCase):
+    def attest_records(self, *args, **kwargs) -> tuple[list[dict], list[str]]:
+        manifest, failures = native_ir.attest_artifacts(*args, **kwargs)
+        return manifest["attestations"], failures
+
     def native_ir_descriptor(self, digest: str) -> dict:
         return {
             "version": 2,
@@ -8015,13 +8019,14 @@ class DirectNativeIrTests(unittest.TestCase):
             )
 
             direct_path = {"matches": True, "observationMatches": True}
-            records, failures = native_ir.attest_artifacts(
+            manifest, failures = native_ir.attest_artifacts(
                 [descriptor],
                 out_dir,
                 direct_path_evidence_by_id={
                     descriptor["caseId"]: direct_path
                 },
             )
+            records = manifest["attestations"]
             self.assertEqual(failures, [])
             self.assertTrue(records[0]["matches"])
             self.assertEqual(records[0]["directPath"], direct_path)
@@ -8039,8 +8044,114 @@ class DirectNativeIrTests(unittest.TestCase):
             self.assertEqual(records[0]["unsatisfiedOwnershipFactCounts"], [])
             self.assertTrue((case_dir / "attestation.json").is_file())
             self.assertTrue((out_dir / "attestations.json").is_file())
+            self.assertEqual(
+                native_ir.verify_attestation_manifest(
+                    out_dir / "attestations.json"
+                ),
+                manifest,
+            )
+            contract_sha256 = manifest["identity"]["contract"]
+            evidence_sha256 = manifest["identity"]["evidence"]
+            retained = (
+                out_dir
+                / "evidence"
+                / "runs"
+                / contract_sha256
+                / f"{evidence_sha256}.json"
+            )
+            self.assertEqual(
+                native_ir.verify_attestation_manifest(retained), manifest
+            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(
+                    native_ir.main(
+                        ["--verify-attestations", str(retained)]
+                    ),
+                    0,
+                )
+            self.assertIn(evidence_sha256, stdout.getvalue())
+            self.assertIn(contract_sha256, stdout.getvalue())
 
-            records, failures = native_ir.attest_artifacts(
+            second_record = dict(records[0])
+            second_record.pop("identity")
+            second_record["caseId"] = "z-native-ir-case"
+            second_record["entry"] = "Fir.Validation.zNativeIrCase"
+            second_record["dependencies"] = [
+                "Fir.Validation.zNativeIrHelper"
+            ]
+            second_record["declarations"] = [
+                second_record["entry"],
+                *second_record["dependencies"],
+            ]
+            second_record = native_ir.with_attestation_identity(second_record)
+            ordered_manifest = native_ir.build_attestation_manifest(
+                [second_record, records[0]]
+            )
+            self.assertEqual(
+                [
+                    record["caseId"]
+                    for record in ordered_manifest["attestations"]
+                ],
+                ["native-ir-case", "z-native-ir-case"],
+            )
+            self.assertEqual(
+                ordered_manifest,
+                native_ir.build_attestation_manifest(
+                    [records[0], second_record]
+                ),
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "repeats a case"
+            ):
+                native_ir.build_attestation_manifest(
+                    [records[0], records[0]]
+                )
+
+            tampered_evidence = json.loads(json.dumps(manifest))
+            tampered_evidence["attestations"][0]["ownershipInventory"][
+                "facts"
+            ].append("tampered")
+            with self.assertRaisesRegex(
+                core.ValidationError, "attestation identity does not match"
+            ):
+                native_ir.verify_attestation_manifest_value(tampered_evidence)
+
+            provisional_record = dict(tampered_evidence["attestations"][0])
+            provisional_record.pop("identity")
+            tampered_evidence["attestations"][0] = (
+                native_ir.with_attestation_identity(provisional_record)
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "ownership inventory derivatives disagree"
+            ):
+                native_ir.verify_attestation_manifest_value(tampered_evidence)
+
+            tampered_evidence = json.loads(json.dumps(manifest))
+            provisional_record = dict(tampered_evidence["attestations"][0])
+            provisional_record.pop("identity")
+            provisional_record["artifactBytes"] += 1
+            tampered_evidence["attestations"][0] = (
+                native_ir.with_attestation_identity(provisional_record)
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "evidence identity does not match"
+            ):
+                native_ir.verify_attestation_manifest_value(tampered_evidence)
+
+            tampered_contract = json.loads(json.dumps(manifest))
+            provisional_record = dict(tampered_contract["attestations"][0])
+            provisional_record.pop("identity")
+            provisional_record["claim"] = "a different ownership claim"
+            tampered_contract["attestations"][0] = (
+                native_ir.with_attestation_identity(provisional_record)
+            )
+            with self.assertRaisesRegex(
+                core.ValidationError, "contract identity does not match"
+            ):
+                native_ir.verify_attestation_manifest_value(tampered_contract)
+
+            records, failures = self.attest_records(
                 [descriptor],
                 out_dir,
                 direct_path_evidence_by_id={
@@ -8057,7 +8168,7 @@ class DirectNativeIrTests(unittest.TestCase):
                 **descriptor,
                 "requiredArtifactFragments": ["isShared owner"],
             }
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [missing_claim], out_dir, verify_digest=False
             )
             self.assertFalse(records[0]["claimMatches"])
@@ -8069,7 +8180,7 @@ class DirectNativeIrTests(unittest.TestCase):
                 **descriptor,
                 "requiredOwnershipFacts": ["isShared:owner"],
             }
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [missing_ownership], out_dir, verify_digest=False
             )
             self.assertFalse(records[0]["ownershipMatches"])
@@ -8088,7 +8199,7 @@ class DirectNativeIrTests(unittest.TestCase):
                     }
                 ],
             }
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [missing_ownership_count], out_dir, verify_digest=False
             )
             self.assertEqual(
@@ -8118,7 +8229,7 @@ class DirectNativeIrTests(unittest.TestCase):
                     }
                 ],
             }
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [wrong_ownership_count], out_dir, verify_digest=False
             )
             self.assertFalse(records[0]["ownershipFactCountsMatch"])
@@ -8140,14 +8251,14 @@ class DirectNativeIrTests(unittest.TestCase):
                 **descriptor,
                 "expectedArtifactSha256": "0" * 64,
             }
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [mismatch], out_dir, verify_digest=False
             )
             self.assertFalse(records[0]["artifactMatches"])
             self.assertTrue(records[0]["claimMatches"])
             self.assertEqual(failures, [])
 
-            records, failures = native_ir.attest_artifacts(
+            records, failures = self.attest_records(
                 [mismatch], out_dir
             )
             self.assertFalse(records[0]["matches"])
