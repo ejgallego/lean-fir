@@ -3397,6 +3397,20 @@ result path rather than an interprocedural callee path; lazy-cache and external
 call instances, followed by automatic syntax-directed certificate assembly,
 remain. No FIR semantic contract or executable ABI changed.
 
+W6.6dw closes partial application and closure underapplication. One concrete
+allocation theorem now packages the partial-application host return, extended
+closure witness, related semantic result, clear failure channel, and
+fresh-prefix retained-header transport. Direct `.pap` lets consume that
+package as an ordinary allocating result step. For a source closure
+application, the selected underapplication candidate feeds its projected
+captures and explicit arguments to the same package; the existing matcher
+chain, nested branch resumption, dispatch-local reload, and enclosing
+destination write then produce a capacity-aware call step. The recursive
+selected-dispatch builder is intentionally agnostic between saturated
+declaration calls and underapplication allocation. Lazy-cache and external
+call instances, followed by automatic syntax-directed certificate assembly,
+remain. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

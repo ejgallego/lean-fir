@@ -46,6 +46,37 @@ structure CapacityPreservingSuccessfulDeclaration
     HeaderCapacityTransport initial.host.runtime.heap
       afterCall.host.runtime.heap initialWitness
 
+/--
+Exact concrete partial-application execution plus the two hereditary frame
+facts needed by a caller.
+
+This is the allocating-result analogue of
+`CapacityPreservingSuccessfulDeclaration`: it packages one concrete host
+operation rather than a generated Wasm declaration.
+-/
+structure CapacityPreservingPartialApplication
+    (initial nextStore : Wasm.Store Host)
+    (beforeWitness afterWitness : RefinementWitness)
+    (sourceRuntime nextRuntime : RuntimeState)
+    (function : Lean.Name) (arity fixed : Nat)
+    (fieldKinds : Array AbiKind) (resultKind : AbiKind)
+    (physicalArgs : List Wasm.Value)
+    (sourceValue : Value) (word : Word32) : Prop where
+  operation :
+    partialApplyStep function arity fixed fieldKinds resultKind initial
+        physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore
+  runtimeRelated :
+    ConcreteRuntimeRel nextStore.host.runtime afterWitness nextRuntime
+  failureClear : nextStore.host.failure? = none
+  valueRelated :
+    PhysicalValueRel afterWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue
+  witnessTransport : WitnessTransport beforeWitness afterWitness
+  capacityTransport :
+    HeaderCapacityTransport initial.host.runtime.heap
+      nextStore.host.runtime.heap beforeWitness
+
 /-- A complete capacity-aware body certificate supplies the two hereditary
 frame fields required by callers; no separate per-declaration heap proof is
 needed. -/
@@ -80,6 +111,112 @@ theorem CapacityPreservingSuccessfulDeclaration.ofSimulation
       resultWitness parameters resultKind resultValue physical := by
   have frame := simulation.frameTransport
   exact ⟨successful, frame.1, frame.2⟩
+
+/-- Construct the partial-application package from the concrete closure
+allocator refinement. The returned witness and semantic location are exactly
+the fresh bindings selected by that allocation. -/
+theorem CapacityPreservingPartialApplication.ofRefines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {captures : List LaneValue}
+    {semantic : Array Value} {heap : MemoryState} {address : Word32}
+    {targetId descriptorId : UInt32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (resultKindSupported : resultKind = .object ∨ resultKind = .tobject)
+    (fixedArgs : physicalArgs.length = fixed)
+    (decoded : decodePhysicalLanes 0 fieldKinds.toList physicalArgs =
+      .ok captures)
+    (count : fieldKinds.size = captures.toArray.size)
+    (semanticCount : semantic.size = captures.toArray.size)
+    (capturesLtArity : captures.toArray.size < arity)
+    (targetIdEq : closureTargetId initial.host.closureDispatch function =
+      .ok targetId)
+    (targetLookup :
+      initial.host.closureDispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId initial.host.closureDescriptors
+      fieldKinds = .ok descriptorId)
+    (descriptorLookup :
+      initial.host.closureDescriptors.lookup? descriptorId = some fieldKinds)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq : witness.closureDescriptors =
+      initial.host.closureDescriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.toArray.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (allocated : allocateClosure initial.host.runtime.heap
+      initial.host.closureDispatch initial.host.closureDescriptors function
+      arity fieldKinds captures.toArray = .ok (heap, address)) :
+    CapacityPreservingPartialApplication initial (replaceHeap initial heap)
+      witness
+      (witness.bindClosure runtime.nextLocation address function arity
+        fieldKinds)
+      runtime (semanticClosureResult runtime function arity semantic)
+      function arity fixed fieldKinds resultKind physicalArgs
+      (.object (.heap runtime.nextLocation)) address := by
+  obtain ⟨extension, operation, nextRuntimeRelated, failureClear,
+      valueRelated, capacityTransport, _⟩ :=
+    partialApplyStep_of_capacityPreservingRefines runtimeRelated
+      resultKindSupported fixedArgs decoded count semanticCount
+      capturesLtArity targetIdEq targetLookup descriptorIdEq descriptorLookup
+      dispatchEq descriptorsEq arityFits fixedFits captureTyped captureRelated
+      allocated
+  exact ⟨operation, nextRuntimeRelated, failureClear, valueRelated,
+    WitnessTransport.ofExtension extension, by
+      simpa [replaceHeap, clearFailure] using capacityTransport⟩
+
+/-- Direct `.pap` result adapter. The ordinary source/target step supplies
+execution and binding; the partial-application package supplies the two frame
+facts required to erase the destination's stale capacity evidence. -/
+theorem ReuseCapacityLetStepSimulates.ofPartialApplication
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {word : Word32}
+    (initialRelated :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some nextLocals)
+    (partialResult :
+      CapacityPreservingPartialApplication targetStore nextStore beforeWitness
+        afterWitness sourceRuntime nextRuntime function arity fixed fieldKinds
+        resultKind physicalArgs sourceValue word) :
+    ReuseCapacityLetStepSimulates facts
+      (eraseReuseCapacityFact facts decl.fvarId) context sourceFunction module
+      hostEnv decl targetValue sourceRuntime nextRuntime sourceEnv sourceValue
+      targetStore nextStore targetLocals nextLocals resultIndex beforeWitness
+      afterWitness :=
+  ReuseCapacityResultStep.ofErase step initialRelated step.2.2.1 resultFound
+    (localUpdate_of_set? targetSet) partialResult.witnessTransport
+    partialResult.capacityTransport
 
 /-- Repeating the same checked local write is an identity. Closure dispatch
 stores the selected result inside the candidate body and then reloads it for
@@ -326,6 +463,119 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
         initialRelated.stateRelated.clearFailure beforeNonmatching
         selectedMatches selectedBody
 
+/--
+The underapplication sibling of `ofSaturatedClosureDeclaration`.
+
+The selected candidate allocates a fresh partial-application closure through
+the concrete host instead of entering a generated declaration. Its
+`CapacityPreservingPartialApplication` package supplies the exact final
+runtime/value relation and both hereditary frame transports; the surrounding
+matcher chain and result-local protocol are unchanged.
+-/
+theorem ReuseCapacityCallLetStepSimulates.ofUnderappliedClosure
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env} {sourceValue : Value}
+    {initial nextStore : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex closureIndex partialApplyIndex : Nat}
+    {closureId : FVarId} {closureAddress : Word32}
+    {beforeWitness afterWitness : RefinementWitness}
+    {argumentTarget : Wasm.Program}
+    {physicalArgs : List Wasm.Value}
+    {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {word : Word32} {imp : Wasm.ImportDecl}
+    (before : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex closureAddress))
+    (selected :
+      ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex closureAddress)
+    (suffix : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex closureAddress))
+    (sourceStep :
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue)
+    (initialRelated :
+      ReuseCapacityStateRelated facts callerFunction sourceRuntime sourceEnv
+        initial locals beforeWitness)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hClosure :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat closureAddress.value)))
+    (hSat : hostEnv.Satisfies module spec)
+    (beforeNonmatching :
+      ∀ candidate, candidate ∈ before →
+        candidate.matched = (0 : UInt32))
+    (selectedMatches : (selected.matched != 0) = true)
+    (assembled :
+      ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+        initial locals)
+    (selectedBodyEq :
+      selected.targetBody =
+        argumentTarget ++
+          [.call partialApplyIndex, .localSet resultIndex])
+    (hImp : module.imports[partialApplyIndex]? = some imp)
+    (hi : partialApplyIndex < module.imports.length)
+    (hContract : spec.contracts[partialApplyIndex]? =
+      some (partialApplyContract function arity fixed fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (partialResult :
+      CapacityPreservingPartialApplication initial nextStore beforeWitness
+        afterWitness sourceRuntime nextRuntime function arity fixed fieldKinds
+        resultKind physicalArgs sourceValue word)
+    (targetSet :
+      locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some updated) :
+    ReuseCapacityCallLetStepSimulates facts
+      (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+      hostEnv sourceExternals decl continuation
+      (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+        [.localGet resultIndex])
+      sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore locals
+      updated resultIndex beforeWitness afterWitness := by
+  refine ReuseCapacityCallLetStepSimulates.ofErase initialRelated ?_
+    resultFound (localUpdate_of_set? targetSet) partialResult.witnessTransport
+    partialResult.capacityTransport
+  refine ⟨sourceStep, initialRelated.stateRelated, ?_, ?_⟩
+  · exact initialRelated.stateRelated.bindAfterTransport
+      partialResult.witnessTransport partialResult.runtimeRelated
+      partialResult.failureClear resultFound resultKindAt
+      partialResult.valueRelated targetSet
+  · intro rest Q tail continued
+    have selectedBody :
+        Wasm.wp module selected.targetBody
+          (closureDispatchSelectedPost module hostEnv tail before.length
+            (.localGet resultIndex :: .localSet resultIndex :: rest) Q)
+          initial { locals with values := tail } hostEnv := by
+      rw [selectedBodyEq]
+      apply wp_partialApplyBody_of_assembly assembled hImp hSat hi hContract
+        hParams hResults partialResult.operation targetSet
+      apply (Wasm.wp_nil).2
+      apply closureDispatchSelectedPost_fallthrough before.length
+      exact wp_closureDispatchResult targetSet continued
+    simpa [List.append_assoc] using
+      wp_compileClosureDispatch_of_selected before selected suffix
+        (.localSet resultIndex :: rest) Q hClosure hSat
+        initialRelated.stateRelated.clearFailure beforeNonmatching
+        selectedMatches selectedBody
+
 /-- Recursive certificate node for the same direct declaration-call boundary.
 The continuation starts under the validator's ordinary-result erasure
 transfer, while the callee frame theorem preserves every differently named
@@ -407,7 +657,7 @@ theorem ReuseCapacityCodeSimulation.callLetOfDirectDeclaration
 /-- Insert an already-proved saturated closure call into the recursive
 certificate while deriving its exact numeric dispatch adaptation from the
 compiler candidate list. -/
-theorem ReuseCapacityCodeSimulation.callLetOfSaturatedClosureDispatch
+theorem ReuseCapacityCodeSimulation.callLetOfSelectedClosureDispatch
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}

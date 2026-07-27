@@ -251,6 +251,94 @@ theorem HeaderCapacityTransport.allocateClosure
       captureTyped allocated)
 
 /--
+Partial application is a complete capacity-preserving allocation boundary.
+
+The existing concrete refinement theorem supplies the new closure witness,
+semantic runtime, result relation, and executable host step. The same checked
+allocation supplies the fresh-prefix theorem used to retain every old
+capacity fact. This package is shared by direct `.pap` lets and selected
+underapplication candidates in closure dispatch.
+-/
+theorem partialApplyStep_of_capacityPreservingRefines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {function : Lean.Name} {arity fixed : Nat}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {captures : List LaneValue}
+    {semantic : Array Value} {heap : MemoryState} {address : Word32}
+    {targetId descriptorId : UInt32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (resultKindSupported : resultKind = .object ∨ resultKind = .tobject)
+    (fixedArgs : physicalArgs.length = fixed)
+    (decoded : decodePhysicalLanes 0 fieldKinds.toList physicalArgs =
+      .ok captures)
+    (count : fieldKinds.size = captures.toArray.size)
+    (semanticCount : semantic.size = captures.toArray.size)
+    (capturesLtArity : captures.toArray.size < arity)
+    (targetIdEq : closureTargetId initial.host.closureDispatch function =
+      .ok targetId)
+    (targetLookup :
+      initial.host.closureDispatch.lookup? targetId = some function)
+    (descriptorIdEq : closureDescriptorId initial.host.closureDescriptors
+      fieldKinds = .ok descriptorId)
+    (descriptorLookup :
+      initial.host.closureDescriptors.lookup? descriptorId = some fieldKinds)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq : witness.closureDescriptors =
+      initial.host.closureDescriptors)
+    (arityFits : arity < UInt32.size)
+    (fixedFits : captures.toArray.size < UInt32.size)
+    (captureTyped : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      lane.valueType = kind.valueType)
+    (captureRelated : ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue)
+        (value : Value),
+      fieldKinds[index]? = some kind →
+      captures.toArray[index]? = some lane →
+      semantic[index]? = some value →
+      ValueRel witness kind lane value)
+    (allocated : allocateClosure initial.host.runtime.heap
+      initial.host.closureDispatch initial.host.closureDescriptors function
+      arity fieldKinds captures.toArray = .ok (heap, address)) :
+    let nextWitness := witness.bindClosure runtime.nextLocation address function
+      arity fieldKinds
+    witness.Extends nextWitness ∧
+      partialApplyStep function arity fixed fieldKinds resultKind initial
+          physicalArgs =
+        .Return [.i32 (UInt32.ofNat address.value)]
+          (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (semanticClosureResult runtime function arity semantic) ∧
+      (replaceHeap initial heap).host.failure? = none ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat address.value))
+        (.object (.heap runtime.nextLocation)) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      alloc runtime (.closure function arity semantic) =
+        (semanticClosureResult runtime function arity semantic,
+          .heap runtime.nextLocation) := by
+  dsimp only
+  obtain ⟨extension, operation, nextRuntimeRelated, valueRelated,
+      semanticStep⟩ :=
+    partialApplyStep_of_refines runtimeRelated resultKindSupported fixedArgs
+      decoded count semanticCount capturesLtArity targetIdEq targetLookup
+      descriptorIdEq descriptorLookup dispatchEq descriptorsEq arityFits
+      fixedFits captureTyped captureRelated allocated
+  have failureClear :
+      (replaceHeap initial heap).host.failure? = none := by
+    simp [replaceHeap, clearFailure]
+  have capacityTransport :
+      HeaderCapacityTransport initial.host.runtime.heap heap witness :=
+    HeaderCapacityTransport.allocateClosure initial.host.runtime.heap heap
+      witness initial.host.closureDispatch initial.host.closureDescriptors
+      function arity fieldKinds captures.toArray address targetId descriptorId
+      runtimeRelated.heap.frontier count capturesLtArity targetIdEq
+      descriptorIdEq arityFits fixedFits captureTyped allocated
+  exact ⟨extension, operation, nextRuntimeRelated, failureClear, valueRelated,
+    capacityTransport, semanticStep⟩
+
+/--
 Dynamic meaning of the validator's reset/reuse capacity evidence.
 
 The relation deliberately covers both sides of `reset`: constructor results
