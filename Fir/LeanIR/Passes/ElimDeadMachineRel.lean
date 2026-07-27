@@ -6502,6 +6502,62 @@ theorem coreStep_deletedReset_of_ready
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
 
+/-- Hereditary deleted-reset rule.  The explicit ownership frame proves that
+the source-only reference-count/update/release transition preserves every
+published root while exact compiler provenance survives in the continuation. -/
+theorem coreStep_deletedReset_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedResetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      count object) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .reset count object }
+    ∃ nextRuntime token,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId token
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases ready with
+    ⟨objectValue, token, nextRuntime, objectRead, effect, frame⟩
+  have evaluated : evalLetValue sourceState {
+      fvarId
+      binderName
+      type
+      value := .reset count object
+    } = .ok (nextRuntime, .value token) := by
+    simp only [evalLetValue, objectRead, Bind.bind, Except.bind]
+    rw [effect]
+    rfl
+  have next := runtime.frameLeft frame
+  exact ⟨nextRuntime, token,
+    coreStep_deletedLet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env absent
+      evaluated next⟩
+
 /-- Unified operational certificate for every locally stutterable deleted
 let-value shape.  `runtimeNeutral` covers successful erased/projection/unbox/
 `isShared` reads (and other unchanged-runtime values); the remaining
@@ -13416,6 +13472,301 @@ theorem match_retainedResetLetStep
               exact ⟨targetExpected,
                 match_internalCoreSteps sourceTransition targetTransition
                   afterRelated (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary retained-reset matcher.  Related covered constructor objects
+undergo paired ownership transitions and bind related reuse tokens while exact
+compiler provenance is preserved in the two continuations. -/
+theorem match_retainedResetLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .reset count object
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .reset count object
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceObjectRead :
+    lookupValue sourceState.env object = sourceObjectResult
+  cases sourceObjectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceObjectRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceObject =>
+      have sourceObjectLookup :=
+        lookupValue_eq_ok_iff.mp sourceObjectRead
+      have objects := env object objectMember
+      rw [sourceObjectLookup] at objects
+      generalize targetObjectLookup :
+        lookup targetState.env object = targetObjectOption at objects
+      cases objects with
+      | some values =>
+          rename_i targetObject
+          have targetObjectRead :
+              lookupValue targetState.env object = .ok targetObject :=
+            lookupValue_eq_ok_iff.mpr targetObjectLookup
+          generalize sourceResetEq :
+            reset sourceState.runtime count sourceObject = sourceResetResult
+          cases sourceResetResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceObjectRead, sourceResetEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourcePair =>
+              obtain ⟨sourceRuntime, sourceToken⟩ := sourcePair
+              have sourceObjectRoot :
+                  sourceObject ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+              rcases runtime.resetBoth_of_related sourceObjectRoot values
+                  sourceResetEq with
+                ⟨targetRuntime, targetToken, targetResetEq, tokens,
+                  resetRuntime⟩
+              let sourceExpected := {
+                sourceState with
+                runtime := sourceRuntime
+                env := bind sourceState.env fvarId sourceToken
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                runtime := targetRuntime
+                env := bind targetState.env fvarId targetToken
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceObjectRead, sourceResetEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetObjectRead, targetResetEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have afterRelated :
+                  BinderReadyReachableMachineRelated fuel rho
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_binderReadyReachableRelated
+                  sourceState targetState sourceRuntime targetRuntime
+                  programs frames continuation joins env tokens resetRuntime
+              exact ⟨targetExpected,
+                match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated
+                  (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary deleted-reset matcher.  Dynamic readiness supplies either a
+runtime-neutral token result or the ownership frame for a source-only
+reference-count/update/release transition. -/
+theorem match_deletedResetLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .reset count object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact match_deletedRuntimeNeutralLetStep_binderReady
+        sourceState targetState programs frames continuation joins env absent
+        runtime evaluated step
+  | reset fvarId binderName type count object ready =>
+      rcases coreStep_deletedReset_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime ready with
+        ⟨nextRuntime, token, transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+      exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Exact retained reset provenance supplies the hereditary continuation and
+promotes the compiler-collected object local to the ambient live set. -/
+theorem ExactShadowCodeBinderReady.match_retainedResetLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel count : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.reset count object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .reset count object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reset count object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedResetLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime step
+
+/-- Exact deleted reset provenance supplies binder absence and the hereditary
+continuation; dynamic readiness supplies the ownership frame for any
+source-only runtime transition. -/
+theorem ExactShadowCodeBinderReady.match_deletedResetLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel count : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.reset count object :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .reset count object
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .reset count object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedResetLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
 
 /-- Complete graph-level matcher for reset lets.  Retained resets use the
 paired runtime simulation above; deleted resets retain their explicit
