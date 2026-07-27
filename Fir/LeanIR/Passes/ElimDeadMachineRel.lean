@@ -4256,6 +4256,51 @@ theorem coreStep_deletedCtor_of_ready
     coreStep_deletedLet_reachableRelated sourceState targetState
       programs frames continuation joins env absent evaluated next⟩
 
+/-- Hereditary form of deleted-constructor stuttering.  Constructor
+allocation may add one source-only garbage cell, while every compiler-derived
+code relation in the live machine remains exact. -/
+theorem coreStep_deletedCtor_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedCtorReadyAt sourceState info arguments) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .ctor info arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  rcases ready with ⟨values, argumentsRead, arity⟩
+  rcases runtime.evalLetValueCtorLeftGarbage
+      (fvarId := fvarId) (binderName := binderName) (type := type)
+      argumentsRead arity with
+    ⟨nextRuntime, value, evaluated, next⟩
+  exact ⟨nextRuntime, value,
+    coreStep_deletedLet_binderReadyReachableRelated sourceState targetState
+      programs frames continuation joins env absent evaluated next⟩
+
 /-- Operational well-formedness needed to execute a deleted partial
 application: its fixed arguments resolve, its declaration exists, and the
 application is genuinely partial. -/
@@ -8839,6 +8884,362 @@ theorem match_retainedCtorLetStep
             | ok result =>
                 simp [evalLetValue, sourceArgumentsEq, allocCtor, arity,
                   Bind.bind, Except.bind] at evaluatedEq
+
+/-- Hereditary retained-constructor matcher.  Related live arguments either
+produce the same immediate nullary constructor or paired heap allocations;
+the latter extend the hidden address renaming and preserve exact compiler
+provenance throughout the resulting machines. -/
+theorem match_retainedCtorLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .ctor info arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .ctor info arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceArgumentsEq :
+    evalArgs sourceState.env arguments = sourceEvaluation
+  cases sourceEvaluation with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceArgumentsEq, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceArguments =>
+      have evaluated := evalArgs_relOn env covered
+      rw [sourceArgumentsEq] at evaluated
+      generalize targetArgumentsEq :
+        evalArgs targetState.env arguments = targetEvaluation at evaluated
+      cases evaluated with
+      | ok argumentsRelated =>
+          rename_i targetArguments
+          by_cases arity : sourceArguments.size = info.size
+          · have publishedArguments :=
+              runtime.publishEvalArgs covered sourceArgumentsEq
+                targetArgumentsEq argumentsRelated
+            have tail : ListRel (ValueRel rho)
+                (envRootsOn used sourceState.env ++ sourceFrameRoots)
+                (envRootsOn used targetState.env ++ targetFrameRoots) :=
+              listRel_append (envRootsOn_related env) frames.roots
+            rcases publishedArguments.allocCtorBoth argumentsRelated tail
+                info arity with
+              ⟨larger, sourceRuntime, sourceValue, targetRuntime, targetValue,
+                extension, sourceAllocation, targetAllocation, values,
+                allocatedRuntime⟩
+            let sourceExpected := {
+              sourceState with
+              runtime := sourceRuntime
+              env := bind sourceState.env fvarId sourceValue
+              control := .code sourceContinuation }
+            let targetExpected := {
+              targetState with
+              runtime := targetRuntime
+              env := bind targetState.env fvarId targetValue
+              control := .code targetContinuation }
+            have sourceTransition :
+                coreStep sourceCurrent = .next sourceExpected := by
+              simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                sourceArgumentsEq, sourceAllocation, Bind.bind, Except.bind,
+                Pure.pure, Except.pure]
+            have targetTransition :
+                coreStep targetCurrent = .next targetExpected := by
+              simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                targetArgumentsEq, targetAllocation, Bind.bind, Except.bind,
+                Pure.pure, Except.pure]
+            have afterRelated :
+                BinderReadyReachableMachineRelated fuel larger
+                  sourceExpected targetExpected := by
+              exact retainedLetValue_binderReadyReachableRelated
+                sourceState targetState sourceRuntime targetRuntime programs
+                (frames.monoRenaming extension) continuation joins
+                (envRelOn_monoRenaming extension env) values allocatedRuntime
+            exact ⟨larger, targetExpected, extension,
+              match_internalCoreSteps_binderReady
+                sourceTransition targetTransition afterRelated
+                (by simpa [sourceCurrent] using step)⟩
+          · generalize evaluatedEq :
+              evalLetValue sourceState {
+                fvarId, binderName, type, value := .ctor info arguments
+              } = evaluation
+            cases evaluation with
+            | error fault =>
+                have currentEvaluated :
+                    evalLetValue sourceCurrent {
+                      fvarId, binderName, type,
+                      value := .ctor info arguments
+                    } = .error fault := by
+                  simpa [sourceCurrent, evalLetValue] using evaluatedEq
+                have done : coreStep sourceCurrent =
+                    .done (observe sourceCurrent (.fault fault)) := by
+                  simp [sourceCurrent, coreStep, currentEvaluated, fail]
+                exact (noStep done).elim
+            | ok result =>
+                simp [evalLetValue, sourceArgumentsEq, allocCtor, arity,
+                  Bind.bind, Except.bind] at evaluatedEq
+
+/-- A deleted-constructor certificate selected by an exact compiler view
+preserves hereditary provenance whether it is discharged by generic
+runtime-neutrality or by a source-only garbage allocation. -/
+theorem coreStep_deletedCtor_of_letReady_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .ctor info arguments }) :
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact ⟨sourceState.runtime, value,
+        coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated runtime⟩
+  | constructor fvarId binderName type info arguments ready =>
+      exact coreStep_deletedCtor_of_ready_binderReady
+        sourceState targetState programs frames continuation joins env absent
+        runtime ready
+
+/-- Hereditary deleted-constructor matcher.  The source performs its
+certified value-producing step, the target stutters at the selected
+continuation, and exact compiler provenance remains available afterwards. -/
+theorem match_deletedCtorLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .ctor info arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_deletedCtor_of_letReady_binderReady
+      sourceState targetState programs frames continuation joins env absent
+      runtime ready with
+    ⟨nextRuntime, value, transition, afterRelated⟩
+  rcases match_sourceOnlyCoreStep_binderReady
+      transition afterRelated step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Exact retained-constructor provenance supplies the hereditary
+continuation graph, while its compiler liveness bound covers every
+constructor argument used by the paired allocation. -/
+theorem ExactShadowCodeBinderReady.match_retainedCtorLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.ctor info arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .ctor info arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedCtorLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime step
+
+/-- Exact deleted-constructor provenance supplies binder absence and the
+hereditary continuation graph; dynamic readiness justifies its source-only
+value-producing step. -/
+theorem ExactShadowCodeBinderReady.match_deletedCtorLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.ctor info arguments :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .ctor info arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .ctor info arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedCtorLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
 
 /-- Complete graph-level matcher for constructor lets.  The retained branch
 may extend the hidden address renaming; the deleted branch uses its explicit
