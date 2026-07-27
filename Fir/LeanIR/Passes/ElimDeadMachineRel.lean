@@ -7907,6 +7907,27 @@ theorem reachablyReadyCompilerLaws :
       (sourcePath.trans sourceTail) (targetPath.trans targetTail)
       futureStructural
 
+/-- Hereditary exact-code readiness is itself a compiler invariant.  Current
+operational readiness follows by forgetting exact provenance, while stability
+is finite-path composition: every future of the destination pair was already
+a future of the source pair. -/
+theorem binderReadyReachablyCodeReadyCompilerLaws :
+    ReachableCompilerInvariantLaws externals fuel
+      (BinderReadyReachablyCodeReady externals fuel) where
+  ready := by
+    intro source target structural hereditary
+    exact hereditary.reachablyCodeReady.reachablyReady source target
+      (NonLockstep.reaches_refl source)
+      (NonLockstep.reaches_refl target) structural
+  stable := by
+    intro sourceBefore targetBefore sourceAfter targetAfter hereditary
+      beforeStructural sourcePath targetPath afterStructural
+    intro sourceFuture targetFuture sourceTail targetTail futureStructural
+      sourceCode sourceControl
+    exact hereditary sourceFuture targetFuture
+      (sourcePath.trans sourceTail) (targetPath.trans targetTail)
+      futureStructural sourceCode sourceControl
+
 /-- Laws expected from compiler well-formedness and ownership analysis.  In
 particular, `ready` makes the nullary-FAP discrepancy an explicit unprovable
 obligation rather than an assumption inside the operational proof. -/
@@ -23007,12 +23028,9 @@ theorem binderReadyProgram_loweringCorrect_reachablyCodeReady
     LoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals) source target entries := by
-  apply reachableProgram_loweringCorrect_reachablyCodeReady
-    (forgetBinderReadyShadowProgram programs) compatible
-  intro entry member sourceArguments targetArguments arguments
-  exact
-    (initialReady entry member sourceArguments targetArguments
-      arguments).reachablyCodeReady
+  exact reachableProgram_loweringCorrect_of_compiler
+    (forgetBinderReadyShadowProgram programs)
+    binderReadyReachablyCodeReadyCompilerLaws compatible initialReady
 
 /-- Exact declaration provenance is sufficient for the same endpoint; its
 forgetful projection supplies the monotone runtime graph. -/
