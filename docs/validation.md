@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 97 cases. Required oracle edges must share one matrix
+edges over at least 99 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,12 +469,12 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 97 source cases are shared by the source-LCNF and V8
-tiers, the three direct cases are unique to the direct tier, and
+current baseline, the 99 source cases are shared by the source-LCNF and V8
+tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 16 static forms, 16 executed forms, and all nine interpreter
+contributes 13 static forms, 13 executed forms, and all nine interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -1309,7 +1309,11 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 97 cases.  Beyond literals,
+The compiler-generated corpus currently has 99 cases. Two direct identity cases
+pin the 64-bit tagged-`Nat` boundary: one round-trips the maximum immediate
+`2^63 - 1`, while the other round-trips the first heap natural `2^63`.
+Unlike the existing boundary-crossing `Nat.add` case, neither can hide ABI
+encoding or decoding behind an external implementation. Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
@@ -1321,9 +1325,10 @@ projections force the same compiler-produced constructor through object,
 `USize`, and scalar storage paths, including absolute fixed-slot `uset`/`uproj`
 coordinates after the three-object prefix.
 
-The direct-LCNF corpus currently has one deliberately non-compiler-generated
-case for the interpreter apply frame. Its distinct provenance suite and plan
-prevent machine-only evidence from inflating source-compiler coverage.
+The direct-LCNF corpus currently has nine deliberately
+non-compiler-generated cases for interpreter application and reset/reuse
+machine paths. Their distinct provenance suite and plan prevent machine-only
+evidence from inflating source-compiler coverage.
 
 Four adjacent-`USize` mutation fixtures use a two-object, two-`USize`,
 one-scalar layout. Unique paths update absolute slots 2 and 3 while returning

@@ -1067,6 +1067,28 @@ def cases : Array Case := #[
     tags := #["quick", "borrowed"]
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"] },
+  { id := "nat-immediate-max-roundtrip"
+    entry := ``Source.idNat
+    args := #[.nat 9223372036854775807]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.idNat 9223372036854775807)
+    tags := #["stress", "nat", "roundtrip", "boundary", "immediate"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip the maximum tagged immediate natural without an external" },
+  { id := "nat-heap-boundary-roundtrip"
+    entry := ``Source.idNat
+    args := #[.nat 9223372036854775808]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.idNat 9223372036854775808)
+    tags := #["stress", "nat", "roundtrip", "boundary", "heap"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip the first heap natural without an external" },
   { id := "branch-nat"
     entry := ``Source.branchNat
     args := #[.bool true]
