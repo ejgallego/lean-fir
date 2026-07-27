@@ -1089,6 +1089,18 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance
       "Round-trip the first heap natural without an external" },
+  { id := "nat-multi-limb-roundtrip"
+    entry := ``Source.idNat
+    args := #[.nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat]
+    resultSchema := .nat
+    native := fun _ =>
+      .nat (Source.idNat 340282366920938463463374607431768211473)
+    tags := #["stress", "nat", "roundtrip", "boundary", "heap", "multi-limb"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip 2^128 + 17 to exercise a multi-limb natural without an external" },
   { id := "branch-nat"
     entry := ``Source.branchNat
     args := #[.bool true]
@@ -1247,6 +1259,29 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := leanCompileProvenance "tests/compile/str.lean"
       "Unicode fixture adapted to a pure source-level identity" },
+  { id := "empty-string-roundtrip"
+    entry := ``Source.idString
+    args := #[.string ""]
+    argSchemas := #[.string]
+    resultSchema := .string
+    native := fun _ => .string (Source.idString "")
+    tags := #["stress", "string", "empty", "roundtrip", "boundary"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip the empty String heap representation without an external" },
+  { id := "nul-nonbmp-string-roundtrip"
+    entry := ``Source.idString
+    args := #[.string "\u0000é😀"]
+    argSchemas := #[.string]
+    resultSchema := .string
+    native := fun _ => .string (Source.idString "\u0000é😀")
+    tags := #["stress", "string", "unicode", "nul", "non-bmp", "roundtrip",
+      "boundary"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip embedded NUL and non-BMP UTF-8 without an external" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8
@@ -2320,6 +2355,17 @@ def cases : Array Case := #[
     requiredLcnfForms := #["inc", "return"]
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance "Runner-supplied packed ByteArray ABI round-trip" },
+  { id := "empty-byte-array-roundtrip"
+    entry := ``Source.idByteArray
+    args := #[.bytes #[]]
+    argSchemas := #[.bytes]
+    resultSchema := .bytes
+    native := fun _ => byteArrayDatum (Source.idByteArray ⟨#[]⟩)
+    tags := #["stress", "bytes", "packed-layout", "empty", "roundtrip", "boundary"]
+    requiredLcnfForms := #["inc", "return"]
+    requiredExecutedLcnfForms := #["inc", "return"]
+    provenance := firProvenance
+      "Round-trip the empty packed ByteArray representation without an external" },
   { id := "byte-array-size"
     entry := ``Source.byteArraySize
     args := #[.bytes #[0, 127, 128, 255]]

@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 99 cases. Required oracle edges must share one matrix
+edges over at least 103 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,7 +469,7 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 99 source cases are shared by the source-LCNF and V8
+current baseline, the 103 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1309,11 +1309,13 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 99 cases. Two direct identity cases
-pin the 64-bit tagged-`Nat` boundary: one round-trips the maximum immediate
-`2^63 - 1`, while the other round-trips the first heap natural `2^63`.
-Unlike the existing boundary-crossing `Nat.add` case, neither can hide ABI
-encoding or decoding behind an external implementation. Beyond literals,
+The compiler-generated corpus currently has 103 cases. Direct identity cases
+pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
+same check to the multi-limb value `2^128 + 17`. Empty `String` and `ByteArray`
+values exercise zero-length heap representations, while a string containing an
+embedded NUL, a multibyte BMP character, and a non-BMP character exercises the
+full JSON/native/interpreter text path. None can hide ABI encoding or decoding
+behind an external implementation. Beyond literals,
 branches, calls, closures, recursion, and ownership instructions, it covers a
 heap-allocated natural above the tagged range, recursive structured-value
 round trips, Unicode strings, maximum-width `UInt64`, portable `USize`,
