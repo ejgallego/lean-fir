@@ -9014,20 +9014,24 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
       rw [sourceControl] at codeEq
       cases codeEq
 
-/-- Source-side dynamic contract at one active code state.  For every exact
-compiler residual compatible with the active source code, it supplies only
-the runtime/ownership component missing from hereditary structural
-provenance.  Saved-frame roots are explicit because deleted writes, reset,
-and concrete reuse must be unreachable from the whole live continuation. -/
+/-- Source-side dynamic contract at one active code state.  For every
+proof-relevant exact compiler residual embedded in hereditary structural
+provenance, it supplies runtime/ownership readiness for that same exact view.
+Saved-frame roots are explicit because deleted writes, reset, and concrete
+reuse must be unreachable from the whole live continuation. -/
 def SourceRuntimeOwnershipReadyAt
     (fuel : Nat) (state : MachineState) (sourceFrameRoots : List Value)
     (sourceCode : LCNF.Code .impure) : Prop :=
-  ∀ {used targetCode},
-    BinderReadyShadowCodeGraph fuel used sourceCode targetCode →
-      BinderReadyShadowCodeReadyAt fuel used state
+  ∀ {used remaining final targetCode},
+    remaining ≤ fuel →
+    ∀ (exact :
+        ExactShadowCodeGraph remaining final sourceCode targetCode),
+      UsedSubset final used →
+      ExactShadowCodeBinderReady used exact.view →
+      ExactShadowCodeRuntimeReadyAt state
         (runtimeRoots state.runtime
           (envRootsOn used state.env ++ sourceFrameRoots))
-        sourceCode targetCode
+        exact.view
 
 /-- Pair-indexed source invariant at the current state.  A complete strong
 machine decomposition selects the exact residual and its actual saved-frame
@@ -9081,8 +9085,13 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
         rw [sourceControl, targetControl] at control
         cases control with
         | code graph joins env =>
+            rcases graph with
+              ⟨remaining, final, bounded, exact, subset, static⟩
+            have dynamic := runtimeReady bounded exact subset static
             rw [sourceControl]
-            exact .code (runtimeReady graph) joins env
+            exact .code
+              ⟨remaining, final, bounded, exact, subset, static, dynamic⟩
+              joins env
     | yielded targetValue =>
         rw [sourceControl, targetControl] at control
         cases control
@@ -9520,6 +9529,29 @@ theorem DeletedLetReadyAt.not_fap
       | ok values =>
           simp [argumentsEq, Bind.bind, Except.bind,
             Pure.pure, Except.pure] at evaluated
+
+/-- The source runtime/ownership interface constructively rejects every
+strong compiler edge that deletes a full application.  The nullary instance
+is exactly Lean 4.32's known `safeToElim` discrepancy, while the statement is
+slightly stronger because no full application produces a local value action. -/
+theorem SourceRuntimeOwnershipReadyAt.not_fap_of_deleted
+    (ready : SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let {
+        fvarId, binderName, type, value := .fap name arguments
+      } sourceContinuation))
+    (bounded : remaining ≤ fuel)
+    (exact : ExactShadowCodeGraph remaining final
+      (.let {
+        fvarId, binderName, type, value := .fap name arguments
+      } sourceContinuation) target)
+    (subset : UsedSubset final used)
+    (static : ExactShadowCodeBinderReady used exact.view)
+    (deleted :
+      exact.view.runtimeDecision = .deletedLet) : False := by
+  have runtimeReady := ready bounded exact subset static
+  simp only [ExactShadowCodeRuntimeReadyAt] at runtimeReady
+  rw [deleted] at runtimeReady
+  exact runtimeReady.not_fap
 
 /-- General deleted-let stuttering rule.  Once the transparent graph supplies
 the related continuation and binder absence, `DeletedLetReadyAt` dispatches
