@@ -673,15 +673,24 @@ matched step. It is complete for:
   certified unreachable cells.
 
 All stepping non-let code forms are therefore covered; `.unreach` is terminal.
-For impure let values, twelve of fourteen families have their exact hereditary
-wrappers. The remaining families are retained `.fvar`/`.fap` applications and
-the deleted nullary-`.fap` boundary.
+All fourteen impure let-value families now have exact hereditary wrappers.
+This includes retained and deleted `.fvar` applications, retained `.fap`
+applications, and the deleted nullary-`.fap` boundary.
 
-After the application families, assemble the strong active-code dispatcher,
-prove hereditary readiness stable across matched finite paths, and discharge
-`BinderReadyReachablyCodeReady` for compiler-produced entry states. That
-closes the transparent whole-program forward theorem modulo the explicit
-foreign-semantics and nullary-constant contracts.
+`ExactShadowCodeBinderReady.match_codeStep` assembles those family proofs into
+one exact active-code dispatcher. The deleted nullary-`.fap` case is rejected
+constructively: it cannot satisfy `DeletedLetReadyAt`'s generic
+runtime-neutral equality because evaluating `.fap` produces an invocation,
+not a value. Thus the local preservation proof does not assume this compiler
+case is sound; compiler-facing entry readiness must exclude it or supply a
+stronger constant-purity contract.
+
+The remaining work is to unpack the strong state-level readiness relation
+through that dispatcher, prove hereditary readiness stable across matched
+finite paths, and discharge `BinderReadyReachablyCodeReady` for
+compiler-produced entry states. That closes the transparent whole-program
+forward theorem modulo the explicit foreign-semantics and nullary-constant
+contracts.
 
 ### Open semantic boundaries
 
@@ -710,10 +719,9 @@ regression.
 
 ## Immediate proof queue
 
-1. Add retained call/application cases and resolve the nullary-`.fap`
-   admissibility contract.
-2. Assemble the hereditary code-step dispatcher and its finite-path
-   preservation law.
+1. Lift the exact active-code dispatcher through
+   `BinderReadyReachableMachineReadyAt` at the machine-state boundary.
+2. Prove hereditary readiness stable across matched finite paths.
 3. Derive entry readiness from `ProgramElimDeadWellFormed` plus the successful
    compiler graph, then specialize the program theorem.
 4. Expand actual-pass conformance fixtures around each completed family.
