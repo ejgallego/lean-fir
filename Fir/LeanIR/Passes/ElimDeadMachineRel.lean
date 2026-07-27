@@ -3335,6 +3335,343 @@ theorem invokeDecl_foundCode_binderReadyReachableRelated
                 targetFound, targetValueEq, sourceStep, targetStep,
                 hereditaryAfter'⟩
 
+/-- Under-applied hereditary declarations allocate related closures while
+retaining exact provenance in the program and saved frames. -/
+theorem invokeDecl_partial_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (paramsEq : sourceDeclaration.params = targetDeclaration.params)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (targetFound : targetState.program.findDecl? name =
+      some targetDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceObject : HeapObject := .closure name
+    sourceDeclaration.params.size sourceArguments
+  let targetObject : HeapObject := .closure name
+    targetDeclaration.params.size targetArguments
+  have objects : HeapObjectRel rho sourceObject targetObject := by
+    rw [show sourceObject = .closure name sourceDeclaration.params.size
+      sourceArguments from rfl]
+    rw [show targetObject = .closure name targetDeclaration.params.size
+      targetArguments from rfl]
+    rw [← paramsEq]
+    exact .closure arguments
+  have sourceOwned : RootSubset sourceObject.ownedValues.toList
+      (runtimeRoots sourceState.runtime
+        (sourceArguments.toList ++ sourceFrameRoots)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [sourceObject, HeapObject.ownedValues] using member
+  have targetOwned : RootSubset targetObject.ownedValues.toList
+      (runtimeRoots targetState.runtime
+        (targetArguments.toList ++ targetFrameRoots)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [targetObject, HeapObject.ownedValues] using member
+  rcases runtime.allocBoth objects sourceOwned targetOwned false with
+    ⟨larger, extension, values, allocatedRuntime⟩
+  let sourceRuntime := (alloc sourceState.runtime sourceObject).1
+  let targetRuntime := (alloc targetState.runtime targetObject).1
+  let sourceValue : Value := .object
+    (alloc sourceState.runtime sourceObject).2
+  let targetValue : Value := .object
+    (alloc targetState.runtime targetObject).2
+  have largerFrames := frames.monoRenaming extension
+  have sourceSubset : RootSubset
+      (sourceValue :: sourceFrameRoots)
+      (sourceValue :: sourceArguments.toList ++ sourceFrameRoots) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | frameRoot
+    · subst value
+      exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _
+        (List.mem_append_right _ frameRoot)
+  have targetSubset : RootSubset
+      (targetValue :: targetFrameRoots)
+      (targetValue :: targetArguments.toList ++ targetFrameRoots) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | frameRoot
+    · subst value
+      exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _
+        (List.mem_append_right _ frameRoot)
+  have nextRuntime : ShadowRuntimeRel larger sourceRuntime targetRuntime
+      (sourceValue :: sourceFrameRoots)
+      (targetValue :: targetFrameRoots) := by
+    apply allocatedRuntime.restrictExtra
+    · exact .cons values largerFrames.roots
+    · exact sourceSubset
+    · exact targetSubset
+  let sourceAfter := sourceState.withValue sourceRuntime sourceValue
+  let targetAfter := targetState.withValue targetRuntime targetValue
+  have argumentSize := arrayRel_size_eq arguments
+  have targetTooFew :
+      targetArguments.size < targetDeclaration.params.size := by
+    rw [← paramsEq, ← argumentSize]
+    exact sourceTooFew
+  have sourceStep : invokeDecl sourceState name sourceArguments =
+      .next sourceAfter := by
+    unfold invokeDecl
+    rw [sourceFound]
+    simp only
+    rw [if_pos sourceTooFew]
+  have targetStep : invokeDecl targetState name targetArguments =
+      .next targetAfter := by
+    unfold invokeDecl
+    rw [targetFound]
+    simp only
+    rw [if_pos targetTooFew]
+  refine ⟨larger, sourceAfter, targetAfter, extension, sourceStep,
+    targetStep, ?_⟩
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨[sourceValue], [targetValue], sourceFrameRoots, targetFrameRoots,
+    programs, .yielded values, largerFrames, nextRuntime⟩
+
+/-- A hereditary program lookup supplies the matching target declaration for
+under-application without weakening its program relation. -/
+theorem invokeDecl_foundPartial_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  rcases binderReadyShadowProgram_findDecl_of_some programs sourceFound with
+    ⟨targetDeclaration, targetFound, declarations⟩
+  exact invokeDecl_partial_binderReadyReachableRelated
+    sourceState targetState programs frames arguments declarations.params_eq
+    sourceFound targetFound sourceTooFew runtime
+
+/-- Named dispatch to an under-applied hereditary declaration preserves exact
+provenance after the paired closure allocation. -/
+theorem coreStep_invokeName_foundPartial_of_declReady_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : BinderReadyReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundPartial_binderReadyReachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceTooFew invokeRuntime with
+    ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
+      nextRelated⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨larger, sourceAfter, targetAfter, extension, steps.1, steps.2,
+    nextRelated⟩
+
+/-- Fully applied named dispatch enters hereditary internal bodies without
+forgetting exact compiler provenance. -/
+theorem coreStep_invokeName_foundCode_of_declReady_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ sourceAfter targetAfter,
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : BinderReadyReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundCode_binderReadyReachableRelated
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceValue sourceEnough sourceBinding
+      invokeRuntime with
+    ⟨targetDeclaration, targetCode, sourceAfter, targetAfter,
+      targetFound, targetValue, sourceStep, targetStep, nextRelated⟩
+  have targetReady := sourceReady.related arguments runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨sourceAfter, targetAfter, steps.1, steps.2, nextRelated⟩
+
+/-- An empty named-call cache hit yields related values while preserving the
+hereditary program and saved-frame provenance. -/
+theorem coreStep_invokeName_cacheHit_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceEmpty : sourceArguments.isEmpty = true)
+    (sourceGlobal : findGlobal? sourceState.runtime.globals name =
+      some sourceValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetValue sourceAfter targetAfter,
+      findGlobal? targetState.runtime.globals name = some targetValue ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have globals := findGlobal?_related runtime.globals name
+  rw [sourceGlobal] at globals
+  cases targetGlobal : findGlobal? targetState.runtime.globals name with
+  | none =>
+      rw [targetGlobal] at globals
+      cases globals
+  | some targetValue =>
+      rw [targetGlobal] at globals
+      cases globals with
+      | some values =>
+          have published := runtime.prependGlobal values sourceGlobal
+            targetGlobal
+          have sourceSubset : RootSubset
+              (sourceValue :: sourceFrameRoots)
+              (sourceValue :: sourceArguments.toList ++ sourceFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have targetSubset : RootSubset
+              (targetValue :: targetFrameRoots)
+              (targetValue :: targetArguments.toList ++ targetFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have nextRuntime := published.restrictExtra
+            (.cons values frames.roots) sourceSubset targetSubset
+          let sourceAfter := {
+            sourceState with control := .yielded sourceValue }
+          let targetAfter := {
+            targetState with control := .yielded targetValue }
+          have argumentSize := arrayRel_size_eq arguments
+          have targetEmpty : targetArguments.isEmpty = true := by
+            simpa [Array.isEmpty, argumentSize] using sourceEmpty
+          have sourceStep : coreStep { sourceState with
+              control := .invokeName name sourceArguments } =
+              .next sourceAfter := by
+            simp [coreStep, sourceEmpty, sourceGlobal, sourceAfter]
+          have targetStep : coreStep { targetState with
+              control := .invokeName name targetArguments } =
+              .next targetAfter := by
+            simp [coreStep, targetEmpty, targetGlobal, targetAfter]
+          refine ⟨targetValue, sourceAfter, targetAfter, rfl,
+            sourceStep, targetStep, ?_⟩
+          unfold BinderReadyReachableMachineRelated
+          exact ⟨[sourceValue], [targetValue], sourceFrameRoots,
+            targetFrameRoots, programs, .yielded values, frames, nextRuntime⟩
+
 /-- A retained return narrows the active runtime roots from the complete live
 environment to the returned value, while keeping all saved-frame roots. -/
 theorem coreStep_return_reachableRelated
@@ -15963,6 +16300,141 @@ theorem SomeReachableMachineRelated.matchInvokeNameNext
                   rcases coreStep_invokeName_cacheHit_reachableRelated
                       source target programs frames arguments sourceEmpty
                       sourceGlobal runtime with
+                    ⟨targetValue, sourceNext, targetNext, targetGlobal,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨rho, nextRelated⟩⟩
+
+/-- Hereditary state-level matcher for every internal named-call transition.
+Under-application extends the address renaming, internal declaration entry
+restores an exact body graph, and cache hits preserve the strong saved-frame
+relation. -/
+theorem SomeBinderReadyReachableMachineRelated.matchInvokeNameNext
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeName name targetArguments } = target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeName name sourceArguments } =
+                  .next sourceAfter := by
+            simpa only [sourceSame] using sourceTransition
+          have matchDeclaration
+              (sourceReady : InvokeNameDeclReady source.runtime
+                name sourceArguments) :
+              ∃ targetAfter,
+                coreStep target = .next targetAfter ∧
+                SomeBinderReadyReachableMachineRelated fuel
+                  sourceAfter targetAfter := by
+            cases sourceFound :
+                source.program.findDecl? name with
+            | none =>
+                cases sourceReady with
+                | nonempty nonempty =>
+                    simp [coreStep, nonempty, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+                | cacheMiss empty miss =>
+                    simp [coreStep, empty, miss, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+            | some sourceDeclaration =>
+                by_cases sourceTooFew :
+                    sourceArguments.size < sourceDeclaration.params.size
+                · rcases
+                      coreStep_invokeName_foundPartial_of_declReady_binderReady
+                        source target programs frames arguments sourceReady
+                        sourceFound sourceTooFew runtime with
+                    ⟨larger, sourceNext, targetNext, extension,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨larger, nextRelated⟩⟩
+                · cases sourceBinding :
+                      bindParams sourceDeclaration.params
+                        (sourceArguments.extract 0
+                          sourceDeclaration.params.size) with
+                  | error fault =>
+                      cases sourceReady with
+                      | nonempty nonempty =>
+                          simp [coreStep, nonempty, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                      | cacheMiss empty miss =>
+                          simp [coreStep, empty, miss, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                  | ok sourceEnv =>
+                      cases sourceValue : sourceDeclaration.value with
+                      | code sourceCode =>
+                          rcases
+                              coreStep_invokeName_foundCode_of_declReady_binderReady
+                                source target programs frames arguments
+                                sourceReady sourceFound sourceValue
+                                sourceTooFew sourceBinding runtime with
+                            ⟨sourceNext, targetNext, sourceStep, targetStep,
+                              nextRelated⟩
+                          rw [sourceStep] at sourceTransition'
+                          cases sourceTransition'
+                          exact ⟨targetNext,
+                            by simpa only [targetSame] using targetStep,
+                            ⟨rho, nextRelated⟩⟩
+                      | extern sourceInfo =>
+                          cases sourceReady with
+                          | nonempty nonempty =>
+                              simp [coreStep, nonempty, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+                          | cacheMiss empty miss =>
+                              simp [coreStep, empty, miss, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+          cases sourceEmpty : sourceArguments.isEmpty with
+          | false =>
+              exact matchDeclaration (.nonempty sourceEmpty)
+          | true =>
+              cases sourceGlobal :
+                  findGlobal? source.runtime.globals name with
+              | none =>
+                  exact matchDeclaration
+                    (.cacheMiss sourceEmpty sourceGlobal)
+              | some sourceValue =>
+                  rcases
+                      coreStep_invokeName_cacheHit_binderReadyReachableRelated
+                        source target programs frames arguments sourceEmpty
+                        sourceGlobal runtime with
                     ⟨targetValue, sourceNext, targetNext, targetGlobal,
                       sourceStep, targetStep, nextRelated⟩
                   rw [sourceStep] at sourceTransition'
