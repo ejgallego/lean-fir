@@ -685,10 +685,23 @@ not a value. Thus the local preservation proof does not assume this compiler
 case is sound; compiler-facing entry readiness must exclude it or supply a
 stronger constant-purity contract.
 
-The remaining work is to unpack the strong state-level readiness relation
-through that dispatcher, prove hereditary readiness stable across matched
-finite paths, and discharge `BinderReadyReachablyCodeReady` for
-compiler-produced entry states. That closes the transparent whole-program
+`SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready` now lifts the
+exact dispatcher to complete machine states.
+`binderReadyReachablyCodeReadyCompilerLaws` proves the resulting readiness
+invariant stable across matched finite paths by path composition, and the
+whole-program endpoint retains that strong invariant directly.
+
+Canonical invocation entries and all non-code controls reconstruct strong
+readiness without an active-edge premise. Hereditary yielded steps preserve
+exact provenance through bind, apply, and cache frames; internal named calls
+preserve it through cache hits, partial-application allocation, and internal
+declaration entry.
+
+The remaining work is to preserve the strong relation through closure calls
+and external waiting/resumption, then derive each active exact edge's dynamic
+runtime obligation from compiler-facing source invariants. Discharging that
+source-side obligation yields `BinderReadyReachablyCodeReady` for
+compiler-produced entry states and closes the transparent whole-program
 forward theorem modulo the explicit foreign-semantics and nullary-constant
 contracts.
 
@@ -719,11 +732,13 @@ regression.
 
 ## Immediate proof queue
 
-1. Lift the exact active-code dispatcher through
-   `BinderReadyReachableMachineReadyAt` at the machine-state boundary.
-2. Prove hereditary readiness stable across matched finite paths.
-3. Derive entry readiness from `ProgramElimDeadWellFormed` plus the successful
-   compiler graph, then specialize the program theorem.
+1. Add hereditary closure-call progress and external waiting/resumption
+   matchers.
+2. State and prove the source runtime/ownership invariant that supplies
+   `ExactShadowCodeRuntimeReadyAt`, including the nullary-`.fap` exclusion.
+3. Derive `BinderReadyReachablyCodeReady` from
+   `ProgramElimDeadWellFormed`, the successful compiler graph, and that
+   runtime invariant; then specialize the program theorem.
 4. Expand actual-pass conformance fixtures around each completed family.
 
 In parallel, the Wasm lane continues from the same final-impure semantic
