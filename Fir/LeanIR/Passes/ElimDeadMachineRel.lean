@@ -7685,6 +7685,24 @@ theorem BinderReadyReachableControlReadyAt.readyAt
   | invokeName name arguments => exact .invokeName name arguments
   | invokeValue function arguments => exact .invokeValue function arguments
 
+/-- Hereditary structural controls need an extra runtime certificate only
+when code is active.  Yielded and invocation controls reconstruct strong
+machine readiness directly from their value relation. -/
+theorem BinderReadyReachableControlRelated.readyAt_of_not_code
+    (related : BinderReadyReachableControlRelated fuel rho
+      sourceState.env sourceState.joins sourceControl
+      targetState.env targetState.joins targetControl
+      sourceControlRoots targetControlRoots)
+    (notCode : ∀ sourceCode, sourceControl ≠ .code sourceCode) :
+    BinderReadyReachableControlReadyAt fuel rho sourceState targetState
+      sourceFrameRoots sourceControl targetControl
+      sourceControlRoots targetControlRoots := by
+  cases related with
+  | code graph joins env => exact (notCode _ rfl).elim
+  | yielded value => exact .yielded value
+  | invokeName name arguments => exact .invokeName name arguments
+  | invokeValue function arguments => exact .invokeValue function arguments
+
 /-- Full machine readiness retaining exact elimDead provenance at every live
 code-bearing location.  For active code, the only additional field beyond the
 hereditary machine relation is `ExactShadowCodeRuntimeReadyAt`. -/
@@ -7724,6 +7742,43 @@ theorem BinderReadyReachableMachineReadyAt.readyAt
     sourceFrameRoots, targetFrameRoots,
     forgetBinderReadyShadowProgram programs, control.readyAt, frames.related,
     runtime⟩
+
+/-- A hereditary machine pair is strongly ready automatically outside active
+code.  Clients therefore only need to derive the selected exact edge's
+runtime obligation in the code case. -/
+theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyAt_of_code
+    (related : SomeBinderReadyReachableMachineRelated fuel source target)
+    (codeReady : ∀ sourceCode,
+      source.control = .code sourceCode →
+        BinderReadyReachableMachineReadyAt fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target := by
+  have nonCodeReady
+      (notCode : ∀ sourceCode, source.control ≠ .code sourceCode) :
+      BinderReadyReachableMachineReadyAt fuel source target := by
+    rcases related with
+      ⟨rho, sourceControlRoots, targetControlRoots,
+        sourceFrameRoots, targetFrameRoots,
+        programs, control, frames, runtime⟩
+    exact ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs,
+      control.readyAt_of_not_code notCode, frames, runtime⟩
+  cases sourceControl : source.control with
+  | code sourceCode => exact codeReady sourceCode sourceControl
+  | yielded sourceValue =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeName sourceName sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeValue sourceFunction sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
 
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
@@ -7785,6 +7840,31 @@ theorem initialState_reachableMachineReadyAt
   · simpa [initialState] using
       (ReachableFramesRelated.nil :
         ReachableFramesRelated fuel emptyAddressRenaming [] [] [] [])
+  · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
+/-- Checked hereditary program provenance makes canonical invocation entries
+strongly ready before their first declaration lookup.  No active-code dynamic
+obligation exists yet because the entry control is an invocation. -/
+theorem initialState_binderReadyReachableMachineReadyAt
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) sourceProgram targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    BinderReadyReachableMachineReadyAt fuel
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) := by
+  refine ⟨emptyAddressRenaming, sourceArguments.toList,
+    targetArguments.toList, [], [], ?_, ?_, ?_, ?_⟩
+  · simpa [initialState] using programs
+  · simpa [initialState] using
+      BinderReadyReachableControlReadyAt.invokeName
+        (sourceState := initialState sourceProgram entry sourceArguments)
+        (targetState := initialState targetProgram entry targetArguments)
+        (sourceFrameRoots := []) entry arguments
+  · simpa [initialState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated
+          fuel emptyAddressRenaming [] [] [] [])
   · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
 
 /-- Structural reachability plus a separately maintained semantic invariant.
