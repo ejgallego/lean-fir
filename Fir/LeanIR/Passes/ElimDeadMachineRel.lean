@@ -4479,6 +4479,76 @@ theorem coreStep_deletedBox_of_ready
         coreStep_deletedLet_reachableRelated sourceState targetState
           programs frames continuation joins env absent evaluated next⟩
 
+/-- Hereditary deleted-box rule.  A tagged scalar leaves the runtime
+unchanged, while an out-of-range scalar allocates one source-only unreachable
+cell; exact compiler provenance survives either source-only step. -/
+theorem coreStep_deletedBox_of_ready_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedBoxReadyAt sourceState input) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type := resultType
+      value := .box boxedType input }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } := by
+  dsimp only
+  cases ready with
+  | scalar scalar inputRead =>
+      rcases runtime.boxScalarLeftGarbage boxedType scalar with
+        ⟨nextRuntime, value, boxed, next⟩
+      have evaluated : evalLetValue sourceState {
+          fvarId
+          binderName
+          type := resultType
+          value := .box boxedType input
+        } = .ok (nextRuntime, .value value) := by
+        simp only [evalLetValue, inputRead, Bind.bind, Except.bind]
+        rw [boxed]
+        rfl
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next⟩
+  | usize word inputRead =>
+      rcases runtime.boxUSizeLeftGarbage boxedType word with
+        ⟨nextRuntime, value, boxed, next⟩
+      have evaluated : evalLetValue sourceState {
+          fvarId
+          binderName
+          type := resultType
+          value := .box boxedType input
+        } = .ok (nextRuntime, .value value) := by
+        simp only [evalLetValue, inputRead, Bind.bind, Except.bind]
+        rw [boxed]
+        rfl
+      exact ⟨nextRuntime, value,
+        coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next⟩
+
 /-- Resume related residual continuations after a source-only runtime update
 whose reachable roots are unchanged. -/
 theorem continueCode_reachableRelated
@@ -11143,6 +11213,321 @@ theorem match_retainedBoxLetStep
               exact ⟨larger, targetExpected, extension,
                 match_internalCoreSteps sourceTransition targetTransition
                   afterRelated (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary retained-box matcher.  Related covered immediate inputs either
+produce the same tagged object or allocate paired boxed cells at fresh mapped
+locations, preserving exact compiler provenance in the continuation. -/
+theorem match_retainedBoxLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (inputMember : used.contains input = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceInputRead :
+    lookupValue sourceState.env input = sourceInputResult
+  cases sourceInputResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceInputRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceInput =>
+      have sourceInputLookup :=
+        lookupValue_eq_ok_iff.mp sourceInputRead
+      have inputs := env input inputMember
+      rw [sourceInputLookup] at inputs
+      generalize targetInputLookup :
+        lookup targetState.env input = targetInputOption at inputs
+      cases inputs with
+      | some inputValues =>
+          rename_i targetInput
+          have targetInputRead :
+              lookupValue targetState.env input = .ok targetInput :=
+            lookupValue_eq_ok_iff.mpr targetInputLookup
+          generalize sourceBoxEq :
+            box sourceState.runtime boxedType sourceInput = sourceBoxResult
+          cases sourceBoxResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceResult =>
+              obtain ⟨sourceRuntime, sourceValue⟩ := sourceResult
+              have sourceInputRoot :
+                  sourceInput ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn inputMember sourceInputLookup)
+              rcases runtime.boxBoth_of_related sourceInputRoot inputValues
+                  sourceBoxEq with
+                ⟨larger, targetRuntime, targetValue, extension,
+                  targetBoxEq, resultValues, boxedRuntime⟩
+              let sourceExpected := {
+                sourceState with
+                runtime := sourceRuntime
+                env := bind sourceState.env fvarId sourceValue
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                runtime := targetRuntime
+                env := bind targetState.env fvarId targetValue
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetInputRead, targetBoxEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have afterRelated :
+                  BinderReadyReachableMachineRelated fuel larger
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_binderReadyReachableRelated
+                  sourceState targetState sourceRuntime targetRuntime
+                  programs (frames.monoRenaming extension) continuation joins
+                  (envRelOn_monoRenaming extension env) resultValues
+                  boxedRuntime
+              exact ⟨larger, targetExpected, extension,
+                match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated
+                  (by simpa [sourceCurrent] using step)⟩
+
+/-- Hereditary deleted-box matcher.  Dynamic readiness distinguishes a
+runtime-neutral tagged result from a source-only unreachable allocation; the
+target stutters in either case. -/
+theorem match_deletedBoxLetStep_binderReady
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type := resultType,
+        value := .box boxedType input })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact match_deletedRuntimeNeutralLetStep_binderReady
+        sourceState targetState programs frames continuation joins env absent
+        runtime evaluated step
+  | box fvarId binderName resultType boxedType input ready =>
+      rcases coreStep_deletedBox_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime ready with
+        ⟨nextRuntime, value, transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+      exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Exact retained box provenance supplies the hereditary continuation and
+promotes the compiler-collected input local to the ambient live set. -/
+theorem ExactShadowCodeBinderReady.match_retainedBoxLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId input : FVarId} {binderName : Name}
+    {resultType boxedType : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.box boxedType input :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.box boxedType input : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have inputMember : ambient.contains input = true :=
+    usedBound input (by simp [collectLetValue])
+  exact match_retainedBoxLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env inputMember runtime step
+
+/-- Exact deleted box provenance supplies binder absence and the hereditary
+continuation; dynamic readiness justifies either a tagged result or its
+source-only unreachable allocation. -/
+theorem ExactShadowCodeBinderReady.match_deletedBoxLetStep
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId input : FVarId} {binderName : Name}
+    {resultType boxedType : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.box boxedType input :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type := resultType,
+        value := .box boxedType input })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedBoxLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
 
 /-- Complete graph-level matcher for box lets. -/
 theorem match_boxLetCodeStep
