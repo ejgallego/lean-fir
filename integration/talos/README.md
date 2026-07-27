@@ -139,6 +139,20 @@ natural limbs now execute over that memory. The semantic Talos host remains
 the oracle while concrete heap-state and operation refinements are proved one
 vertical slice at a time.
 
+W6 compiler correctness now has a certificate-free public track.
+`ConcreteSupportedExport` statically ties the selected LCNF code to the actual
+`compileCode` and Talos-adapter body and records the compiler's local-layout
+alignment. `ConcreteSupportedExport.correctReturn` is the first direct case:
+given a source return evaluation and an initially related concrete state, it
+derives the generated numeric return body and matching exported Talos
+execution. `ConcreteCompilerCorrectnessContract.lean` keeps this application
+free of caller-supplied simulation certificates under `make talos-check`.
+Existing certificate-shaped modules are retained only as internal sources of
+operation and invariant lemmas while direct `let`, control-flow, call,
+external, cache, and fault cases are migrated. The first endpoint preserves
+finite source behaviors conditionally; later finite-trace and weak-simulation
+work will cover divergence without proving source termination.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine
 runner paths and produces standards-consumable, host-backed Wasm artifacts for

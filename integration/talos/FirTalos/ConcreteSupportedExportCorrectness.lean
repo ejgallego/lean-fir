@@ -24,11 +24,25 @@ def ConcreteExportTerminatesWith
     module.findExport exportName = some functionIndex ∧
       Wasm.TerminatesWith hostEnv module functionIndex initial args Post
 
-/-- Static whole-pipeline evidence for one concrete generated export. Dynamic
-source evaluation and target-state refinement remain in
-`ConcreteCodeSimulation`; this package contains only admission, lowering,
-adaptation, concrete host resolution, export resolution, and result-ABI
-facts. -/
+/-- The lowering context and the selected symbolic function assign the same
+ABI kind and numeric slot to every successfully compiled local read. This is
+a static invariant of `lowerDecl`; keeping it explicit here prevents dynamic
+simulation evidence from standing in for compiler layout correctness. -/
+def LocalLayoutAligned
+    (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function) : Prop :=
+  ∀ {fvarId : FVarId} {kind : AbiKind},
+    Fir.Wasm.getLocal context fvarId = .ok (.localGet fvarId, kind) →
+      ∃ index,
+        findFVar? (functionBindings sourceFunction) fvarId = some index ∧
+          (functionBindings sourceFunction)[index]?.map Prod.snd = some kind
+
+/-- Static whole-pipeline evidence for one concrete generated export.
+
+`bodyAdapted` is the crucial compiler-facing equation: it ties the selected
+source code to the actual generated target body through `compileCode` and the
+numeric Talos adapter. Dynamic source behavior and target-state refinement are
+deliberately absent from this static package. -/
 structure ConcreteSupportedExport
     (program : Fir.LeanIR.ImpureProgram)
     (context : Fir.Wasm.Context)
@@ -44,6 +58,7 @@ structure ConcreteSupportedExport
   sourceFunctionIndex : Nat
   sourceFunctionFound :
     sourceModule.functions[sourceFunctionIndex]? = some sourceFunction
+  localsAligned : LocalLayoutAligned context sourceFunction
   adapted : adapt sourceModule = .ok target
   hostsResolved : resolveHosts sourceModule = .ok hosts
   hostsAligned :
@@ -58,6 +73,8 @@ structure ConcreteSupportedExport
     target.wasmModule.funcs[
         targetFunctionIndex - target.wasmModule.imports.length]? =
       some targetFunction
+  bodyAdapted :
+    CodeAdapted context sourceModule sourceFunction [] code targetFunction.body
   singleResult : targetFunction.results.length = 1
 
 /-- Successful concrete resolution provides the exact host contract installed

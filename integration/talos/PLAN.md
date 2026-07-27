@@ -3411,6 +3411,28 @@ declaration calls and underapplication allocation. Lazy-cache and external
 call instances, followed by automatic syntax-directed certificate assembly,
 remain. No FIR semantic contract or executable ABI changed.
 
+W6.6dx corrects the program-proof endpoint before further certificate
+assembly. FIR controls this compiler, so caller-supplied
+`ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` values must not be
+the final correctness boundary. `ConcreteSupportedExport` now retains the
+actual `compileCode`/adapter equation for its selected body and a static
+lowering-context/function-local alignment invariant. The new
+`ConcreteCompilerCorrectness` module inverts those executable equations for a
+source return and proves exported concrete execution directly from a source
+evaluation and the initial state relation. A separate compile-time contract
+module applies the theorem without any translation-certificate premise.
+
+The pragmatic next endpoint is conditional preservation of finite source
+returns and faults; it does not assert that source programs terminate. The
+next proof slice is the direct-`let` compiler rule, instantiated first by
+literal operations. Existing `CodeWP`, successful-declaration, fault, and
+capacity certificate modules remain internal compatibility scaffolding while
+their operation and transport lemmas move beneath the direct structural
+theorem. Once the finite compiler theorem covers the supported fragment, add
+a Talos relational-execution adequacy layer and lift the same state relation
+to finite traces, divergence preservation, and weak simulation/bisimulation
+as useful. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

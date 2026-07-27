@@ -33,6 +33,14 @@ failure correspondence. The matrix is intentionally conservative.
 
 Cross-cutting W6.5 state:
 
+- compiler-level coverage is now tracked separately from operation coverage.
+  `ConcreteSupportedExport` carries the actual compiler/adaptor body equation
+  and local-layout alignment; `ConcreteSupportedExport.correctReturn` proves
+  the first certificate-free partial-correctness case, and
+  `ConcreteCompilerCorrectnessContract.lean` checks that the public
+  application needs only source evaluation, initial refinement, and static
+  pipeline facts. Direct `let`, control-flow, call, external, cache, and fault
+  cases remain to migrate from the internal certificate-shaped scaffolding;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

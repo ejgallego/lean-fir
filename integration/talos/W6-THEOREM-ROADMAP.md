@@ -10,22 +10,26 @@ or representation makes a proof substantially better.
 
 ## Semantic endpoints
 
-The successful source endpoint is FIR's executable final-impure LCNF
-semantics:
+The first pragmatic endpoint is conditional preservation of a finite source
+behavior. It does not prove that any source program terminates:
 
 ```lean
 ExecEvaluates sourceExternals
   (sourceCodeState context sourceRuntime sourceEnv sourceCode)
   (ReturnedObservation resultRuntime resultValue)
+
+→ ∃ resultKind,
+    ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+      initial arguments
+      (RefinedReturnPost resultRuntime resultValue resultKind callerTail)
 ```
 
-The successful target endpoint is Talos's fuel-free total-correctness
-predicate over the W6 concrete host:
-
-```lean
-Wasm.TerminatesWith hostEnv module functionIndex initial arguments
-  (RefinedReturnPost resultRuntime resultValue resultKind callerTail)
-```
+Talos's `TerminatesWith` is used only in the consequent, after a finite source
+evaluation has been supplied. This is compiler partial correctness, not a
+source termination theorem. The first return slice consumes the existing
+source `CodeEvaluates` derivation and derives its canonical `ExecEvaluates`
+run; subsequent slices move the compiler theorem directly over the canonical
+machine evaluation.
 
 `RefinedReturnPost` must state all of the following:
 
@@ -42,49 +46,27 @@ that could silently omit part of the runtime.
 
 ## The theorem ladder
 
-### T1. Successful declaration certificate
+### T1. Verified static pipeline
 
-`SuccessfulDeclaration` is the first public concrete theorem boundary. Its
-hypotheses package:
+`ConcreteSupportedExport` is the static compiler boundary. It records
+successful admission, lowering, adaptation, concrete-host resolution, and
+export lookup. It now also records two facts that must be derived from the
+compiler rather than supplied by a dynamic simulation object:
 
-- a finite successful source execution;
-- the exact generated function index and non-import/function-lookup facts;
-- a compiler-and-adapter `CodeWP` for the generated body;
-- the initial concrete/source state relation carried by that `CodeWP`;
-- an exact final target store and physical result;
-- `ConcreteRuntimeRel` for the final source runtime;
-- a clear concrete failure channel; and
-- `PhysicalValueRel` for the returned source value.
+- `bodyAdapted`: the selected source code passes through the actual
+  `compileCode` and numeric adapter to the selected target function body; and
+- `localsAligned`: the lowering context and selected symbolic function assign
+  the same ABI kind and numeric slot to every compiled local read.
 
-Its main consequence is source termination paired with concrete target
-termination under `RefinedReturnPost`. A second, stronger consequence retains
-the exact final store and physical value for callers such as lazy-cache
-publication.
+These fields are temporary explicit invariants until the corresponding
+`lowerDecl`/whole-module theorems construct them automatically. They contain
+no source execution or target execution evidence.
 
-The body judgment is parameter- and caller-tail-polymorphic. A declaration
-with physical parameters `parameters` is proved once, and the theorem applies
-to every caller operand remainder:
+### T2. Direct partial compiler correctness
 
-```lean
-parameters.length = targetFunction.numParams
-∀ callerTail,
-  CodeWP ... targetFunction.body ...
-    (ConcreteFunctionBodyPost targetFunction (parameters ++ callerTail)
-      (ExactReturnPost afterCall physical callerTail))
-```
-
-For a nullary declaration, this entails the existing
-`CachedDeclarationBodyWP`; cache correctness is a corollary of declaration
-correctness rather than the public semantic specification.
-
-T1 is a sound certificate theorem. It deliberately does **not** claim that
-successful source evaluation alone implies target correctness.
-
-### T2. Syntax-directed concrete simulation
-
-The main W6 compiler proof is an inductive `ConcreteCodeSimulation`, analogous
-to the semantic-host `Correctness.CodeSimulation`, but indexed by concrete
-stores and refinement witnesses. It must have constructors for:
+The main W6 theorem is a function from a source evaluation to matching target
+execution. It is proved structurally from the executable compiler, with cases
+for:
 
 - return;
 - direct value `let`;
@@ -94,39 +76,52 @@ stores and refinement witnesses. It must have constructors for:
 - external calls; and
 - lazy-cache hit and miss paths.
 
-The induction must prove both:
+At each node the proof inverts the actual compiler equation, applies the
+operation refinement theorem, establishes the generated local/control
+plumbing, and recurses on the source evaluation. The intended public shape is:
 
 ```lean
-ConcreteCodeSimulation ... → CodeWP ...
-ConcreteCodeSimulation ... → ExecEvaluates ...
+compileCode context sourceCode = .ok symbolicTarget →
+instructions sourceModule sourceFunction [] symbolicTarget = .ok targetBody →
+StateRelated ... →
+ExecEvaluates sourceExternals sourceState observation →
+TargetBehaviorRel observation targetBody
 ```
 
-and then construct `SuccessfulDeclaration`. Existing W6.6 operation
-composition theorems are intended to discharge its step premises. T2 is the
-point at which local operation coverage becomes a compiler correctness
-theorem.
+`CodeWP`, `SuccessfulDeclaration`, `ConcreteCodeSimulation`, and
+`ReuseCapacityCodeSimulation` remain internal compatibility lemmas while
+their operation results are migrated. They are not premises of the final
+compiler theorem.
+
+`ConcreteSupportedExport.correctReturn` is the first completed T2 case. It
+derives the emitted return body, ABI kind, numeric local, exact target return,
+and source execution from the static pipeline and source return evaluation.
+`ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
+that this public theorem has no translation-certificate premise.
 
 ### T3. Whole-export success
 
-`ConcreteSupportedExport` must package only static whole-pipeline evidence:
-
-- `WasmSupported`;
-- successful `lowerSupported`;
-- source-function lookup;
-- successful Talos adaptation;
-- successful concrete-host resolution;
-- exported-name/function lookup; and
-- the single-result ABI.
-
-Combining `ConcreteSupportedExport` with `ConcreteCodeSimulation` must yield:
+Combining T1 with the direct T2 theorem must yield:
 
 ```lean
-ExecEvaluates ... observation ∧
-ConcreteExportTerminatesWith ... (RefinedReturnPost ...)
+ExecEvaluates ... observation →
+∃ resultKind,
+  ConcreteExportTerminatesWith ... (RefinedReturnPost ...)
 ```
 
 This theorem must use the exported function selected from the generated
-module, not a hand-written body or fixture-specific index.
+module, not a hand-written body or fixture-specific index, and must not accept
+a caller-built simulation derivation.
+
+### T3S. Finite traces and weak simulation
+
+After the finite-return theorem covers the supported compiler, introduce a
+relational target execution layer adequate to Talos `exec`/`run`. The next
+endpoint is finite-prefix preservation and then weak simulation; backward
+matching may be added to obtain weak bisimulation. This layer captures
+divergence without adding termination assumptions to compiler correctness.
+The state relation and operation lemmas used by T2 must therefore remain
+independent of Talos's total-correctness `wp`.
 
 ### T4. Structured faults
 
@@ -340,15 +335,24 @@ acceptance tests pass.
 
 ## Work order
 
-1. Implement T1 and derive the existing nullary cache package from it.
-2. Introduce the return/direct-let spine of `ConcreteCodeSimulation`.
-3. Complete: add effect, call, external, lazy, and case constructors by
-   consuming the existing W6.6 step theorems.
-4. Complete: package the whole generated export as T3.
-5. In progress: populate the completed T4 syntax induction with terminal
-   leaves for every structured failure admitted by the supported fragment,
-   using `W6-FAULT-AUDIT.md` as the exact checklist.
-6. In progress: discharge T4S. Retained reuse capacity is validated and its
+1. In progress: prove T1 directly from `lowerDecl`, `lowerSupported`, and
+   `adapt`; the explicit `bodyAdapted` and `localsAligned` fields are the
+   current theorem targets, not client obligations to preserve indefinitely.
+2. Completed base case: derive return compilation/adaptation and exported
+   target execution from a source return evaluation. Keep the
+   certificate-free application in
+   `ConcreteCompilerCorrectnessContract.lean`.
+3. Next: prove the direct-`let` structural rule from the source evaluation,
+   actual `compileCode_let` equation, operation refinement, checked local
+   write, and recursive continuation theorem. Instantiate literals first,
+   then constructors/projections.
+4. Extend the direct theorem across cases, effects, calls, externals, and lazy
+   caches. Reuse the existing W6 operation lemmas, but do not expose
+   `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
+5. Lift from the current source evaluation view to canonical
+   `ExecEvaluates`, then package the complete generated export as T3.
+6. Migrate T4 and T4S to consequences of the same structural compiler proof.
+   Retained reuse capacity is validated and its
    static-to-concrete operation bridge and whole-fact-map invariant are proved;
    fresh nonempty allocation and zero-token reuse supply header-capacity
    transport, in-place reuse carries mapped-header transport through the
@@ -361,18 +365,19 @@ acceptance tests pass.
    now have generic insert/erase adapters, and constructor/reset/reuse supply
    their exact tracked evidence plus old-fact transport. All current direct
    result families reduce to named tracked transfer, heap-preserving erasure,
-   or prefix-extending erasure. The recursive capacity-aware certificate is
-   defined for all existing simulation constructors and conservatively erases
-   to `ConcreteCodeSimulation`. An empty fact map now seeds that certificate
-   from the ordinary initial relation, and a completed certificate lifts to the
-   supported-export theorem while exposing the selected return state's final
-   fact interpretation. Result steps now have one common capacity-preserving
+   or prefix-extending erasure. The existing recursive capacity-aware
+   derivation remains a source of reusable transport lemmas while its facts
+   move into the direct compiler state relation. Result steps now have one
+   common capacity-preserving
    contract with named direct, external, lazy, and call instantiations. The
    call specialization identifies the remaining callee obligation exactly:
    the ordinary call simulation plus its destination-local update, witness
    transport, and retained-header transport. The remaining syntax work is to
-   construct these step contracts from the operation and callee theorems.
+   consume these contracts in the direct operation and callee cases.
    Structured unreachability remains the shared-contract blocker.
-7. Let W7 generation proceed independently against the current concrete
+7. Add a target relational execution/adequacy layer and prove finite-prefix
+   preservation, divergence preservation, and then weak simulation or weak
+   bisimulation as useful.
+8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
-8. Close with T6 and the pure `prettyM` acceptance theorem.
+9. Close with T6 and the pure `prettyM` acceptance theorem.
