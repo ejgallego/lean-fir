@@ -9128,6 +9128,25 @@ def ReachableExternalSpecCompatible (externals : ExternalSpec)
           (resumeExternal sourceRequest sourceWaiting sourceResponse)
           (resumeExternal targetRequest targetWaiting targetResponse)
 
+/-- Strong foreign-response contract: related requests whose suspended
+machines retain hereditary compiler provenance resume to a pair retaining
+that provenance, under a possibly extended hidden address renaming. -/
+def BinderReadyReachableExternalSpecCompatible
+    (externals : ExternalSpec) (fuel : Nat) : Prop :=
+  ∀ {rho sourceBefore targetBefore sourceRequest targetRequest
+      sourceWaiting targetWaiting sourceResponse},
+    ExternalRequestRel rho sourceRequest targetRequest →
+    coreStep sourceBefore = .external sourceRequest sourceWaiting →
+    coreStep targetBefore = .external targetRequest targetWaiting →
+    BinderReadyReachableMachineRelated fuel rho
+      sourceWaiting targetWaiting →
+    externals sourceRequest sourceBefore.runtime sourceResponse →
+      ∃ targetResponse,
+        externals targetRequest targetBefore.runtime targetResponse ∧
+        SomeBinderReadyReachableMachineRelated fuel
+          (resumeExternal sourceRequest sourceWaiting sourceResponse)
+          (resumeExternal targetRequest targetWaiting targetResponse)
+
 /-- Compiler-side laws are independent of the foreign environment: the
 well-formedness invariant supplies active readiness and is stable along
 related finite executions. -/
@@ -22381,6 +22400,83 @@ theorem SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready
   | invokeValue targetFunction targetArguments =>
       rw [sourceControl, targetControl] at control
       cases control
+
+/-- Every internal machine step preserves hereditary exact provenance once
+the active-code case is supplied with its binder-ready readiness witness. -/
+theorem SomeBinderReadyReachableMachineRelated.matchNextStep_of_ready
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready ready sourceControl
+        (.internal sourceTransition)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep sourceControl
+        (.internal sourceTransition)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+
+/-- Every external machine step preserves hereditary exact provenance under
+the strong foreign-response contract.  Invocation controls expose the paired
+requests and suspended machines; code and yielded controls delegate to their
+general hereditary step dispatchers. -/
+theorem SomeBinderReadyReachableMachineRelated.matchExternalStep_of_ready
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (transition : coreStep source = .external request waiting)
+    (externalProof : externals request source.runtime response) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        (resumeExternal request waiting response) targetAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready ready sourceControl
+        (.external transition externalProof)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep sourceControl
+        (.external transition externalProof)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameExternal sourceControl transition with
+        ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+          waitingRelated⟩
+      rcases compatible requests transition targetTransition waitingRelated
+          externalProof with
+        ⟨targetResponse, targetExternal, resumedRelated⟩
+      exact ⟨resumeExternal targetRequest targetWaiting targetResponse,
+        NonLockstep.reaches_of_step
+          (.external targetTransition targetExternal),
+        resumedRelated⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueExternal sourceControl transition with
+        ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+          waitingRelated⟩
+      rcases compatible requests transition targetTransition waitingRelated
+          externalProof with
+        ⟨targetResponse, targetExternal, resumedRelated⟩
+      exact ⟨resumeExternal targetRequest targetWaiting targetResponse,
+        NonLockstep.reaches_of_step
+          (.external targetTransition targetExternal),
+        resumedRelated⟩
 
 /-- Unified semantic-step dispatcher for an active related code graph.
 `ReachableCodeReadyAt` supplies the exact ownership certificate required by
