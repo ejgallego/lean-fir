@@ -3354,6 +3354,19 @@ is to assemble its operation-specific nodes and state the capacity-preserving
 interprocedural call condition explicitly. No FIR semantic contract or
 executable ABI changed.
 
+W6.6dt makes that interprocedural condition explicit and reusable.
+`ReuseCapacityResultStep` pairs any existing result-step simulation with the
+exact strengthened relation before and after the validator-selected fact
+transfer. Named direct, external, lazy, and call specializations are consumed
+by the recursive certificate; generic constructors cover both tracked-result
+insertion and ordinary-result erasure. The call erasure theorem isolates the
+three facts not exported by `CallLetStepSimulates`: the checked destination
+write, witness transport, and retained-header transport. Canonical return,
+selected-case, and transported-effect builders remove the remaining
+certificate boilerplate. The next call slice must obtain those three facts
+from the concrete callee theorem rather than weakening the capacity relation.
+No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

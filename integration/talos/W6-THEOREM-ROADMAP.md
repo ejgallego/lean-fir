@@ -366,9 +366,13 @@ acceptance tests pass.
    to `ConcreteCodeSimulation`. An empty fact map now seeds that certificate
    from the ordinary initial relation, and a completed certificate lifts to the
    supported-export theorem while exposing the selected return state's final
-   fact interpretation. The remaining syntax work is to construct the
-   certificate from the operation lemmas and close its interprocedural call
-   case. Structured unreachability remains the shared-contract blocker.
+   fact interpretation. Result steps now have one common capacity-preserving
+   contract with named direct, external, lazy, and call instantiations. The
+   call specialization identifies the remaining callee obligation exactly:
+   the ordinary call simulation plus its destination-local update, witness
+   transport, and retained-header transport. The remaining syntax work is to
+   construct these step contracts from the operation and callee theorems.
+   Structured unreachability remains the shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.
