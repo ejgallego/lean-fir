@@ -190,6 +190,10 @@ run_cmd do
       moduleArtifact.module.closureDispatch ==
         Fir.Wasm.collectClosureDispatch moduleArtifact.module.runtimeOperations do
     throwError "compiler Format closure-dispatch inventory changed"
+  unless moduleArtifact.module.closureDescriptors.size == 14 &&
+      moduleArtifact.module.closureDescriptors ==
+        Fir.Wasm.collectClosureDescriptors moduleArtifact.module.runtimeOperations do
+    throwError "compiler Format closure-descriptor inventory changed"
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
@@ -286,6 +290,9 @@ run_cmd do
   unless residentClosureArtifact.module.closureDispatch ==
       moduleArtifact.module.closureDispatch do
     throwError "resident linking changed the stable closure-dispatch table"
+  unless residentClosureArtifact.module.closureDescriptors ==
+      moduleArtifact.module.closureDescriptors do
+    throwError "resident linking changed the stable closure-descriptor table"
   unless expectedClosureCoordinates.all fun coordinate =>
       let operation : Fir.Wasm.RuntimeOp :=
         .closureProj `resident (coordinate.1 + 2) (coordinate.1 + 1)
@@ -317,6 +324,9 @@ run_cmd do
   unless residentMatchArtifact.module.closureDispatch ==
       moduleArtifact.module.closureDispatch do
     throwError "closure-match linking changed the stable closure-dispatch table"
+  unless residentMatchArtifact.module.closureDescriptors ==
+      moduleArtifact.module.closureDescriptors do
+    throwError "closure-match linking changed the stable closure-descriptor table"
   unless closureMatches.all fun operation =>
       (Fir.Wasm.Emit.ResidentRuntime.closureMatchName?
         residentMatchArtifact.module.closureDispatch operation).any
@@ -369,6 +379,9 @@ run_cmd do
   unless residentConstructorArtifact.module.closureDispatch ==
       moduleArtifact.module.closureDispatch do
     throwError "constructor linking changed the stable closure-dispatch table"
+  unless residentConstructorArtifact.module.closureDescriptors ==
+      moduleArtifact.module.closureDescriptors do
+    throwError "constructor linking changed the stable closure-descriptor table"
   unless (List.range constructors.size).all fun ordinal =>
       residentConstructorArtifact.module.exports.contains
         (Fir.Wasm.Emit.ResidentConstructor.constructorName ordinal) do

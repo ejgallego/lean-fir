@@ -310,6 +310,10 @@ def entryResultKind (entry : Name) (function : Fir.Wasm.Function) : Except Strin
 private def closureDispatchJson (module : Fir.Wasm.Module) : Json :=
   Json.arr <| module.closureDispatch.map fun name => (name.toString : Json)
 
+private def closureDescriptorsJson (module : Fir.Wasm.Module) : Json :=
+  Json.arr <| module.closureDescriptors.map fun descriptor =>
+    Json.arr <| descriptor.map fun kind => (abiKindName kind : Json)
+
 /-- Describe a reusable module without attaching any particular invocation. -/
 def moduleJson (sourceEntry entry : Name) (module : Fir.Wasm.Module) : Except String Json := do
   let function ← entryFunction module entry
@@ -322,6 +326,7 @@ def moduleJson (sourceEntry entry : Name) (module : Fir.Wasm.Module) : Except St
     ("result", abiKindName result),
     ("params", Json.arr (params.map fun kind => (abiKindName kind : Json))),
     ("closureDispatch", closureDispatchJson module),
+    ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray)]
 
 def artifactJson (artifactName : String) (sourceEntry entry : Name)
@@ -342,6 +347,7 @@ def artifactJson (artifactName : String) (sourceEntry entry : Name)
     ("params", Json.arr (params.map fun kind => (abiKindName kind : Json))),
     ("arguments", Json.arr arguments.toArray),
     ("closureDispatch", closureDispatchJson module),
+    ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray)]
 
 def artifactJsonWithRuntime (artifactName : String) (sourceEntry entry : Name)
@@ -363,6 +369,7 @@ def artifactJsonWithRuntime (artifactName : String) (sourceEntry entry : Name)
     ("params", Json.arr (params.map fun kind => (abiKindName kind : Json))),
     ("arguments", Json.arr arguments.toArray),
     ("closureDispatch", closureDispatchJson module),
+    ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray),
     ("initialRuntime", initialRuntime)]
 

@@ -147,6 +147,7 @@ const host = new ConcreteHost(
   manifest.initialRuntime,
   undefined,
   manifest.closureDispatch,
+  manifest.closureDescriptors,
 );
 const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
 host.attachMemory(instance.exports.memory);
@@ -390,6 +391,14 @@ concrete host uses it for allocation. On the proof side, this is the concrete
 table to which W6's `RefinementWitness.closureDispatch` must be related. A
 future table-layout change therefore remains a shared-contract change rather
 than a generation-only rewrite.
+
+Closure capture-layout IDs follow the same rule. The duplicate-free
+`closureDescriptors` array is retained independently of runtime imports, so a
+resident `partialApply` helper can continue writing the exact descriptor ID
+into header word `aux3` after all `partialApply` imports disappear. The
+compiler-produced `prettyM` module currently carries 14 rows. Consumers pass
+the manifest table to `ConcreteHost`; W6's
+`RefinementWitness.closureDescriptors` relates to this exact retained table.
 
 The closure-matching retained audit is
 `351 → 350 → 349 → 341 → 254 → 177` function imports. That checkpoint

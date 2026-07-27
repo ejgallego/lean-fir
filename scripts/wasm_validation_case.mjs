@@ -211,8 +211,8 @@ export async function executeSemanticWasmCase({
     `${caseId} effect projections must be an array`);
 
   const manifestKeys =
-    ["arguments", "closureDispatch", "entry", "fixture", "imports", "params",
-      "result", "sourceEntry"];
+    ["arguments", "closureDescriptors", "closureDispatch", "entry", "fixture",
+      "imports", "params", "result", "sourceEntry"];
   if (Object.hasOwn(compilerManifest, "initialRuntime")) {
     manifestKeys.push("initialRuntime");
   }
@@ -228,6 +228,17 @@ export async function executeSemanticWasmCase({
   assert.equal(new Set(compilerManifest.closureDispatch).size,
     compilerManifest.closureDispatch.length,
     `${caseId} closureDispatch must not contain duplicates`);
+  assert.ok(Array.isArray(compilerManifest.closureDescriptors),
+    `${caseId} closureDescriptors must be an array`);
+  assert.ok(compilerManifest.closureDescriptors.every((descriptor) =>
+    Array.isArray(descriptor) &&
+    descriptor.every((kind) => typeof kind === "string" && kind.length > 0)),
+  `${caseId} closureDescriptors must contain ABI kind arrays`);
+  compilerManifest.closureDescriptors.forEach((descriptor, index) =>
+    assert.ok(!compilerManifest.closureDescriptors.slice(0, index).some((candidate) =>
+      candidate.length === descriptor.length &&
+      candidate.every((kind, kindIndex) => kind === descriptor[kindIndex])),
+    `${caseId} closureDescriptors must not contain duplicates`));
   assert.ok(Array.isArray(compilerManifest.arguments),
     `${caseId} arguments must be an array`);
   assert.equal(compilerManifest.params.length, descriptor.args.length,

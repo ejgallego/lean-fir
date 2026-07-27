@@ -28,6 +28,7 @@ export async function checkFetchedConcretePrettyFormatTrace(artifactUrl) {
     undefined,
     concreteArtifactExternalRegistry,
     manifest.closureDispatch,
+    manifest.closureDescriptors,
   );
   const artifact = await instantiateModuleArtifact({
     bytes: await moduleResponse.arrayBuffer(),

@@ -73,6 +73,7 @@ const host = new ConcreteHost(
   undefined,
   concreteArtifactExternalRegistry,
   manifest.closureDispatch,
+  manifest.closureDescriptors,
 );
 const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
 console.log(checkConcretePrettyFormatTraceModule(artifact));

@@ -23,7 +23,8 @@ export async function checkConcretePrettyFormatInvocation({
     "concrete prettyM invocation failed WebAssembly validation");
 
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry, manifest.closureDispatch);
+    concreteArtifactExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
   for (const cell of manifest.initialRuntime.heap) {
     const address = host.locationAddresses.get(cell.location);
     assert.notEqual(address, undefined,

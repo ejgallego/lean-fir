@@ -140,6 +140,30 @@ def externalModule? : Option Module :=
   | .ok module => some module
   | .error _ => none
 
+def closureCallModule? : Option Module :=
+  match lower closureCallProgram with
+  | .ok module => some module
+  | .error _ => none
+
+#guard closureCallModule?.any fun module =>
+  !module.closureDescriptors.isEmpty &&
+  module.closureDescriptors ==
+    collectClosureDescriptors module.runtimeOperations
+
+#guard closureCallModule?.any fun module =>
+  match validateModule { module with closureDescriptors := #[] } with
+  | .error (.missingClosureDescriptor _) => true
+  | _ => false
+
+#guard closureCallModule?.any fun module =>
+  match module.closureDescriptors[0]? with
+  | none => false
+  | some descriptor =>
+      match validateModule
+          { module with closureDescriptors := #[descriptor, descriptor] } with
+      | .error (.duplicateClosureDescriptor found) => found == descriptor
+      | _ => false
+
 #guard externalModule?.any fun module =>
   module.functions.size == 1 &&
   module.imports.any fun import_ =>

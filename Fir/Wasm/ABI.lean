@@ -220,6 +220,11 @@ def RuntimeOp.closureTarget? : RuntimeOp → Option Name
   | .closureProj function .. => some function
   | _ => none
 
+/-- The ordered capture kinds whose stable identity is stored in a closure header. -/
+def RuntimeOp.closureDescriptor? : RuntimeOp → Option (Array AbiKind)
+  | .partialApply _ _ _ fields _ => some fields
+  | _ => none
+
 /--
 Build the stable module-wide closure dispatch table in first-use order.
 
@@ -232,6 +237,20 @@ def collectClosureDispatch (operations : Array RuntimeOp) : Array Name :=
     | none => targets
     | some target =>
         if targets.contains target then targets else targets.push target
+
+/--
+Build the stable module-wide closure capture-descriptor table in first-use
+`partialApply` order. Resident linking may remove those runtime operations, so
+the table is retained independently on `Module`.
+-/
+def collectClosureDescriptors (operations : Array RuntimeOp) :
+    Array (Array AbiKind) :=
+  operations.foldl (init := #[]) fun descriptors operation =>
+    match operation.closureDescriptor? with
+    | none => descriptors
+    | some descriptor =>
+        if descriptors.contains descriptor then descriptors
+        else descriptors.push descriptor
 
 /-- Operation-specific semantic constraints not expressible by the plain constructor fields. -/
 def RuntimeOp.abiWellFormed : RuntimeOp → Bool

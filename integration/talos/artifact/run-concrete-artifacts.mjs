@@ -25,7 +25,8 @@ export async function runConcreteArtifact(manifestPath) {
   assert.ok(WebAssembly.validate(bytes), `${basename(wasmPath)} failed WebAssembly validation`);
 
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry, manifest.closureDispatch);
+    concreteArtifactExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -52,7 +53,8 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifest = JSON.parse(await readFile(
       join(artifactDirectory, `${fixture}.wasm.json`), "utf8"));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-      concreteArtifactExternalRegistry, manifest.closureDispatch);
+      concreteArtifactExternalRegistry, manifest.closureDispatch,
+      manifest.closureDescriptors);
     assert.throws(() => host.imports(manifest.imports),
       /unsupported concrete artifact operation/,
       `${fixture} unexpectedly crossed its concrete fragment gate`);
@@ -63,7 +65,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const bytes = await readFile(manifestPath.slice(0, -".json".length));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-      undefined, manifest.closureDispatch);
+      undefined, manifest.closureDispatch, manifest.closureDescriptors);
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {
@@ -82,7 +84,8 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const bytes = await readFile(manifestPath.slice(0, -".json".length));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-      concreteArtifactExternalRegistry, manifest.closureDispatch);
+      concreteArtifactExternalRegistry, manifest.closureDispatch,
+      manifest.closureDescriptors);
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {

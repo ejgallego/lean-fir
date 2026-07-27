@@ -187,6 +187,11 @@ for (const artifact of [
     baseline.manifest.closureDispatch,
     "resident linking changed the stable closure-dispatch table",
   );
+  assert.deepStrictEqual(
+    artifact.manifest.closureDescriptors,
+    baseline.manifest.closureDescriptors,
+    "resident linking changed the stable closure-descriptor table",
+  );
 }
 assert.ok(residentRuntime.exports.some(({ name, kind }) =>
   name === residentRuntime.manifest.entry && kind === "function"),

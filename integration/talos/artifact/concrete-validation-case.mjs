@@ -126,8 +126,8 @@ function semanticHeapView(host) {
 
 function manifestShape(caseId, manifest) {
   const keys =
-    ["arguments", "closureDispatch", "entry", "fixture", "imports", "params",
-      "result", "sourceEntry"];
+    ["arguments", "closureDescriptors", "closureDispatch", "entry", "fixture",
+      "imports", "params", "result", "sourceEntry"];
   if (Object.hasOwn(manifest, "initialRuntime")) keys.push("initialRuntime");
   assert.deepStrictEqual(Object.keys(manifest).sort(), keys.sort(),
     `${caseId} compiler manifest shape mismatch`);
@@ -179,6 +179,7 @@ export async function executeConcreteValidationCase({
     compilerManifest.initialRuntime,
     concreteValidationExternalRegistry,
     compilerManifest.closureDispatch,
+    compilerManifest.closureDescriptors,
   );
   const heapView = semanticHeapView(host);
   assert.equal(compilerManifest.params.length, descriptor.args.length,

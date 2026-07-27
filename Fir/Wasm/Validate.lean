@@ -20,6 +20,8 @@ inductive SymbolicError where
   | runtimeOperationOrder
   | duplicateClosureTarget (name : Name)
   | missingClosureTarget (name : Name)
+  | duplicateClosureDescriptor (descriptor : Array AbiKind)
+  | missingClosureDescriptor (descriptor : Array AbiKind)
   | invalidRuntimeOperation (index : Nat)
   | invalidRuntimeImport (index : Nat)
   | invalidExternalImport (index : Nat)
@@ -133,10 +135,15 @@ def validateModuleShape (module : Module) : Except SymbolicError Unit := do
     throw (.duplicateFunction name)
   if let some name := firstDuplicate? module.closureDispatch.toList then
     throw (.duplicateClosureTarget name)
+  if let some descriptor := firstDuplicate? module.closureDescriptors.toList then
+    throw (.duplicateClosureDescriptor descriptor)
   for operation in module.runtimeOperations do
     if let some name := operation.closureTarget? then
       unless module.closureDispatch.contains name do
         throw (.missingClosureTarget name)
+    if let some descriptor := operation.closureDescriptor? then
+      unless module.closureDescriptors.contains descriptor do
+        throw (.missingClosureDescriptor descriptor)
   let expectedOperations := collectRuntimeOps module.functions
   unless module.runtimeOperations == expectedOperations do
     throw .runtimeOperationOrder

@@ -132,6 +132,17 @@ async function readManifest(path, id, requireFixture) {
   assert.ok(manifest.closureDispatch.every((target) =>
     typeof target === "string" && target.length > 0),
   `${id} manifest closureDispatch must contain target names`);
+  assert.ok(Array.isArray(manifest.closureDescriptors),
+    `${id} manifest closureDescriptors must be an array`);
+  assert.ok(manifest.closureDescriptors.every((descriptor) =>
+    Array.isArray(descriptor) &&
+    descriptor.every((kind) => typeof kind === "string" && kind.length > 0)),
+  `${id} manifest closureDescriptors must contain ABI kind arrays`);
+  manifest.closureDescriptors.forEach((descriptor, index) =>
+    assert.ok(!manifest.closureDescriptors.slice(0, index).some((candidate) =>
+      candidate.length === descriptor.length &&
+      candidate.every((kind, kindIndex) => kind === descriptor[kindIndex])),
+    `${id} manifest closureDescriptors must not contain duplicates`));
   if (requireFixture) {
     assert.equal(manifest.fixture, id, `${id} manifest fixture mismatch`);
   }
@@ -158,7 +169,7 @@ function preflightManifest(manifest) {
   const blockers = [];
   try {
     const host = new ConcreteHost(manifest.imports, undefined, undefined,
-      manifest.closureDispatch);
+      manifest.closureDispatch, manifest.closureDescriptors);
     host.imports(manifest.imports);
   } catch (error) {
     blockers.push({ kind: "import-construction", message: String(error.message ?? error) });
@@ -166,7 +177,7 @@ function preflightManifest(manifest) {
   if (manifest.initialRuntime !== undefined) {
     try {
       new ConcreteHost(manifest.imports, manifest.initialRuntime, undefined,
-        manifest.closureDispatch);
+        manifest.closureDispatch, manifest.closureDescriptors);
     } catch (error) {
       blockers.push({ kind: "initial-runtime", message: String(error.message ?? error) });
     }

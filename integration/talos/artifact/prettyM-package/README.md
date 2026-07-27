@@ -96,3 +96,10 @@ against an event oracle also guarded by native Lean 4.32. Keeping this package
 separate provides a coherent integration snapshot while allocation families
 move behind the resident boundary; it does not freeze that boundary as a
 supported ABI.
+
+The module descriptor also carries the retained `closureDispatch` and
+`closureDescriptors` tables. They assign the target and capture-layout IDs
+stored in closure header words `aux0` and `aux3`, respectively. Consumers pass
+both tables unchanged to `ConcreteHost`; they remain available after their
+introducing closure operations are internalized and disappear from the import
+list.

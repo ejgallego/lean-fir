@@ -109,7 +109,8 @@ export function concreteManifestValue(argument) {
  */
 export class ConcreteHost {
   constructor(manifestImports = [], initialRuntime = undefined,
-    externalRegistry = undefined, closureDispatch = undefined) {
+    externalRegistry = undefined, closureDispatch = undefined,
+    closureDescriptors = undefined) {
     this.memory = undefined;
     this.residentFrontier = undefined;
     this.buffer = new ArrayBuffer(PAGE_BYTES);
@@ -130,14 +131,14 @@ export class ConcreteHost {
 
     const operations = manifestImports.map((descriptor) => descriptor.operation);
     const importedClosureDispatch = [];
-    this.closureDescriptors = [];
+    const importedClosureDescriptors = [];
     for (const operation of operations) {
       if (operation.kind === "partialApply" || operation.kind === "closureMatches" ||
           operation.kind === "closureProj") {
         uniquePush(importedClosureDispatch, operation.function);
       }
       if (operation.kind === "partialApply") {
-        uniquePush(this.closureDescriptors, [...operation.fields], sameKinds);
+        uniquePush(importedClosureDescriptors, [...operation.fields], sameKinds);
       }
     }
     if (closureDispatch === undefined) {
@@ -154,6 +155,24 @@ export class ConcreteHost {
         closureDispatch.includes(target)),
       "concrete closure dispatch metadata is missing an imported target");
       this.closureDispatch = [...closureDispatch];
+    }
+    if (closureDescriptors === undefined) {
+      this.closureDescriptors = importedClosureDescriptors;
+    } else {
+      assert.ok(Array.isArray(closureDescriptors),
+        "concrete closure descriptor metadata must be an array");
+      assert.ok(closureDescriptors.every((descriptor) =>
+        Array.isArray(descriptor) &&
+        descriptor.every((kind) => typeof kind === "string" && kind.length > 0)),
+      "concrete closure descriptors must contain ABI kind names");
+      closureDescriptors.forEach((descriptor, index) =>
+        assert.ok(!closureDescriptors.slice(0, index).some((candidate) =>
+          sameKinds(candidate, descriptor)),
+        "concrete closure descriptor metadata must not contain duplicates"));
+      assert.ok(importedClosureDescriptors.every((descriptor) =>
+        closureDescriptors.some((candidate) => sameKinds(candidate, descriptor))),
+      "concrete closure descriptor metadata is missing an imported descriptor");
+      this.closureDescriptors = closureDescriptors.map((descriptor) => [...descriptor]);
     }
     if (initialRuntime !== undefined) {
       this.loadInitialRuntime(initialRuntime);

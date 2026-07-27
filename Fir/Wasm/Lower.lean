@@ -100,6 +100,11 @@ structure Module where
   this metadata survives resident-runtime internalization.
   -/
   closureDispatch : Array Name := #[]
+  /--
+  Stable descriptor-ID table for concrete closure capture layouts. This
+  survives removal of every `partialApply` runtime import.
+  -/
+  closureDescriptors : Array (Array AbiKind) := #[]
   /-- Optional module-owned wasm32 memory. Existing semantic-host modules omit it. -/
   memory : Option MemoryDecl := none
   /-- Resident-runtime globals, physically appended after lazy-cache globals. -/
@@ -1287,6 +1292,7 @@ def lower (program : Fir.LeanIR.ImpureProgram) : Except CompileError Module := d
     exports
     initializers := cachedDeclarations
     runtimeOperations := operations
-    closureDispatch := collectClosureDispatch operations }
+    closureDispatch := collectClosureDispatch operations
+    closureDescriptors := collectClosureDescriptors operations }
 
 end Fir.Wasm

@@ -27,6 +27,18 @@ export function validateModuleDescriptor(manifest) {
   requireCondition(new Set(manifest.closureDispatch).size ===
     manifest.closureDispatch.length,
   "module descriptor closureDispatch must not contain duplicates");
+  requireCondition(Array.isArray(manifest.closureDescriptors),
+    "module descriptor closureDescriptors must be an array");
+  requireCondition(manifest.closureDescriptors.every((descriptor) =>
+    Array.isArray(descriptor) &&
+    descriptor.every((kind) => typeof kind === "string" && kind.length > 0)),
+  "module descriptor closureDescriptors must contain ABI kind arrays");
+  for (const [index, descriptor] of manifest.closureDescriptors.entries()) {
+    requireCondition(!manifest.closureDescriptors.slice(0, index).some((candidate) =>
+      candidate.length === descriptor.length &&
+      candidate.every((kind, kindIndex) => kind === descriptor[kindIndex])),
+    "module descriptor closureDescriptors must not contain duplicates");
+  }
   requireCondition(Array.isArray(manifest.imports),
     "module descriptor imports must be an array");
   for (const field of INVOCATION_FIELDS) {

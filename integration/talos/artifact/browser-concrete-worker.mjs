@@ -43,7 +43,8 @@ async function runConcreteArtifact(fixture) {
   assert.ok(WebAssembly.validate(bytes), `${fixture}.wasm failed WebAssembly validation`);
 
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry, manifest.closureDispatch);
+    concreteArtifactExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   const entry = instance.exports[manifest.entry];
   assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
@@ -64,7 +65,8 @@ async function runConcreteArtifact(fixture) {
 async function checkFragmentGate(fixture) {
   const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry, manifest.closureDispatch);
+    concreteArtifactExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
   let rejected = false;
   try {
     host.imports(manifest.imports);
@@ -78,7 +80,8 @@ async function checkExpectedFault(fixture, expectedFault) {
   const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
   const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    concreteArtifactExternalRegistry, manifest.closureDispatch);
+    concreteArtifactExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   let actual;
   try {
@@ -96,7 +99,7 @@ async function checkDefaultExternalFault(fixture, expectedFault) {
   const manifest = await fetchJson(`${fixture}.wasm.json`, `${fixture} manifest`);
   const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
-    undefined, manifest.closureDispatch);
+    undefined, manifest.closureDispatch, manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   let actual;
   try {
