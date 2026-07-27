@@ -3382,6 +3382,21 @@ closure dispatch, lazy caches, and external calls, then finish automatic
 syntax-directed certificate construction. No FIR semantic contract or
 executable ABI changed.
 
+W6.6dv closes the saturated closure-dispatch instance. The proof follows the
+compiler's exact candidate chain: any nonmatching prefix executes only
+read-only matcher calls, the selected candidate assembles projected captures
+and explicit arguments, and its ordinary declaration call consumes the same
+hereditary callee certificate as a named call. Two small structural lemmas
+show that normal fallthrough crosses every nested candidate resumption layer
+and that the candidate's result-local store followed by the dispatch reload
+and enclosing `let` store is a checked idempotent write. The resulting
+capacity-aware call step retains all caller facts except the bound result,
+and a recursive builder derives the numeric Talos dispatch adaptation from
+the compiler candidate list. Underapplication remains a fresh-allocation
+result path rather than an interprocedural callee path; lazy-cache and external
+call instances, followed by automatic syntax-directed certificate assembly,
+remain. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
