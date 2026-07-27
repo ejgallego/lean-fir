@@ -385,7 +385,8 @@ theorem reuseCapacitySafeCode_constructor_head
       (insertReuseCapacityFact facts decl.fvarId
         (constructorReuseCapacityEvidence info))
       continuation = true := by
-  simpa only [reuseCapacitySafeCode, valueEq] using safe
+  apply reuseCapacitySafeCode_let_head facts _ decl continuation ?_ safe
+  simp [reuseCapacityLetFacts?, valueEq]
 
 /-- When reset's source is tracked, the validator transfers that same fact to
 the result binding and checks the continuation under it. -/
@@ -400,7 +401,8 @@ theorem reuseCapacitySafeCode_reset_tracked_head
     reuseCapacitySafeCode
       (insertReuseCapacityFact facts decl.fvarId evidence) continuation =
         true := by
-  simpa only [reuseCapacitySafeCode, valueEq, tracked] using safe
+  apply reuseCapacitySafeCode_let_head facts _ decl continuation ?_ safe
+  simp [reuseCapacityLetFacts?, valueEq, tracked]
 
 /-- When reset's source is untracked, the validator erases any shadowed
 destination fact before checking the continuation. -/
@@ -413,7 +415,8 @@ theorem reuseCapacitySafeCode_reset_untracked_head
     (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
     reuseCapacitySafeCode
       (eraseReuseCapacityFact facts decl.fvarId) continuation = true := by
-  simpa only [reuseCapacitySafeCode, valueEq, untracked] using safe
+  apply reuseCapacitySafeCode_let_head facts _ decl continuation ?_ safe
+  simp [reuseCapacityLetFacts?, valueEq, untracked]
 
 /-- Dynamic interpretation of every fact carried by the static analysis.
 Each tracked source binding is resolved at the compiler-assigned local and

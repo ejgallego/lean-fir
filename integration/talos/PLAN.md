@@ -3328,6 +3328,21 @@ current direct-let result family without adding transport to the shared
 capacity-aware code certificate, followed by its branch and interprocedural
 cases. No FIR semantic contract or executable ABI changed.
 
+W6.6dr defines the recursive theorem target for capacity-safe execution.
+`reuseCapacityLetFacts?` is now the authoritative, behavior-preserving static
+transfer used by `reuseCapacitySafeCode`, so proof code no longer duplicates
+the validator's constructor/reset/reuse match. The new
+`ReuseCapacityCodeSimulation` mirrors `ConcreteCodeSimulation` across direct
+lets, calls, externals, lazy-cache paths, cases, and no-result effects while
+indexing every node and the selected return leaf by their exact fact maps. It
+records static acceptance and the dynamic `ReuseCapacityStateRelated`
+interpretation at each recursive boundary. Erasure recovers the existing
+executable simulation, and therefore its `CodeWP` theorem, without changing
+endpoints. The remaining W6 work is constructive: build this certificate from
+the operation-specific result/effect transitions and close the
+interprocedural call transition, then lift it to the supported export theorem.
+No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

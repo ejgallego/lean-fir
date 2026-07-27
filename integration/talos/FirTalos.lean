@@ -25,6 +25,7 @@ import FirTalos.ConcreteReuseCapacityCorrectness
 import FirTalos.ConcreteCacheCorrectness
 import FirTalos.ConcreteDeclarationCorrectness
 import FirTalos.ConcreteProgramCorrectness
+import FirTalos.ConcreteReuseCapacityProgramCorrectness
 import FirTalos.ConcreteClosureDispatch
 import FirTalos.ConcreteResolver
 import FirTalos.ConcreteSupportedExportCorrectness

@@ -579,34 +579,35 @@ private theorem reuseCapacity_funDeclValue_sizeOf_lt
   simp only [LCNF.FunDecl.value]
   omega
 
+/-- Authoritative static fact transfer for one result-producing `let`.
+`none` is the validator's rejection of a reuse whose token provenance is
+unknown or whose retained allocation is too small. -/
+def reuseCapacityLetFacts? (facts : ReuseCapacityFacts)
+    (decl : LCNF.LetDecl .impure) : Option ReuseCapacityFacts :=
+  match decl.value with
+  | .ctor info _ =>
+      some (insertReuseCapacityFact facts decl.fvarId
+        (constructorReuseCapacityEvidence info))
+  | .reset _ objectId =>
+      some <| match findReuseCapacityEvidence? facts objectId with
+        | some evidence => insertReuseCapacityFact facts decl.fvarId evidence
+        | none => eraseReuseCapacityFact facts decl.fvarId
+  | .reuse tokenId info _ _ =>
+      match findFittingReuseCapacityEvidence? facts tokenId info with
+      | some evidence =>
+          some (insertReuseCapacityFact facts decl.fvarId
+            (evidence.afterReuse info))
+      | none => none
+  | _ => some (eraseReuseCapacityFact facts decl.fvarId)
+
 mutual
 
 def reuseCapacitySafeCode (facts : ReuseCapacityFacts) :
     LCNF.Code .impure → Bool
   | .let decl continuation =>
-      match decl.value with
-      | .ctor info _ =>
-          reuseCapacitySafeCode
-            (insertReuseCapacityFact facts decl.fvarId
-              (constructorReuseCapacityEvidence info))
-            continuation
-      | .reset _ objectId =>
-          let facts :=
-            match findReuseCapacityEvidence? facts objectId with
-            | some evidence => insertReuseCapacityFact facts decl.fvarId evidence
-            | none => eraseReuseCapacityFact facts decl.fvarId
-          reuseCapacitySafeCode facts continuation
-      | .reuse tokenId info _ _ =>
-          match findFittingReuseCapacityEvidence? facts tokenId info with
-          | some evidence =>
-              reuseCapacitySafeCode
-                (insertReuseCapacityFact facts decl.fvarId
-                  (evidence.afterReuse info))
-                continuation
-          | none => false
-      | _ =>
-          reuseCapacitySafeCode
-            (eraseReuseCapacityFact facts decl.fvarId) continuation
+      match reuseCapacityLetFacts? facts decl with
+      | some nextFacts => reuseCapacitySafeCode nextFacts continuation
+      | none => false
   | .fun _ _ h => nomatch h
   | .jp decl continuation =>
       reuseCapacitySafeCode facts decl.value &&
@@ -686,6 +687,17 @@ theorem findFittingReuseCapacityEvidence?_retained_layoutFits
   exact
     (ReuseCapacityEvidence.retainedAtLeast_fits_iff available info).mp fits
 
+/-- An accepted result-producing head checks its continuation under the
+authoritative fact transfer. -/
+theorem reuseCapacitySafeCode_let_head
+    (facts nextFacts : ReuseCapacityFacts)
+    (decl : LCNF.LetDecl .impure)
+    (continuation : LCNF.Code .impure)
+    (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+    (safe : reuseCapacitySafeCode facts (.let decl continuation) = true) :
+    reuseCapacitySafeCode nextFacts continuation = true := by
+  simpa only [reuseCapacitySafeCode, transfer] using safe
+
 /--
 Every reuse at the head of an accepted code spine has tracked, fitting
 capacity evidence. This is the decomposition rule used by the
@@ -702,14 +714,14 @@ theorem reuseCapacitySafeCode_reuse_head
       findFittingReuseCapacityEvidence? facts tokenId info = some evidence ∧
         findReuseCapacityEvidence? facts tokenId = some evidence ∧
         evidence.fits info = true := by
-  simp only [reuseCapacitySafeCode, valueEq] at safe
-  split at safe
-  next evidence found =>
+  cases found :
+      findFittingReuseCapacityEvidence? facts tokenId info with
+  | some evidence =>
     have tracked :=
       findFittingReuseCapacityEvidence?_eq_some facts tokenId info evidence found
-    exact ⟨evidence, found, tracked⟩
-  next missing =>
-    contradiction
+    exact ⟨evidence, rfl, tracked⟩
+  | none =>
+    simp [reuseCapacitySafeCode, reuseCapacityLetFacts?, valueEq, found] at safe
 
 theorem reuseCapacitySafeProgram_code
     (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)

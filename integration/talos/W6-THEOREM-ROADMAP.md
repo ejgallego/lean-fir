@@ -277,8 +277,13 @@ surface now has named constructor/reset/reuse adapters plus two exhaustive
 ordinary-result shapes: heap preservation for reads and fresh-prefix
 extension for allocation. Boxing, natural, string, and partial-application
 allocation instantiate the latter across all admitted representations. The
-remaining syntax work is to assemble these transitions in the recursive
-capacity-aware code certificate before branch and call propagation. Native
+authoritative let-fact transfer has been extracted from the validator, and
+`ReuseCapacityCodeSimulation` now states the recursive certificate across
+direct lets, calls, externals, lazy-cache paths, cases, and effects. It exposes
+initial and selected-return fact interpretations and erases to the existing
+executable simulation and `CodeWP`. The remaining syntax work is to construct
+that certificate from each operation theorem, with the interprocedural call
+transition the main open composition boundary. Native
 unreachability losing its source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
 
@@ -356,9 +361,12 @@ acceptance tests pass.
    now have generic insert/erase adapters, and constructor/reset/reuse supply
    their exact tracked evidence plus old-fact transport. All current direct
    result families reduce to named tracked transfer, heap-preserving erasure,
-   or prefix-extending erasure. The remaining syntax work is the recursive
-   capacity-aware code certificate, followed by branch/call propagation.
-   Structured unreachability remains the shared-contract blocker.
+   or prefix-extending erasure. The recursive capacity-aware certificate is
+   defined for all existing simulation constructors and conservatively erases
+   to `ConcreteCodeSimulation`. The remaining syntax work is to construct it
+   from the operation lemmas, close its interprocedural call case, and lift it
+   to supported exports. Structured unreachability remains the shared-contract
+   blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.
