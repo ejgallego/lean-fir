@@ -20,10 +20,10 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/wasm-lanes` | active | Record the landed W7 allocator handoff and keep W6/W7 bridges explicit | No shared contract is blocking a lane |
+| Integration | integration owner | `integration/wasm-lanes` | active | Released the stable closure-descriptor table as `40f41c0`; waiting for the active W6 slice to reach a clean rebase point | W6 must rebase before W7 starts the dependent resident `partialApply` linker |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | blocked | Compiler-derived binder-readiness endpoint is drafted in `ElimDeadMachineRel.lean`, but the uncommitted draft appeared alongside another owner's checkpoint | Ownership must be reconciled before proof edits, checks, or handoff continue |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Preserve mapped header capacity through leaf, fuel-indexed, recursive, and public ownership release | Consumes the released erased-reset contract; independent of W7 allocator and validation schemas |
-| W7 generation | generation owner | `wasm/generation` | released | Resident allocator and styled `prettyM` package landed as `21f382c`; next generation slice may start independently | Allocator signatures queue a W6 Talos-adapter guard and later T5 bridge; no shared contract changed |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Preserve mapped header capacity through leaf, fuel-indexed, recursive, and public ownership release | Current worktree is dirty on its active slice and does not yet contain released closure-descriptor contract `40f41c0`; finish the slice, then rebase before W7's dependent linker starts |
+| W7 generation | generation owner | `wasm/generation` | active | Constructor internalization is landed as `10ffa4f`; stable closure descriptors are landed as `40f41c0`; resident `partialApply` allocation is next | Dependent edits wait for W6 to rebase onto `40f41c0`; no W6 files will be touched by W7 |
 | Validation | validation owner | `validation/interpreter-corpus` | released | Mixed erased/owned reset release is observable through native and interpreter sharing state at `3b82b0b` | Differentially checks the released reset contract; no new shared contract |
 
 ## Resident-helper bridge
@@ -40,6 +40,7 @@ moving global snapshot hash.
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
 | `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
 | `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | released | `21f382c` | Zero-import allocator and styled package are generation-ready; allocator installation preserves the current 177-import `prettyM` frontier, and W6 owns the later bridge proof |
+| `W7-CLOSURE-DESCRIPTORS` | W7 | W6, W7, integration, artifact clients | released | `40f41c0` | Retains the duplicate-free capture-kind table after `partialApply` imports are removed, so closure header `aux3` remains stable; W6 must rebase before W7 consumes it in the resident closure allocator |
 
 ## Update format
 
