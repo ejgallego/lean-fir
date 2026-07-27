@@ -391,6 +391,40 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident-constructor Format module: {repr error}"
+  let naturals := residentConstructorArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural
+  unless naturals.size == 2 do
+    throwError "resident Format immediate-Natural inventory changed"
+  let residentNaturalArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeImmediateNaturals
+        residentConstructorArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident-Natural Format facade: {repr error}"
+  unless residentNaturalArtifact.module.runtimeOperations.all fun operation =>
+      !Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural operation do
+    throwError "resident Format retained an immediate-Natural import"
+  unless (residentNaturalArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentLiteral.isStringLiteral).size == 4 do
+    throwError "resident Format moved strings across the host boundary"
+  unless residentNaturalArtifact.module.imports.size + naturals.size ==
+      residentConstructorArtifact.module.imports.size do
+    throwError "resident Format immediate-Natural import accounting changed"
+  unless residentNaturalArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch do
+    throwError "Natural linking changed the stable closure-dispatch table"
+  unless residentNaturalArtifact.module.closureDescriptors ==
+      moduleArtifact.module.closureDescriptors do
+    throwError "Natural linking changed the stable closure-descriptor table"
+  unless (List.range naturals.size).all fun ordinal =>
+      residentNaturalArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentLiteral.naturalName ordinal) do
+    throwError "resident Format Natural helper exports changed"
+  match ← residentNaturalArtifact.write
+      "_build/source-pretty-format-resident-naturals.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident-Natural Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

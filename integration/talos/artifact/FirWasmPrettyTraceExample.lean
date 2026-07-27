@@ -57,24 +57,51 @@ run_cmd do
       Fir.Wasm.Emit.SourceFixture.prettyFormatTraceEventsExpected do
     throwError "native styled prettyM event oracle changed:\n{repr trace.eventsRev.reverse}"
   let result ← liftCoreM <|
-    Fir.Wasm.Emit.ResidentPrettyFormat.compileModule
+    Fir.Wasm.Emit.ResidentPrettyFormat.compileConstructorModule
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw
-  let artifact ← match result with
+  let constructorArtifact ← match result with
     | .ok artifact => pure artifact
     | .error error =>
-        throwError "failed to compile resident styled Format facade: {repr error}"
-  unless artifact.module.memory.any fun memory =>
+        throwError "failed to compile resident styled constructor facade: {repr error}"
+  unless constructorArtifact.module.memory.any fun memory =>
       memory.pagesMin == 1 && memory.exportName == some "memory" do
     throwError "resident styled Format module does not export its memory"
   unless Fir.Wasm.Emit.ResidentAllocator.helperNames.all
-      artifact.module.exports.contains do
+      constructorArtifact.module.exports.contains do
     throwError "resident styled Format module lost allocator exports"
-  unless artifact.module.imports.size == 157 &&
-      artifact.module.runtimeOperations.all fun operation =>
+  unless constructorArtifact.module.imports.size == 157 &&
+      constructorArtifact.module.runtimeOperations.all fun operation =>
         !Fir.Wasm.Emit.ResidentConstructor.isConstructor operation do
     throwError "resident styled Format constructor frontier changed"
-  match ← artifact.write
+  match ← constructorArtifact.write
       "_build/source-pretty-format-trace-resident-constructors.wasm" with
   | .ok () => pure ()
   | .error error =>
-      throwError "failed to write resident styled Format module: {repr error}"
+      throwError "failed to write resident styled constructor module: {repr error}"
+  let naturals := constructorArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural
+  unless naturals.size == 4 do
+    throwError "resident styled Format immediate-Natural inventory changed"
+  let naturalArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeImmediateNaturals
+        constructorArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled Natural facade: {repr error}"
+  unless naturalArtifact.module.imports.size == 153 &&
+      naturalArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentLiteral.isImmediateNatural operation do
+    throwError "resident styled Format Natural frontier changed"
+  unless (naturalArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentLiteral.isStringLiteral).size == 4 do
+    throwError "resident styled Format moved strings across the host boundary"
+  unless naturalArtifact.module.closureDispatch ==
+      constructorArtifact.module.closureDispatch &&
+      naturalArtifact.module.closureDescriptors ==
+        constructorArtifact.module.closureDescriptors do
+    throwError "resident styled Natural linking changed closure metadata"
+  match ← naturalArtifact.write
+      "_build/source-pretty-format-trace-resident-naturals.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled Natural module: {repr error}"

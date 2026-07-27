@@ -23,6 +23,8 @@ test -s "$here/_build/resident-allocator.wasm"
 test -s "$here/_build/resident-allocator.wasm.json"
 test -s "$here/_build/resident-constructors.wasm"
 test -s "$here/_build/resident-constructors.wasm.json"
+test -s "$here/_build/resident-literals.wasm"
+test -s "$here/_build/resident-literals.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-get-tag.wasm"
 test -s "$here/_build/source-pretty-format-resident-get-tag.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-runtime.wasm"
@@ -37,8 +39,10 @@ test -s "$here/_build/source-pretty-format-resident-allocator.wasm"
 test -s "$here/_build/source-pretty-format-resident-allocator.wasm.json"
 test -s "$here/_build/source-pretty-format-resident-constructors.wasm"
 test -s "$here/_build/source-pretty-format-resident-constructors.wasm.json"
-test -s "$here/_build/source-pretty-format-trace-resident-constructors.wasm"
-test -s "$here/_build/source-pretty-format-trace-resident-constructors.wasm.json"
+test -s "$here/_build/source-pretty-format-resident-naturals.wasm"
+test -s "$here/_build/source-pretty-format-resident-naturals.wasm.json"
+test -s "$here/_build/source-pretty-format-trace-resident-naturals.wasm"
+test -s "$here/_build/source-pretty-format-trace-resident-naturals.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &
@@ -52,6 +56,10 @@ cleanup() {
   fi
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true
+  for _ in {1..10}; do
+    rm -rf "$chrome_data" 2>/dev/null && return
+    sleep 0.1
+  done
   rm -rf "$chrome_data"
 }
 trap cleanup EXIT

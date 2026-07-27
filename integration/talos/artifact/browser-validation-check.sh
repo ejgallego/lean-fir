@@ -31,6 +31,10 @@ cleanup() {
   fi
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true
+  for _ in {1..10}; do
+    rm -rf "$chrome_data" 2>/dev/null && return
+    sleep 0.1
+  done
   rm -rf "$chrome_data"
 }
 trap cleanup EXIT

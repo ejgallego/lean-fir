@@ -42,6 +42,7 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "conditional-byte-array-get-skipped",
   "conditional-byte-array-get-taken",
   "effect-record-byte-array-twice",
+  "empty-byte-array-roundtrip",
   "mixed-layout-byte-array",
   "mixed-layout-natural",
   "mixed-layout-string",

@@ -86,6 +86,9 @@ node run-resident-allocator.mjs _build/resident-allocator.wasm
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm
+lake exe fir-wasm-artifact resident-literals \
+  _build/resident-literals.wasm
+node run-resident-literals.mjs _build/resident-literals.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -136,6 +139,12 @@ It checks both immediate empty constructors and exact nonempty W6 headers,
 object slots, `USize` slots, packed scalar bytes, zero padding, repeated
 allocation, frontier movement, and preservation of the temporary retagging
 scratch word.
+
+The resident literal module likewise has zero imports and owns its memory. It
+checks immediate `Nat` encodings plus empty and Unicode/newline strings,
+including the exact versioned W6 header, canonical UTF-8 payload, aligned zero
+padding, frontier movement, scratch preservation, and direct `ConcreteHost`
+decoding.
 
 Remaining JavaScript runtime operations can use that module-owned heap without
 a facade. Construct the concrete host before instantiation as usual, then
@@ -452,6 +461,24 @@ host frontiers at each remaining JavaScript import boundary; this bridge does
 not add an ABI and becomes inactive at zero function imports. The full retained
 audit is now `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154`.
 
+The following independent checkpoint internalizes the two supported
+immediate-Natural literals in text `prettyM`, preserving the captured LCNF and
+reducing imports from 154 to 152:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-naturals.wasm
+```
+
+Larger naturals remain fail-closed imports until their big-natural allocator
+lands. The standalone literal artifact already checks the resident UTF-8
+String allocator, but `FIR-BUG-wasm-none-resident-import-location-registry`
+requires String linking to wait until its remaining JavaScript consumers are
+resident. The styled facade contains two additional event-kind naturals, so
+its checkpoint moves from 157 to 153 imports while preserving the exact
+native-oracle event stream. The full text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -466,8 +493,8 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 157 function imports: three more than
-the text-only 154-import checkpoint in order to preserve the exact
+memory and allocator and currently has 153 function imports: one more than
+the text-only 152-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare
@@ -537,8 +564,8 @@ third Worker. That Worker also executes the concrete initial-runtime
 complete 13-probe compiler source inventory—including both initial-runtime
 `prettyM` invocations and the invocation-free raw-layout module—through the
 same concrete checkers used by Node. The shared-product Worker independently
-executes the 65 non-`ByteArray` products through the concrete host after their
-semantic executions and verifies the exact 30-case blocker inventory.
+executes the 70 non-`ByteArray` products through the concrete host after their
+semantic executions and verifies the exact 33-case blocker inventory.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

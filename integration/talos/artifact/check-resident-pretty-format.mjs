@@ -9,13 +9,14 @@ const residentClosurePath = process.argv[6];
 const residentMatchPath = process.argv[7];
 const residentAllocatorPath = process.argv[8];
 const residentConstructorPath = process.argv[9];
+const residentNaturalPath = process.argv[10];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
-  residentAllocatorPath && residentConstructorPath,
+  residentAllocatorPath && residentConstructorPath && residentNaturalPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
   "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm " +
-  "RESIDENT_CONSTRUCTORS.wasm");
+  "RESIDENT_CONSTRUCTORS.wasm RESIDENT_NATURALS.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -38,6 +39,7 @@ const residentClosures = readArtifact(residentClosurePath);
 const residentMatches = readArtifact(residentMatchPath);
 const residentAllocator = readArtifact(residentAllocatorPath);
 const residentConstructors = readArtifact(residentConstructorPath);
+const residentNaturals = readArtifact(residentNaturalPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -81,6 +83,14 @@ assert.equal(operationCount(residentAllocator, "allocCtor"), 23,
   "resident-allocator prettyM constructor inventory changed");
 assert.equal(operationCount(residentConstructors, "allocCtor"), 0,
   "resident-constructor prettyM retained constructor imports");
+assert.equal(operationCount(residentConstructors, "naturalLiteral"), 2,
+  "resident-constructor prettyM natural-literal inventory changed");
+assert.equal(operationCount(residentConstructors, "stringLiteral"), 4,
+  "resident-constructor prettyM string-literal inventory changed");
+assert.equal(operationCount(residentNaturals, "naturalLiteral"), 0,
+  "resident-Natural prettyM retained supported natural literals");
+assert.equal(operationCount(residentNaturals, "stringLiteral"), 4,
+  "resident-Natural prettyM moved strings across the host boundary");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -144,6 +154,16 @@ assert.equal(
   "resident-constructor prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentNaturals) + 2,
+  functionImportCount(residentConstructors),
+  "resident Naturals did not remove exactly two function imports",
+);
+assert.equal(
+  residentNaturals.manifest.imports.length,
+  functionImportCount(residentNaturals),
+  "resident-Natural prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -173,6 +193,11 @@ assert.equal(
   0,
   "resident-constructor prettyM imports memory",
 );
+assert.equal(
+  residentNaturals.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident-Natural prettyM imports memory",
+);
 for (const artifact of [
   getTagResident,
   residentRuntime,
@@ -181,6 +206,7 @@ for (const artifact of [
   residentMatches,
   residentAllocator,
   residentConstructors,
+  residentNaturals,
 ]) {
   assert.deepStrictEqual(
     artifact.manifest.closureDispatch,
@@ -298,15 +324,28 @@ for (let ordinal = 0; ordinal < 23; ordinal += 1) {
     entry.name === name && entry.kind === "function"),
   `resident-constructor prettyM helper export ${name} is missing`);
 }
+assert.ok(residentNaturals.exports.some(({ name, kind }) =>
+  name === residentNaturals.manifest.entry && kind === "function"),
+"resident-Natural prettyM entry export is missing");
+assert.ok(residentNaturals.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident-Natural prettyM memory export is missing");
+for (let ordinal = 0; ordinal < 2; ordinal += 1) {
+  const name = `fir_nat_literal_${ordinal}`;
+  assert.ok(residentNaturals.exports.some((entry) =>
+    entry.name === name && entry.kind === "function"),
+  `resident-Natural prettyM helper export ${name} is missing`);
+}
 
 console.log(
   `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
-  `then installed its allocator and internalized constructors ` +
+  `then installed its allocator and internalized constructors and immediate Naturals ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
   `${functionImportCount(residentClosures)} → ` +
   `${functionImportCount(residentMatches)} → ` +
   `${functionImportCount(residentAllocator)} → ` +
-  `${functionImportCount(residentConstructors)} function imports)`,
+  `${functionImportCount(residentConstructors)} → ` +
+  `${functionImportCount(residentNaturals)} function imports)`,
 );

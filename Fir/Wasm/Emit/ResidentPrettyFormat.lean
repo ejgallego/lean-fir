@@ -1,6 +1,7 @@
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentConstructor
+import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentRuntime
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -43,6 +44,21 @@ def internalizeConstructors (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident constructor allocation: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeImmediateNaturals (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentLiteral.internalizeImmediateNaturals
+        artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident immediate Naturals: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -142,9 +158,19 @@ def compileConstructorModule (entry : Name) :
   let result ← compileAllocatorModule entry
   return result.bind internalizeConstructors
 
+/--
+Continue from constructor allocation and internalize the immediate-Natural
+literal family. String helpers are already available standalone, but remain
+imports until their JavaScript-consuming external family is resident.
+-/
+def compileImmediateNaturalModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileConstructorModule entry
+  return result.bind internalizeImmediateNaturals
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileConstructorModule entry
+  compileImmediateNaturalModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat
