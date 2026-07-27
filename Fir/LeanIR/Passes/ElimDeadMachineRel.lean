@@ -15553,6 +15553,292 @@ theorem SomeReachableMachineRelated.matchYieldedStep
                             by simpa only [targetSame] using targetPath,
                             ⟨rho, afterRelated⟩⟩
 
+/-- Hereditary bind-frame restoration.  The saved continuation and join
+environment re-enter the active control without forgetting their exact
+compiler provenance. -/
+theorem coreStep_yieldedBind_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceJoins targetJoins)
+    (env : EnvRelOn rho used sourceEnv targetEnv)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots))
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots))) :
+    let sourceAfter := {
+      sourceState with
+      env := bind sourceEnv binder sourceValue
+      joins := sourceJoins
+      frames := sourceFrames
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with
+      env := bind targetEnv binder targetValue
+      joins := targetJoins
+      frames := targetFrames
+      control := .code targetContinuation }
+    coreStep { sourceState with
+        frames := .bind binder sourceContinuation sourceEnv sourceJoins ::
+          sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .bind binder targetContinuation targetEnv targetJoins ::
+          targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  have nextEnv := env.bindBoth (binder := binder) value
+  have extra : ListRel (ValueRel rho)
+      (envRootsOn used (bind sourceEnv binder sourceValue) ++
+        sourceFrameRoots)
+      (envRootsOn used (bind targetEnv binder targetValue) ++
+        targetFrameRoots) :=
+    listRel_append (envRootsOn_related nextEnv) frames.roots
+  have sourceSubset : RootSubset
+      (envRootsOn used (bind sourceEnv binder sourceValue) ++
+        sourceFrameRoots)
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots)) := by
+    intro root member
+    simp only [List.mem_append, List.mem_singleton] at member ⊢
+    rcases member with changed | framed
+    · have rooted := envRootsOn_bind_subset root changed
+      simp only [List.mem_cons] at rooted
+      rcases rooted with same | old
+      · exact Or.inl same
+      · exact Or.inr (Or.inl old)
+    · exact Or.inr (Or.inr framed)
+  have targetSubset : RootSubset
+      (envRootsOn used (bind targetEnv binder targetValue) ++
+        targetFrameRoots)
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots)) := by
+    intro root member
+    simp only [List.mem_append, List.mem_singleton] at member ⊢
+    rcases member with changed | framed
+    · have rooted := envRootsOn_bind_subset root changed
+      simp only [List.mem_cons] at rooted
+      rcases rooted with same | old
+      · exact Or.inl same
+      · exact Or.inr (Or.inl old)
+    · exact Or.inr (Or.inr framed)
+  have nextRuntime := runtime.restrictExtra extra sourceSubset targetSubset
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨envRootsOn used (bind sourceEnv binder sourceValue),
+    envRootsOn used (bind targetEnv binder targetValue),
+    sourceFrameRoots, targetFrameRoots,
+    programs, .code continuation joins nextEnv, frames, nextRuntime⟩
+
+/-- Hereditary apply-frame restoration preserves the exact provenance in the
+remaining stack while exposing a related closure invocation. -/
+theorem coreStep_yieldedApply_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ (sourceArguments.toList ++ sourceFrameRoots))
+      ([targetValue] ++ (targetArguments.toList ++ targetFrameRoots))) :
+    let sourceAfter := {
+      sourceState with
+      frames := sourceFrames
+      control := .invokeValue sourceValue sourceArguments }
+    let targetAfter := {
+      targetState with
+      frames := targetFrames
+      control := .invokeValue targetValue targetArguments }
+    coreStep { sourceState with
+        frames := .apply sourceArguments :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .apply targetArguments :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨sourceValue :: sourceArguments.toList,
+    targetValue :: targetArguments.toList,
+    sourceFrameRoots, targetFrameRoots,
+    programs, .invokeValue value arguments, frames, by simpa using runtime⟩
+
+/-- Hereditary cache-frame restoration preserves exact provenance in the
+remaining stack while publishing the returned value on both sides. -/
+theorem coreStep_yieldedCache_binderReadyReachableRelated
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ sourceFrameRoots)
+      ([targetValue] ++ targetFrameRoots)) :
+    let sourceAfter := {
+      sourceState with
+      runtime := sourceState.runtime.setGlobal name sourceValue
+      frames := sourceFrames
+      control := .yielded sourceValue }
+    let targetAfter := {
+      targetState with
+      runtime := targetState.runtime.setGlobal name targetValue
+      frames := targetFrames
+      control := .yielded targetValue }
+    coreStep { sourceState with
+        frames := .cache name :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .cache name :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  dsimp only
+  refine ⟨rfl, rfl, ?_⟩
+  have nextRuntime := runtime.setGlobalBoth (name := name) value
+    (by simp) (by simp)
+  unfold BinderReadyReachableMachineRelated
+  exact ⟨[sourceValue], [targetValue],
+    sourceFrameRoots, targetFrameRoots,
+    programs, .yielded value, frames, by simpa using nextRuntime⟩
+
+/-- State-level yielded advance that retains exact provenance through bind,
+apply, and cache frame restoration.  An empty stack is terminal. -/
+theorem SomeBinderReadyReachableMachineRelated.matchYieldedStep
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | yielded value =>
+          cases sourceFrames : source.frames with
+          | nil =>
+              have done : coreStep source =
+                  .done (observe source (.returned sourceValue)) := by
+                simp [coreStep, sourceControl, sourceFrames]
+              cases step with
+              | internal transition =>
+                  rw [done] at transition
+                  contradiction
+              | external transition externalProof =>
+                  rw [done] at transition
+                  contradiction
+          | cons sourceHead sourceTail =>
+              cases targetFrames : target.frames with
+              | nil =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames
+              | cons targetHead targetTail =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames with
+                  | cons head tail =>
+                      cases head with
+                      | @bind used sourceContinuation targetContinuation
+                          sourceJoins targetJoins sourceEnv targetEnv fvarId
+                          graph joins env =>
+                          have sourceSame : { source with
+                              frames := .bind fvarId sourceContinuation
+                                sourceEnv sourceJoins :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .bind fvarId targetContinuation
+                                targetEnv targetJoins :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedBind_binderReadyReachableRelated
+                                (binder := fvarId) source target programs tail
+                                graph joins env value runtime with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady
+                              sourceTransition targetTransition afterRelated
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+                      | @apply sourceArguments targetArguments arguments =>
+                          have sourceSame : { source with
+                              frames := .apply sourceArguments :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .apply targetArguments :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedApply_binderReadyReachableRelated
+                                source target programs tail value arguments
+                                runtime with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady
+                              sourceTransition targetTransition afterRelated
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+                      | cache name =>
+                          have sourceSame : { source with
+                              frames := .cache name :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .cache name :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedCache_binderReadyReachableRelated
+                                (name := name) source target programs tail value
+                                (by simpa using runtime) with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady
+                              sourceTransition targetTransition afterRelated
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+
 /-- State-level named-call matcher for every internal transition.  Cache hits
 publish an already-related global, while cache misses and nonempty calls
 classify declaration invocation into closure allocation or internal body
