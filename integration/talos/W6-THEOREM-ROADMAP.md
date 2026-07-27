@@ -268,8 +268,13 @@ for constructor tags, object fields, `USize` fields, and every supported packed
 integer width. The operation-level transport inventory is complete; the
 complete no-result effect spine now carries it through generic effect-step and
 heap-replacement adapters, with reflexive transport for persistent ownership
-effects. The result-producing let spine still has to insert constructor,
-reset, and reuse facts or erase ordinary result facts before branch and call
+effects. Generic result-binding rules now insert tracked evidence or erase a
+shadowed stale fact across the checked local write and the same transport
+boundary. Constructor, reset, and reuse supply their exact validator-selected
+result evidence in every successful physical branch; nonunique and unique
+reset also preserve unrelated mapped-header facts. The remaining
+result-producing syntax work is to instantiate those rules for every
+direct-let lowering and ordinary result family before branch and call
 propagation. Native
 unreachability losing its source fault is tracked separately by
 `FIR-BUG-wasm-none-unreachable-fault-classification`.
@@ -344,9 +349,12 @@ acceptance tests pass.
    constructor allocation/reuse covers immediate and promoted tagged results;
    ownership and mutation operations now supply transport across every
    admitted successful effect. The complete no-result effect spine carries the
-   strengthened state through generic effect-step adapters. The remaining
-   syntax work is the result-producing let spine and subsequent branch/call
-   propagation. Structured unreachability remains the shared-contract blocker.
+   strengthened state through generic effect-step adapters. Result bindings
+   now have generic insert/erase adapters, and constructor/reset/reuse supply
+   their exact tracked evidence plus old-fact transport. The remaining syntax
+   work is direct-let instantiation for tracked and ordinary result families,
+   followed by branch/call propagation. Structured unreachability remains the
+   shared-contract blocker.
 7. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 8. Close with T6 and the pure `prettyM` acceptance theorem.

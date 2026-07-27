@@ -3298,6 +3298,21 @@ reset, and reuse insert new facts, while ordinary results erase or bind facts
 before branch and call propagation. No FIR semantic contract or executable
 ABI changed.
 
+W6.6dp establishes the result-binding core and closes the tracked operation
+inventory. Generic `ReuseCapacityFactsRel` and `ReuseCapacityStateRelated`
+rules now insert a proved result fact or erase a shadowed stale fact while
+transporting all other facts through the source binding, checked destination
+local write, witness transition, and heap transition. Specializations consume
+the existing `LetStepSimulates` surface for wasm32 tracked results and
+arbitrary ordinary results. Direct constructor allocation, reset, and reuse
+now supply the exact evidence selected by `reuseCapacitySafeCode` in every
+successful physical branch. In particular, nonunique reset exports
+mapped-header capacity transport instead of losing it at the host wrapper,
+and unique reset returns both its retained result fact and transport for
+unrelated facts. The remaining syntax work is to instantiate these adapters
+for each direct-let lowering, then propagate the strengthened state through
+branches and calls. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

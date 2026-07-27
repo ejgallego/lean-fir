@@ -4044,8 +4044,59 @@ theorem resetStep_tagged_of_refines
   · simpa [replaceHeap, clearFailure] using runtimeRelated
 
 /-- A nonunique mapped heap object follows reset's decrement-and-empty-token
-path in both runtimes. Persistent reachable cells are included because their
-canonical zero reference count is nonunique. -/
+path in both runtimes while preserving the physical extent of every mapped
+header. Persistent reachable cells are included because their canonical zero
+reference count is nonunique. -/
+theorem resetStep_nonunique_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken none)) :
+    ∃ heap,
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+            (replaceHeap initial heap) ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+          nextRuntime ∧
+        ValueRel witness .reuseToken (.word32 Word32.zero)
+          (.reuseToken none) ∧
+        MappedHeaderCapacityTransport initial.host.runtime.heap heap
+          witness := by
+  have semanticDec : decLocation runtime location = .ok nextRuntime := by
+    unfold reset at updated
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at updated
+    rw [if_pos (by simp [notUnique])] at updated
+    cases decEq : decLocation runtime location with
+    | error fault =>
+        rw [decEq] at updated
+        contradiction
+    | ok middleRuntime =>
+        rw [decEq] at updated
+        have pairEq := Except.ok.inj updated
+        have runtimeEq : middleRuntime = nextRuntime := congrArg Prod.fst pairEq
+        subst middleRuntime
+        rfl
+  obtain ⟨heap, concreteReset, heapRelated, tokenRelated,
+      capacityTransport⟩ :=
+    runtimeRelated.heap.resetObject_refines_nonunique_with_capacity mapped found
+      live notUnique updated
+  refine ⟨heap, ?_, ?_, tokenRelated, capacityTransport⟩
+  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      ← descriptorsEq, concreteReset, replaceHeap]
+  · exact FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+      runtimeRelated heapRelated (decLocation_runtimeAux semanticDec)
+
+/-- Compatibility surface for clients that need only runtime and value
+refinement from the nonunique reset branch. -/
 theorem resetStep_nonunique_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -4067,29 +4118,10 @@ theorem resetStep_nonunique_of_refines
           nextRuntime ∧
         ValueRel witness .reuseToken (.word32 Word32.zero)
           (.reuseToken none) := by
-  have semanticDec : decLocation runtime location = .ok nextRuntime := by
-    unfold reset at updated
-    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
-      at updated
-    rw [if_pos (by simp [notUnique])] at updated
-    cases decEq : decLocation runtime location with
-    | error fault =>
-        rw [decEq] at updated
-        contradiction
-    | ok middleRuntime =>
-        rw [decEq] at updated
-        have pairEq := Except.ok.inj updated
-        have runtimeEq : middleRuntime = nextRuntime := congrArg Prod.fst pairEq
-        subst middleRuntime
-        rfl
-  obtain ⟨heap, concreteReset, heapRelated, tokenRelated⟩ :=
-    runtimeRelated.heap.resetObject_refines_nonunique mapped found live
-      notUnique updated
-  refine ⟨heap, ?_, ?_, tokenRelated⟩
-  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
-      ← descriptorsEq, concreteReset, replaceHeap]
-  · exact FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
-      runtimeRelated heapRelated (decLocation_runtimeAux semanticDec)
+  obtain ⟨heap, concreteReset, finalRelated, tokenRelated, _⟩ :=
+    resetStep_nonunique_of_refines_with_capacity runtimeRelated descriptorsEq
+      mapped found live notUnique updated
+  exact ⟨heap, concreteReset, finalRelated, tokenRelated⟩
 
 /-- A unique ordinary constructor reset returns a nonempty token, rebinds the
 active descriptor to the reset protocol, and transports every auxiliary

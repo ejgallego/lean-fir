@@ -59,6 +59,19 @@ theorem valueRel_reuseToken_some_mapped
       cases heapRelated with
       | mapped found => exact found
 
+theorem valueRel_taggedObject_related
+    {witness : RefinementWitness} {kind : AbiKind}
+    {word : Word32} {payload : UInt64}
+    (related :
+      ValueRel witness kind (.word32 word)
+        (.object (.tagged payload))) :
+    TaggedReferenceRel witness word payload := by
+  cases related with
+  | tagged taggedRelated => exact taggedRelated
+  | tobject objectRelated =>
+      cases objectRelated with
+      | tagged taggedRelated => exact taggedRelated
+
 /-- Nonempty constructor allocation instantiates the generic header-capacity
 transport boundary from its existing fresh-prefix theorem. -/
 theorem HeaderCapacityTransport.allocateConstructor_nonempty
@@ -198,6 +211,28 @@ theorem ReuseCapacityValueRel.valueRelated
   | retainedEmptyToken => exact .reuseNone
   | retainedToken valueRelated _ _ _ => exact valueRelated
 
+/-- Erasing a tracked name removes every occurrence with the same Lean name,
+including shadowed entries left by an earlier binding. -/
+theorem findReuseCapacityEvidence?_erase_same
+    (facts : ReuseCapacityFacts) (erased query : FVarId)
+    (same : erased.name = query.name) :
+    findReuseCapacityEvidence? (eraseReuseCapacityFact facts erased) query =
+      none := by
+  induction facts with
+  | nil => rfl
+  | cons entry rest ih =>
+      rcases entry with ⟨candidate, evidence⟩
+      unfold eraseReuseCapacityFact at ih ⊢
+      simp only [List.filter_cons]
+      by_cases removed : candidate.name = erased.name
+      · simp [removed]
+        exact ih
+      · have candidateQuery : candidate.name ≠ query.name := by
+          intro equal
+          exact removed (equal.trans same.symm)
+        simp [removed, findReuseCapacityEvidence?, candidateQuery]
+        exact ih
+
 /-- Erasing one tracked name does not affect lookup of a different name. -/
 theorem findReuseCapacityEvidence?_erase_other
     (facts : ReuseCapacityFacts) (erased query : FVarId)
@@ -308,6 +343,56 @@ theorem ReuseCapacityFactsRel.transport
       targetLookup, valueRelated⟩ := related.resolve found
   exact ⟨index, kind, lane, semantic, sourceLookup, localFound, kindAt,
     targetLookup, valueRelated.transport witnessTransport capacityTransport⟩
+
+/-- Bind an ordinary result while erasing any stale capacity fact for its
+destination. Every differently named fact survives the heap and witness
+transition, and the checked local write frames its compiler-assigned local. -/
+theorem ReuseCapacityFactsRel.eraseBind
+    {facts : ReuseCapacityFacts}
+    {bindings : List (FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals updatedLocals : Wasm.Locals}
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {result : FVarId} {resultIndex : Nat} {semantic : Value}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals before
+        beforeWitness)
+    (resultFound : findFVar? bindings result = some resultIndex)
+    (localUpdate :
+      FirTalos.Correctness.LocalUpdate targetLocals updatedLocals resultIndex
+        value)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness) :
+    ReuseCapacityFactsRel (eraseReuseCapacityFact facts result) bindings
+      (Fir.LeanIR.Impure.bind sourceEnv result semantic) updatedLocals after
+      afterWitness := by
+  intro fvarId evidence found
+  have different : result.name ≠ fvarId.name := by
+    intro same
+    have erasedNone :=
+      findReuseCapacityEvidence?_erase_same facts result fvarId same
+    rw [erasedNone] at found
+    contradiction
+  have oldFound :
+      findReuseCapacityEvidence? facts fvarId = some evidence := by
+    rw [← findReuseCapacityEvidence?_erase_other facts result fvarId different]
+    exact found
+  obtain ⟨index, kind, lane, oldSemantic, sourceLookup, localFound, kindAt,
+      targetLookup, valueRelated⟩ := related.resolve oldFound
+  have differentIndex :=
+    FirTalos.Correctness.findFVar?_ne_of_name_ne bindings different
+      resultFound localFound
+  have boundSourceLookup :
+      lookup (Fir.LeanIR.Impure.bind sourceEnv result semantic) fvarId =
+        some oldSemantic := by
+    simpa [Fir.LeanIR.Impure.bind, lookup, different] using sourceLookup
+  have updatedLookup :
+      updatedLocals.get index = some (physicalOfLane lane) :=
+    (localUpdate.2 differentIndex.symm).trans targetLookup
+  exact ⟨index, kind, lane, oldSemantic, boundSourceLookup, localFound, kindAt,
+    updatedLookup,
+    valueRelated.transport witnessTransport capacityTransport⟩
 
 /-- Bind a newly tracked result while preserving every differently named old
 fact through the heap, witness, environment, and local transitions. -/
@@ -438,6 +523,245 @@ theorem ReuseCapacityStateRelated.stateRelated
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
       witness :=
   related.1
+
+/-- Bind a result whose capacity evidence is known. This is the generic
+result-producing counterpart of `transport`: the ordinary state theorem owns
+the semantic/runtime transition, while the fact relation owns the checked
+destination-local write and the new evidence. -/
+theorem ReuseCapacityStateRelated.bindResult
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {beforeWitness afterWitness : RefinementWitness}
+    {result : FVarId} {resultIndex : Nat} {kind : AbiKind}
+    {lane : LaneValue} {semantic : Value}
+    {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (finalRelated :
+      StateRelated sourceFunction nextRuntime
+        (Fir.LeanIR.Impure.bind sourceEnv result semantic) nextStore nextLocals
+        afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (localUpdate :
+      FirTalos.Correctness.LocalUpdate targetLocals nextLocals resultIndex
+        (physicalOfLane lane))
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness evidence
+        kind lane semantic) :
+    ReuseCapacityStateRelated (insertReuseCapacityFact facts result evidence)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv result semantic) nextStore nextLocals
+      afterWitness := by
+  exact ⟨finalRelated, related.2.bind resultFound kindAt localUpdate
+    witnessTransport capacityTransport valueRelated⟩
+
+/-- Bind an ordinary result while dropping any capacity evidence shadowed by
+its destination. The operation still has to transport all old headers, but no
+capacity claim is made for the new value. -/
+theorem ReuseCapacityStateRelated.eraseResult
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {beforeWitness afterWitness : RefinementWitness}
+    {result : FVarId} {resultIndex : Nat} {semantic : Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (finalRelated :
+      StateRelated sourceFunction nextRuntime
+        (Fir.LeanIR.Impure.bind sourceEnv result semantic) nextStore nextLocals
+        afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (localUpdate :
+      FirTalos.Correctness.LocalUpdate targetLocals nextLocals resultIndex
+        value)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness) :
+    ReuseCapacityStateRelated (eraseReuseCapacityFact facts result)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv result semantic) nextStore nextLocals
+      afterWitness := by
+  exact ⟨finalRelated, related.2.eraseBind resultFound localUpdate
+    witnessTransport capacityTransport⟩
+
+/-- Add one tracked result to the strengthened state produced by an existing
+direct-`let` simulation. Source evaluation, compiler adaptation, ordinary
+state refinement, and Wasm weakest preconditions remain owned by
+`LetStepSimulates`. -/
+theorem ReuseCapacityStateRelated.ofLetStepBind
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {kind : AbiKind} {lane : LaneValue}
+    {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (localUpdate :
+      FirTalos.Correctness.LocalUpdate targetLocals nextLocals resultIndex
+        (physicalOfLane lane))
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness evidence
+        kind lane sourceValue) :
+    ReuseCapacityStateRelated
+      (insertReuseCapacityFact facts decl.fvarId evidence) sourceFunction
+      nextRuntime (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue)
+      nextStore nextLocals afterWitness :=
+  related.bindResult step.2.2.1 resultFound kindAt localUpdate
+    witnessTransport capacityTransport valueRelated
+
+/-- Erase a direct `let` destination's stale fact while transporting every
+other fact across the already proved source/target step. -/
+theorem ReuseCapacityStateRelated.ofLetStepErase
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (localUpdate :
+      FirTalos.Correctness.LocalUpdate targetLocals nextLocals resultIndex
+        value)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness) :
+    ReuseCapacityStateRelated (eraseReuseCapacityFact facts decl.fvarId)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness :=
+  related.eraseResult step.2.2.1 resultFound localUpdate witnessTransport
+    capacityTransport
+
+/-- The checked `localSet` form used by constructor, reset, and reuse results.
+All three operations return a wasm32 lane, so this packages their common
+syntax-level capacity continuation rule. -/
+theorem ReuseCapacityStateRelated.ofWord32LetStepBind
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness}
+    {kind : AbiKind} {word : Word32} {evidence : ReuseCapacityEvidence}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (targetSet :
+      targetLocals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+        some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness)
+    (valueRelated :
+      ReuseCapacityValueRel nextStore.host.runtime.heap afterWitness evidence
+        kind (.word32 word) sourceValue) :
+    ReuseCapacityStateRelated
+      (insertReuseCapacityFact facts decl.fvarId evidence) sourceFunction
+      nextRuntime (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue)
+      nextStore nextLocals afterWitness := by
+  apply related.ofLetStepBind step resultFound kindAt
+      (witnessTransport := witnessTransport)
+      (capacityTransport := capacityTransport)
+      (valueRelated := valueRelated)
+  simpa [physicalOfLane] using
+    FirTalos.Correctness.localUpdate_of_set? targetSet
+
+/-- Checked-local-write specialization for ordinary result-producing lets.
+The destination fact is erased while all differently named facts are
+transported. -/
+theorem ReuseCapacityStateRelated.ofLetStepEraseOfSet
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {beforeWitness afterWitness : RefinementWitness} {physical : Wasm.Value}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals beforeWitness)
+    (step :
+      LetStepSimulates context sourceFunction module hostEnv decl targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+        targetLocals nextLocals resultIndex beforeWitness afterWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (targetSet :
+      targetLocals.set? resultIndex physical = some nextLocals)
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap beforeWitness) :
+    ReuseCapacityStateRelated (eraseReuseCapacityFact facts decl.fvarId)
+      sourceFunction nextRuntime
+      (Fir.LeanIR.Impure.bind sourceEnv decl.fvarId sourceValue) nextStore
+      nextLocals afterWitness :=
+  related.ofLetStepErase step resultFound
+    (FirTalos.Correctness.localUpdate_of_set? targetSet) witnessTransport
+    capacityTransport
 
 /-- A successful concrete transition lifts the ordinary final state relation
 to the strengthened capacity invariant whenever it transports witnesses and
@@ -704,6 +1028,165 @@ theorem allocCtorEmptyStep_of_capacityEvidence
     valueRelated, physicalRelated, by simpa [evidenceEq] using capacityValue,
     capacityTransport, semanticStep⟩
 
+/-- Shared fresh-allocation boundary for nonempty constructor and zero-token
+reuse. It records the exact new header bound independently of the generated
+host-call instruction sequence. -/
+theorem ConcreteRuntimeRel.nonemptyConstructorCapacityEvidence
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind} {fields : Array Word32}
+    {semanticFields : Array Value} {address : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (arity : fields.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated :
+      allocateConstructor concrete.heap info fields = .ok (result, address)) :
+    let nextWitness :=
+      witness.bindConstructor runtime.nextLocation address info fieldKinds
+    witness.Extends nextWitness ∧
+      ValueRel nextWitness resultKind (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      ReuseCapacityValueRel result nextWitness
+        (constructorReuseCapacityEvidence info) resultKind (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      HeaderCapacityTransport concrete.heap result witness := by
+  dsimp only
+  obtain ⟨extension, _, exactRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorNonempty related
+      arity semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have valueRelated :=
+    objectConstructorResult_of_refines nonempty resultRefines exactRelated
+  have objectFacts :=
+    allocateConstructor_nonempty_objectRel concrete.heap result witness info
+      fieldKinds fields semanticFields address related.heap.frontier arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits
+      objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  rcases objectFacts with ⟨_, objectRelated, _⟩
+  have heapExtension :=
+    allocateConstructor_nonempty_prefixExtension concrete.heap result info
+      fields address related.heap.frontier arity nonempty tagFits
+      objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have capacityValue :=
+    ReuseCapacityValueRel.retainedObject_of_constructor valueRelated
+      (objectRelated.witnessExtension extension)
+  have evidenceEq :
+      constructorReuseCapacityEvidence info =
+        .retainedAtLeast
+          (ConstructorLayout.ofInfo info).allocationBytes := by
+    simp [constructorReuseCapacityEvidence, constructorAllocatesHeap]
+    tauto
+  exact ⟨extension, valueRelated, by simpa [evidenceEq] using capacityValue,
+    HeaderCapacityTransport.ofPrefixExtension witness heapExtension⟩
+
+/-- Nonempty constructor allocation realizes the validator's exact fresh
+allocation bound and preserves every capacity fact owned by the old heap. -/
+theorem allocCtorNonemptyStep_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {address : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields.toArray[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (allocated :
+      allocateConstructor initial.host.runtime.heap info fields.toArray =
+        .ok (heap, address)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat address.value)]
+          (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat address.value))
+        (.object (.heap runtime.nextLocation)) ∧
+      ReuseCapacityValueRel heap nextWitness
+        (constructorReuseCapacityEvidence info) resultKind (.word32 address)
+        (.object (.heap runtime.nextLocation)) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      allocCtor runtime info semanticFields =
+        .ok (semanticConstructorResult runtime info semanticFields,
+          .object (.heap runtime.nextLocation)) := by
+  obtain ⟨extension, concreteStep, nextRuntimeRelated, physicalRelated,
+      semanticStep⟩ :=
+    allocCtorNonemptyStep_of_refines runtimeRelated argsLength decoded arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
+      allocated
+  have objectFacts :=
+    allocateConstructor_nonempty_objectRel initial.host.runtime.heap heap
+      witness info fieldKinds fields.toArray semanticFields address
+      runtimeRelated.heap.frontier arity semanticArity fieldKindsSize
+      fieldKindsValid fieldRelated nonempty tagFits objectFieldsFit
+      usizeFieldsFit scalarBytesFit allocated
+  rcases objectFacts with ⟨_, objectRelated, _⟩
+  have heapExtension :=
+    allocateConstructor_nonempty_prefixExtension initial.host.runtime.heap heap
+      info fields.toArray address runtimeRelated.heap.frontier arity nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  obtain ⟨lane, decodedLane, valueRelated⟩ :=
+    decodePhysicalLane_of_related physicalRelated
+  have decodedAddress :
+      decodePhysicalLane resultKind (.i32 (UInt32.ofNat address.value)) =
+        .ok (.word32 address) := by
+    cases resultKind <;>
+      simp [decodePhysicalLane, AbiKind.valueType, constructorKind, nonempty,
+        AbiKind.refines, Word32.ofUInt32_ofNat_value] at resultRefines ⊢
+  rw [decodedAddress] at decodedLane
+  have laneEq := Except.ok.inj decodedLane
+  subst lane
+  have capacityValue :=
+    ReuseCapacityValueRel.retainedObject_of_constructor valueRelated
+      (objectRelated.witnessExtension extension)
+  have evidenceEq :
+      constructorReuseCapacityEvidence info =
+        .retainedAtLeast
+          (ConstructorLayout.ofInfo info).allocationBytes := by
+    simp [constructorReuseCapacityEvidence, constructorAllocatesHeap]
+    tauto
+  have nextCapacity :
+      ReuseCapacityValueRel heap
+        (witness.bindConstructor runtime.nextLocation address info fieldKinds)
+        (constructorReuseCapacityEvidence info) resultKind (.word32 address)
+        (.object (.heap runtime.nextLocation)) := by
+    simpa [evidenceEq] using capacityValue
+  refine ⟨_, extension, concreteStep, nextRuntimeRelated, physicalRelated,
+    nextCapacity, ?_, semanticStep⟩
+  exact HeaderCapacityTransport.ofPrefixExtension witness heapExtension
+
 /-- Empty-token reuse of an empty-layout constructor preserves old retained
 facts and realizes the analysis result as another definitely-empty tagged
 constructor value. -/
@@ -757,6 +1240,74 @@ theorem reuseStep_none_empty_of_capacityEvidence
     valueRelated, physicalRelated, by simpa [evidenceEq] using capacityValue,
     capacityTransport, semanticStep⟩
 
+/-- Empty-token reuse of a nonempty constructor follows the shared fresh
+allocation boundary and realizes `afterReuse` as the replacement layout's
+exact lower bound. -/
+theorem reuseStep_none_nonempty_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {heap : MemoryState} {address : Word32}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (Word32.zero, fields))
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields.toArray[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (reused :
+      reuseObject initial.host.runtime.heap Word32.zero info updateHeader
+        fields.toArray = .ok (heap, address)) :
+    ∃ nextWitness,
+      witness.Extends nextWitness ∧
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat address.value)]
+          (replaceHeap initial heap) ∧
+      ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+        (semanticConstructorResult runtime info semanticFields) ∧
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat address.value))
+        (.object (.heap runtime.nextLocation)) ∧
+      ReuseCapacityValueRel heap nextWitness
+        (ReuseCapacityEvidence.afterReuse .emptyToken info) resultKind
+        (.word32 address) (.object (.heap runtime.nextLocation)) ∧
+      HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      reuse runtime (.reuseToken none) info updateHeader semanticFields =
+        .ok (semanticConstructorResult runtime info semanticFields,
+          .object (.heap runtime.nextLocation)) := by
+  obtain ⟨extension, concreteStep, nextRuntimeRelated, physicalRelated,
+      semanticStep⟩ :=
+    reuseStep_none_nonempty_of_refines runtimeRelated argsLength decoded arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines reused
+  have allocated :
+      allocateConstructor initial.host.runtime.heap info fields.toArray =
+        .ok (heap, address) := by
+    unfold reuseObject at reused
+    rw [if_pos (by decide)] at reused
+    exact reused
+  obtain ⟨_, _, capacityValue, capacityTransport⟩ :=
+    ConcreteRuntimeRel.nonemptyConstructorCapacityEvidence runtimeRelated arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty
+      tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
+      allocated
+  exact ⟨_, extension, concreteStep, nextRuntimeRelated, physicalRelated,
+    by simpa [ReuseCapacityEvidence.afterReuse] using capacityValue,
+    capacityTransport, semanticStep⟩
+
 /-- A unique reset changes an ordinary object lane into a reuse-token lane at
 the same address. Header-capacity transport carries the retained lower bound
 through prefix clearing and child ownership updates. -/
@@ -784,6 +1335,77 @@ theorem ReuseCapacityValueRel.retainedToken_of_reset
           headerRead headerOwned
       exact .retainedToken tokenRelated nextHeaderRead nextHeaderOwned
         (by simpa [sameExtent] using minimum)
+
+/-- Definitely-empty reset evidence identifies the tagged reset branch. The
+operation is a concrete heap no-op and produces the exact empty-token fact
+inserted for its result binding. -/
+theorem resetStep_tagged_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {payload : UInt64} {word : Word32}
+    {kind : AbiKind} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (capacityRelated :
+      ReuseCapacityValueRel initial.host.runtime.heap witness .emptyToken kind
+        (.word32 word) (.object (.tagged payload))) :
+    resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+        .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+          (replaceHeap initial initial.host.runtime.heap) ∧
+      ConcreteRuntimeRel
+        (replaceHeap initial initial.host.runtime.heap).host.runtime witness
+          runtime ∧
+      ReuseCapacityValueRel initial.host.runtime.heap witness .emptyToken
+        .reuseToken (.word32 Word32.zero) (.reuseToken none) ∧
+      HeaderCapacityTransport initial.host.runtime.heap
+        initial.host.runtime.heap witness ∧
+      reset runtime count (.object (.tagged payload)) =
+        .ok (runtime, .reuseToken none) := by
+  have tagged :=
+    valueRel_taggedObject_related capacityRelated.valueRelated
+  obtain ⟨concreteReset, nextRelated, _⟩ :=
+    resetStep_tagged_of_refines runtimeRelated descriptorsEq tagged count
+  exact ⟨concreteReset, nextRelated, .emptyToken, .refl _ _, rfl⟩
+
+/-- A nonunique retained object returns the empty token while keeping the
+same static lower bound. The strengthened host theorem supplies the
+mapped-header transport needed to preserve all other tracked facts. -/
+theorem resetStep_nonunique_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {count available : Nat}
+    {kind : AbiKind}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (capacityRelated :
+      ReuseCapacityValueRel initial.host.runtime.heap witness
+        (.retainedAtLeast available) kind (.word32 address)
+        (.object (.heap location)))
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken none)) :
+    ∃ heap,
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+            (replaceHeap initial heap) ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+          nextRuntime ∧
+        ReuseCapacityValueRel heap witness (.retainedAtLeast available)
+          .reuseToken (.word32 Word32.zero) (.reuseToken none) ∧
+        HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+        reset runtime count (.object (.heap location)) =
+          .ok (nextRuntime, .reuseToken none) := by
+  have mapped :=
+    valueRel_heapObject_mapped capacityRelated.valueRelated
+  obtain ⟨heap, concreteReset, nextRelated, _, capacityTransport⟩ :=
+    resetStep_nonunique_of_refines_with_capacity runtimeRelated descriptorsEq
+      mapped found live notUnique updated
+  exact ⟨heap, concreteReset, nextRelated, .retainedEmptyToken,
+    capacityTransport, updated⟩
 
 /-- The unique-reset host theorem now closes the validator's retained-capacity
 invariant directly: the concrete reset transports every mapped header, and
@@ -820,6 +1442,7 @@ theorem resetStep_unique_of_capacityEvidence
           nextRuntime ∧
         ReuseCapacityValueRel heap nextWitness (.retainedAtLeast available)
           .reuseToken (.word32 address) (.reuseToken (some location)) ∧
+        HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
         ResetReuseProtocolRel initial.host.runtime.heap heap witness runtime
           nextRuntime location address cell object count := by
   obtain ⟨heap, info, fieldKinds, concreteReset, transport, nextRelated,
@@ -834,7 +1457,7 @@ theorem resetStep_unique_of_capacityEvidence
         .reuseToken (.word32 address) (.reuseToken (some location)) :=
     capacityRelated.retainedToken_of_reset capacityTransport tokenRelated
   exact ⟨heap, info, fieldKinds, concreteReset, transport, nextRelated,
-    nextCapacity, protocol⟩
+    nextCapacity, capacityTransport, protocol⟩
 
 /-- At reuse-token kind, definitely-empty evidence fixes both the semantic
 token and its physical word. -/
@@ -871,6 +1494,78 @@ theorem ReuseCapacityValueRel.retainedToken_cases
   | retainedToken valueRelated headerRead headerOwned minimum =>
       exact .inr
         ⟨_, _, _, rfl, rfl, valueRelated, headerRead, headerOwned, minimum⟩
+
+/-- Successful in-place reuse turns a fitting retained-token bound into the
+replacement constructor's exact `afterReuse` bound. The target address is
+unchanged and mapped-header transport preserves its physical allocation
+extent. -/
+theorem ReuseCapacityValueRel.retainedObject_afterReuse
+    {facts : ReuseCapacityFacts} {tokenId : FVarId}
+    {info : LCNF.CtorInfo} {available : Nat}
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {address : Word32} {location : Location} {kind : AbiKind}
+    (tokenRelated :
+      ReuseCapacityValueRel before beforeWitness
+        (.retainedAtLeast available) .reuseToken (.word32 address)
+        (.reuseToken (some location)))
+    (fitting :
+      findFittingReuseCapacityEvidence? facts tokenId info =
+        some (.retainedAtLeast available))
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
+    (resultRelated :
+      ValueRel afterWitness kind (.word32 address)
+        (.object (.heap location))) :
+    ReuseCapacityValueRel after afterWitness
+      (ReuseCapacityEvidence.afterReuse (.retainedAtLeast available) info)
+      kind (.word32 address) (.object (.heap location)) := by
+  cases tokenRelated with
+  | retainedToken valueRelated headerRead headerOwned minimum =>
+      have layoutMinimum :=
+        findFittingReuseCapacityEvidence?_retained_layoutFits
+          facts tokenId info available fitting
+      obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
+        capacityTransport address location _
+          (valueRel_reuseToken_some_mapped valueRelated) headerRead headerOwned
+      have nextMinimum :
+          (ConstructorLayout.ofInfo info).allocationBytes ≤
+            nextHeader.allocationBytes.toNat := by
+        simpa [sameExtent] using Nat.le_trans layoutMinimum minimum
+      have resultCapacity :
+          ReuseCapacityValueRel after afterWitness
+            (.retainedAtLeast
+              (ConstructorLayout.ofInfo info).allocationBytes)
+            kind (.word32 address) (.object (.heap location)) :=
+        .retainedObject resultRelated nextHeaderRead nextHeaderOwned nextMinimum
+      simpa [ReuseCapacityEvidence.afterReuse] using resultCapacity
+
+/-- Evidence-polymorphic form used by the reuse operation theorem. A nonzero
+semantic token rules out `.emptyToken`; the retained case is exactly
+`retainedObject_afterReuse`. -/
+theorem ReuseCapacityValueRel.object_afterReuse
+    {facts : ReuseCapacityFacts} {tokenId : FVarId}
+    {info : LCNF.CtorInfo} {evidence : ReuseCapacityEvidence}
+    {before after : MemoryState}
+    {beforeWitness afterWitness : RefinementWitness}
+    {address : Word32} {location : Location} {kind : AbiKind}
+    (tokenRelated :
+      ReuseCapacityValueRel before beforeWitness evidence .reuseToken
+        (.word32 address) (.reuseToken (some location)))
+    (fitting :
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence)
+    (capacityTransport :
+      HeaderCapacityTransport before after beforeWitness)
+    (resultRelated :
+      ValueRel afterWitness kind (.word32 address)
+        (.object (.heap location))) :
+    ReuseCapacityValueRel after afterWitness (evidence.afterReuse info) kind
+      (.word32 address) (.object (.heap location)) := by
+  cases evidence with
+  | emptyToken => cases tokenRelated
+  | retainedAtLeast available =>
+      exact tokenRelated.retainedObject_afterReuse fitting capacityTransport
+        resultRelated
 
 /--
 The central W6.6dg bridge: static fitting evidence and its dynamic header
@@ -963,15 +1658,36 @@ theorem reuseStep_some_of_capacityEvidence
         nextRuntime ∧
       PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat address.value)) (.object (.heap location)) ∧
+      ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
+        resultKind (.word32 address) (.object (.heap location)) ∧
       HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken (some location)) info updateHeader
           semanticFields = .ok (nextRuntime, .object (.heap location)) := by
   have layoutFits :=
     capacityRelated.reuseToken_some_layoutFits capacityFitting headerRead
-  exact reuseStep_some_of_refines runtimeRelated argsLength decoded mapped found
-    descriptor objectEq objectRelated headerRead headerKind refCount persistent
-    ordinary cellLive layoutFits arity semanticArity fieldKindsSize
-    fieldKindsValid fieldRelated tagFits objectFieldsFit usizeFieldsFit
-    scalarBytesFit resultKindSupported
+  obtain ⟨heap, nextRuntime, concreteStep, witnessTransport,
+      nextRuntimeRelated, physicalRelated, capacityTransport, semanticStep⟩ :=
+    reuseStep_some_of_refines runtimeRelated argsLength decoded mapped found
+      descriptor objectEq objectRelated headerRead headerKind refCount
+      persistent ordinary cellLive layoutFits arity semanticArity
+      fieldKindsSize fieldKindsValid fieldRelated tagFits objectFieldsFit
+      usizeFieldsFit scalarBytesFit resultKindSupported
+  obtain ⟨lane, decodedLane, resultRelated⟩ :=
+    decodePhysicalLane_of_related physicalRelated
+  have decodedAddress :
+      decodePhysicalLane resultKind (.i32 (UInt32.ofNat address.value)) =
+        .ok (.word32 address) := by
+    rcases resultKindSupported with rfl | rfl <;>
+      simp [decodePhysicalLane, AbiKind.valueType,
+        Word32.ofUInt32_ofNat_value]
+  rw [decodedAddress] at decodedLane
+  have laneEq := Except.ok.inj decodedLane
+  subst lane
+  have resultCapacity :=
+    capacityRelated.object_afterReuse capacityFitting capacityTransport
+      resultRelated
+  exact ⟨heap, nextRuntime, concreteStep, witnessTransport,
+    nextRuntimeRelated, physicalRelated, resultCapacity, capacityTransport,
+    semanticStep⟩
 
 end FirTalos.Concrete

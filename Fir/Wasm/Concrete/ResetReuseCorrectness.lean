@@ -1931,8 +1931,9 @@ theorem LiveHeapRel.resetObject_refines_tagged
   exact ⟨related.resetObject_tagged tagged count, rfl, .reuseNone⟩
 
 /-- A non-unique ordinary heap cell follows reset's fallback path: one public
-decrement is performed and the empty reuse token is returned. -/
-theorem LiveHeapRel.resetObject_refines_nonunique
+decrement is performed, the empty reuse token is returned, and every mapped
+header retains its physical extent. -/
+theorem LiveHeapRel.resetObject_refines_nonunique_with_capacity
     {state : MemoryState} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
     {cell : HeapCell} {count : Nat}
@@ -1947,7 +1948,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique
       resetObject state count address witness.closureDescriptors =
         .ok (result, Word32.zero) ∧
       LiveHeapRel result witness nextRuntime ∧
-      ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) := by
+      ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1982,8 +1984,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique
           congrArg Prod.fst pairEq
         subst middleRuntime
         rfl
-  obtain ⟨result, concreteDec, finalRelated⟩ :=
-    related.decrementReferenceOnce_refines mapped true semanticDec
+  obtain ⟨result, concreteDec, finalRelated, capacityTransport⟩ :=
+    related.decrementReferenceOnce_refines_with_capacity mapped true semanticDec
   have addressHeap :=
     (MemoryState.PrefixExtension.readLiveHeader_facts state address header
       headerRead).1
@@ -1995,7 +1997,31 @@ theorem LiveHeapRel.resetObject_refines_nonunique
     simp only [Bind.bind, Except.bind, liftMemory]
     rw [if_pos fallback, concreteDec]
     rfl
-  exact ⟨result, concreteReset, finalRelated, .reuseNone⟩
+  exact ⟨result, concreteReset, finalRelated, .reuseNone, capacityTransport⟩
+
+/-- Compatibility surface for clients that need only heap and value
+refinement from the nonunique reset branch. -/
+theorem LiveHeapRel.resetObject_refines_nonunique
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {count : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true) (notUnique : cell.rc ≠ 1)
+    (semanticOperation :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .ok (nextRuntime, .reuseToken none)) :
+    ∃ result,
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, Word32.zero) ∧
+      LiveHeapRel result witness nextRuntime ∧
+      ValueRel witness .reuseToken (.word32 Word32.zero)
+        (.reuseToken none) := by
+  obtain ⟨result, concreteReset, finalRelated, tokenRelated, _⟩ :=
+    related.resetObject_refines_nonunique_with_capacity mapped found live
+      notUnique semanticOperation
+  exact ⟨result, concreteReset, finalRelated, tokenRelated⟩
 
 /-- A unique constructor reset enters the explicit reset/reuse protocol. The
 cleared target and every released child remain related under the rebound
