@@ -493,6 +493,38 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident setter Format module: {repr error}"
+  let increments :=
+    residentSetterArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentReferenceCount.isIncrement
+  unless increments.size == 4 do
+    throwError "resident Format increment inventory changed"
+  let residentIncrementArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIncrements
+        residentSetterArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident increment Format facade: {repr error}"
+  unless residentIncrementArtifact.module.imports.size == 50 &&
+      residentIncrementArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentReferenceCount.isIncrement operation do
+    throwError "resident Format increment frontier changed"
+  unless residentIncrementArtifact.module.imports.size + increments.size ==
+      residentSetterArtifact.module.imports.size do
+    throwError "resident Format increment import accounting changed"
+  unless residentIncrementArtifact.module.closureDispatch ==
+      moduleArtifact.module.closureDispatch &&
+      residentIncrementArtifact.module.closureDescriptors ==
+        moduleArtifact.module.closureDescriptors do
+    throwError "resident increment linking changed stable closure metadata"
+  unless (List.range increments.size).all fun ordinal =>
+      residentIncrementArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentReferenceCount.incrementName ordinal) do
+    throwError "resident Format increment helper exports changed"
+  match ← residentIncrementArtifact.write
+      "_build/source-pretty-format-resident-increments.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident increment Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

@@ -12,15 +12,18 @@ const residentConstructorPath = process.argv[9];
 const residentNaturalPath = process.argv[10];
 const residentPartialApplicationPath = process.argv[11];
 const residentSetterPath = process.argv[12];
+const residentIncrementPath = process.argv[13];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
   residentAllocatorPath && residentConstructorPath && residentNaturalPath &&
-  residentPartialApplicationPath && residentSetterPath,
+  residentPartialApplicationPath && residentSetterPath &&
+  residentIncrementPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
   "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm " +
   "RESIDENT_CONSTRUCTORS.wasm RESIDENT_NATURALS.wasm " +
-  "RESIDENT_PARTIAL_APPLICATIONS.wasm RESIDENT_SETTERS.wasm");
+  "RESIDENT_PARTIAL_APPLICATIONS.wasm RESIDENT_SETTERS.wasm " +
+  "RESIDENT_INCREMENTS.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -47,6 +50,7 @@ const residentNaturals = readArtifact(residentNaturalPath);
 const residentPartialApplications =
   readArtifact(residentPartialApplicationPath);
 const residentSetters = readArtifact(residentSetterPath);
+const residentIncrements = readArtifact(residentIncrementPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -112,6 +116,10 @@ assert.equal(operationCount(residentSetters, "objectSet"), 0,
   "resident setter prettyM retained object setters");
 assert.equal(operationCount(residentSetters, "scalarSet"), 0,
   "resident setter prettyM retained scalar setters");
+assert.equal(operationCount(residentSetters, "inc"), 4,
+  "resident setter prettyM increment inventory changed");
+assert.equal(operationCount(residentIncrements, "inc"), 0,
+  "resident increment prettyM retained increments");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -209,6 +217,18 @@ assert.equal(
   "resident setter prettyM descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentIncrements) + 4,
+  functionImportCount(residentSetters),
+  "resident increments did not remove exactly four function imports",
+);
+assert.equal(functionImportCount(residentIncrements), 50,
+  "resident increment prettyM frontier changed");
+assert.equal(
+  residentIncrements.manifest.imports.length,
+  functionImportCount(residentIncrements),
+  "resident increment prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -255,6 +275,11 @@ assert.equal(
   0,
   "resident setter prettyM imports memory",
 );
+assert.equal(
+  residentIncrements.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident increment prettyM imports memory",
+);
 for (const artifact of [
   getTagResident,
   residentRuntime,
@@ -266,6 +291,7 @@ for (const artifact of [
   residentNaturals,
   residentPartialApplications,
   residentSetters,
+  residentIncrements,
 ]) {
   assert.deepStrictEqual(
     artifact.manifest.closureDispatch,
@@ -419,11 +445,23 @@ for (let ordinal = 0; ordinal < 11; ordinal += 1) {
     entry.name === name && entry.kind === "function"),
   `resident setter prettyM helper export ${name} is missing`);
 }
+assert.ok(residentIncrements.exports.some(({ name, kind }) =>
+  name === residentIncrements.manifest.entry && kind === "function"),
+"resident increment prettyM entry export is missing");
+assert.ok(residentIncrements.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident increment prettyM memory export is missing");
+for (let ordinal = 0; ordinal < 4; ordinal += 1) {
+  const name = `fir_inc_${ordinal}`;
+  assert.ok(residentIncrements.exports.some((entry) =>
+    entry.name === name && entry.kind === "function"),
+  `resident increment prettyM helper export ${name} is missing`);
+}
 
 console.log(
   `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
   `then installed its allocator and internalized constructors, immediate Naturals, ` +
-  `closure allocations, and setters ` +
+  `closure allocations, setters, and increments ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
@@ -433,5 +471,6 @@ console.log(
   `${functionImportCount(residentConstructors)} → ` +
   `${functionImportCount(residentNaturals)} → ` +
   `${functionImportCount(residentPartialApplications)} → ` +
-  `${functionImportCount(residentSetters)} function imports)`,
+  `${functionImportCount(residentSetters)} → ` +
+  `${functionImportCount(residentIncrements)} function imports)`,
 );

@@ -96,6 +96,9 @@ node run-resident-literals.mjs _build/resident-literals.wasm
 lake exe fir-wasm-artifact resident-setters \
   _build/resident-setters.wasm
 node run-resident-setters.mjs _build/resident-setters.wasm
+lake exe fir-wasm-artifact resident-increments \
+  _build/resident-increments.wasm
+node run-resident-increments.mjs _build/resident-increments.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -168,6 +171,13 @@ and width-mismatched inputs, preserves the scratch word, and lets
 `ConcreteHost` independently project the written fields. These helpers perform
 only the requested direct write; the LCNF's separate `inc` and `dec` operations
 remain explicit.
+
+The 511-byte resident-increment module likewise has zero imports and owns its
+memory. It implements overflow-checked nonrecursive increments, including
+checked immediate and promoted-tag no-ops, persistent-object no-ops, ordinary
+live-heap updates, and traps for invalid addresses, dead headers, unchecked
+tagged representations, and overflowing counts. `ConcreteHost` independently
+decodes the updated exact W6 headers.
 
 Remaining JavaScript runtime operations can use that module-owned heap without
 a facade. Construct the concrete host before instantiation as usual, then
@@ -363,7 +373,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-constructors.wasm \
   _build/source-pretty-format-resident-naturals.wasm \
   _build/source-pretty-format-resident-partial-applications.wasm \
-  _build/source-pretty-format-resident-setters.wasm
+  _build/source-pretty-format-resident-setters.wasm \
+  _build/source-pretty-format-resident-increments.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -541,6 +552,23 @@ Final LCNF and both retained closure tables remain byte-identical. Text
 66 to 56. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54`.
 
+The next independent checkpoint internalizes all four nonrecursive `inc`
+operations in each facade. Checked direct immediates and persistent promoted
+tags are no-ops; unchecked tagged representations trap; ordinary persistent
+objects remain unchanged; and nonpersistent live heap counts are updated only
+when the addition does not overflow:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-increments.wasm
+```
+
+Final LCNF and both retained closure tables remain byte-identical. Text
+`prettyM` advances from 54 to 50 imports, while styled `prettyM` advances from
+56 to 52. Recursive `dec` and `delete` remain separate because they must walk
+owned constructor/closure fields. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -555,8 +583,8 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 56 function imports: two more than
-the text-only 54-import checkpoint in order to preserve the exact
+memory and allocator and currently has 52 function imports: two more than
+the text-only 50-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare

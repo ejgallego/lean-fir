@@ -4,6 +4,7 @@ import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
+import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRuntime
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -91,6 +92,21 @@ def internalizeSetters (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident setters: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeIncrements (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentReferenceCount.internalizeIncrements
+        artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident increments: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -218,9 +234,18 @@ def compileSetterModule (entry : Name) :
   let result ← compilePartialApplicationModule entry
   return result.bind internalizeSetters
 
+/--
+Continue from direct constructor writes and internalize nonrecursive
+reference-count increments reachable from `prettyM`.
+-/
+def compileIncrementModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileSetterModule entry
+  return result.bind internalizeIncrements
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileSetterModule entry
+  compileIncrementModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

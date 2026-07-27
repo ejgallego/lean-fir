@@ -172,3 +172,34 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled setter module: {repr error}"
+  let increments := setterArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentReferenceCount.isIncrement
+  unless increments.size == 4 do
+    throwError "resident styled Format increment inventory changed"
+  let incrementArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIncrements setterArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled increments: {repr error}"
+  unless incrementArtifact.module.imports.size == 52 &&
+      incrementArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentReferenceCount.isIncrement operation do
+    throwError "resident styled Format increment frontier changed"
+  unless incrementArtifact.module.imports.size + increments.size ==
+      setterArtifact.module.imports.size do
+    throwError "resident styled increment import accounting changed"
+  unless incrementArtifact.module.closureDispatch ==
+      setterArtifact.module.closureDispatch &&
+      incrementArtifact.module.closureDescriptors ==
+        setterArtifact.module.closureDescriptors do
+    throwError "resident styled increments changed closure metadata"
+  unless (List.range increments.size).all fun ordinal =>
+      incrementArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentReferenceCount.incrementName ordinal) do
+    throwError "resident styled increment helper exports changed"
+  match ← incrementArtifact.write
+      "_build/source-pretty-format-trace-resident-increments.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError
+        "failed to write resident styled increment module: {repr error}"
