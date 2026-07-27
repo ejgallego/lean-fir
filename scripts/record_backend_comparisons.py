@@ -38,6 +38,7 @@ ATTESTATION_RECORD_FIELDS = {
     "comparedCases",
     "equalCases",
     "findingCount",
+    "witnesses",
     "matches",
 }
 PAIR_FIELDS = {
@@ -69,6 +70,14 @@ COMPARISON_SUMMARY_FIELDS = {
     "comparedCases",
     "equalCases",
     "findingCount",
+}
+WITNESS_FIELDS = {
+    "caseId",
+    "referenceResultSha256",
+    "candidateResultSha256",
+    "referenceObservation",
+    "candidateObservation",
+    "equal",
 }
 
 
@@ -177,6 +186,47 @@ def validate_comparison_report(
     return compared_cases, equal_cases, finding_count
 
 
+def validate_witnesses(
+    value: object,
+    comparisons: list[dict],
+    reference: str,
+    candidate: str,
+) -> None:
+    context = f"{reference}->{candidate} comparison witnesses"
+    if not isinstance(value, list) or len(value) != len(comparisons):
+        raise core.ValidationError(
+            f"{context} do not cover every compared case"
+        )
+    for witness, comparison in zip(value, comparisons, strict=True):
+        if not isinstance(witness, dict) or set(witness) != WITNESS_FIELDS:
+            raise core.ValidationError(f"{context} have a malformed entry")
+        case_id = core.validate_backend_name(
+            witness["caseId"], f"{context} case ID"
+        )
+        core.checked_sha256(
+            witness["referenceResultSha256"],
+            f"{context} {case_id} reference result",
+        )
+        core.checked_sha256(
+            witness["candidateResultSha256"],
+            f"{context} {case_id} candidate result",
+        )
+        reference_observation = witness["referenceObservation"]
+        candidate_observation = witness["candidateObservation"]
+        equal = reference_observation == candidate_observation
+        if (
+            case_id != comparison["caseId"]
+            or not isinstance(reference_observation, dict)
+            or not isinstance(candidate_observation, dict)
+            or not isinstance(witness["equal"], bool)
+            or witness["equal"] is not equal
+            or witness["equal"] is not comparison["equal"]
+        ):
+            raise core.ValidationError(
+                f"{context} disagree with retained comparison evidence"
+            )
+
+
 def verify_attestation_record(value: object) -> dict:
     if (
         not isinstance(value, dict)
@@ -245,6 +295,12 @@ def verify_attestation_record(value: object) -> dict:
         candidate,
         selected_cases,
     )
+    validate_witnesses(
+        value["witnesses"],
+        comparison["comparisons"],
+        reference,
+        candidate,
+    )
     expected_matches = (
         compared_cases == len(selected_cases)
         and equal_cases == len(selected_cases)
@@ -274,6 +330,7 @@ def record_from_verified_pair(
     matrix: dict,
     pair: dict,
     comparison_content: bytes,
+    result_artifacts: dict[tuple[str, str], tuple[str, dict]],
 ) -> dict:
     if not isinstance(pair, dict) or set(pair) != PAIR_FIELDS:
         raise core.ValidationError("verified matrix has a malformed pair")
@@ -330,6 +387,44 @@ def record_from_verified_pair(
         raise core.ValidationError(
             f"{reference}->{candidate} matrix pair disagrees with its artifact"
         )
+    witnesses: list[dict] = []
+    for compared in comparison["comparisons"]:
+        case_id = compared["caseId"]
+        try:
+            reference_sha256, reference_record = result_artifacts[
+                (case_id, reference)
+            ]
+            candidate_sha256, candidate_record = result_artifacts[
+                (case_id, candidate)
+            ]
+        except KeyError as error:
+            raise core.ValidationError(
+                f"{reference}->{candidate} has no result witness for {case_id}"
+            ) from error
+        equal, reference_observation, candidate_observation = (
+            core.compare_success(reference_record, candidate_record)
+        )
+        if equal is not compared["equal"]:
+            raise core.ValidationError(
+                f"{reference}->{candidate} result witness disagrees for "
+                f"{case_id}"
+            )
+        witnesses.append(
+            {
+                "caseId": case_id,
+                "referenceResultSha256": core.checked_sha256(
+                    reference_sha256,
+                    f"{reference}->{candidate} {case_id} reference result",
+                ),
+                "candidateResultSha256": core.checked_sha256(
+                    candidate_sha256,
+                    f"{reference}->{candidate} {case_id} candidate result",
+                ),
+                "referenceObservation": reference_observation,
+                "candidateObservation": candidate_observation,
+                "equal": equal,
+            }
+        )
     provisional = {
         "version": core.PROTOCOL_VERSION,
         "recordId": f"{reference}->{candidate}",
@@ -344,6 +439,7 @@ def record_from_verified_pair(
         "comparedCases": compared_cases,
         "equalCases": equal_cases,
         "findingCount": finding_count,
+        "witnesses": witnesses,
         "matches": (
             compared_cases == len(selected_cases)
             and equal_cases == len(selected_cases)
@@ -354,8 +450,61 @@ def record_from_verified_pair(
     return verify_attestation_record(record)
 
 
+def result_artifacts_from_matrix(
+    path: Path,
+    matrix: dict,
+) -> dict[tuple[str, str], tuple[str, dict]]:
+    result_artifacts: dict[tuple[str, str], tuple[str, dict]] = {}
+    for artifact in matrix["artifacts"]:
+        if artifact["kind"] != "backend-result":
+            continue
+        backend, case_id, _ = core.validation_artifact_scope(
+            artifact["kind"],
+            artifact["name"],
+            matrix["backends"],
+            matrix["selectedCases"],
+        )
+        if case_id is None:
+            raise core.ValidationError(
+                "verified backend result artifact has no case"
+            )
+        content = core.verify_evidence_file(
+            path.parent,
+            artifact["artifact"],
+            artifact["sha256"],
+            f"backend comparison result witness {case_id}:{backend}",
+        )
+        try:
+            record = json.loads(content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise core.ValidationError(
+                f"backend comparison result witness is not JSON: "
+                f"{case_id}:{backend}"
+            ) from error
+        if not isinstance(record, dict):
+            raise core.ValidationError(
+                f"backend comparison result witness is malformed: "
+                f"{case_id}:{backend}"
+            )
+        recorded_case_id, _ = core.checked_record(record, backend)
+        if recorded_case_id != case_id:
+            raise core.ValidationError(
+                f"backend comparison result witness disagrees with its name: "
+                f"{case_id}:{backend}"
+            )
+        key = (case_id, backend)
+        if key in result_artifacts:
+            raise core.ValidationError(
+                f"duplicate backend comparison result witness: "
+                f"{case_id}:{backend}"
+            )
+        result_artifacts[key] = (artifact["sha256"], record)
+    return result_artifacts
+
+
 def records_from_matrix(path: Path) -> list[dict]:
     matrix = core.verify_matrix_artifact(path)
+    result_artifacts = result_artifacts_from_matrix(path, matrix)
     records: list[dict] = []
     for pair in matrix["pairs"]:
         reference = pair["reference"]
@@ -366,7 +515,14 @@ def records_from_matrix(path: Path) -> list[dict]:
             pair["sha256"],
             f"backend comparison attestation {reference}->{candidate}",
         )
-        records.append(record_from_verified_pair(matrix, pair, content))
+        records.append(
+            record_from_verified_pair(
+                matrix,
+                pair,
+                content,
+                result_artifacts,
+            )
+        )
     return records
 
 

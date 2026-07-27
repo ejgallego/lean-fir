@@ -356,9 +356,11 @@ python3 scripts/record_backend_comparisons.py \
 This command does not build or execute a backend. Each record's contract binds
 the matrix selection and run identities, ordered selected cases, and directed
 backend names. Its evidence retains the exact UTF-8 comparison artifact,
-recomputable source SHA-256 and byte count, per-case equality claims, findings,
-derived counts, and full-coverage match status. A changed result therefore
-changes the evidence identity while the same run contract remains recognizable.
+recomputable source SHA-256 and byte count, findings, derived counts, and
+full-coverage match status. Every compared case additionally carries both
+normalized backend observations, their retained result-artifact digests, and
+the reported equality as an ordered witness. A changed result therefore changes
+the evidence identity while the same run contract remains recognizable.
 The aggregate is written to
 `_build/validation-comparison-attestations/attestations.json` and retained
 append-only under `evidence/runs/<contract>/<evidence>.json`.
@@ -373,12 +375,13 @@ python3 scripts/record_backend_comparisons.py \
 ```
 
 Offline checking reconstructs every exact comparison artifact digest, validates
-its edge and ordered case set, re-derives its summary and match result, and then
-checks the record, contract, and evidence identities. The initial native/LCNF/V8
-matrix is one producer of this format. Once the Wasm compiler lane supplies a
-real-engine matrix edge, native-to-V8 evidence uses the same adapter without
-compiler-side changes; a later Talos-to-real-Wasm validator can consume the same
-envelope contract independently.
+its edge and ordered case set, compares the two witnessed observations instead
+of trusting the retained equality boolean, re-derives its summary and match
+result, and then checks the record, contract, and evidence identities. The
+initial native/LCNF/V8 matrix is one producer of this format. Once the Wasm
+compiler lane supplies a real-engine matrix edge, native-to-V8 evidence uses the
+same adapter without compiler-side changes; a later Talos-to-real-Wasm validator
+can consume the same envelope contract independently.
 
 Each native-IR attestation also executes the direct native oracle and the
 explicit LCNF machine program. Its `directPath` evidence requires equal semantic

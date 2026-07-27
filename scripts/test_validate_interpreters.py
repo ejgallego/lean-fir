@@ -8015,6 +8015,8 @@ class BackendComparisonAttestationTests(unittest.TestCase):
                 "run": run_sha256,
             },
             "selectedCases": self.selected_cases,
+            "backends": ["native", "v8"],
+            "artifacts": [],
             "pairs": [],
         }
 
@@ -8052,6 +8054,31 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
 
+    def result_artifacts(
+        self,
+        equal: tuple[bool, bool] = (True, True),
+    ) -> dict[tuple[str, str], tuple[str, dict]]:
+        result: dict[tuple[str, str], tuple[str, dict]] = {}
+        for case_id, case_equal in zip(
+            self.selected_cases, equal, strict=True
+        ):
+            reference_record = success(case_id, "native", 42)
+            candidate_record = success(
+                case_id, "v8", 42 if case_equal else 43
+            )
+            for backend, record in (
+                ("native", reference_record),
+                ("v8", candidate_record),
+            ):
+                content = (
+                    json.dumps(record, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                result[(case_id, backend)] = (
+                    core.sha256_bytes(content),
+                    record,
+                )
+        return result
+
     def pair(
         self,
         content: bytes,
@@ -8080,6 +8107,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             self.matrix(run_sha256),
             self.pair(content, equal_cases=sum(int(item) for item in equal)),
             content,
+            self.result_artifacts(equal),
         )
 
     def test_matrix_adapter_retains_exact_edge_evidence_offline(self) -> None:
@@ -8087,6 +8115,31 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         matrix = self.matrix()
         pair = self.pair(content)
         matrix["pairs"] = [pair]
+        result_artifacts = self.result_artifacts()
+        result_contents: dict[str, bytes] = {}
+        for (case_id, backend), (digest, record) in result_artifacts.items():
+            artifact = f"evidence/artifacts/{digest}"
+            matrix["artifacts"].append(
+                {
+                    "kind": "backend-result",
+                    "name": f"{case_id}/{backend}/result.json",
+                    "sha256": digest,
+                    "artifact": artifact,
+                }
+            )
+            result_contents[artifact] = (
+                json.dumps(record, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+        result_contents[pair["artifact"]] = content
+
+        def evidence(
+            _root: Path,
+            artifact: str,
+            _digest: str,
+            _context: str,
+        ) -> bytes:
+            return result_contents[artifact]
+
         with tempfile.TemporaryDirectory() as directory:
             out_dir = Path(directory)
             matrix_path = out_dir / "source" / "matrix.json"
@@ -8099,23 +8152,31 @@ class BackendComparisonAttestationTests(unittest.TestCase):
                 mock.patch.object(
                     comparison_attestations.core,
                     "verify_evidence_file",
-                    return_value=content,
+                    side_effect=evidence,
                 ) as verify_comparison,
             ):
                 manifest = comparison_attestations.attest_matrix(
                     matrix_path, out_dir
                 )
             verify_matrix.assert_called_once_with(matrix_path)
-            verify_comparison.assert_called_once_with(
+            verify_comparison.assert_any_call(
                 matrix_path.parent,
                 pair["artifact"],
                 pair["sha256"],
                 "backend comparison attestation native->v8",
             )
+            self.assertEqual(verify_comparison.call_count, 5)
             record = manifest["records"][0]
             self.assertEqual(record["comparisonArtifact"], content.decode())
             self.assertEqual(record["comparisonArtifactBytes"], len(content))
             self.assertTrue(record["matches"])
+            self.assertEqual(
+                [witness["caseId"] for witness in record["witnesses"]],
+                self.selected_cases,
+            )
+            self.assertTrue(
+                all(witness["equal"] for witness in record["witnesses"])
+            )
             retained = (
                 out_dir
                 / "evidence"
@@ -8181,6 +8242,18 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         malformed = attestation.with_record_identity(malformed)
         with self.assertRaisesRegex(
             core.ValidationError, "artifact derivatives disagree"
+        ):
+            comparison_attestations.verify_attestation_record(malformed)
+
+        malformed = json.loads(json.dumps(record))
+        malformed.pop("identity")
+        malformed["witnesses"][0]["candidateObservation"] = {
+            "termination": {"trapped": {"message": "tampered"}}
+        }
+        malformed = attestation.with_record_identity(malformed)
+        with self.assertRaisesRegex(
+            core.ValidationError,
+            "witnesses disagree with retained comparison evidence",
         ):
             comparison_attestations.verify_attestation_record(malformed)
 
