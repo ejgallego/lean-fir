@@ -10,6 +10,9 @@ import {
   checkFetchedResidentConstructors,
 } from "./resident-constructor-client.mjs";
 import {
+  checkFetchedResidentClosureAllocation,
+} from "./resident-closure-allocation-client.mjs";
+import {
   checkFetchedResidentLiterals,
 } from "./resident-literal-client.mjs";
 import { checkFetchedConcretePrettyFormat } from "./fetch-concrete-pretty-format.mjs";
@@ -34,6 +37,9 @@ try {
     checkFetchedResidentMemorySurface("./_build/resident-memory-surface.wasm"),
     checkFetchedResidentAllocator("./_build/resident-allocator.wasm"),
     checkFetchedResidentConstructors("./_build/resident-constructors.wasm"),
+    checkFetchedResidentClosureAllocation(
+      "./_build/resident-closure-allocation.wasm",
+    ),
     checkFetchedResidentLiterals("./_build/resident-literals.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
     checkFetchedConcretePrettyFormat(
@@ -58,10 +64,10 @@ try {
       "./_build/source-pretty-format-resident-constructors.wasm",
     ),
     checkFetchedConcretePrettyFormat(
-      "./_build/source-pretty-format-resident-naturals.wasm",
+      "./_build/source-pretty-format-resident-partial-applications.wasm",
     ),
     checkFetchedConcretePrettyFormatTrace(
-      "./_build/source-pretty-format-trace-resident-naturals.wasm",
+      "./_build/source-pretty-format-trace-resident-partial-applications.wasm",
     ),
     checkFetchedResidentGetTag("./_build/resident-get-tag.wasm"),
     checkFetchedResidentIsShared("./_build/resident-is-shared.wasm"),

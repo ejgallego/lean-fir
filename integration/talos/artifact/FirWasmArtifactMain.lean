@@ -1,6 +1,7 @@
 import Fir.Wasm.Emit.Examples
 import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.Emit.ResidentAllocator
+import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentRuntime
@@ -96,6 +97,20 @@ def emitResidentConstructors (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-constructors: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentClosureAllocation (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentClosureAllocation.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident closure-allocation encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentClosureAllocation.manifest.compress
+  IO.println
+    s!"resident-closure-allocation: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentLiterals (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentLiteral.residentExampleModule
@@ -172,6 +187,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-allocator <output.wasm>\n" ++
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-literals <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
     "       fir-wasm-artifact resident-read-projections <output.wasm>\n" ++
@@ -201,6 +217,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-constructors", output] =>
         emitResidentConstructors output
+        return 0
+    | ["resident-closure-allocation", output] =>
+        emitResidentClosureAllocation output
         return 0
     | ["resident-literals", output] =>
         emitResidentLiterals output

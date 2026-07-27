@@ -105,3 +105,39 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled Natural module: {repr error}"
+  let partialApplications := naturalArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication
+  unless partialApplications.size == 87 do
+    throwError "resident styled Format partial-application inventory changed"
+  let partialApplicationArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications
+        naturalArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError
+          "failed to compile resident styled partial applications: {repr error}"
+  unless partialApplicationArtifact.module.imports.size == 66 &&
+      partialApplicationArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentClosureAllocation.isPartialApplication operation do
+    throwError "resident styled Format partial-application frontier changed"
+  unless partialApplicationArtifact.module.imports.size +
+      partialApplications.size == naturalArtifact.module.imports.size do
+    throwError "resident styled partial-application import accounting changed"
+  unless (partialApplicationArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentLiteral.isStringLiteral).size == 4 do
+    throwError "resident styled Format moved strings across the host boundary"
+  unless partialApplicationArtifact.module.closureDispatch ==
+      naturalArtifact.module.closureDispatch &&
+      partialApplicationArtifact.module.closureDescriptors ==
+        naturalArtifact.module.closureDescriptors do
+    throwError "resident styled partial applications changed closure metadata"
+  unless (List.range partialApplications.size).all fun ordinal =>
+      partialApplicationArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentClosureAllocation.partialApplicationName ordinal) do
+    throwError "resident styled partial-application helper exports changed"
+  match ← partialApplicationArtifact.write
+      "_build/source-pretty-format-trace-resident-partial-applications.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError
+        "failed to write resident styled partial-application module: {repr error}"

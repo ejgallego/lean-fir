@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.ResidentAllocator
+import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentRuntime
@@ -59,6 +60,22 @@ def internalizeImmediateNaturals (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident immediate Naturals: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizePartialApplications (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match
+        Fir.Wasm.Emit.ResidentClosureAllocation.internalizePartialApplications
+          artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident partial applications: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -168,9 +185,18 @@ def compileImmediateNaturalModule (entry : Name) :
   let result ← compileConstructorModule entry
   return result.bind internalizeImmediateNaturals
 
+/--
+Continue from immediate Naturals and internalize closure allocation using the
+retained dispatch and capture-descriptor tables.
+-/
+def compilePartialApplicationModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileImmediateNaturalModule entry
+  return result.bind internalizePartialApplications
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileImmediateNaturalModule entry
+  compilePartialApplicationModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

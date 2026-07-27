@@ -86,6 +86,10 @@ node run-resident-allocator.mjs _build/resident-allocator.wasm
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm
+lake exe fir-wasm-artifact resident-closure-allocation \
+  _build/resident-closure-allocation.wasm
+node run-resident-closure-allocation.mjs \
+  _build/resident-closure-allocation.wasm
 lake exe fir-wasm-artifact resident-literals \
   _build/resident-literals.wasm
 node run-resident-literals.mjs _build/resident-literals.wasm
@@ -139,6 +143,14 @@ It checks both immediate empty constructors and exact nonempty W6 headers,
 object slots, `USize` slots, packed scalar bytes, zero padding, repeated
 allocation, frontier movement, and preservation of the temporary retagging
 scratch word.
+
+The 1,253-byte closure-allocation module likewise owns memory and has zero
+imports. It freezes the W6 closure header, stable target and descriptor IDs,
+zero-capture and mixed `tobject`/`UInt8`/`USize` capture slots, frontier
+movement, and scratch preservation. Its deliberately shifted dispatch and
+descriptor tables ensure resident linking cannot accidentally derive either
+ID from the surviving import order. `ConcreteHost` independently decodes the
+Wasm-born closures and projects every capture.
 
 The resident literal module likewise has zero imports and owns its memory. It
 checks immediate `Nat` encodings plus empty and Unicode/newline strings,
@@ -336,7 +348,10 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-projections.wasm \
   _build/source-pretty-format-resident-closure-projections.wasm \
   _build/source-pretty-format-resident-closure-matches.wasm \
-  _build/source-pretty-format-resident-allocator.wasm
+  _build/source-pretty-format-resident-allocator.wasm \
+  _build/source-pretty-format-resident-constructors.wasm \
+  _build/source-pretty-format-resident-naturals.wasm \
+  _build/source-pretty-format-resident-partial-applications.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -479,6 +494,25 @@ its checkpoint moves from 157 to 153 imports while preserving the exact
 native-oracle event stream. The full text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152`.
 
+The next retained checkpoint internalizes every one of the 87 `partialApply`
+operations. Each helper allocates through the resident frontier, zeroes the
+complete aligned closure object, writes the stable dispatch and descriptor
+IDs plus arity/fixed metadata, copies typed capture slots, and returns the raw
+object word:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-partial-applications.wasm
+```
+
+The text facade advances from 152 to 65 imports, while the exact-event styled
+facade advances from 153 to 66. Both preserve final LCNF and the complete
+retained closure tables. The current source closures use only i32 captures;
+the standalone fixture additionally checks an i64 `USize` capture. Float
+captures fail closed until the resident symbolic surface has typed float
+stores. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -493,8 +527,8 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 153 function imports: one more than
-the text-only 152-import checkpoint in order to preserve the exact
+memory and allocator and currently has 66 function imports: one more than
+the text-only 65-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare
