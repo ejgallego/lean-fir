@@ -37,6 +37,34 @@ def LocalLayoutAligned
         findFVar? (functionBindings sourceFunction) fvarId = some index ∧
           (functionBindings sourceFunction)[index]?.map Prod.snd = some kind
 
+/-- The concrete contract selected by the executable host resolver, when that
+resolver supports the runtime operation. -/
+def resolvedContract? (operation : RuntimeOp) :
+    Option (Wasm.HostContract Host) :=
+  (hostFn? operation).map fun function =>
+    fun initial args result => result = function.invoke initial args
+
+/--
+Every symbolic runtime call used by the adapter occupies the same numeric
+slot in the target import table and concrete host specification.
+
+This is static resolver/adaptor alignment. It exposes no source behavior and
+is intended to be discharged once from `adapt` and `resolveHosts`, not supplied
+as a per-execution simulation certificate.
+-/
+def ConcreteRuntimeCallsAligned
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts) : Prop :=
+  ∀ {operation : RuntimeOp} {id : Nat},
+    callIndex? sourceModule (.runtime operation) = some id →
+      ∃ imp,
+        target.wasmModule.imports[id]? = some imp ∧
+          id < target.wasmModule.imports.length ∧
+          hosts.spec.contracts[id]? = resolvedContract? operation ∧
+          imp.params.length = operation.signature.params.size ∧
+          imp.results.length = operation.signature.results.size
+
 /-- Static whole-pipeline evidence for one concrete generated export.
 
 `bodyAdapted` is the crucial compiler-facing equation: it ties the selected
@@ -63,6 +91,8 @@ structure ConcreteSupportedExport
   hostsResolved : resolveHosts sourceModule = .ok hosts
   hostsAligned :
     target.wasmModule.imports.length = hosts.hosts.length
+  runtimeCallsAligned :
+    ConcreteRuntimeCallsAligned sourceModule target hosts
   targetFunctionIndex : Nat
   targetFunction : Wasm.Function
   exported :
@@ -93,6 +123,44 @@ theorem ConcreteSupportedExport.hostsSatisfy
         target hosts exportName) :
     hosts.env.Satisfies target.wasmModule hosts.spec :=
   hosts.satisfies target.wasmModule spec.hostsAligned
+
+/-- Resolver/adaptor alignment specializes to the exact concrete natural
+literal contract expected by the allocation refinement theorem. -/
+theorem ConcreteSupportedExport.naturalLiteralCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {value id : Nat}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.literal (.nat value) .tobject)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (naturalLiteralContract value) ∧
+        imp.params.length = 0 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = naturalLiteralStep value initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, naturalLiteralFn]
+      using contracted
+  · change imp.params.length = 0 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
 
 /-- The syntax-directed proof for the statically selected generated function
 constructs T1's exact successful-declaration certificate. -/

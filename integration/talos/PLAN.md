@@ -3433,6 +3433,22 @@ a Talos relational-execution adequacy layer and lift the same state relation
 to finite traces, divergence preservation, and weak simulation/bisimulation
 as useful. No FIR semantic contract or executable ABI changed.
 
+W6.6dy supplies the first compositional theorem on that corrected path.
+`ConcreteSupportedExport` now also records static runtime-call alignment:
+symbolic call indices, adapted import slots, resolved concrete contracts, and
+their arities agree. `CodeAdapted.naturalLiteralReturn_eq` inverts the actual
+compiler and adapter to recover the exact
+`call; local.set; local.get; return` body. The public
+`correctNaturalLiteralReturn` theorem then composes concrete natural
+allocation, witness extension, the checked local write, and the return suffix
+to prove matching finite source execution and exported target termination.
+The caller supplies no syntax simulation or translation certificate; only
+allocation success and local-write capacity remain dynamic preconditions.
+The compile-time contract harness covers this API. The next proof slice
+generalizes the immediate-return continuation, adds UTF-8 strings, and then
+moves to constructor/projection lets. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

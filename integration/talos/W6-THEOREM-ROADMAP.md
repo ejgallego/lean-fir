@@ -56,7 +56,10 @@ compiler rather than supplied by a dynamic simulation object:
 - `bodyAdapted`: the selected source code passes through the actual
   `compileCode` and numeric adapter to the selected target function body; and
 - `localsAligned`: the lowering context and selected symbolic function assign
-  the same ABI kind and numeric slot to every compiled local read.
+  the same ABI kind and numeric slot to every compiled local read; and
+- `runtimeCallsAligned`: each symbolic runtime call selected by the adapter
+  has the same numeric target import, concrete resolved-host contract, and
+  parameter/result arity.
 
 These fields are temporary explicit invariants until the corresponding
 `lowerDecl`/whole-module theorems construct them automatically. They contain
@@ -96,8 +99,15 @@ compiler theorem.
 `ConcreteSupportedExport.correctReturn` is the first completed T2 case. It
 derives the emitted return body, ABI kind, numeric local, exact target return,
 and source execution from the static pipeline and source return evaluation.
+`ConcreteSupportedExport.correctNaturalLiteralReturn` is the first
+compositional case: it derives the exact
+`call; local.set; local.get; return` body and resolved natural-literal
+contract, executes concrete allocation, extends the heap witness, and proves
+the source and exported target return the related result. Its only dynamic
+side conditions are allocation success and capacity for the checked local
+write.
 `ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
-that this public theorem has no translation-certificate premise.
+that both public theorems have no translation-certificate premise.
 
 ### T3. Whole-export success
 
@@ -335,17 +345,19 @@ acceptance tests pass.
 
 ## Work order
 
-1. In progress: prove T1 directly from `lowerDecl`, `lowerSupported`, and
-   `adapt`; the explicit `bodyAdapted` and `localsAligned` fields are the
-   current theorem targets, not client obligations to preserve indefinitely.
+1. In progress: prove T1 directly from `lowerDecl`, `lowerSupported`, `adapt`,
+   and `resolveHosts`; the explicit `bodyAdapted`, `localsAligned`, and
+   `runtimeCallsAligned` fields are the current theorem targets, not client
+   obligations to preserve indefinitely.
 2. Completed base case: derive return compilation/adaptation and exported
    target execution from a source return evaluation. Keep the
    certificate-free application in
    `ConcreteCompilerCorrectnessContract.lean`.
-3. Next: prove the direct-`let` structural rule from the source evaluation,
-   actual `compileCode_let` equation, operation refinement, checked local
-   write, and recursive continuation theorem. Instantiate literals first,
-   then constructors/projections.
+3. Completed first compositional instance: a `tobject` natural-literal
+   `let; return` now uses the actual `compileCode_let` equation, resolver
+   alignment, concrete allocation refinement, checked local write, and return
+   continuation. Next generalize this into the recursive direct-`let` rule,
+   instantiate UTF-8 strings, then constructors/projections.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

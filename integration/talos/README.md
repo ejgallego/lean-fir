@@ -142,16 +142,22 @@ vertical slice at a time.
 W6 compiler correctness now has a certificate-free public track.
 `ConcreteSupportedExport` statically ties the selected LCNF code to the actual
 `compileCode` and Talos-adapter body and records the compiler's local-layout
-alignment. `ConcreteSupportedExport.correctReturn` is the first direct case:
+alignment plus the adapter/resolver's runtime-call contracts.
+`ConcreteSupportedExport.correctReturn` is the first direct case:
 given a source return evaluation and an initially related concrete state, it
 derives the generated numeric return body and matching exported Talos
-execution. `ConcreteCompilerCorrectnessContract.lean` keeps this application
-free of caller-supplied simulation certificates under `make talos-check`.
+execution. `correctNaturalLiteralReturn` adds the first compositional
+`let; return` case: the exact generated call/local-write/read/return body,
+concrete allocation, witness extension, and resolved host contract are joined
+without a caller-supplied simulation certificate.
+`ConcreteCompilerCorrectnessContract.lean` keeps both applications on that
+public boundary under `make talos-check`.
 Existing certificate-shaped modules are retained only as internal sources of
-operation and invariant lemmas while direct `let`, control-flow, call,
-external, cache, and fault cases are migrated. The first endpoint preserves
-finite source behaviors conditionally; later finite-trace and weak-simulation
-work will cover divergence without proving source termination.
+operation and invariant lemmas while general continuations, remaining direct
+`let` operations, control-flow, calls, externals, caches, and faults are
+migrated. The first endpoint preserves finite source behaviors conditionally;
+later finite-trace and weak-simulation work will cover divergence without
+proving source termination.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine

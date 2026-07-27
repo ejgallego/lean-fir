@@ -35,12 +35,16 @@ Cross-cutting W6.5 state:
 
 - compiler-level coverage is now tracked separately from operation coverage.
   `ConcreteSupportedExport` carries the actual compiler/adaptor body equation
-  and local-layout alignment; `ConcreteSupportedExport.correctReturn` proves
-  the first certificate-free partial-correctness case, and
+  plus local-layout and runtime-call resolver alignment;
+  `ConcreteSupportedExport.correctReturn` proves the certificate-free return
+  base, while `correctNaturalLiteralReturn` proves the first allocating
+  `let; return` composition through the exact generated four-instruction body,
+  concrete heap/witness growth, and checked destination write; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
-  application needs only source evaluation, initial refinement, and static
-  pipeline facts. Direct `let`, control-flow, call, external, cache, and fault
-  cases remain to migrate from the internal certificate-shaped scaffolding;
+  applications have no caller-supplied simulation premise. General
+  continuations, string/constructor/projection direct lets, control-flow,
+  calls, externals, caches, and faults remain to migrate from the internal
+  certificate-shaped scaffolding;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness
