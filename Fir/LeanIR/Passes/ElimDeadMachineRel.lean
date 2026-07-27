@@ -20069,6 +20069,52 @@ theorem ExactShadowCodeBinderReady.match_codeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- State-level hereditary active-code advance.  The machine readiness
+certificate exposes the exact compiler edge and its active runtime
+obligation, so the exact dispatcher preserves binder-ready provenance in the
+resulting machine relation. -/
+theorem SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready
+    (_related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (sourceControl : source.control = .code sourceCode)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code exactReady joins env =>
+          rcases exactReady with
+            ⟨remaining, final, fuelBound, exact, usedBound, static,
+              runtimeReady⟩
+          have sourceSame :
+              withCodeControl source sourceCode = source := by
+            cases source
+            simp_all [withCodeControl]
+          have targetSame :
+              withCodeControl target targetCode = target := by
+            cases target
+            simp_all [withCodeControl]
+          simpa only [sourceSame, targetSame] using
+            (static.match_codeStep fuelBound usedBound source target programs
+              frames joins env runtime runtimeReady
+              (by simpa only [sourceSame] using step))
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+
 /-- Unified semantic-step dispatcher for an active related code graph.
 `ReachableCodeReadyAt` supplies the exact ownership certificate required by
 conditionally deleted or concrete-token operations; every syntactic family
