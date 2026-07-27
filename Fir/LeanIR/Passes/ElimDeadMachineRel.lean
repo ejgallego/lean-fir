@@ -19633,6 +19633,442 @@ theorem ExactShadowCodeBinderReady.match_deleteStep
     frames (ready.delete_continuationGraph fuelBound usedBound) joins env
     objectMember runtime step
 
+/-- Unified hereditary dispatcher for one exact compiler edge.  Static
+provenance selects the family matcher, while the exact view's dynamic
+certificate is consumed only by genuinely effectful deleted or reuse edges.
+The deleted nullary-`.fap` discrepancy has no `DeletedLetReadyAt`
+constructor, so that branch is eliminated rather than assumed sound. -/
+theorem ExactShadowCodeBinderReady.match_codeStep
+    {initial final ambient : UsedLocals}
+    {remaining fuel : Nat}
+    {sourceCode targetCode : LCNF.Code .impure}
+    {view :
+      ExactShadowCodeView initial remaining final sourceCode targetCode}
+    (ready : ExactShadowCodeBinderReady ambient view)
+    (fuelBound : remaining ≤ fuel)
+    (usedBound : UsedSubset final ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (runtimeReady : ExactShadowCodeRuntimeReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      view)
+    (step : Step externals
+      (withCodeControl sourceState sourceCode) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState targetCode) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel sourceAfter targetAfter := by
+  cases view with
+  | @letRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation declaration continuation keep =>
+      rcases declaration with ⟨fvarId, binderName, type, value⟩
+      cases value with
+      | lit literalValue =>
+          rcases ready.match_retainedLiteralLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | erased =>
+          rcases ready.match_retainedErasedLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fvar function arguments =>
+          rcases ready.match_retainedFVarLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | ctor info arguments =>
+          rcases ready.match_retainedCtorLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | oproj index object =>
+          rcases ready.match_retainedObjectProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | uproj index object =>
+          rcases ready.match_retainedUSizeProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | sproj index offset object =>
+          rcases ready.match_retainedScalarProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reset count object =>
+          rcases ready.match_retainedResetLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reuse token info updateHeader arguments =>
+          have retainedReady : RetainedLetReadyAt sourceState
+              (runtimeRoots sourceState.runtime
+                (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+              (.reuse token info updateHeader arguments) := by
+            simpa [ExactShadowCodeRuntimeReadyAt,
+              ExactShadowCodeView.runtimeDecision] using runtimeReady
+          rcases ready.match_retainedReuseLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env retainedReady
+              runtime (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | fap name arguments =>
+          rcases ready.match_retainedFapLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | pap name arguments =>
+          rcases ready.match_retainedPapLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | box boxedType input =>
+          rcases ready.match_retainedBoxLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | unbox object =>
+          rcases ready.match_retainedUnboxLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | isShared object =>
+          rcases ready.match_retainedIsSharedLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | proj _ _ _ impossible | const _ _ _ impossible =>
+          nomatch impossible
+  | @letDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation declaration continuation absent safe =>
+      have deletedReady : DeletedLetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          declaration := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases declaration with ⟨fvarId, binderName, type, value⟩
+      cases value with
+      | lit literalValue =>
+          rcases ready.match_deletedLiteralLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | erased =>
+          rcases ready.match_deletedErasedLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fvar function arguments =>
+          rcases ready.match_deletedFVarLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | ctor info arguments =>
+          rcases ready.match_deletedCtorLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | oproj index object =>
+          rcases ready.match_deletedObjectProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | uproj index object =>
+          rcases ready.match_deletedUSizeProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | sproj index offset object =>
+          rcases ready.match_deletedScalarProjectionLetStep
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reset count object =>
+          rcases ready.match_deletedResetLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reuse token info updateHeader arguments =>
+          rcases ready.match_deletedReuseLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fap name arguments =>
+          cases deletedReady with
+          | runtimeNeutral declaration value evaluated =>
+              cases argumentsResult :
+                  evalArgs sourceState.env arguments <;>
+                simp [evalLetValue, argumentsResult, Functor.map, Except.map]
+                  at evaluated
+      | pap name arguments =>
+          rcases ready.match_deletedPapLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | box boxedType input =>
+          rcases ready.match_deletedBoxLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | unbox object =>
+          rcases ready.match_deletedUnboxLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | isShared object =>
+          rcases ready.match_deletedIsSharedLetStep fuelBound usedBound
+              sourceState targetState programs frames joins env runtime
+              deletedReady (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | proj _ _ _ impossible | const _ _ _ impossible =>
+          nomatch impossible
+  | @joinRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId bodyUsed sourceBody targetBody binderName
+      params type continuation live body =>
+      rcases ready.match_retainedJoinStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @joinDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId binderName params type sourceBody continuation
+      absent =>
+      rcases ready.match_deletedJoinStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @cases beforeDiscr nextFuel sourceAlternatives
+      targetAlternatives discr typeName resultType alternatives =>
+      rcases ready.match_casesStep fuelBound usedBound sourceState targetState
+          programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @jump terminalFuel join arguments =>
+      rcases ready.match_jumpStep fuelBound usedBound sourceState targetState
+          programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @«return» terminalFuel result =>
+      rcases ready.match_returnStep fuelBound usedBound sourceState targetState
+          programs frames env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @unreachable terminalFuel type =>
+      have done :
+          coreStep (withCodeControl sourceState (.unreach type)) =
+            .done (observe
+              (withCodeControl sourceState (.unreach type))
+              (.fault .unreachable)) := by
+        simp [withCodeControl, coreStep, fail]
+      cases step with
+      | internal transition =>
+          rw [done] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [done] at transition
+          contradiction
+  | @objectSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation live =>
+      rcases ready.match_objectSetRetainedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @objectSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation absent =>
+      have deletedReady : DeletedObjectSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_objectSetDeletedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @usizeSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation live =>
+      rcases ready.match_usizeSetRetainedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @usizeSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation absent =>
+      have deletedReady : DeletedUSizeSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_usizeSetDeletedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @scalarSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object width offset field type continuation live =>
+      rcases ready.match_scalarSetRetainedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @scalarSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object width offset field type continuation absent =>
+      have deletedReady : DeletedScalarSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_scalarSetDeletedStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @tagSet nextFuel continuationUsed sourceContinuation targetContinuation
+      object tag continuation =>
+      rcases ready.match_setTagStep fuelBound usedBound sourceState targetState
+          programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @increment nextFuel continuationUsed sourceContinuation
+      targetContinuation object amount check persistent continuation =>
+      rcases ready.match_incrementStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @decrement nextFuel continuationUsed sourceContinuation
+      targetContinuation object amount check persistent objects continuation =>
+      rcases ready.match_decrementStep fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @delete nextFuel continuationUsed sourceContinuation targetContinuation
+      object continuation =>
+      rcases ready.match_deleteStep fuelBound usedBound sourceState targetState
+          programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- Unified semantic-step dispatcher for an active related code graph.
 `ReachableCodeReadyAt` supplies the exact ownership certificate required by
 conditionally deleted or concrete-token operations; every syntactic family
