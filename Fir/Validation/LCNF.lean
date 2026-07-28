@@ -1569,6 +1569,136 @@ private def intDecisionGuard (name : Name) (operation : Int → Int → Bool)
 #guard intDecisionGuard ``Int.decLe
   (fun left right => decide (left ≤ right)) multiLimbInt (-multiLimbInt) false
 
+private def uint32BinaryExternal (operation : UInt32 → UInt32 → UInt32)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalUInt32 request left
+  let right ← externalUInt32 request right
+  return {
+    value := .scalar (.uint32 (operation left right))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint32UnaryExternal (operation : UInt32 → UInt32)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalUInt32 request value
+  return {
+    value := .scalar (.uint32 (operation value))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint32DecisionExternal (operation : UInt32 → UInt32 → Bool)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalUInt32 request left
+  let right ← externalUInt32 request right
+  return {
+    value := .scalar (.uint8 (if operation left right then 1 else 0))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint32BinaryGuard (name : Name) (operation : UInt32 → UInt32 → UInt32)
+    (left right expected : UInt32) : Bool :=
+  let runtime : RuntimeState := {}
+  let request := intBinaryRequest name
+    (.scalar (.uint32 left)) (.scalar (.uint32 right))
+  match uint32BinaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint32 expected) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+private def uint32UnaryGuard (name : Name) (operation : UInt32 → UInt32)
+    (input expected : UInt32) : Bool :=
+  let runtime : RuntimeState := {}
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.scalar (.uint32 input)] }
+  match uint32UnaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint32 expected) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+private def uint32DecisionGuard (name : Name) (operation : UInt32 → UInt32 → Bool)
+    (left right : UInt32) (expected : Bool) : Bool :=
+  let runtime : RuntimeState := {}
+  let request := intBinaryRequest name
+    (.scalar (.uint32 left)) (.scalar (.uint32 right))
+  match uint32DecisionExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+#guard uint32BinaryGuard ``UInt32.add UInt32.add 4294967295 1 0
+
+#guard uint32BinaryGuard ``UInt32.sub UInt32.sub 0 1 4294967295
+
+#guard uint32BinaryGuard ``UInt32.mul UInt32.mul 2147483648 2 0
+
+#guard uint32BinaryGuard ``UInt32.div UInt32.div 4294967295 3 1431655765
+
+#guard uint32BinaryGuard ``UInt32.div UInt32.div 4294967295 0 0
+
+#guard uint32BinaryGuard ``UInt32.mod UInt32.mod 4294967295 16 15
+
+#guard uint32BinaryGuard ``UInt32.mod UInt32.mod 4294967295 0 4294967295
+
+#guard uint32BinaryGuard ``UInt32.land UInt32.land 0xf0f0f0f0 0x0ff00ff0 0x00f000f0
+
+#guard uint32BinaryGuard ``UInt32.lor UInt32.lor 0xf000000f 0x0ff00ff0 0xfff00fff
+
+#guard uint32BinaryGuard ``UInt32.xor UInt32.xor 0xf0f0f0f0 0x0ff00ff0 0xff00ff00
+
+#guard uint32BinaryGuard ``UInt32.shiftLeft UInt32.shiftLeft 0x80000001 32 0x80000001
+
+#guard uint32BinaryGuard ``UInt32.shiftLeft UInt32.shiftLeft 0x80000001 33 2
+
+#guard uint32BinaryGuard ``UInt32.shiftRight UInt32.shiftRight 0x80000001 32 0x80000001
+
+#guard uint32BinaryGuard ``UInt32.shiftRight UInt32.shiftRight 0x80000001 33 0x40000000
+
+#guard uint32UnaryGuard ``UInt32.complement UInt32.complement 0 4294967295
+
+#guard uint32UnaryGuard ``UInt32.neg UInt32.neg 1 4294967295
+
+#guard uint32DecisionGuard ``UInt32.decEq
+  (fun left right => decide (left = right)) 4294967295 4294967295 true
+
+#guard uint32DecisionGuard ``UInt32.decEq
+  (fun left right => decide (left = right)) 4294967295 0 false
+
+#guard uint32DecisionGuard ``UInt32.decLt
+  (fun left right => decide (left < right)) 0 4294967295 true
+
+#guard uint32DecisionGuard ``UInt32.decLt
+  (fun left right => decide (left < right)) 4294967295 0 false
+
+#guard uint32DecisionGuard ``UInt32.decLe
+  (fun left right => decide (left ≤ right)) 4294967295 4294967295 true
+
+#guard uint32DecisionGuard ``UInt32.decLe
+  (fun left right => decide (left ≤ right)) 4294967295 0 false
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
@@ -1656,6 +1786,36 @@ private def validationExternals : ExternalImpl where
       intDecLtExternal request runtime
     else if request.name == ``Int.decLe then
       intDecLeExternal request runtime
+    else if request.name == ``UInt32.add then
+      uint32BinaryExternal UInt32.add request runtime
+    else if request.name == ``UInt32.sub then
+      uint32BinaryExternal UInt32.sub request runtime
+    else if request.name == ``UInt32.mul then
+      uint32BinaryExternal UInt32.mul request runtime
+    else if request.name == ``UInt32.div then
+      uint32BinaryExternal UInt32.div request runtime
+    else if request.name == ``UInt32.mod then
+      uint32BinaryExternal UInt32.mod request runtime
+    else if request.name == ``UInt32.land then
+      uint32BinaryExternal UInt32.land request runtime
+    else if request.name == ``UInt32.lor then
+      uint32BinaryExternal UInt32.lor request runtime
+    else if request.name == ``UInt32.xor then
+      uint32BinaryExternal UInt32.xor request runtime
+    else if request.name == ``UInt32.shiftLeft then
+      uint32BinaryExternal UInt32.shiftLeft request runtime
+    else if request.name == ``UInt32.shiftRight then
+      uint32BinaryExternal UInt32.shiftRight request runtime
+    else if request.name == ``UInt32.complement then
+      uint32UnaryExternal UInt32.complement request runtime
+    else if request.name == ``UInt32.neg then
+      uint32UnaryExternal UInt32.neg request runtime
+    else if request.name == ``UInt32.decEq then
+      uint32DecisionExternal (fun left right => decide (left = right)) request runtime
+    else if request.name == ``UInt32.decLt then
+      uint32DecisionExternal (fun left right => decide (left < right)) request runtime
+    else if request.name == ``UInt32.decLe then
+      uint32DecisionExternal (fun left right => decide (left ≤ right)) request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 

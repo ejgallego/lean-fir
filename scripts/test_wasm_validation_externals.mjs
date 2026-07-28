@@ -5,6 +5,7 @@ import { SemanticHost } from "./wasm_semantic_host.mjs";
 import {
   integerValue,
   naturalValue,
+  scalarUInt32,
   validationExternalRegistry,
 } from "./wasm_validation_externals.mjs";
 
@@ -29,6 +30,23 @@ const intShiftRight = validationExternalRegistry["Int.shiftRight"];
 const intDecEq = validationExternalRegistry["Int.decEq"];
 const intDecLt = validationExternalRegistry["Int.decLt"];
 const intDecLe = validationExternalRegistry["Int.decLe"];
+const uint32Declarations = [
+  "UInt32.add",
+  "UInt32.sub",
+  "UInt32.mul",
+  "UInt32.div",
+  "UInt32.mod",
+  "UInt32.land",
+  "UInt32.lor",
+  "UInt32.xor",
+  "UInt32.shiftLeft",
+  "UInt32.shiftRight",
+  "UInt32.complement",
+  "UInt32.neg",
+  "UInt32.decEq",
+  "UInt32.decLt",
+  "UInt32.decLe",
+];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
 assert.strictEqual(formatExternalRegistry["String.Internal.pushn"], pushn);
@@ -51,6 +69,11 @@ assert.strictEqual(formatExternalRegistry["Int.shiftRight"], intShiftRight);
 assert.strictEqual(formatExternalRegistry["Int.decEq"], intDecEq);
 assert.strictEqual(formatExternalRegistry["Int.decLt"], intDecLt);
 assert.strictEqual(formatExternalRegistry["Int.decLe"], intDecLe);
+for (const declaration of uint32Declarations) {
+  assert.strictEqual(
+    formatExternalRegistry[declaration],
+    validationExternalRegistry[declaration]);
+}
 
 function invoke(handler, host, args) {
   const beforeWorld = host.world;
@@ -79,6 +102,76 @@ function snapshot(cell) {
 
 function character(codePoint) {
   return { kind: "scalar", scalarKind: "uint32", value: BigInt(codePoint) };
+}
+
+function uint32(value) {
+  return { kind: "scalar", scalarKind: "uint32", value: BigInt(value) };
+}
+
+for (const [declaration, left, right, expected] of [
+  ["UInt32.add", 0xffffffffn, 1n, 0n],
+  ["UInt32.sub", 0n, 1n, 0xffffffffn],
+  ["UInt32.mul", 0x80000000n, 2n, 0n],
+  ["UInt32.div", 0xffffffffn, 3n, 0x55555555n],
+  ["UInt32.div", 0xffffffffn, 0n, 0n],
+  ["UInt32.mod", 0xffffffffn, 16n, 15n],
+  ["UInt32.mod", 0xffffffffn, 0n, 0xffffffffn],
+  ["UInt32.land", 0xf0f0f0f0n, 0x0ff00ff0n, 0x00f000f0n],
+  ["UInt32.lor", 0xf000000fn, 0x0ff00ff0n, 0xfff00fffn],
+  ["UInt32.xor", 0xf0f0f0f0n, 0x0ff00ff0n, 0xff00ff00n],
+  ["UInt32.shiftLeft", 0x80000001n, 32n, 0x80000001n],
+  ["UInt32.shiftLeft", 0x80000001n, 33n, 2n],
+  ["UInt32.shiftRight", 0x80000001n, 32n, 0x80000001n],
+  ["UInt32.shiftRight", 0x80000001n, 33n, 0x40000000n],
+]) {
+  const host = new SemanticHost();
+  const leftValue = uint32(left);
+  const rightValue = uint32(right);
+  const frontier = host.nextLocation;
+  const result = invoke(
+    validationExternalRegistry[declaration], host, [leftValue, rightValue]);
+  assert.equal(scalarUInt32(result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier);
+  assert.deepStrictEqual(leftValue, uint32(left));
+  assert.deepStrictEqual(rightValue, uint32(right));
+}
+
+for (const [declaration, input, expected] of [
+  ["UInt32.complement", 0n, 0xffffffffn],
+  ["UInt32.neg", 1n, 0xffffffffn],
+]) {
+  const host = new SemanticHost();
+  const inputValue = uint32(input);
+  const frontier = host.nextLocation;
+  const result = invoke(
+    validationExternalRegistry[declaration], host, [inputValue]);
+  assert.equal(scalarUInt32(result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier);
+  assert.deepStrictEqual(inputValue, uint32(input));
+}
+
+for (const [declaration, left, right, expected] of [
+  ["UInt32.decEq", 0xffffffffn, 0xffffffffn, 1n],
+  ["UInt32.decEq", 0xffffffffn, 0n, 0n],
+  ["UInt32.decLt", 0n, 0xffffffffn, 1n],
+  ["UInt32.decLt", 0xffffffffn, 0n, 0n],
+  ["UInt32.decLe", 0xffffffffn, 0xffffffffn, 1n],
+  ["UInt32.decLe", 0xffffffffn, 0n, 0n],
+]) {
+  const host = new SemanticHost();
+  const leftValue = uint32(left);
+  const rightValue = uint32(right);
+  const frontier = host.nextLocation;
+  const result = invoke(
+    validationExternalRegistry[declaration], host, [leftValue, rightValue]);
+  assert.deepStrictEqual(result, {
+    kind: "scalar",
+    scalarKind: "uint8",
+    value: expected,
+  });
+  assert.equal(host.nextLocation, frontier);
+  assert.deepStrictEqual(leftValue, uint32(left));
+  assert.deepStrictEqual(rightValue, uint32(right));
 }
 
 for (const [leftValue, rightValue, expected, allocates] of [

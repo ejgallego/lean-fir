@@ -50,6 +50,8 @@ export function stringValue(host, value, context) {
 export function scalarUInt32(value, context) {
   assert.equal(value.kind, "scalar", `${context} must be a scalar`);
   assert.equal(value.scalarKind, "uint32", `${context} must use UInt32`);
+  assert.ok(value.value >= 0n && value.value <= 0xffffffffn,
+    `${context} is out of UInt32 range`);
   return value.value;
 }
 
@@ -98,6 +100,40 @@ function integerDecision(declaration, operation) {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
     const left = integerValue(host, args[0], `${declaration} left operand`);
     const right = integerValue(host, args[1], `${declaration} right operand`);
+    return { value: boolResult(operation(left, right)), world };
+  };
+}
+
+function uint32Result(value) {
+  return {
+    kind: "scalar",
+    scalarKind: "uint32",
+    value: BigInt.asUintN(32, value),
+  };
+}
+
+function uint32Binary(declaration, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = scalarUInt32(args[0], `${declaration} left operand`);
+    const right = scalarUInt32(args[1], `${declaration} right operand`);
+    return { value: uint32Result(operation(left, right)), world };
+  };
+}
+
+function uint32Unary(declaration, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = scalarUInt32(args[0], `${declaration} operand`);
+    return { value: uint32Result(operation(value)), world };
+  };
+}
+
+function uint32Decision(declaration, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = scalarUInt32(args[0], `${declaration} left operand`);
+    const right = scalarUInt32(args[1], `${declaration} right operand`);
     return { value: boolResult(operation(left, right)), world };
   };
 }
@@ -321,6 +357,28 @@ export const validationExternalRegistry = {
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
+  "UInt32.add": uint32Binary("UInt32.add", (left, right) => left + right),
+  "UInt32.sub": uint32Binary("UInt32.sub", (left, right) => left - right),
+  "UInt32.mul": uint32Binary("UInt32.mul", (left, right) => left * right),
+  "UInt32.div": uint32Binary(
+    "UInt32.div", (left, right) => right === 0n ? 0n : left / right),
+  "UInt32.mod": uint32Binary(
+    "UInt32.mod", (left, right) => right === 0n ? left : left % right),
+  "UInt32.land": uint32Binary("UInt32.land", (left, right) => left & right),
+  "UInt32.lor": uint32Binary("UInt32.lor", (left, right) => left | right),
+  "UInt32.xor": uint32Binary("UInt32.xor", (left, right) => left ^ right),
+  "UInt32.shiftLeft": uint32Binary(
+    "UInt32.shiftLeft", (value, count) => value << (count & 31n)),
+  "UInt32.shiftRight": uint32Binary(
+    "UInt32.shiftRight", (value, count) => value >> (count & 31n)),
+  "UInt32.complement": uint32Unary("UInt32.complement", value => ~value),
+  "UInt32.neg": uint32Unary("UInt32.neg", value => -value),
+  "UInt32.decEq": uint32Decision(
+    "UInt32.decEq", (left, right) => left === right),
+  "UInt32.decLt": uint32Decision(
+    "UInt32.decLt", (left, right) => left < right),
+  "UInt32.decLe": uint32Decision(
+    "UInt32.decLe", (left, right) => left <= right),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");
