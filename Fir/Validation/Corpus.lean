@@ -174,6 +174,82 @@ def stringCompareClassify (left right : String) : Nat :=
   | .eq => 1
   | .gt => 2
 
+@[noinline]
+def addInt8 (left right : Int8) : Int8 :=
+  Int8.add left right
+
+@[noinline]
+def subInt8 (left right : Int8) : Int8 :=
+  Int8.sub left right
+
+@[noinline]
+def mulInt8 (left right : Int8) : Int8 :=
+  Int8.mul left right
+
+@[noinline]
+def divInt8 (left right : Int8) : Int8 :=
+  Int8.div left right
+
+@[noinline]
+def modInt8 (left right : Int8) : Int8 :=
+  Int8.mod left right
+
+@[noinline]
+def landInt8 (left right : Int8) : Int8 :=
+  Int8.land left right
+
+@[noinline]
+def lorInt8 (left right : Int8) : Int8 :=
+  Int8.lor left right
+
+@[noinline]
+def xorInt8 (left right : Int8) : Int8 :=
+  Int8.xor left right
+
+@[noinline]
+def shiftLeftInt8 (value count : Int8) : Int8 :=
+  Int8.shiftLeft value count
+
+@[noinline]
+def shiftRightInt8 (value count : Int8) : Int8 :=
+  Int8.shiftRight value count
+
+@[noinline]
+def complementInt8 (value : Int8) : Int8 :=
+  Int8.complement value
+
+@[noinline]
+def negInt8 (value : Int8) : Int8 :=
+  Int8.neg value
+
+@[noinline]
+def absInt8 (value : Int8) : Int8 :=
+  Int8.abs value
+
+@[noinline]
+def decideInt8Eq (left right : Int8) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideInt8Lt (left right : Int8) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideInt8Le (left right : Int8) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
+def natToInt8 (value : Nat) : Int8 :=
+  Int8.ofNat value
+
+@[noinline]
+def intToInt8 (value : Int) : Int8 :=
+  Int8.ofInt value
+
+@[noinline]
+def int8ToInt (value : Int8) : Int :=
+  Int8.toInt value
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1675,26 +1751,44 @@ private def exactIntNatExternalCase
 private structure FixedWidthCaseCodec (α : Type) where
   schema : ValidationSchema
   datum : α → ValidationDatum
+  externalTag : String
+  conversionTag : String
+
+private def int8CaseCodec : FixedWidthCaseCodec Int8 where
+  schema := .bits 8
+  datum value := .bits 8 (UInt64.ofNat value.toUInt8.toNat)
+  externalTag := "fixed-width-signed-external"
+  conversionTag := "fixed-width-signed-conversion"
 
 private def uint8CaseCodec : FixedWidthCaseCodec UInt8 where
   schema := .bits 8
   datum value := .bits 8 (UInt64.ofNat value.toNat)
+  externalTag := "fixed-width-unsigned-external"
+  conversionTag := "fixed-width-unsigned-conversion"
 
 private def uint16CaseCodec : FixedWidthCaseCodec UInt16 where
   schema := .bits 16
   datum value := .bits 16 (UInt64.ofNat value.toNat)
+  externalTag := "fixed-width-unsigned-external"
+  conversionTag := "fixed-width-unsigned-conversion"
 
 private def uint32CaseCodec : FixedWidthCaseCodec UInt32 where
   schema := .bits 32
   datum value := .bits 32 (UInt64.ofNat value.toNat)
+  externalTag := "fixed-width-unsigned-external"
+  conversionTag := "fixed-width-unsigned-conversion"
 
 private def uint64CaseCodec : FixedWidthCaseCodec UInt64 where
   schema := .bits 64
   datum := .bits 64
+  externalTag := "fixed-width-unsigned-external"
+  conversionTag := "fixed-width-unsigned-conversion"
 
 private def usizeCaseCodec : FixedWidthCaseCodec USize where
   schema := .usize
   datum value := .usize value.toUInt64
+  externalTag := "fixed-width-unsigned-external"
+  conversionTag := "fixed-width-unsigned-conversion"
 
 private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
     (id : String) (entry : Lean.Name) (operation : α → α → α)
@@ -1706,7 +1800,7 @@ private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
   argSchemas := #[codec.schema, codec.schema]
   resultSchema := codec.schema
   native := fun _ => codec.datum (operation left right)
-  tags := tags.push "fixed-width-unsigned-external"
+  tags := tags.push codec.externalTag
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1726,7 +1820,7 @@ private def exactFixedWidthUnaryExternalCase (codec : FixedWidthCaseCodec α)
   argSchemas := #[codec.schema]
   resultSchema := codec.schema
   native := fun _ => codec.datum (operation input)
-  tags := tags.push "fixed-width-unsigned-external"
+  tags := tags.push codec.externalTag
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1746,7 +1840,7 @@ private def exactFixedWidthDecisionExternalCase (codec : FixedWidthCaseCodec α)
   argSchemas := #[codec.schema, codec.schema]
   resultSchema := .bool
   native := fun _ => .bool (operation left right)
-  tags := tags.push "fixed-width-unsigned-external"
+  tags := tags.push codec.externalTag
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1766,7 +1860,27 @@ private def exactNatToFixedWidthExternalCase (codec : FixedWidthCaseCodec α)
   argSchemas := #[.nat]
   resultSchema := codec.schema
   native := fun _ => codec.datum (operation input)
-  tags := (tags.push "fixed-width-unsigned-conversion").push "nat-word-conversion"
+  tags := (tags.push codec.conversionTag).push "nat-word-conversion"
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactIntToFixedWidthExternalCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (operation : Int → α)
+    (external : Lean.Name) (input : Int) (tags : Array String) (note : String) :
+    Case := {
+  id
+  entry
+  args := #[.int input]
+  argSchemas := #[.int]
+  resultSchema := codec.schema
+  native := fun _ => codec.datum (operation input)
+  tags := (tags.push codec.conversionTag).push "int-word-conversion"
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1786,7 +1900,27 @@ private def exactFixedWidthToNatExternalCase (codec : FixedWidthCaseCodec α)
   argSchemas := #[codec.schema]
   resultSchema := .nat
   native := fun _ => .nat (operation input)
-  tags := (tags.push "fixed-width-unsigned-conversion").push "nat-word-conversion"
+  tags := (tags.push codec.conversionTag).push "nat-word-conversion"
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactFixedWidthToIntExternalCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (operation : α → Int)
+    (external : Lean.Name) (input : α) (tags : Array String) (note : String) :
+    Case := {
+  id
+  entry
+  args := #[codec.datum input]
+  argSchemas := #[codec.schema]
+  resultSchema := .int
+  native := fun _ => .int (operation input)
+  tags := (tags.push codec.conversionTag).push "int-word-conversion"
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1808,7 +1942,7 @@ private def exactFixedWidthConversionExternalCase
   resultSchema := targetCodec.schema
   native := fun _ => targetCodec.datum (operation input)
   tags :=
-    (tags.push "fixed-width-unsigned-conversion").push "fixed-width-cross-conversion"
+    (tags.push sourceCodec.conversionTag).push "fixed-width-cross-conversion"
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -1817,6 +1951,24 @@ private def exactFixedWidthConversionExternalCase
   requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
   requiredExecutedExternalTrace := some #[external]
   provenance := firProvenance note }
+
+private def exactInt8BinaryExternalCase :=
+  exactFixedWidthBinaryExternalCase int8CaseCodec
+
+private def exactInt8UnaryExternalCase :=
+  exactFixedWidthUnaryExternalCase int8CaseCodec
+
+private def exactInt8DecisionExternalCase :=
+  exactFixedWidthDecisionExternalCase int8CaseCodec
+
+private def exactNatToInt8ExternalCase :=
+  exactNatToFixedWidthExternalCase int8CaseCodec
+
+private def exactIntToInt8ExternalCase :=
+  exactIntToFixedWidthExternalCase int8CaseCodec
+
+private def exactInt8ToIntExternalCase :=
+  exactFixedWidthToIntExternalCase int8CaseCodec
 
 private def exactUInt8BinaryExternalCase :=
   exactFixedWidthBinaryExternalCase uint8CaseCodec
@@ -6338,8 +6490,238 @@ private def postConversionCases : Array Case := #[
       "Copy a shared byte array while preserving its original alias through ByteArray.set!" }
 ]
 
+private def int8Value (value : Int) : Int8 :=
+  Int8.ofInt value
+
+private def int8Cases : Array Case := #[
+  exactInt8BinaryExternalCase
+    "int8-add-overflow" ``Source.addInt8 Source.addInt8 ``Int8.add
+    (int8Value 127) (int8Value 1)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "addition",
+      "overflow", "wraparound", "boundary", "i32"]
+    "Wrap signed Int8 maximum plus one to the minimum two's-complement value",
+  exactInt8BinaryExternalCase
+    "int8-sub-underflow" ``Source.subInt8 Source.subInt8 ``Int8.sub
+    (int8Value (-128)) (int8Value 1)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "subtraction",
+      "underflow", "wraparound", "boundary", "i32"]
+    "Wrap signed Int8 minimum minus one to the maximum value",
+  exactInt8BinaryExternalCase
+    "int8-mul-overflow" ``Source.mulInt8 Source.mulInt8 ``Int8.mul
+    (int8Value 64) (int8Value 2)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "multiplication",
+      "overflow", "wraparound", "boundary", "i32"]
+    "Wrap the exact high multiplication bit into the Int8 sign bit",
+  exactInt8BinaryExternalCase
+    "int8-div-negative-truncates" ``Source.divInt8 Source.divInt8 ``Int8.div
+    (int8Value (-7)) (int8Value 3)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "division",
+      "negative", "truncate-zero", "boundary", "i32"]
+    "Truncate signed Int8 division of negative seven by positive three toward zero",
+  exactInt8BinaryExternalCase
+    "int8-div-min-neg-one" ``Source.divInt8 Source.divInt8 ``Int8.div
+    (int8Value (-128)) (int8Value (-1))
+    #["stress", "scalar", "int8", "signed", "arithmetic", "division",
+      "overflow", "wraparound", "minimum", "boundary", "i32"]
+    "Wrap the unique overflowing signed Int8 quotient min / -1 back to min",
+  exactInt8BinaryExternalCase
+    "int8-div-zero" ``Source.divInt8 Source.divInt8 ``Int8.div
+    (int8Value (-7)) (int8Value 0)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "division",
+      "negative", "zero-divisor", "boundary", "i32"]
+    "Pin total signed Int8 division by zero to zero",
+  exactInt8BinaryExternalCase
+    "int8-mod-negative-dividend" ``Source.modInt8 Source.modInt8 ``Int8.mod
+    (int8Value (-7)) (int8Value 3)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "remainder",
+      "negative-dividend", "truncate-zero", "boundary", "i32"]
+    "Retain the dividend sign for signed Int8 remainder of negative seven by three",
+  exactInt8BinaryExternalCase
+    "int8-mod-negative-divisor" ``Source.modInt8 Source.modInt8 ``Int8.mod
+    (int8Value 7) (int8Value (-3))
+    #["stress", "scalar", "int8", "signed", "arithmetic", "remainder",
+      "negative-divisor", "truncate-zero", "boundary", "i32"]
+    "Keep a positive signed Int8 remainder when only the divisor is negative",
+  exactInt8BinaryExternalCase
+    "int8-mod-zero" ``Source.modInt8 Source.modInt8 ``Int8.mod
+    (int8Value (-7)) (int8Value 0)
+    #["stress", "scalar", "int8", "signed", "arithmetic", "remainder",
+      "negative", "zero-divisor", "boundary", "i32"]
+    "Pin signed Int8 remainder by zero to the dividend",
+  exactInt8BinaryExternalCase
+    "int8-land-mixed" ``Source.landInt8 Source.landInt8 ``Int8.land
+    (int8Value (-16)) (int8Value 60)
+    #["stress", "scalar", "int8", "signed", "bitwise", "and",
+      "mixed-bits", "twos-complement", "i32"]
+    "Intersect negative and positive Int8 two's-complement bit groups",
+  exactInt8BinaryExternalCase
+    "int8-lor-mixed" ``Source.lorInt8 Source.lorInt8 ``Int8.lor
+    (int8Value (-64)) (int8Value 60)
+    #["stress", "scalar", "int8", "signed", "bitwise", "or",
+      "mixed-bits", "twos-complement", "i32"]
+    "Union negative and positive Int8 two's-complement bit groups",
+  exactInt8BinaryExternalCase
+    "int8-xor-mixed" ``Source.xorInt8 Source.xorInt8 ``Int8.xor
+    (int8Value (-16)) (int8Value 60)
+    #["stress", "scalar", "int8", "signed", "bitwise", "xor",
+      "mixed-bits", "twos-complement", "i32"]
+    "Exclusive-or negative and positive Int8 two's-complement bit groups",
+  exactInt8BinaryExternalCase
+    "int8-shift-left-negative-width" ``Source.shiftLeftInt8 Source.shiftLeftInt8
+    ``Int8.shiftLeft (int8Value (-127)) (int8Value (-8))
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-left",
+      "negative-count", "masked-count", "identity", "boundary", "i32"]
+    "Reduce a signed Int8 left-shift count of negative eight to zero",
+  exactInt8BinaryExternalCase
+    "int8-shift-left-negative-one" ``Source.shiftLeftInt8 Source.shiftLeftInt8
+    ``Int8.shiftLeft (int8Value (-127)) (int8Value (-1))
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-left",
+      "negative-count", "masked-count", "overflow", "boundary", "i32"]
+    "Reduce a signed Int8 left-shift count of negative one to seven",
+  exactInt8BinaryExternalCase
+    "int8-shift-left-width-plus-one" ``Source.shiftLeftInt8 Source.shiftLeftInt8
+    ``Int8.shiftLeft (int8Value (-127)) (int8Value 9)
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-left",
+      "oversized-count", "masked-count", "overflow", "boundary", "i32"]
+    "Reduce a signed Int8 left-shift count of nine to one",
+  exactInt8BinaryExternalCase
+    "int8-shift-right-negative-width" ``Source.shiftRightInt8 Source.shiftRightInt8
+    ``Int8.shiftRight (int8Value (-127)) (int8Value (-8))
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-right",
+      "negative-count", "masked-count", "arithmetic", "identity", "boundary", "i32"]
+    "Reduce a signed Int8 arithmetic-right-shift count of negative eight to zero",
+  exactInt8BinaryExternalCase
+    "int8-shift-right-negative-one" ``Source.shiftRightInt8 Source.shiftRightInt8
+    ``Int8.shiftRight (int8Value (-127)) (int8Value (-1))
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-right",
+      "negative-count", "masked-count", "arithmetic", "sign-extension",
+      "boundary", "i32"]
+    "Reduce a signed Int8 right-shift count of negative one to seven and extend the sign",
+  exactInt8BinaryExternalCase
+    "int8-shift-right-width-plus-one" ``Source.shiftRightInt8 Source.shiftRightInt8
+    ``Int8.shiftRight (int8Value (-127)) (int8Value 9)
+    #["stress", "scalar", "int8", "signed", "bitwise", "shift-right",
+      "oversized-count", "masked-count", "arithmetic", "sign-extension",
+      "boundary", "i32"]
+    "Reduce a signed Int8 arithmetic-right-shift count of nine to one",
+  exactInt8UnaryExternalCase
+    "int8-complement-zero" ``Source.complementInt8 Source.complementInt8
+    ``Int8.complement (int8Value 0)
+    #["stress", "scalar", "int8", "signed", "bitwise", "complement",
+      "twos-complement", "boundary", "i32"]
+    "Complement Int8 zero to negative one in two's-complement representation",
+  exactInt8UnaryExternalCase
+    "int8-neg-min" ``Source.negInt8 Source.negInt8 ``Int8.neg
+    (int8Value (-128))
+    #["stress", "scalar", "int8", "signed", "arithmetic", "negation",
+      "minimum", "overflow", "wraparound", "boundary", "i32"]
+    "Wrap negation of the signed Int8 minimum back to itself",
+  exactInt8UnaryExternalCase
+    "int8-abs-negative" ``Source.absInt8 Source.absInt8 ``Int8.abs
+    (int8Value (-7))
+    #["stress", "scalar", "int8", "signed", "arithmetic", "absolute-value",
+      "negative", "i32"]
+    "Compute a representable positive Int8 absolute value",
+  exactInt8UnaryExternalCase
+    "int8-abs-min" ``Source.absInt8 Source.absInt8 ``Int8.abs
+    (int8Value (-128))
+    #["stress", "scalar", "int8", "signed", "arithmetic", "absolute-value",
+      "minimum", "overflow", "wraparound", "boundary", "i32"]
+    "Wrap the unrepresentable absolute value of the Int8 minimum back to itself",
+  exactInt8DecisionExternalCase
+    "int8-dec-eq-negative-true" ``Source.decideInt8Eq Source.decideInt8Eq
+    ``Int8.decEq (int8Value (-1)) (int8Value (-1))
+    #["stress", "scalar", "int8", "signed", "decision", "equality",
+      "negative", "true", "boundary", "i32"]
+    "Decide equality of two negative-one Int8 values",
+  exactInt8DecisionExternalCase
+    "int8-dec-eq-sign-false" ``Source.decideInt8Eq Source.decideInt8Eq
+    ``Int8.decEq (int8Value (-1)) (int8Value 1)
+    #["stress", "scalar", "int8", "signed", "decision", "equality",
+      "opposite-sign", "false", "boundary", "i32"]
+    "Reject equality of opposite-sign Int8 bit patterns",
+  exactInt8DecisionExternalCase
+    "int8-dec-lt-negative-zero-true" ``Source.decideInt8Lt Source.decideInt8Lt
+    ``Int8.decLt (int8Value (-1)) (int8Value 0)
+    #["stress", "scalar", "int8", "signed", "decision", "ordering",
+      "less-than", "opposite-sign", "true", "boundary", "i32"]
+    "Order negative one before zero using signed Int8 comparison",
+  exactInt8DecisionExternalCase
+    "int8-dec-lt-max-min-false" ``Source.decideInt8Lt Source.decideInt8Lt
+    ``Int8.decLt (int8Value 127) (int8Value (-128))
+    #["stress", "scalar", "int8", "signed", "decision", "ordering",
+      "less-than", "opposite-sign", "false", "boundary", "i32"]
+    "Reject unsigned-style ordering of the Int8 maximum before the minimum",
+  exactInt8DecisionExternalCase
+    "int8-dec-le-min-min-true" ``Source.decideInt8Le Source.decideInt8Le
+    ``Int8.decLe (int8Value (-128)) (int8Value (-128))
+    #["stress", "scalar", "int8", "signed", "decision", "ordering",
+      "less-or-equal", "minimum", "equality", "true", "boundary", "i32"]
+    "Accept non-strict signed Int8 ordering at the minimum",
+  exactInt8DecisionExternalCase
+    "int8-dec-le-zero-negative-false" ``Source.decideInt8Le Source.decideInt8Le
+    ``Int8.decLe (int8Value 0) (int8Value (-1))
+    #["stress", "scalar", "int8", "signed", "decision", "ordering",
+      "less-or-equal", "opposite-sign", "false", "boundary", "i32"]
+    "Reject non-strict signed Int8 ordering from zero to negative one",
+  exactNatToInt8ExternalCase
+    "nat-to-int8-max-encoding" ``Source.natToInt8 Source.natToInt8
+    ``Int8.ofNat 255
+    #["stress", "scalar", "int8", "signed", "conversion", "nat",
+      "maximum-encoding", "negative-result", "boundary", "i32"]
+    "Wrap Nat 255 to the negative-one Int8 bit pattern",
+  exactNatToInt8ExternalCase
+    "nat-to-int8-modulus" ``Source.natToInt8 Source.natToInt8
+    ``Int8.ofNat 256
+    #["stress", "scalar", "int8", "signed", "conversion", "nat",
+      "modulus", "overflow", "wraparound", "boundary", "i32"]
+    "Wrap Nat 256 at the exact Int8 modulus to zero",
+  exactNatToInt8ExternalCase
+    "nat-to-int8-multi-limb" ``Source.natToInt8 Source.natToInt8
+    ``Int8.ofNat 340282366920938463463374607431768211473
+    #["stress", "scalar", "int8", "signed", "conversion", "nat",
+      "heap-input", "multi-limb", "wraparound", "i32"]
+    "Reduce 2^128 + 17 modulo 2^8 while converting a multi-limb Nat to Int8",
+  exactIntToInt8ExternalCase
+    "int-to-int8-positive-overflow" ``Source.intToInt8 Source.intToInt8
+    ``Int8.ofInt 128
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "positive", "overflow", "wraparound", "boundary", "i32"]
+    "Wrap Int 128 to the signed Int8 minimum",
+  exactIntToInt8ExternalCase
+    "int-to-int8-negative-underflow" ``Source.intToInt8 Source.intToInt8
+    ``Int8.ofInt (-129)
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "negative", "underflow", "wraparound", "boundary", "i32"]
+    "Wrap Int negative 129 to the signed Int8 maximum",
+  exactIntToInt8ExternalCase
+    "int-to-int8-multi-limb-positive" ``Source.intToInt8 Source.intToInt8
+    ``Int8.ofInt 340282366920938463463374607431768211473
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "positive", "heap-input", "multi-limb", "wraparound", "i32"]
+    "Reduce positive 2^128 + 17 modulo 2^8 while converting a heap Int to Int8",
+  exactIntToInt8ExternalCase
+    "int-to-int8-multi-limb-negative" ``Source.intToInt8 Source.intToInt8
+    ``Int8.ofInt (-340282366920938463463374607431768211473)
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "negative", "heap-input", "multi-limb", "wraparound", "i32"]
+    "Reduce negative 2^128 + 17 modulo 2^8 while converting a heap Int to Int8",
+  exactInt8ToIntExternalCase
+    "int8-to-int-min" ``Source.int8ToInt Source.int8ToInt
+    ``Int8.toInt (int8Value (-128))
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "negative-result", "minimum", "immediate-result", "boundary", "i32"]
+    "Sign-extend the signed Int8 minimum to an exact immediate Int",
+  exactInt8ToIntExternalCase
+    "int8-to-int-max" ``Source.int8ToInt Source.int8ToInt
+    ``Int8.toInt (int8Value 127)
+    #["stress", "scalar", "int8", "signed", "conversion", "int",
+      "positive-result", "maximum", "immediate-result", "boundary", "i32"]
+    "Sign-extend the signed Int8 maximum to an exact immediate Int"
+]
+
 def cases : Array Case :=
-  preConversionCases ++ conversionCases ++ postConversionCases
+  preConversionCases ++ conversionCases ++ postConversionCases ++ int8Cases
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
 def requiredFinalExecutedForms : Array String :=
@@ -6371,6 +6753,15 @@ def requiredSourceAdministrativeStepKinds : Array String :=
 
 #guard (cases.filter fun validationCase =>
   validationCase.tags.contains "fixed-width-cross-conversion").size == 20
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "fixed-width-signed-external").size == 28
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "fixed-width-signed-conversion").size == 9
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "int8").size == 37
 
 #guard System.Platform.numBits == 64
 

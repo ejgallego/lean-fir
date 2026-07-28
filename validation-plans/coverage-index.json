@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 376,
-        "minimumComparisons": 376,
+        "minimumCases": 413,
+        "minimumComparisons": 413,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 376,
-        "minimumComparisons": 752,
+        "minimumCases": 413,
+        "minimumComparisons": 826,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 385,
-      "minimumTierCases": 761,
-      "minimumComparisons": 1137
+      "minimumUniqueCases": 422,
+      "minimumTierCases": 835,
+      "minimumComparisons": 1248
     },
     "machine": {
-      "minimumCases": 385,
-      "minimumInterpreterSteps": 3560,
+      "minimumCases": 422,
+      "minimumInterpreterSteps": 3782,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -167,6 +167,25 @@
         "Int.shiftLeft",
         "Int.shiftRight",
         "Int.sub",
+        "Int8.abs",
+        "Int8.add",
+        "Int8.complement",
+        "Int8.decEq",
+        "Int8.decLe",
+        "Int8.decLt",
+        "Int8.div",
+        "Int8.land",
+        "Int8.lor",
+        "Int8.mod",
+        "Int8.mul",
+        "Int8.neg",
+        "Int8.ofInt",
+        "Int8.ofNat",
+        "Int8.shiftLeft",
+        "Int8.shiftRight",
+        "Int8.sub",
+        "Int8.toInt",
+        "Int8.xor",
         "Nat.add",
         "Nat.decEq",
         "Nat.decLe",
