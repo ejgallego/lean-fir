@@ -2140,6 +2140,339 @@ theorem deadCtorSourceOnlyMachineStep :
   simpa [allocatingSourceInnerState, allocatingTargetInnerState,
     deadCtorDecl, letDecl] using progress
 
+/-- Entry state after resolving the allocating fixture's `main`
+declaration. -/
+def allocatingSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .code allocatingBefore
+    frames := neutralEntryFrames arguments }
+
+/-- Active state after evaluating the fixture's retained live binding. -/
+def allocatingSourceInnerStateAt
+    (arguments : Array Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .code (.let deadCtorDecl (.return live))
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+/-- State after the source allocates the constructor that the target
+deletes.  Both the allocation result and its fresh runtime are explicit so
+the finite execution invariant does not assume a concrete allocator
+implementation. -/
+def allocatingSourceReturnState (arguments : Array Value)
+    (nextRuntime : RuntimeState) (deadValue : Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .code (.return live)
+    env := bind liveEnv dead deadValue
+    runtime := nextRuntime
+    frames := neutralEntryFrames arguments }
+
+def allocatingSourceYieldedState (arguments : Array Value)
+    (nextRuntime : RuntimeState) (deadValue : Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .yielded .erased
+    env := bind liveEnv dead deadValue
+    runtime := nextRuntime
+    frames := neutralEntryFrames arguments }
+
+def allocatingSourceCachedState
+    (nextRuntime : RuntimeState) (deadValue : Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .yielded .erased
+    env := bind liveEnv dead deadValue
+    runtime := nextRuntime.setGlobal `main .erased }
+
+def allocatingSourceInvokingState (arguments : Array Value)
+    (nextRuntime : RuntimeState) (deadValue : Value) : MachineState :=
+  { program := allocatingBeforeProgram
+    control := .invokeValue .erased arguments
+    env := bind liveEnv dead deadValue
+    runtime := nextRuntime }
+
+theorem allocatingSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState allocatingBeforeProgram `main arguments) =
+      .next (allocatingSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, allocatingBeforeProgram,
+      Program.findDecl?, invokeDecl, allocatingSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem allocatingSourceOuterStep (arguments : Array Value) :
+    coreStep (allocatingSourceOuterState arguments) =
+      .next (allocatingSourceInnerStateAt arguments) := by
+  rfl
+
+theorem allocatingSourceInnerStep (arguments : Array Value) :
+    ∃ nextRuntime deadValue,
+      coreStep (allocatingSourceInnerStateAt arguments) =
+        .next
+          (allocatingSourceReturnState arguments nextRuntime deadValue) := by
+  rcases deadCtorEvalPreservesReachableRuntime with
+    ⟨nextRuntime, deadValue, evaluated, runtime⟩
+  have evaluatedAt :
+      evalLetValue (allocatingSourceInnerStateAt arguments) deadCtorDecl =
+        .ok (nextRuntime, .value deadValue) := by
+    simpa [evalLetValue, deadCtorDecl, letDecl,
+      allocatingSourceInnerStateAt, neutralLiveState] using evaluated
+  refine ⟨nextRuntime, deadValue, ?_⟩
+  change coreStep {
+      allocatingSourceInnerStateAt arguments with
+      control := .code (.let deadCtorDecl (.return live)) } =
+    .next (allocatingSourceReturnState arguments nextRuntime deadValue)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluatedAt]
+  rfl
+
+theorem allocatingSourceReturnStep (arguments : Array Value)
+    (nextRuntime : RuntimeState) (deadValue : Value) :
+    coreStep
+        (allocatingSourceReturnState arguments nextRuntime deadValue) =
+      .next
+        (allocatingSourceYieldedState arguments nextRuntime deadValue) := by
+  simp [coreStep, allocatingSourceReturnState,
+    allocatingSourceYieldedState, liveEnv, lookupValue, Impure.bind,
+    Impure.lookup, live, dead]
+
+theorem allocatingSourceYieldedStepEmpty
+    (nextRuntime : RuntimeState) (deadValue : Value) :
+    coreStep
+        (allocatingSourceYieldedState #[] nextRuntime deadValue) =
+      .next (allocatingSourceCachedState nextRuntime deadValue) := by
+  rfl
+
+theorem allocatingSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep
+        (allocatingSourceYieldedState arguments nextRuntime deadValue) =
+      .next
+        (allocatingSourceInvokingState arguments nextRuntime deadValue) := by
+  simp [coreStep, allocatingSourceYieldedState, neutralEntryFrames,
+    notEmpty, allocatingSourceInvokingState]
+
+/-- Complete finite-state characterization of source executions of the first
+allocating fixture.  The dead constructor value remains in the environment,
+but is absent from every exact live-variable root set used by the simulation.
+-/
+inductive AllocatingSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      AllocatingSourceReachable arguments
+        (initialState allocatingBeforeProgram `main arguments)
+  | outer :
+      AllocatingSourceReachable arguments
+        (allocatingSourceOuterState arguments)
+  | inner :
+      AllocatingSourceReachable arguments
+        (allocatingSourceInnerStateAt arguments)
+  | ret (nextRuntime : RuntimeState) (deadValue : Value) :
+      AllocatingSourceReachable arguments
+        (allocatingSourceReturnState arguments nextRuntime deadValue)
+  | yielded (nextRuntime : RuntimeState) (deadValue : Value) :
+      AllocatingSourceReachable arguments
+        (allocatingSourceYieldedState arguments nextRuntime deadValue)
+  | cached (nextRuntime : RuntimeState) (deadValue : Value)
+      (empty : arguments = #[]) :
+      AllocatingSourceReachable arguments
+        (allocatingSourceCachedState nextRuntime deadValue)
+  | invoking (nextRuntime : RuntimeState) (deadValue : Value)
+      (notEmpty : arguments ≠ #[]) :
+      AllocatingSourceReachable arguments
+        (allocatingSourceInvokingState arguments nextRuntime deadValue)
+
+theorem allocatingSourceReachable_step
+    (reachable : AllocatingSourceReachable arguments before)
+    (step : Step externals before after) :
+    AllocatingSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (allocatingSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (allocatingSourceOuterStep arguments) .inner step
+  | inner =>
+      rcases allocatingSourceInnerStep arguments with
+        ⟨nextRuntime, deadValue, transition⟩
+      exact predicate_of_step_next transition
+        (.ret nextRuntime deadValue) step
+  | ret nextRuntime deadValue =>
+      exact predicate_of_step_next
+        (allocatingSourceReturnStep arguments nextRuntime deadValue)
+        (.yielded nextRuntime deadValue) step
+  | yielded nextRuntime deadValue =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          (allocatingSourceYieldedStepEmpty nextRuntime deadValue)
+          (.cached nextRuntime deadValue rfl) step
+      · exact predicate_of_step_next
+          (allocatingSourceYieldedStepNonempty
+            (nextRuntime := nextRuntime) (deadValue := deadValue) empty)
+          (.invoking nextRuntime deadValue empty) step
+  | cached nextRuntime deadValue empty =>
+      cases step with
+      | internal transition =>
+          simp [allocatingSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [allocatingSourceCachedState, coreStep] at transition
+  | invoking nextRuntime deadValue notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [allocatingSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+      | external transition response =>
+          simp [allocatingSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+
+/-- The live outer binding is runtime-neutral even though its continuation
+contains an allocation. -/
+theorem allocatingBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 state sourceFrameRoots
+      allocatingBefore := by
+  unfold allocatingBefore
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+/-- The deleted constructor's argument evaluation and arity are sufficient
+for the source-only allocation certificate; retaining a constructor has no
+additional ownership premise. -/
+theorem allocatingDeadCtorSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3
+      (allocatingSourceInnerStateAt arguments) sourceFrameRoots
+      (.let deadCtorDecl (.return live)) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    unfold deadCtorDecl letDecl
+    apply DeletedLetReadyAt.constructor
+    refine .mk #[.erased] ?_ rfl
+    simp [allocatingSourceInnerStateAt, liveEnv, evalArgs, evalArg]
+    rfl
+  · intro roots
+    trivial
+
+theorem allocatingSourceReachable_ready
+    (state : MachineState)
+    (reachable : AllocatingSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 3 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = allocatingBefore :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact allocatingBeforeSourceRuntimeReadyAt
+        (allocatingSourceOuterState arguments) sourceFrameRoots
+        bounded exact subset static
+  | inner =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq :
+          sourceCode = .let deadCtorDecl (.return live) :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact allocatingDeadCtorSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | ret nextRuntime deadValue =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = .return live :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact neutralReturnSourceRuntimeReadyAt
+        (allocatingSourceReturnState arguments nextRuntime deadValue)
+        sourceFrameRoots bounded exact subset static
+  | yielded nextRuntime deadValue =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [allocatingSourceYieldedState] at control
+  | cached nextRuntime deadValue empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [allocatingSourceCachedState] at control
+  | invoking nextRuntime deadValue notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [allocatingSourceInvokingState] at control
+
+/-- Every state reachable from the allocating source fixture satisfies the
+dynamic source contract used by the strong non-lockstep simulation. -/
+theorem allocatingSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 3
+      (initialState allocatingBeforeProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (AllocatingSourceReachable arguments)
+    .entry allocatingSourceReachable_step allocatingSourceReachable_ready
+
+theorem allocatingSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 3
+      allocatingBeforeProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact
+    allocatingSourceRuntimeOwnershipMachineInvariant externals arguments
+
+theorem allocatingBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed allocatingBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, allocatingBeforeProgram,
+          fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [allocatingBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE .ret)
+    · intro declaration member
+      simp [allocatingBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩ .ret)
+  · intro declaration member
+    simp [allocatingBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl, allocatingBefore,
+      liveDecl, deadCtorDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds, live, dead]
+
+theorem allocatingShadowProgramRun :
+    shadowProgram? 3 allocatingBeforeProgram =
+      some allocatingAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    allocatingBeforeProgram, allocatingAfterProgram, fixtureDecl, decl,
+    allocatingShadowRun]
+
+/-- Checked whole-program lowering correctness for the allocating
+dead-constructor fixture.  The source may allocate an unreachable cell that
+the target omits; `ObservationRel` identifies the resulting executions. -/
+theorem allocatingProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 3) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      allocatingBeforeProgram allocatingAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    allocatingBeforeProgramElimDeadWellFormed allocatingShadowProgramRun
+    compatible
+    (allocatingSourceRuntimeOwnershipInitialInvariant externals)
+
 /-- The liveness-indexed machine relation accepts the concrete environment
 difference introduced by executing and then deleting the dead binding. -/
 theorem deadBindingMachineRelated :

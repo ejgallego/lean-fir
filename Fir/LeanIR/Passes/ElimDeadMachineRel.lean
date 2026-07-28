@@ -9033,24 +9033,24 @@ def SourceRuntimeOwnershipReadyAt
           (envRootsOn used state.env ++ sourceFrameRoots))
         exact.view
 
-/-- An active runtime-neutral let satisfies the source-only dynamic contract
-whenever retaining the same value shape has no additional ownership
-obligation.  The exact traversal still decides whether the let is retained or
-deleted; this theorem supplies the corresponding dynamic premise without
-reselecting a proof-relevant view. -/
-theorem SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
-    (neutral : RuntimeNeutralAt state declaration)
+/-- An active let satisfies the source-only dynamic contract once both
+possible compiler decisions have operation-specific runtime certificates.
+The exact traversal selects the applicable certificate without requiring the
+caller to recover or replace its proof-relevant view. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_ready
+    (deleted :
+      ∀ roots, DeletedLetReadyAt state roots declaration)
     (retained :
       ∀ roots, RetainedLetReadyAt state roots declaration.value) :
     SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
       (.let declaration continuation) := by
   intro used remaining final targetCode bounded exact subset static
-  have deleted :
+  have removed :
       DeletedLetReadyAt state
         (runtimeRoots state.runtime
           (envRootsOn used state.env ++ sourceFrameRoots))
         declaration :=
-    neutral.deletedLetReadyAt
+    deleted _
   have kept :
       RetainedLetReadyAt state
         (runtimeRoots state.runtime
@@ -9063,9 +9063,23 @@ theorem SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
         decision] using kept
   | deletedLet =>
       simpa [ExactShadowCodeRuntimeReadyAt,
-        decision] using deleted
+        decision] using removed
   | deletedObjectSet | deletedUSizeSet | deletedScalarSet | static =>
       simp [ExactShadowCodeRuntimeReadyAt, decision]
+
+/-- An active runtime-neutral let satisfies the source-only dynamic contract
+whenever retaining the same value shape has no additional ownership
+obligation.  The exact traversal still decides whether the let is retained or
+deleted; this theorem supplies the corresponding dynamic premise without
+reselecting a proof-relevant view. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+    (neutral : RuntimeNeutralAt state declaration)
+    (retained :
+      ∀ roots, RetainedLetReadyAt state roots declaration.value) :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let declaration continuation) := by
+  exact SourceRuntimeOwnershipReadyAt.let_of_ready
+    (fun _ => neutral.deletedLetReadyAt) retained
 
 /-- Pair-indexed source invariant at the current state.  A complete strong
 machine decomposition selects the exact residual and its actual saved-frame
