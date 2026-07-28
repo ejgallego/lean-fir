@@ -43,11 +43,6 @@ function unreachablePanicHelper({ declaration }) {
 
 export const formatExternalRegistry = {
   ...validationExternalRegistry,
-  "Int.natAbs": ({ args, host, world }) => {
-    assert.equal(args.length, 1, "Int.natAbs external arity mismatch");
-    const value = integerValue(host, args[0], "Int.natAbs operand");
-    return { value: host.natural(value < 0n ? -value : value), world };
-  },
   "Int.sub": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Int.sub external arity mismatch");
     const left = integerValue(host, args[0], "Int.sub left operand");

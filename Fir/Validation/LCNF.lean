@@ -543,6 +543,52 @@ private def intNegExternal (request : ExternalRequest) (runtime : RuntimeState) 
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def intToNatExternal (operation : Int → Nat)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalInt request runtime value
+  let (runtime, value) := literal runtime (.nat (operation value))
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def intNatAbsExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intToNatExternal Int.natAbs request runtime
+
+private def intToNatRequest (name : Name) (value : Value) : ExternalRequest := {
+  name
+  paramTypes := #[]
+  resultType := default
+  args := #[value] }
+
+private def intToNatGuard (name : Name) (operation : Int → Nat)
+    (input : Int) (expected : Nat) (allocates : Bool) : Bool :=
+  let (runtime, inputValue) := encodeIntValue {} input
+  let request := intToNatRequest name inputValue
+  match intToNatExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalNat request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.world == runtime.world &&
+          response.nextLocation ==
+            runtime.nextLocation + if allocates then 1 else 0
+
+private def intNatAbsGuard : Int → Nat → Bool → Bool :=
+  intToNatGuard ``Int.natAbs Int.natAbs
+
 private def intBinaryExternal (operation : Int → Int → Int)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -611,6 +657,14 @@ private def multiLimbInt : Int :=
 
 #guard intSubGuard multiLimbInt multiLimbInt 0 false
 
+#guard intNatAbsGuard multiLimbInt multiLimbNat true
+
+#guard intNatAbsGuard (-multiLimbInt) multiLimbNat true
+
+#guard intNatAbsGuard (-2147483648) 2147483648 false
+
+#guard intNatAbsGuard (-2147483649) 2147483649 false
+
 private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
@@ -644,6 +698,8 @@ private def validationExternals : ExternalImpl where
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then
       intNegExternal request runtime
+    else if request.name == ``Int.natAbs then
+      intNatAbsExternal request runtime
     else if request.name == ``Int.add then
       intAddExternal request runtime
     else if request.name == ``Int.sub then
