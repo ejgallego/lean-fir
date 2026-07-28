@@ -263,3 +263,33 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled tag-setter module: {repr error}"
+  let cacheSets := tagSetterArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentCache.isCacheSet
+  unless cacheSets.size == 21 do
+    throwError "resident styled Format lazy-cache inventory changed"
+  let cacheArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeCacheSets tagSetterArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled cache: {repr error}"
+  unless cacheArtifact.module.imports.size == 24 &&
+      cacheArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentCache.isCacheSet operation do
+    throwError "resident styled Format lazy-cache frontier changed"
+  unless cacheArtifact.module.imports.size + cacheSets.size ==
+      tagSetterArtifact.module.imports.size do
+    throwError "resident styled lazy-cache import accounting changed"
+  unless cacheArtifact.module.closureDispatch ==
+      tagSetterArtifact.module.closureDispatch &&
+      cacheArtifact.module.closureDescriptors ==
+        tagSetterArtifact.module.closureDescriptors do
+    throwError "resident styled cache changed closure metadata"
+  unless (List.range cacheSets.size).all fun ordinal =>
+      cacheArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentCache.cacheSetName ordinal) do
+    throwError "resident styled lazy-cache helper exports changed"
+  match ← cacheArtifact.write
+      "_build/source-pretty-format-trace-resident-cache.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled cache module: {repr error}"

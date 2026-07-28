@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.PrettyFormat
 import Fir.Wasm.Emit.ResidentAllocator
+import Fir.Wasm.Emit.ResidentCache
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
@@ -136,6 +137,20 @@ def internalizeReleases (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident recursive releases: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeCacheSets (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentCache.internalizeCacheSets artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident lazy-cache publication: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -291,9 +306,20 @@ def compileTagSetterModule (entry : Name) :
   let result ← compileReleaseModule entry
   return result.bind internalizeTagSetters
 
+/--
+Continue from constructor-tag writes and internalize lazy-cache publication.
+The compiler-produced miss path retains the physical cached value and
+initialized flag in module globals; this stage makes its reachable object
+graph persistent in Wasm and returns the same physical lane.
+-/
+def compileCacheModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileTagSetterModule entry
+  return result.bind internalizeCacheSets
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileTagSetterModule entry
+  compileCacheModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

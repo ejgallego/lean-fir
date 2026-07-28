@@ -105,6 +105,9 @@ node run-resident-increments.mjs _build/resident-increments.wasm
 lake exe fir-wasm-artifact resident-releases \
   _build/resident-releases.wasm
 node run-resident-releases.mjs _build/resident-releases.wasm
+lake exe fir-wasm-artifact resident-cache \
+  _build/resident-cache.wasm
+node run-resident-cache.mjs _build/resident-cache.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -389,7 +392,9 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-increments.wasm \
   _build/source-pretty-format-resident-releases.wasm \
   _build/source-pretty-format-trace-resident-releases.wasm \
-  _build/source-pretty-format-trace-resident-tag-setters.wasm
+  _build/source-pretty-format-trace-resident-tag-setters.wasm \
+  _build/source-pretty-format-resident-cache.wasm \
+  _build/source-pretty-format-trace-resident-cache.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -607,6 +612,17 @@ fixed `setTag 1` operation; the guarded resident helper removes it, preserves
 final LCNF and both closure tables, and advances the styled facade from 46 to
 45 imports.
 
+The following checkpoint internalizes lazy-cache publication. Plain `prettyM`
+has 20 distinct `cacheSet` operations and styled `prettyM` has 21. A shared
+recursive helper marks each reachable constructor field and statically
+object-like closure capture persistent before the generated miss path stores
+the same physical lane in its existing Wasm global. Mark-before-descend makes
+cycles and sharing terminate; canonical freed children are ignored, while
+malformed live/dead headers and unknown closure descriptors trap. Both facades
+now have 24 function imports, with final LCNF and both closure tables unchanged.
+The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -621,9 +637,9 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 45 function imports: one more than
-the text-only 44-import checkpoint in order to preserve the exact
-`MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
+memory and allocator and currently has 24 function imports, the same frontier
+as the text-only checkpoint while preserving the exact `MonadPrettyFormat`
+output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare
 the exact event stream with the native Lean 4.32 oracle; zero imports is the

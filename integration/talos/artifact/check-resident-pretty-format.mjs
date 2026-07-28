@@ -16,19 +16,22 @@ const residentIncrementPath = process.argv[13];
 const residentReleasePath = process.argv[14];
 const styledReleasePath = process.argv[15];
 const styledTagSetterPath = process.argv[16];
+const residentCachePath = process.argv[17];
+const styledCachePath = process.argv[18];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
   residentAllocatorPath && residentConstructorPath && residentNaturalPath &&
   residentPartialApplicationPath && residentSetterPath &&
   residentIncrementPath && residentReleasePath && styledReleasePath &&
-  styledTagSetterPath,
+  styledTagSetterPath && residentCachePath && styledCachePath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
   "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm " +
   "RESIDENT_CONSTRUCTORS.wasm RESIDENT_NATURALS.wasm " +
   "RESIDENT_PARTIAL_APPLICATIONS.wasm RESIDENT_SETTERS.wasm " +
   "RESIDENT_INCREMENTS.wasm RESIDENT_RELEASES.wasm " +
-  "STYLED_RELEASES.wasm STYLED_TAG_SETTERS.wasm");
+  "STYLED_RELEASES.wasm STYLED_TAG_SETTERS.wasm " +
+  "RESIDENT_CACHE.wasm STYLED_CACHE.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -59,6 +62,8 @@ const residentIncrements = readArtifact(residentIncrementPath);
 const residentReleases = readArtifact(residentReleasePath);
 const styledReleases = readArtifact(styledReleasePath);
 const styledTagSetters = readArtifact(styledTagSetterPath);
+const residentCache = readArtifact(residentCachePath);
+const styledCache = readArtifact(styledCachePath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -140,6 +145,14 @@ assert.equal(operationCount(styledReleases, "setTag"), 1,
   "resident styled release prettyM tag-setter inventory changed");
 assert.equal(operationCount(styledTagSetters, "setTag"), 0,
   "resident styled tag-setter prettyM retained setTag");
+assert.equal(operationCount(residentReleases, "cacheSet"), 20,
+  "resident release prettyM lazy-cache inventory changed");
+assert.equal(operationCount(styledTagSetters, "cacheSet"), 21,
+  "resident styled tag-setter prettyM lazy-cache inventory changed");
+assert.equal(operationCount(residentCache, "cacheSet"), 0,
+  "resident cache prettyM retained cacheSet");
+assert.equal(operationCount(styledCache, "cacheSet"), 0,
+  "resident styled cache prettyM retained cacheSet");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -275,6 +288,30 @@ assert.equal(
   "resident styled tag-setter descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentCache) + 20,
+  functionImportCount(residentReleases),
+  "resident cache did not remove exactly 20 function imports",
+);
+assert.equal(functionImportCount(residentCache), 24,
+  "resident cache prettyM frontier changed");
+assert.equal(
+  residentCache.manifest.imports.length,
+  functionImportCount(residentCache),
+  "resident cache prettyM descriptor and Wasm imports disagree",
+);
+assert.equal(
+  functionImportCount(styledCache) + 21,
+  functionImportCount(styledTagSetters),
+  "resident styled cache did not remove exactly 21 function imports",
+);
+assert.equal(functionImportCount(styledCache), 24,
+  "resident styled cache prettyM frontier changed");
+assert.equal(
+  styledCache.manifest.imports.length,
+  functionImportCount(styledCache),
+  "resident styled cache descriptor and Wasm imports disagree",
+);
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -336,6 +373,16 @@ assert.equal(
   0,
   "resident styled tag-setter prettyM imports memory",
 );
+assert.equal(
+  residentCache.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident cache prettyM imports memory",
+);
+assert.equal(
+  styledCache.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident styled cache prettyM imports memory",
+);
 for (const artifact of [
   getTagResident,
   residentRuntime,
@@ -349,6 +396,7 @@ for (const artifact of [
   residentSetters,
   residentIncrements,
   residentReleases,
+  residentCache,
 ]) {
   assert.deepStrictEqual(
     artifact.manifest.closureDispatch,
@@ -371,6 +419,32 @@ assert.deepStrictEqual(
   styledReleases.manifest.closureDescriptors,
   "resident styled tag linking changed the closure-descriptor table",
 );
+assert.deepStrictEqual(
+  styledCache.manifest.closureDispatch,
+  styledTagSetters.manifest.closureDispatch,
+  "resident styled cache linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  styledCache.manifest.closureDescriptors,
+  styledTagSetters.manifest.closureDescriptors,
+  "resident styled cache linking changed the closure-descriptor table",
+);
+for (const [artifact, count, label] of [
+  [residentCache, 20, "resident cache"],
+  [styledCache, 21, "resident styled cache"],
+]) {
+  for (let ordinal = 0; ordinal < count; ++ordinal) {
+    assert.ok(artifact.exports.some(({ name, kind }) =>
+      name === `fir_cache_set_${ordinal}` && kind === "function"),
+    `${label} helper export fir_cache_set_${ordinal} is missing`);
+  }
+  assert.ok(artifact.exports.some(({ name, kind }) =>
+    name === artifact.manifest.entry && kind === "function"),
+  `${label} entry export is missing`);
+  assert.ok(artifact.exports.some(({ name, kind }) =>
+    name === "memory" && kind === "memory"),
+  `${label} memory export is missing`);
+}
 assert.ok(residentRuntime.exports.some(({ name, kind }) =>
   name === residentRuntime.manifest.entry && kind === "function"),
 "resident-runtime prettyM entry export is missing");
@@ -550,7 +624,7 @@ console.log(
   `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
   `then installed its allocator and internalized constructors, immediate Naturals, ` +
   `closure allocations, setters, increments, recursive releases, and the ` +
-  `styled constructor-tag write ` +
+  `styled constructor-tag write, then lazy-cache publication ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
@@ -562,7 +636,9 @@ console.log(
   `${functionImportCount(residentPartialApplications)} → ` +
   `${functionImportCount(residentSetters)} → ` +
   `${functionImportCount(residentIncrements)} → ` +
-  `${functionImportCount(residentReleases)} function imports; styled ` +
+  `${functionImportCount(residentReleases)} → ` +
+  `${functionImportCount(residentCache)} function imports; styled ` +
   `${functionImportCount(styledReleases)} → ` +
-  `${functionImportCount(styledTagSetters)})`,
+  `${functionImportCount(styledTagSetters)} → ` +
+  `${functionImportCount(styledCache)})`,
 );

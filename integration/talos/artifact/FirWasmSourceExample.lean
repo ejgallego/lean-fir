@@ -559,6 +559,37 @@ run_cmd do
   unless (residentReleaseArtifact.module.runtimeOperations.filter
       Fir.Wasm.Emit.ResidentMutation.isTagSetter).isEmpty do
     throwError "text Format unexpectedly retained a constructor-tag setter"
+  let cacheSets := residentReleaseArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentCache.isCacheSet
+  unless cacheSets.size == 20 do
+    throwError "resident Format lazy-cache inventory changed"
+  let residentCacheArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeCacheSets
+        residentReleaseArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident cache Format facade: {repr error}"
+  unless residentCacheArtifact.module.imports.size == 24 &&
+      residentCacheArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentCache.isCacheSet operation do
+    throwError "resident Format lazy-cache frontier changed"
+  unless residentCacheArtifact.module.imports.size + cacheSets.size ==
+      residentReleaseArtifact.module.imports.size do
+    throwError "resident Format lazy-cache import accounting changed"
+  unless residentCacheArtifact.module.closureDispatch ==
+      residentReleaseArtifact.module.closureDispatch &&
+      residentCacheArtifact.module.closureDescriptors ==
+        residentReleaseArtifact.module.closureDescriptors do
+    throwError "resident cache linking changed stable closure metadata"
+  unless (List.range cacheSets.size).all fun ordinal =>
+      residentCacheArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentCache.cacheSetName ordinal) do
+    throwError "resident Format lazy-cache helper exports changed"
+  match ← residentCacheArtifact.write
+      "_build/source-pretty-format-resident-cache.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident cache Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

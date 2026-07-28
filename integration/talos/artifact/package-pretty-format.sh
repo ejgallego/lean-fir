@@ -9,7 +9,7 @@ if [[ "${1:-}" == "--no-build" ]]; then
   shift
 fi
 out="${1:-$here/_build/prettyM-current}"
-source_artifact="$here/_build/source-pretty-format-trace-resident-tag-setters.wasm"
+source_artifact="$here/_build/source-pretty-format-trace-resident-cache.wasm"
 
 if [[ "$build" == true ]]; then
   lake -d "$root" build Fir.Wasm.Emit.ResidentPrettyFormat
@@ -141,7 +141,7 @@ const build = {
       taggedSegments: true,
     },
   },
-  runtime: "Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete plus concrete JavaScript wasm32-lean64 handlers",
+  runtime: "Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete/lazy-cache publication plus concrete JavaScript wasm32-lean64 handlers",
   test: "node smoke.mjs",
 };
 fs.writeFileSync(
