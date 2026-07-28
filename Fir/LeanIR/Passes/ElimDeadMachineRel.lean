@@ -9033,6 +9033,40 @@ def SourceRuntimeOwnershipReadyAt
           (envRootsOn used state.env ++ sourceFrameRoots))
         exact.view
 
+/-- An active runtime-neutral let satisfies the source-only dynamic contract
+whenever retaining the same value shape has no additional ownership
+obligation.  The exact traversal still decides whether the let is retained or
+deleted; this theorem supplies the corresponding dynamic premise without
+reselecting a proof-relevant view. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+    (neutral : RuntimeNeutralAt state declaration)
+    (retained :
+      ∀ roots, RetainedLetReadyAt state roots declaration.value) :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let declaration continuation) := by
+  intro used remaining final targetCode bounded exact subset static
+  have deleted :
+      DeletedLetReadyAt state
+        (runtimeRoots state.runtime
+          (envRootsOn used state.env ++ sourceFrameRoots))
+        declaration :=
+    neutral.deletedLetReadyAt
+  have kept :
+      RetainedLetReadyAt state
+        (runtimeRoots state.runtime
+          (envRootsOn used state.env ++ sourceFrameRoots))
+        declaration.value :=
+    retained _
+  cases decision : exact.view.runtimeDecision with
+  | retainedLet =>
+      simpa [ExactShadowCodeRuntimeReadyAt,
+        decision] using kept
+  | deletedLet =>
+      simpa [ExactShadowCodeRuntimeReadyAt,
+        decision] using deleted
+  | deletedObjectSet | deletedUSizeSet | deletedScalarSet | static =>
+      simp [ExactShadowCodeRuntimeReadyAt, decision]
+
 /-- Pair-indexed source invariant at the current state.  A complete strong
 machine decomposition selects the exact residual and its actual saved-frame
 roots; every demanded fact in the conclusion is about source evaluation,
@@ -9172,6 +9206,15 @@ def SourceRuntimeOwnershipMachineReadyAt
       SourceRuntimeOwnershipReadyAt
         fuel state sourceFrameRoots sourceCode
 
+/-- Source-only readiness is automatic when the current control is not code.
+This is the one-machine counterpart of the structural relation's invocation
+and yielded-control cases. -/
+theorem SourceRuntimeOwnershipMachineReadyAt.of_not_code
+    (notCode : ∀ sourceCode, state.control ≠ .code sourceCode) :
+    SourceRuntimeOwnershipMachineReadyAt fuel state := by
+  intro sourceFrameRoots sourceCode frames control
+  exact (notCode sourceCode control).elim
+
 /-- Hereditary source-only runtime/ownership contract.  Unlike the pair
 invariant, it quantifies over one execution and contains no target path,
 target state, observation relation, or address renaming. -/
@@ -9181,6 +9224,33 @@ def SourceRuntimeOwnershipMachineInvariant
   ∀ sourceAfter,
     NonLockstep.Reaches externals source sourceAfter →
       SourceRuntimeOwnershipMachineReadyAt fuel sourceAfter
+
+/-- Standard invariant induction for the source-only contract.  Clients can
+describe the reachable source states with an ordinary predicate, prove it
+closed under `Step`, and discharge runtime/ownership readiness once per
+predicate constructor. -/
+theorem SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (predicate : MachineState → Prop)
+    (initial : predicate source)
+    (preserved : ∀ {before after},
+      predicate before → Step externals before after → predicate after)
+    (ready : ∀ state,
+      predicate state → SourceRuntimeOwnershipMachineReadyAt fuel state) :
+    SourceRuntimeOwnershipMachineInvariant externals fuel source := by
+  intro sourceAfter path
+  rcases path with ⟨count, steps⟩
+  apply ready sourceAfter
+  have preservesSteps : ∀ {count before after},
+      Steps externals count before after →
+        predicate before → predicate after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun beforeReady => beforeReady
+    | step head tail ih =>
+        intro beforeReady
+        exact ih (preserved beforeReady head)
+  exact preservesSteps steps initial
 
 /-- A source-only machine invariant supplies the pair-indexed readiness
 needed by the strong simulation.  The related frame witness is used solely

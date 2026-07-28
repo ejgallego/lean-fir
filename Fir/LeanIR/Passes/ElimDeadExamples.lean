@@ -12,6 +12,8 @@ open Fir.LeanIR.Impure
 open Fir.LeanIR.InterpreterExamples
 open Fir.LeanIR.Passes.ElimDead
 open Fir.LeanIR.Passes.SimpCase
+open Fir.LeanIR.Passes.AlphaEqv
+open Fir.LeanIR.Passes.SimpCaseWellFormed
 open Fir.LeanIR.Passes.NonLockstep.Structural
 
 def live : FVarId := ⟨`live⟩
@@ -514,6 +516,329 @@ theorem neutralInitialShadowRelated (entry : Name)
       (initialState neutralBeforeProgram entry arguments)
       (initialState neutralAfterProgram entry arguments) :=
   shadowInitialState_related neutralProgramShadowRelated
+
+/-- The first concrete source-runtime certificate for the strong proof: the
+outer live `erased` binding is dynamically safe under either exact compiler
+decision.  The actual traversal retains it, but the semantic proof does not
+need to recover or replace that proof-relevant witness. -/
+theorem neutralBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 state sourceFrameRoots
+      neutralBefore := by
+  unfold neutralBefore
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+/-- The same source-only contract at the residual where the pass deletes the
+dead `erased` binding. -/
+theorem neutralDeadErasedSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 state sourceFrameRoots
+      (.let deadErasedDecl (.return live)) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+/-- Returning itself has no dynamic runtime/ownership premise in an exact
+elimDead view. -/
+theorem neutralReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+/-- A finite source execution proof may now discharge machine readiness by
+classifying its active control as one of the neutral fixture's three code
+positions.  Saved-frame roots remain arbitrary and are handled by the
+source-only contract. -/
+theorem neutralActiveCodeMachineReadyAt
+    (state : MachineState)
+    (active :
+      state.control = .code neutralBefore ∨
+      state.control =
+        .code (.let deadErasedDecl (.return live)) ∨
+      state.control = .code (.return live)) :
+    SourceRuntimeOwnershipMachineReadyAt 3 state := by
+  intro sourceFrameRoots sourceCode frames control
+  rcases active with outer | inner | ret
+  · have codeEq :
+        sourceCode = neutralBefore :=
+      Control.code.inj (control.symm.trans outer)
+    subst sourceCode
+    intro used remaining final targetCode bounded exact subset static
+    exact neutralBeforeSourceRuntimeReadyAt state sourceFrameRoots
+      bounded exact subset static
+  · have codeEq :
+        sourceCode = .let deadErasedDecl (.return live) :=
+      Control.code.inj (control.symm.trans inner)
+    subst sourceCode
+    intro used remaining final targetCode bounded exact subset static
+    exact neutralDeadErasedSourceRuntimeReadyAt state sourceFrameRoots
+      bounded exact subset static
+  · have codeEq : sourceCode = .return live :=
+      Control.code.inj (control.symm.trans ret)
+    subst sourceCode
+    intro used remaining final targetCode bounded exact subset static
+    exact neutralReturnSourceRuntimeReadyAt state sourceFrameRoots
+      bounded exact subset static
+
+def neutralEntryFrames (arguments : Array Value) : List Frame :=
+  if arguments.isEmpty then [.cache `main] else [.apply arguments]
+
+def neutralSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := neutralBeforeProgram
+    control := .code neutralBefore
+    frames := neutralEntryFrames arguments }
+
+def neutralSourceInnerState (arguments : Array Value) : MachineState :=
+  { program := neutralBeforeProgram
+    control := .code (.let deadErasedDecl (.return live))
+    env := bind [] live .erased
+    frames := neutralEntryFrames arguments }
+
+def neutralSourceReturnState (arguments : Array Value) : MachineState :=
+  { program := neutralBeforeProgram
+    control := .code (.return live)
+    env := bind (bind [] live .erased) dead .erased
+    frames := neutralEntryFrames arguments }
+
+def neutralSourceYieldedState (arguments : Array Value) : MachineState :=
+  { program := neutralBeforeProgram
+    control := .yielded .erased
+    env := bind (bind [] live .erased) dead .erased
+    frames := neutralEntryFrames arguments }
+
+def neutralSourceCachedState : MachineState :=
+  { program := neutralBeforeProgram
+    control := .yielded .erased
+    env := bind (bind [] live .erased) dead .erased
+    runtime := ({} : RuntimeState).setGlobal `main .erased }
+
+def neutralSourceInvokingState (arguments : Array Value) : MachineState :=
+  { program := neutralBeforeProgram
+    control := .invokeValue .erased arguments
+    env := bind (bind [] live .erased) dead .erased }
+
+theorem neutralSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState neutralBeforeProgram `main arguments) =
+      .next (neutralSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, neutralBeforeProgram,
+      Program.findDecl?, invokeDecl, neutralSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem neutralSourceOuterStep (arguments : Array Value) :
+    coreStep (neutralSourceOuterState arguments) =
+      .next (neutralSourceInnerState arguments) := by
+  rfl
+
+theorem neutralSourceInnerStep (arguments : Array Value) :
+    coreStep (neutralSourceInnerState arguments) =
+      .next (neutralSourceReturnState arguments) := by
+  rfl
+
+theorem neutralSourceReturnStep (arguments : Array Value) :
+    coreStep (neutralSourceReturnState arguments) =
+      .next (neutralSourceYieldedState arguments) := by
+  simp [coreStep, neutralSourceReturnState, neutralSourceYieldedState,
+    lookupValue, Impure.bind, Impure.lookup, live, dead]
+
+theorem neutralSourceYieldedStepEmpty :
+    coreStep (neutralSourceYieldedState #[]) =
+      .next neutralSourceCachedState := by
+  rfl
+
+theorem neutralSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (neutralSourceYieldedState arguments) =
+      .next (neutralSourceInvokingState arguments) := by
+  simp [coreStep, neutralSourceYieldedState, neutralEntryFrames,
+    notEmpty, neutralSourceInvokingState]
+
+/-- Complete finite-state characterization of executions starting at the
+neutral source fixture. -/
+inductive NeutralSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      NeutralSourceReachable arguments
+        (initialState neutralBeforeProgram `main arguments)
+  | outer :
+      NeutralSourceReachable arguments
+        (neutralSourceOuterState arguments)
+  | inner :
+      NeutralSourceReachable arguments
+        (neutralSourceInnerState arguments)
+  | ret :
+      NeutralSourceReachable arguments
+        (neutralSourceReturnState arguments)
+  | yielded :
+      NeutralSourceReachable arguments
+        (neutralSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      NeutralSourceReachable arguments neutralSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      NeutralSourceReachable arguments
+        (neutralSourceInvokingState arguments)
+
+theorem predicate_of_step_next
+    {predicate : MachineState → Prop}
+    (transition : coreStep before = .next expected)
+    (expectedReady : predicate expected)
+    (step : Step externals before after) :
+    predicate after := by
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact expectedReady
+  | external actual response =>
+      rw [transition] at actual
+      contradiction
+
+theorem neutralSourceReachable_step
+    (reachable : NeutralSourceReachable arguments before)
+    (step : Step externals before after) :
+    NeutralSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (neutralSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (neutralSourceOuterStep arguments) .inner step
+  | inner =>
+      exact predicate_of_step_next
+        (neutralSourceInnerStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (neutralSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next neutralSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (neutralSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [neutralSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [neutralSourceCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [neutralSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+      | external transition response =>
+          simp [neutralSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+
+theorem neutralSourceReachable_ready
+    (state : MachineState)
+    (reachable : NeutralSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 3 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact neutralActiveCodeMachineReadyAt
+        (neutralSourceOuterState arguments) (.inl rfl)
+  | inner =>
+      exact neutralActiveCodeMachineReadyAt
+        (neutralSourceInnerState arguments) (.inr (.inl rfl))
+  | ret =>
+      exact neutralActiveCodeMachineReadyAt
+        (neutralSourceReturnState arguments) (.inr (.inr rfl))
+  | yielded =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [neutralSourceYieldedState] at control
+  | cached empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [neutralSourceCachedState] at control
+  | invoking notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [neutralSourceInvokingState] at control
+
+/-- The first complete concrete source invariant: every state reachable from
+the neutral entry satisfies the dynamic contract consumed by the strong
+non-lockstep simulation. -/
+theorem neutralSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 3
+      (initialState neutralBeforeProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (NeutralSourceReachable arguments)
+    .entry neutralSourceReachable_step neutralSourceReachable_ready
+
+/-- Entry-array form of the complete neutral fixture invariant. -/
+theorem neutralSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 3
+      neutralBeforeProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact neutralSourceRuntimeOwnershipMachineInvariant externals arguments
+
+theorem neutralBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed neutralBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, neutralBeforeProgram,
+          fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [neutralBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE .ret)
+    · intro declaration member
+      simp [neutralBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩ .ret)
+  · intro declaration member
+    simp [neutralBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl, neutralBefore,
+      liveDecl, deadErasedDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds, live, dead]
+
+theorem neutralShadowProgramRun :
+    shadowProgram? 3 neutralBeforeProgram =
+      some neutralAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    neutralBeforeProgram, neutralAfterProgram, fixtureDecl, decl,
+    neutralShadowRun]
+
+/-- End-to-end use of the checked strong endpoint on a concrete program.
+Only foreign-response compatibility remains parametric; the source
+runtime/ownership invariant is fully discharged above. -/
+theorem neutralProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 3) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      neutralBeforeProgram neutralAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    neutralBeforeProgramElimDeadWellFormed neutralShadowProgramRun
+    compatible (neutralSourceRuntimeOwnershipInitialInvariant externals)
 
 def liveEnv : Env :=
   bind [] live .erased
