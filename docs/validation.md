@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 114 cases. Required oracle edges must share one matrix
+edges over at least 117 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,7 +469,7 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 114 source cases are shared by the source-LCNF and V8
+current baseline, the 117 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1309,7 +1309,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 114 cases. Direct identity cases
+The compiler-generated corpus currently has 117 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
@@ -1318,6 +1318,8 @@ directions, classify both constructors, and convert a multi-limb `Nat` to both
 positive and negative `Int` results through exact ordered external dispatch.
 Three addition cases grow positive and negative multi-limb magnitudes and cancel
 opposite heap values to immediate zero through one exact `Int.add` dispatch.
+Three subtraction cases mirror those growth directions and cancel equal heap
+values to immediate zero through one exact `Int.sub` dispatch.
 Empty `String` and `ByteArray` values exercise zero-length heap representations,
 while a string containing an embedded NUL, a multibyte BMP character, and a
 non-BMP character exercises the full JSON/native/interpreter text path. None can
@@ -1529,13 +1531,13 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 114 corpus cases, including a natural
+The default native-to-V8 matrix covers all 117 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
-`Nat.add`, heap-input `Nat.add`, multi-limb `Int.add` growth and cancellation,
-all three controlled-effect programs, and all five mixed-layout projections.
-`make validate-v8` delegates whole-corpus
-selection to the plan rather than maintaining a second case allowlist, so every
-new shared fixture enters the real-engine triangle by default.
+`Nat.add`, heap-input `Nat.add`, multi-limb `Int.add`/`Int.sub` growth and
+cancellation, all three controlled-effect programs, and all five mixed-layout
+projections. `make validate-v8` delegates whole-corpus selection to the plan
+rather than maintaining a second case allowlist, so every new shared fixture
+enters the real-engine triangle by default.
 `FIR-BUG-wasm-none-json-nat-precision` and
 `FIR-BUG-wasm-none-json-int-precision` record the exact-decimal repairs
 introduced in protocol v2 and v3 respectively.

@@ -616,6 +616,10 @@ def addInt (left right : Int) : Int :=
   left + right
 
 @[noinline]
+def subInt (left right : Int) : Int :=
+  left - right
+
+@[noinline]
 def intPosImmediate : Int :=
   2147483647
 
@@ -1051,7 +1055,7 @@ private def intClassifyFormTrace : Array String :=
 private def intOfNatFormTrace : Array String :=
   #["fap", "extern", "return"]
 
-private def intAddFormTrace : Array String :=
+private def intBinaryFormTrace : Array String :=
   #["fap", "extern", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
@@ -2241,7 +2245,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2263,7 +2267,7 @@ def cases : Array Case := #[
       "external", "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2285,7 +2289,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "cancellation", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2293,6 +2297,72 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.add]
     provenance := firProvenance
       "Cancel opposite multi-limb heap Int values to immediate zero" },
+  { id := "int-sub-multi-limb-positive-growth"
+    entry := ``Source.subInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.subInt
+      340282366920938463463374607431768211473
+      (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "heap", "multi-limb", "external",
+      "arithmetic", "subtraction", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExternals := #[``Int.sub]
+    requiredExecutedExternals := #[``Int.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.sub]
+    requiredExecutedExternalTrace := some #[``Int.sub]
+    provenance := firProvenance
+      "Subtract a negative multi-limb Int and retain a positive heap result" },
+  { id := "int-sub-multi-limb-negative-growth"
+    entry := ``Source.subInt
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.subInt
+      (-340282366920938463463374607431768211473)
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "negative", "heap", "multi-limb",
+      "external", "arithmetic", "subtraction", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExternals := #[``Int.sub]
+    requiredExecutedExternals := #[``Int.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.sub]
+    requiredExecutedExternalTrace := some #[``Int.sub]
+    provenance := firProvenance
+      "Subtract a positive multi-limb Int and retain negSucc magnitude" },
+  { id := "int-sub-multi-limb-cancellation"
+    entry := ``Source.subInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.subInt
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "heap", "multi-limb", "external",
+      "arithmetic", "subtraction", "cancellation", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExternals := #[``Int.sub]
+    requiredExecutedExternals := #[``Int.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.sub]
+    requiredExecutedExternalTrace := some #[``Int.sub]
+    provenance := firProvenance
+      "Subtract equal multi-limb heap Int values to immediate zero" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
