@@ -691,6 +691,14 @@ def divModInt (left right : Int) : Int × Int :=
   (left / right, left % right)
 
 @[noinline]
+def shiftLeftInt (value : Int) (count : Nat) : Int :=
+  Int.shiftLeft value count
+
+@[noinline]
+def shiftRightInt (value : Int) (count : Nat) : Int :=
+  Int.shiftRight value count
+
+@[noinline]
 def decideIntEq (left right : Int) : Bool :=
   decide (left = right)
 
@@ -1214,6 +1222,26 @@ private def exactNatBinaryExternalCase
   argSchemas := #[.nat, .nat]
   resultSchema := .nat
   native := fun _ => .nat (operation left right)
+  tags
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactIntNatExternalCase
+    (id : String) (entry : Lean.Name) (operation : Int → Nat → Int)
+    (external : Lean.Name) (value : Int) (count : Nat) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  args := #[.int value, .nat count]
+  argSchemas := #[.int, .nat]
+  resultSchema := .int
+  native := fun _ => .int (operation value count)
   tags
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
@@ -3461,6 +3489,81 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
     provenance := firProvenance
       "Pin Int division by zero to zero and remainder by zero to the dividend" },
+  exactIntNatExternalCase
+    "int-shift-left-positive-immediate-to-heap"
+    ``Source.shiftLeftInt Source.shiftLeftInt ``Int.shiftLeft
+    2147483647
+    1
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-left",
+      "positive", "immediate-input", "heap-result", "boundary"]
+    "Shift the positive immediate Int maximum into the heap representation",
+  exactIntNatExternalCase
+    "int-shift-left-negative-immediate-to-heap"
+    ``Source.shiftLeftInt Source.shiftLeftInt ``Int.shiftLeft
+    (-2147483648)
+    1
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-left",
+      "negative", "immediate-input", "heap-result", "boundary"]
+    "Shift the negative immediate Int minimum into the heap representation",
+  exactIntNatExternalCase
+    "int-shift-left-multi-limb-positive"
+    ``Source.shiftLeftInt Source.shiftLeftInt ``Int.shiftLeft
+    340282366920938463463374607431768211473
+    65
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-left",
+      "positive", "heap", "multi-limb", "growth", "cross-limb"]
+    "Shift a positive multi-limb Int left across a limb boundary",
+  exactIntNatExternalCase
+    "int-shift-left-multi-limb-negative"
+    ``Source.shiftLeftInt Source.shiftLeftInt ``Int.shiftLeft
+    (-340282366920938463463374607431768211473)
+    65
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-left",
+      "negative", "heap", "multi-limb", "growth", "cross-limb"]
+    "Shift a negative multi-limb Int left while preserving its sign",
+  exactIntNatExternalCase
+    "int-shift-right-multi-limb-positive"
+    ``Source.shiftRightInt Source.shiftRightInt ``Int.shiftRight
+    340282366920938463463374607431768211473
+    65
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-right",
+      "positive", "heap", "multi-limb", "cross-limb"]
+    "Shift a positive multi-limb Int right across a limb boundary",
+  exactIntNatExternalCase
+    "int-shift-right-multi-limb-negative"
+    ``Source.shiftRightInt Source.shiftRightInt ``Int.shiftRight
+    (-340282366920938463463374607431768211473)
+    65
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-right",
+      "negative", "heap", "multi-limb", "cross-limb", "sign-extension"]
+    "Arithmetic-shift a negative multi-limb Int across a limb boundary",
+  exactIntNatExternalCase
+    "int-shift-right-positive-heap-to-immediate"
+    ``Source.shiftRightInt Source.shiftRightInt ``Int.shiftRight
+    340282366920938463463374607431768211473
+    128
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-right",
+      "positive", "heap-input", "multi-limb", "immediate-result",
+      "normalization"]
+    "Shift a positive multi-limb Int down to immediate one",
+  exactIntNatExternalCase
+    "int-shift-right-negative-sign-extension"
+    ``Source.shiftRightInt Source.shiftRightInt ``Int.shiftRight
+    (-340282366920938463463374607431768211473)
+    129
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-right",
+      "negative", "heap-input", "multi-limb", "immediate-result",
+      "sign-extension", "boundary"]
+    "Shift past a negative multi-limb Int and retain arithmetic sign extension",
+  exactIntNatExternalCase
+    "int-shift-right-negative-multi-limb-count"
+    ``Source.shiftRightInt Source.shiftRightInt ``Int.shiftRight
+    (-340282366920938463463374607431768211473)
+    340282366920938463463374607431768211473
+    #["stress", "int", "signed", "external", "bitwise", "int-shift", "shift-right",
+      "negative", "heap-input", "multi-limb", "multi-limb-count",
+      "oversized-count", "immediate-result", "sign-extension"]
+    "Use a multi-limb count while arithmetic-shifting a negative Int to minus one",
   { id := "int-dec-eq-multi-limb-true"
     entry := ``Source.decideIntEq
     args := #[
