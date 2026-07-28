@@ -9067,6 +9067,65 @@ theorem SourceRuntimeOwnershipReadyAt.let_of_ready
   | deletedObjectSet | deletedUSizeSet | deletedScalarSet | static =>
       simp [ExactShadowCodeRuntimeReadyAt, decision]
 
+/-- Literal allocation readiness lifted to the source-only exact-view
+contract.  Small immediates and heap-allocating large literals share this
+interface; their runtime-frame proof is discharged by the operational
+literal rule. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_literal :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let {
+        fvarId, binderName, type, value := .lit literalValue
+      } continuation) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    exact .literal fvarId binderName type literalValue
+  · intro roots
+    trivial
+
+/-- Constructor allocation readiness lifted to the source-only exact-view
+contract. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_constructor
+    (ready : DeletedCtorReadyAt state info arguments) :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let {
+        fvarId, binderName, type, value := .ctor info arguments
+      } continuation) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    exact .constructor fvarId binderName type info arguments ready
+  · intro roots
+    trivial
+
+/-- Partial-application allocation readiness lifted to the source-only
+exact-view contract. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_partialApplication
+    (ready : DeletedPapReadyAt state name arguments) :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let {
+        fvarId, binderName, type, value := .pap name arguments
+      } continuation) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    exact .partialApplication
+      fvarId binderName type name arguments ready
+  · intro roots
+    trivial
+
+/-- Scalar-box allocation readiness lifted to the source-only exact-view
+contract. -/
+theorem SourceRuntimeOwnershipReadyAt.let_of_box
+    (ready : DeletedBoxReadyAt state input) :
+    SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots
+      (.let {
+        fvarId, binderName, type := resultType,
+        value := .box boxedType input
+      } continuation) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    exact .box fvarId binderName resultType boxedType input ready
+  · intro roots
+    trivial
+
 /-- An active runtime-neutral let satisfies the source-only dynamic contract
 whenever retaining the same value shape has no additional ownership
 obligation.  The exact traversal still decides whether the let is retained or

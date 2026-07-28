@@ -1222,6 +1222,26 @@ theorem closedBoxAfterLiteralUnifiedReady :
   exact .box dead dead.name objType u64Type boxInputVar
     closedBoxAfterLiteralBoxReady
 
+/-- The first active closed-box state satisfies the exact source contract:
+its large scalar literal is locally eliminable regardless of whether it is
+represented immediately or in the runtime. -/
+theorem closedBoxLiteralSourceRuntimeReadyAt
+    (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 closedBoxSourceBodyState
+      sourceFrameRoots closedBoxBefore := by
+  unfold closedBoxBefore closedBoxInputDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+/-- The residual closed-box state uses the reusable allocation-family
+contract rather than reopening the exact compiler view. -/
+theorem closedBoxBoxSourceRuntimeReadyAt
+    (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 closedBoxSourceAfterLiteralState
+      sourceFrameRoots deletedBoxBefore := by
+  unfold deletedBoxBefore deadBoxDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_box
+    closedBoxAfterLiteralBoxReady
+
 theorem closedBoxBoxStepRelated :
     ∃ nextRuntime boxValue,
       let sourceAfterBox := {
@@ -1467,6 +1487,25 @@ theorem deletedPapReady :
   · rfl
   · simp [firstDecl, decl]
 
+/-- The heap-allocating large-Nat literal satisfies the source-side dynamic
+contract at its concrete active state. -/
+theorem deletedLargeNatSourceRuntimeReadyAt
+    (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 2 deletedLargeNatSourceState
+      sourceFrameRoots deletedLargeNatBefore := by
+  unfold deletedLargeNatBefore deadLargeNatDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+/-- The partial-application allocation certificate is now exposed through
+the same source-side exact-view interface as constructors and literals. -/
+theorem deletedPapSourceRuntimeReadyAt
+    (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 2 deletedPapSourceState
+      sourceFrameRoots deletedPapBefore := by
+  unfold deletedPapBefore deadPapDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_partialApplication
+    deletedPapReady
+
 theorem deletedBoxEnvReachableRelated :
     EnvRelOn emptyAddressRenaming neutralUsed deletedBoxSourceEnv liveEnv := by
   unfold deletedBoxSourceEnv
@@ -1487,6 +1526,15 @@ theorem deletedBoxReady :
   apply DeletedBoxReadyAt.scalar (.uint64 18446744073709551615)
   simp [deletedBoxSourceState, deletedBoxSourceEnv,
     lookupValue, Impure.bind, lookup, boxInputVar]
+
+/-- The scalar-box allocation certificate is exposed through the common
+source-side exact-view interface. -/
+theorem deletedBoxSourceRuntimeReadyAt
+    (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 2 deletedBoxSourceState
+      sourceFrameRoots deletedBoxBefore := by
+  unfold deletedBoxBefore deadBoxDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_box deletedBoxReady
 
 theorem deletedBoxUnifiedReady :
     DeletedLetReadyAt deletedBoxSourceState
@@ -2344,15 +2392,11 @@ theorem allocatingDeadCtorSourceRuntimeReadyAt
     SourceRuntimeOwnershipReadyAt 3
       (allocatingSourceInnerStateAt arguments) sourceFrameRoots
       (.let deadCtorDecl (.return live)) := by
-  apply SourceRuntimeOwnershipReadyAt.let_of_ready
-  · intro roots
-    unfold deadCtorDecl letDecl
-    apply DeletedLetReadyAt.constructor
-    refine .mk #[.erased] ?_ rfl
-    simp [allocatingSourceInnerStateAt, liveEnv, evalArgs, evalArg]
-    rfl
-  · intro roots
-    trivial
+  unfold deadCtorDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.erased] ?_ rfl
+  simp [allocatingSourceInnerStateAt, liveEnv, evalArgs, evalArg]
+  rfl
 
 theorem allocatingSourceReachable_ready
     (state : MachineState)
