@@ -241,6 +241,14 @@ def decideUInt8Le (left right : UInt8) : Bool :=
   decide (left ≤ right)
 
 @[noinline]
+def natToUInt8 (value : Nat) : UInt8 :=
+  UInt8.ofNat value
+
+@[noinline]
+def uint8ToNat (value : UInt8) : Nat :=
+  UInt8.toNat value
+
+@[noinline]
 def addUInt16 (left right : UInt16) : UInt16 :=
   UInt16.add left right
 
@@ -299,6 +307,14 @@ def decideUInt16Lt (left right : UInt16) : Bool :=
 @[noinline]
 def decideUInt16Le (left right : UInt16) : Bool :=
   decide (left ≤ right)
+
+@[noinline]
+def natToUInt16 (value : Nat) : UInt16 :=
+  UInt16.ofNat value
+
+@[noinline]
+def uint16ToNat (value : UInt16) : Nat :=
+  UInt16.toNat value
 
 def idUInt32 (value : UInt32) : UInt32 :=
   value
@@ -362,6 +378,14 @@ def decideUInt32Lt (left right : UInt32) : Bool :=
 @[noinline]
 def decideUInt32Le (left right : UInt32) : Bool :=
   decide (left ≤ right)
+
+@[noinline]
+def natToUInt32 (value : Nat) : UInt32 :=
+  UInt32.ofNat value
+
+@[noinline]
+def uint32ToNat (value : UInt32) : Nat :=
+  UInt32.toNat value
 
 def idUInt64 (value : UInt64) : UInt64 :=
   value
@@ -1701,6 +1725,12 @@ private def exactUInt8UnaryExternalCase :=
 private def exactUInt8DecisionExternalCase :=
   exactFixedWidthDecisionExternalCase uint8CaseCodec
 
+private def exactNatToUInt8ExternalCase :=
+  exactNatToFixedWidthExternalCase uint8CaseCodec
+
+private def exactUInt8ToNatExternalCase :=
+  exactFixedWidthToNatExternalCase uint8CaseCodec
+
 private def exactUInt16BinaryExternalCase :=
   exactFixedWidthBinaryExternalCase uint16CaseCodec
 
@@ -1710,6 +1740,12 @@ private def exactUInt16UnaryExternalCase :=
 private def exactUInt16DecisionExternalCase :=
   exactFixedWidthDecisionExternalCase uint16CaseCodec
 
+private def exactNatToUInt16ExternalCase :=
+  exactNatToFixedWidthExternalCase uint16CaseCodec
+
+private def exactUInt16ToNatExternalCase :=
+  exactFixedWidthToNatExternalCase uint16CaseCodec
+
 private def exactUInt32BinaryExternalCase :=
   exactFixedWidthBinaryExternalCase uint32CaseCodec
 
@@ -1718,6 +1754,12 @@ private def exactUInt32UnaryExternalCase :=
 
 private def exactUInt32DecisionExternalCase :=
   exactFixedWidthDecisionExternalCase uint32CaseCodec
+
+private def exactNatToUInt32ExternalCase :=
+  exactNatToFixedWidthExternalCase uint32CaseCodec
+
+private def exactUInt32ToNatExternalCase :=
+  exactFixedWidthToNatExternalCase uint32CaseCodec
 
 private def exactUInt64BinaryExternalCase :=
   exactFixedWidthBinaryExternalCase uint64CaseCodec
@@ -3222,6 +3264,111 @@ private def preConversionCases : Array Case := #[
 ]
 
 private def conversionCases : Array Case := #[
+  exactNatToUInt8ExternalCase
+    "nat-to-uint8-max" ``Source.natToUInt8 Source.natToUInt8
+    ``UInt8.ofNat 255
+    #["stress", "scalar", "uint8", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum in-range Nat to the maximum UInt8",
+  exactNatToUInt8ExternalCase
+    "nat-to-uint8-modulus" ``Source.natToUInt8 Source.natToUInt8
+    ``UInt8.ofNat 256
+    #["stress", "scalar", "uint8", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "overflow", "wraparound", "i32"]
+    "Wrap the first out-of-range Nat at exactly 2^8 to UInt8 zero",
+  exactNatToUInt8ExternalCase
+    "nat-to-uint8-multi-limb" ``Source.natToUInt8 Source.natToUInt8
+    ``UInt8.ofNat 340282366920938463463374607431768211473
+    #["stress", "scalar", "uint8", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "heap-input",
+      "multi-limb", "wraparound", "i32"]
+    "Reduce 2^128 + 17 modulo 2^8 while converting a multi-limb Nat to UInt8",
+  exactUInt8ToNatExternalCase
+    "uint8-to-nat-zero" ``Source.uint8ToNat Source.uint8ToNat
+    ``UInt8.toNat 0
+    #["stress", "scalar", "uint8", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "i32"]
+    "Convert UInt8 zero to a tagged Nat",
+  exactUInt8ToNatExternalCase
+    "uint8-to-nat-max" ``Source.uint8ToNat Source.uint8ToNat
+    ``UInt8.toNat 255
+    #["stress", "scalar", "uint8", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum UInt8 exactly to a tagged Nat",
+  exactNatToUInt16ExternalCase
+    "nat-to-uint16-max" ``Source.natToUInt16 Source.natToUInt16
+    ``UInt16.ofNat 65535
+    #["stress", "scalar", "uint16", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum in-range Nat to the maximum UInt16",
+  exactNatToUInt16ExternalCase
+    "nat-to-uint16-modulus" ``Source.natToUInt16 Source.natToUInt16
+    ``UInt16.ofNat 65536
+    #["stress", "scalar", "uint16", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "overflow", "wraparound", "i32"]
+    "Wrap the first out-of-range Nat at exactly 2^16 to UInt16 zero",
+  exactNatToUInt16ExternalCase
+    "nat-to-uint16-multi-limb" ``Source.natToUInt16 Source.natToUInt16
+    ``UInt16.ofNat 340282366920938463463374607431768211473
+    #["stress", "scalar", "uint16", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "heap-input",
+      "multi-limb", "wraparound", "i32"]
+    "Reduce 2^128 + 17 modulo 2^16 while converting a multi-limb Nat to UInt16",
+  exactUInt16ToNatExternalCase
+    "uint16-to-nat-zero" ``Source.uint16ToNat Source.uint16ToNat
+    ``UInt16.toNat 0
+    #["stress", "scalar", "uint16", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "i32"]
+    "Convert UInt16 zero to a tagged Nat",
+  exactUInt16ToNatExternalCase
+    "uint16-to-nat-max" ``Source.uint16ToNat Source.uint16ToNat
+    ``UInt16.toNat 65535
+    #["stress", "scalar", "uint16", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum UInt16 exactly to a tagged Nat",
+  exactNatToUInt32ExternalCase
+    "nat-to-uint32-max" ``Source.natToUInt32 Source.natToUInt32
+    ``UInt32.ofNat 4294967295
+    #["stress", "scalar", "uint32", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum in-range Nat to the maximum UInt32",
+  exactNatToUInt32ExternalCase
+    "nat-to-uint32-modulus" ``Source.natToUInt32 Source.natToUInt32
+    ``UInt32.ofNat 4294967296
+    #["stress", "scalar", "uint32", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "immediate-input",
+      "boundary", "overflow", "wraparound", "i32"]
+    "Wrap the first out-of-range Nat at exactly 2^32 to UInt32 zero",
+  exactNatToUInt32ExternalCase
+    "nat-to-uint32-multi-limb" ``Source.natToUInt32 Source.natToUInt32
+    ``UInt32.ofNat 340282366920938463463374607431768211473
+    #["stress", "scalar", "uint32", "external", "conversion", "nat",
+      "small-word-nat-conversion", "to-fixed-width", "heap-input",
+      "multi-limb", "wraparound", "i32"]
+    "Reduce 2^128 + 17 modulo 2^32 while converting a multi-limb Nat to UInt32",
+  exactUInt32ToNatExternalCase
+    "uint32-to-nat-zero" ``Source.uint32ToNat Source.uint32ToNat
+    ``UInt32.toNat 0
+    #["stress", "scalar", "uint32", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "i32"]
+    "Convert UInt32 zero to a tagged Nat",
+  exactUInt32ToNatExternalCase
+    "uint32-to-nat-max" ``Source.uint32ToNat Source.uint32ToNat
+    ``UInt32.toNat 4294967295
+    #["stress", "scalar", "uint32", "external", "conversion", "nat",
+      "small-word-nat-conversion", "from-fixed-width", "immediate-result",
+      "boundary", "maximum", "i32"]
+    "Convert the maximum UInt32 exactly to a tagged Nat",
   exactNatToUInt64ExternalCase
     "nat-to-uint64-small" ``Source.natToUInt64 Source.natToUInt64
     ``UInt64.ofNat 17
@@ -5995,7 +6142,10 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "usize-external").size == 32
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-unsigned-conversion").size == 20
+  validationCase.tags.contains "fixed-width-unsigned-conversion").size == 35
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "small-word-nat-conversion").size == 15
 
 #guard System.Platform.numBits == 64
 
