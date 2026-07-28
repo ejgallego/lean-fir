@@ -458,6 +458,24 @@ private def stringAppend (left right : String) : String :=
 private def stringPushn (source : String) (char : Char) (count : Nat) : String :=
   String.ofList (source.toList ++ List.replicate count char)
 
+private def compareUtf8 : List UInt8 → List UInt8 → UInt8
+  | [], [] => 1
+  | [], _ => 0
+  | _, [] => 2
+  | left :: leftTail, right :: rightTail =>
+      if left < right then 0
+      else if right < left then 2
+      else compareUtf8 leftTail rightTail
+
+private def stringCompare (left right : String) : UInt8 :=
+  compareUtf8 left.toUTF8.toList right.toUTF8.toList
+
+private def bmpPrivateUseString : String :=
+  String.ofList [Char.ofNat 0xe000]
+
+private def supplementaryPlaneString : String :=
+  String.ofList [Char.ofNat 0x10000]
+
 private def stringCharToNatExternal (operation : String → Char → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -553,6 +571,35 @@ private def stringPushnExternal (request : ExternalRequest) (runtime : RuntimeSt
       world := runtime.world }
   consumingStringResult location cell
     (stringPushn source (Char.ofNat char.toNat) count) runtime
+
+private def stringBinaryUInt8External (operation : String → String → UInt8)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalString request runtime left
+  let right ← externalString request runtime right
+  return {
+    value := .scalar (.uint8 (operation left right))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def stringDecEqExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringBinaryUInt8External
+    (fun left right => if stringCompare left right == 1 then 1 else 0)
+    request runtime
+
+private def stringDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringBinaryUInt8External
+    (fun left right => if stringCompare left right == 0 then 1 else 0)
+    request runtime
+
+private def stringCompareExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringBinaryUInt8External stringCompare request runtime
 
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
@@ -963,6 +1010,51 @@ private def stringPushnSharedGuard : Bool :=
 #guard stringPushnUniqueGuard
 #guard stringPushnSharedGuard
 
+private def stringBinaryUInt8Guard (name : Name)
+    (external : ExternalRequest → RuntimeState → Except RuntimeFault ExternalResponse)
+    (left right : String) (expected : UInt8) : Bool :=
+  let (runtime, leftReference) := alloc {} (.string left)
+  let (runtime, rightReference) := alloc runtime (.string right)
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.object leftReference, .object rightReference] }
+  match external request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint8 expected) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+#guard stringBinaryUInt8Guard ``String.decEq stringDecEqExternal
+  "A\u0000é😀" "A\u0000é😀" 1
+
+#guard stringBinaryUInt8Guard ``String.decEq stringDecEqExternal
+  "A\u0000é😀" "A\u0000é😁" 0
+
+#guard stringBinaryUInt8Guard ``String.decEq stringDecEqExternal "A" "A\u0000" 0
+
+#guard stringBinaryUInt8Guard ``String.decidableLT stringDecLtExternal
+  bmpPrivateUseString supplementaryPlaneString 1
+
+#guard stringBinaryUInt8Guard ``String.decidableLT stringDecLtExternal
+  supplementaryPlaneString bmpPrivateUseString 0
+
+#guard stringBinaryUInt8Guard ``String.decidableLT stringDecLtExternal "A" "A\u0000" 1
+
+#guard stringBinaryUInt8Guard ``String.compare stringCompareExternal
+  "A\u0000é😀" "A\u0000é😀" 1
+
+#guard stringBinaryUInt8Guard ``String.compare stringCompareExternal
+  bmpPrivateUseString supplementaryPlaneString 0
+
+#guard stringBinaryUInt8Guard ``String.compare stringCompareExternal
+  supplementaryPlaneString bmpPrivateUseString 2
+
+#guard stringBinaryUInt8Guard ``String.compare stringCompareExternal "A" "A\u0000" 0
+
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [value] := request.args.toList
@@ -1286,6 +1378,12 @@ private def validationExternals : ExternalImpl where
       stringAppendExternal request runtime
     else if request.name == ``String.Internal.pushn then
       stringPushnExternal request runtime
+    else if request.name == ``String.decEq then
+      stringDecEqExternal request runtime
+    else if request.name == ``String.decidableLT then
+      stringDecLtExternal request runtime
+    else if request.name == ``String.compare then
+      stringCompareExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then

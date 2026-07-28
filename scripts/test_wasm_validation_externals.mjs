@@ -6,9 +6,15 @@ import { validationExternalRegistry } from "./wasm_validation_externals.mjs";
 
 const append = validationExternalRegistry["String.Internal.append"];
 const pushn = validationExternalRegistry["String.Internal.pushn"];
+const decEq = validationExternalRegistry["String.decEq"];
+const decLt = validationExternalRegistry["String.decidableLT"];
+const compare = validationExternalRegistry["String.compare"];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
 assert.strictEqual(formatExternalRegistry["String.Internal.pushn"], pushn);
+assert.strictEqual(formatExternalRegistry["String.decEq"], decEq);
+assert.strictEqual(formatExternalRegistry["String.decidableLT"], decLt);
+assert.strictEqual(formatExternalRegistry["String.compare"], compare);
 
 function invoke(handler, host, args) {
   const beforeWorld = host.world;
@@ -158,4 +164,30 @@ function character(codePoint) {
   });
 }
 
-console.log("PASS shared Wasm String construction ownership contract");
+for (const [handler, leftValue, rightValue, expected] of [
+  [decEq, "A\u0000é😀", "A\u0000é😀", 1n],
+  [decEq, "A\u0000é😀", "A\u0000é😁", 0n],
+  [decLt, "\ue000", "\u{10000}", 1n],
+  [decLt, "\u{10000}", "\ue000", 0n],
+  [compare, "A\u0000", "A\u0000", 1n],
+  [compare, "\ue000", "\u{10000}", 0n],
+  [compare, "\u{10000}", "\ue000", 2n],
+  [compare, "A", "A\u0000", 0n],
+]) {
+  const host = new SemanticHost();
+  const left = host.alloc({ kind: "string", value: leftValue });
+  const right = host.alloc({ kind: "string", value: rightValue });
+  const beforeLeft = snapshot(stringCell(host, left));
+  const beforeRight = snapshot(stringCell(host, right));
+  const frontier = host.nextLocation;
+  assert.deepStrictEqual(invoke(handler, host, [left, right]), {
+    kind: "scalar",
+    scalarKind: "uint8",
+    value: expected,
+  });
+  assert.equal(host.nextLocation, frontier);
+  assert.deepStrictEqual(snapshot(stringCell(host, left)), beforeLeft);
+  assert.deepStrictEqual(snapshot(stringCell(host, right)), beforeRight);
+}
+
+console.log("PASS shared Wasm String ownership and comparison contracts");

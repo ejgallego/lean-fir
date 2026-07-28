@@ -1493,6 +1493,7 @@ The validation backend's external implementation is reject-by-default.
 `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
 `ByteArray.get!`, `ByteArray.set!`, `String.Internal.extract`,
 `String.Internal.append`, `String.Internal.pushn`,
+`String.decEq`, `String.decidableLT`, `String.compare`,
 `String.Internal.length`,
 `String.utf8ByteSize`, `String.Internal.posOf`,
 `String.Internal.offsetOfPos`, `String.Internal.next`, and the validation-owned
@@ -1520,7 +1521,13 @@ allocated; a persistent source remains unchanged and produces one allocation.
 Zero-count `pushn` returns its exact source without mutation or allocation, and
 append's borrowed right operand is always unchanged. Validation guards pin the
 result contents, logical locations, reference counts, allocation frontier, and
-world on every ownership path. The integer primitives decode and
+world on every ownership path.
+String equality, strict ordering, and three-way comparison share an independent
+UTF-8 byte comparator, preserve both borrowed operands, heap, and world, and
+return the exact scalar `UInt8` ABI (`false`/`true` as zero/one and
+`Ordering.lt`/`eq`/`gt` as zero/one/two). Guards include a BMP/non-BMP pair whose
+UTF-8 ordering is the reverse of JavaScript's default UTF-16 code-unit order.
+The integer primitives decode and
 re-encode both signed immediate and heap representations; `Int.add` and
 `Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
 signed input to an exact natural result, and `Int.decLt` returns the scalar

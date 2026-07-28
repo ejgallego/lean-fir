@@ -1,6 +1,7 @@
 import assert from "./wasm_assert.mjs";
 import {
   stringAppend,
+  stringCompare,
   stringExtract,
   stringLength,
   stringNext,
@@ -140,6 +141,22 @@ function stringPushnExternal({ args, host, world }) {
   };
 }
 
+function stringBinaryUInt8(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = stringValue(host, args[0], `${declaration} left operand`);
+    const right = stringValue(host, args[1], `${declaration} right operand`);
+    return {
+      value: {
+        kind: "scalar",
+        scalarKind: "uint8",
+        value: operation(left, right),
+      },
+      world,
+    };
+  };
+}
+
 function setByteArray({ args, host, world }) {
   assert.equal(args.length, 3, "ByteArray.set! external arity mismatch");
   const source = args[0];
@@ -197,6 +214,13 @@ export const validationExternalRegistry = {
   "String.Internal.extract": stringExtractExternal,
   "String.Internal.append": stringAppendExternal,
   "String.Internal.pushn": stringPushnExternal,
+  "String.decEq":
+    stringBinaryUInt8("String.decEq",
+      (left, right) => stringCompare(left, right) === 1n ? 1n : 0n),
+  "String.decidableLT":
+    stringBinaryUInt8("String.decidableLT",
+      (left, right) => stringCompare(left, right) === 0n ? 1n : 0n),
+  "String.compare": stringBinaryUInt8("String.compare", stringCompare),
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");

@@ -21,6 +21,19 @@ export function stringPushn(source, codePoint, count) {
   return source + String.fromCodePoint(Number(codePoint)).repeat(Number(count));
 }
 
+export function stringCompare(left, right) {
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  const commonLength = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < commonLength; ++index) {
+    if (leftBytes[index] < rightBytes[index]) return 0n;
+    if (leftBytes[index] > rightBytes[index]) return 2n;
+  }
+  if (leftBytes.length < rightBytes.length) return 0n;
+  if (leftBytes.length > rightBytes.length) return 2n;
+  return 1n;
+}
+
 export function stringLength(source) {
   return BigInt(Array.from(source).length);
 }
