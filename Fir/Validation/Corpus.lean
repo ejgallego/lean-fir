@@ -131,6 +131,10 @@ def stringOffsetOfPos (value : String) (position : Nat) : Nat :=
 def stringNext (value : String) (position : Nat) : Nat :=
   (String.Internal.next value ⟨position⟩).byteIdx
 
+@[noinline]
+def stringExtract (value : String) (beginPos endPos : Nat) : String :=
+  String.Internal.extract value ⟨beginPos⟩ ⟨endPos⟩
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1603,6 +1607,115 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.next]
     provenance := firProvenance
       "Advance one byte beyond the exact UTF-8 end position" },
+  { id := "string-extract-full"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 0, .nat 8]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 0 8)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "full",
+      "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Allocate the complete String from exact start and end byte positions" },
+  { id := "string-extract-nonbmp"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 3, .nat 7]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 3 7)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "non-bmp",
+      "scalar-boundary", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Extract exactly one non-BMP scalar across its four UTF-8 bytes" },
+  { id := "string-extract-invalid-begin"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 4, .nat 7]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 4 7)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "non-bmp",
+      "invalid-begin", "continuation-byte", "regression", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Return empty when the begin position is inside a non-BMP scalar" },
+  { id := "string-extract-invalid-end"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 3, .nat 4]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 3 4)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "non-bmp",
+      "invalid-end", "continuation-byte", "suffix", "regression", "external",
+      "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Continue to String end when the end position is inside a scalar" },
+  { id := "string-extract-past-end"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 1, .nat 50]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 1 50)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "past-end",
+      "suffix", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Extract the complete suffix when the end position is far past end" },
+  { id := "string-extract-reversed"
+    entry := ``Source.stringExtract
+    args := #[.string "Aé😀Z", .nat 7, .nat 3]
+    argSchemas := #[.string, .nat, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringExtract "Aé😀Z" 7 3)
+    tags := #["stress", "string", "unicode", "extract", "allocation", "reversed",
+      "empty", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.extract]
+    requiredExecutedExternals := #[``String.Internal.extract]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.extract]
+    requiredExecutedExternalTrace := some #[``String.Internal.extract]
+    provenance := firProvenance
+      "Return empty for a begin position greater than the end position" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8

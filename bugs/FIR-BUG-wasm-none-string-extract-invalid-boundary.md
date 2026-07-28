@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-string-extract-invalid-boundary
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-07-28
 reproduction: scripts/wasm_format_external_algorithms.mjs
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -86,4 +86,7 @@ none
 
 ## Resolution and regression
 
-unresolved
+Fixed in `c83e42e` by replacing arbitrary byte slicing with exact scalar-boundary
+traversal and sharing the repaired handler between validation and formatting.
+The `string-extract-invalid-begin` and `string-extract-invalid-end` corpus cases
+compare native Lean, LCNF, and V8 and retain exact external-call obligations.
