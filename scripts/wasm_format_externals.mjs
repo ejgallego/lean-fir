@@ -33,10 +33,6 @@ function scalarUInt32(value, context) {
   return value.value;
 }
 
-function boolResult(value) {
-  return { kind: "scalar", scalarKind: "uint8", value: value ? 1n : 0n };
-}
-
 function unreachablePanicHelper({ declaration }) {
   throw new Error(`unreachable Lean pretty-printing panic helper executed: ${declaration}`);
 }
@@ -54,33 +50,6 @@ export const formatExternalRegistry = {
     const left = integerValue(host, args[0], "Int.add left operand");
     const right = integerValue(host, args[1], "Int.add right operand");
     return { value: host.integer(left + right), world };
-  },
-  "Nat.decEq": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Nat.decEq external arity mismatch");
-    return {
-      value: boolResult(
-        naturalValue(host, args[0], "Nat.decEq left operand") ===
-          naturalValue(host, args[1], "Nat.decEq right operand")),
-      world,
-    };
-  },
-  "Nat.decLt": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Nat.decLt external arity mismatch");
-    return {
-      value: boolResult(
-        naturalValue(host, args[0], "Nat.decLt left operand") <
-          naturalValue(host, args[1], "Nat.decLt right operand")),
-      world,
-    };
-  },
-  "Nat.decLe": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Nat.decLe external arity mismatch");
-    return {
-      value: boolResult(
-        naturalValue(host, args[0], "Nat.decLe left operand") <=
-          naturalValue(host, args[1], "Nat.decLe right operand")),
-      world,
-    };
   },
   "String.Internal.append": ({ args, host, world }) => {
     assert.equal(args.length, 2, "String.Internal.append external arity mismatch");

@@ -343,6 +343,31 @@ private def natSubExternal (request : ExternalRequest) (runtime : RuntimeState) 
     Except RuntimeFault ExternalResponse :=
   natBinaryExternal (· - ·) request runtime
 
+private def natDecisionExternal (operation : Nat → Nat → Bool)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalNat request runtime left
+  let right ← externalNat request runtime right
+  return {
+    value := .scalar (.uint8 (if operation left right then 1 else 0))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def natDecEqExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natDecisionExternal (fun left right => decide (left = right)) request runtime
+
+private def natDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natDecisionExternal (fun left right => decide (left < right)) request runtime
+
+private def natDecLeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natDecisionExternal (fun left right => decide (left ≤ right)) request runtime
+
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
   paramTypes := #[]
@@ -373,6 +398,19 @@ private def natBinaryGuard (name : Name) (operation : Nat → Nat → Nat)
 private def multiLimbNat : Nat :=
   340282366920938463463374607431768211473
 
+private def natDecisionGuard (name : Name) (operation : Nat → Nat → Bool)
+    (left right : Nat) (expected : Bool) : Bool :=
+  let (runtime, leftValue) := literal {} (.nat left)
+  let (runtime, rightValue) := literal runtime (.nat right)
+  let request := natBinaryRequest name leftValue rightValue
+  match natDecisionExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
 #guard natBinaryGuard ``Nat.add (· + ·) multiLimbNat multiLimbNat
   680564733841876926926749214863536422946 true
 
@@ -382,6 +420,24 @@ private def multiLimbNat : Nat :=
 #guard natBinaryGuard ``Nat.sub (· - ·) multiLimbNat multiLimbNat 0 false
 
 #guard natBinaryGuard ``Nat.sub (· - ·) 17 multiLimbNat 0 false
+
+#guard natDecisionGuard ``Nat.decEq
+  (fun left right => decide (left = right)) multiLimbNat multiLimbNat true
+
+#guard natDecisionGuard ``Nat.decEq
+  (fun left right => decide (left = right)) 9223372036854775807 9223372036854775808 false
+
+#guard natDecisionGuard ``Nat.decLt
+  (fun left right => decide (left < right)) 9223372036854775807 9223372036854775808 true
+
+#guard natDecisionGuard ``Nat.decLt
+  (fun left right => decide (left < right)) multiLimbNat multiLimbNat false
+
+#guard natDecisionGuard ``Nat.decLe
+  (fun left right => decide (left ≤ right)) multiLimbNat multiLimbNat true
+
+#guard natDecisionGuard ``Nat.decLe
+  (fun left right => decide (left ≤ right)) 9223372036854775808 9223372036854775807 false
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -684,6 +740,12 @@ private def validationExternals : ExternalImpl where
       natAddExternal request runtime
     else if request.name == ``Nat.sub then
       natSubExternal request runtime
+    else if request.name == ``Nat.decEq then
+      natDecEqExternal request runtime
+    else if request.name == ``Nat.decLt then
+      natDecLtExternal request runtime
+    else if request.name == ``Nat.decLe then
+      natDecLeExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then
