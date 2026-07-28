@@ -181,14 +181,20 @@ and adapter. The exact remaining condition is
 have a matching concrete step that establishes the related continuation state
 and preserves the selected resource invariant. This is a uniform runtime law,
 not a caller-built source/target derivation.
+The first such law is now constructive for zero-argument local aliases.
+`ConcreteLocalFrameAligned` records exact target-frame capacity independently
+of `StateRelated`; compiler-resolved local lookup proves each write is
+in-bounds, and the checked write preserves that invariant. A two-alias contract
+harness obtains both generated read/write pairs and every numeric slot from
+the real compiler and adapter.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
 `make talos-check`.
 Existing certificate-shaped modules are retained only as internal sources of
-operation and invariant lemmas while erased-field constructor prefixes,
-the concrete direct-runtime law, control-flow, calls, externals, caches, and
-faults are migrated. The first
+operation and invariant lemmas while projection/allocation instances of the
+concrete direct-runtime law, control-flow, calls, externals, caches, and faults
+are migrated. The first
 endpoint preserves finite source behaviors conditionally;
 later finite-trace and weak-simulation work will cover divergence without
 proving source termination.

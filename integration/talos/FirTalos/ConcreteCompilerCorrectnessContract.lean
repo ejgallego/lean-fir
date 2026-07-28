@@ -108,6 +108,74 @@ example
     invariant runtimeRefines parameterCount resultCount
 
 /--
+The first concrete structural instance checks a two-`let` local-alias spine.
+Both target `local.get`/`local.set` pairs and all four numeric local indices
+come from the production compiler and adapter.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime middleRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {first second : LCNF.LetDecl .impure}
+    {result : FVarId}
+    {firstValue secondValue resultValue : Value}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    (firstSupported : LocalAliasSupported context first)
+    (secondSupported : LocalAliasSupported context second)
+    (firstStep :
+      SourceLetResult context sourceRuntime sourceEnv first middleRuntime
+        firstValue)
+    (secondStep :
+      SourceLetResult context middleRuntime
+        (bind sourceEnv first.fvarId firstValue) second resultRuntime
+        secondValue)
+    (resultLookup :
+      lookup
+          (bind (bind sourceEnv first.fvarId firstValue)
+            second.fvarId secondValue)
+          result =
+        some resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let first (.let second (.return result))) target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        locals witness)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv
+          (.let first (.let second (.return result))) target initial locals
+          witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  apply codeWP_of_directValueEvaluates
+    (.letValue firstSupported firstStep
+      (.letValue secondSupported secondStep (.ret resultLookup)))
+    adapted localsAligned stateRelated frameAligned
+    (directLetRuntimeRefines_localAlias localsAligned)
+    parameterCount resultCount
+
+/--
 The recursive direct-`let` API is likewise certificate-free: its only
 recursive premise is correctness of the compiler-selected continuation.
 -/

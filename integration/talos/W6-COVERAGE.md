@@ -62,9 +62,13 @@ Cross-cutting W6.5 state:
   first structural source-evaluation induction for arbitrarily long
   return/direct-value spines. The only step interface is the uniform
   `DirectLetRuntimeRefines` law over admitted declarations, compiler/adaptor
-  outputs, and a preserved resource invariant. Discharging that law from the
-  listed operation refinements, then adding control-flow, calls, externals,
-  caches, and faults, remains;
+  outputs, and a preserved resource invariant. Zero-argument local aliases
+  now construct that law from exact compiler ABI-kind agreement,
+  compiler-resolved local bounds, a separately threaded exact frame-shape
+  invariant, and `StateRelated`; a two-alias contract harness exercises the
+  structural composition without supplying target instructions or indices.
+  Discharging the same law from the listed allocation/projection refinements,
+  then adding control-flow, calls, externals, caches, and faults, remains;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

@@ -2229,6 +2229,81 @@ theorem DirectValueEvaluates.execEvaluates
   evaluation.toCodeEvaluates.execEvaluates externals
 
 /--
+Static admission for a direct local alias.
+
+The declaration copies an existing local without applying it, and source and
+destination have the same compiler ABI kind.  These are source/compiler facts,
+not a target-code witness; the target prefix is still recovered from
+`compileLetValue` and the Talos adapter.
+-/
+inductive LocalAliasSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (sourceId : FVarId) (kind : AbiKind)
+      (valueEq : decl.value = .fvar sourceId #[])
+      (resultKind : Fir.Wasm.letValueKind decl = .ok kind)
+      (sourceCompiled :
+        Fir.Wasm.getLocal context sourceId =
+          .ok (.localGet sourceId, kind))
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind)) :
+      LocalAliasSupported context decl
+
+/--
+The concrete frame has exactly the parameter and local capacity allocated for
+the selected symbolic function.  Runtime and witness components are ignored:
+this is a threaded resource invariant, separate from semantic state
+refinement.
+-/
+def ConcreteLocalFrameAligned
+    (sourceFunction : Fir.Wasm.Function)
+    (_sourceRuntime : RuntimeState) (_sourceEnv : Env)
+    (_targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (_witness : RefinementWitness) : Prop :=
+  targetLocals.params.length = sourceFunction.params.size ∧
+    targetLocals.locals.length = sourceFunction.locals.size
+
+theorem ConcreteLocalFrameAligned.validIndex
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {fvar : FVarId} {index : Nat}
+    (aligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (found :
+      findFVar? (functionBindings sourceFunction) fvar = some index) :
+    targetLocals.validIndex index := by
+  have bounded := FirTalos.Correctness.findFVar?_lt_length found
+  simp only [functionBindings, List.length_append, Array.length_toList] at bounded
+  simpa [ConcreteLocalFrameAligned, Wasm.Locals.validIndex, aligned.1,
+    aligned.2] using bounded
+
+/-- A checked destination write preserves the exact concrete frame shape. -/
+theorem ConcreteLocalFrameAligned.set?
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv nextEnv : Env}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness nextWitness : RefinementWitness} {fvar : FVarId} {index : Nat}
+    {physical : Wasm.Value}
+    (aligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (found :
+      findFVar? (functionBindings sourceFunction) fvar = some index) :
+    ∃ updated,
+      targetLocals.set? index physical = some updated ∧
+        ConcreteLocalFrameAligned sourceFunction nextRuntime nextEnv nextStore
+          updated nextWitness := by
+  obtain ⟨updated, targetSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists (aligned.validIndex found)
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+  exact ⟨updated, targetSet,
+    ⟨lengths.1.trans aligned.1, lengths.2.trans aligned.2⟩⟩
+
+/--
 The uniform runtime condition needed by the structural direct-`let` proof.
 
 For every successful direct source value accepted by the production compiler
@@ -2276,6 +2351,174 @@ def DirectLetRuntimeRefines
           targetLocals nextLocals resultIndex witness nextWitness ∧
         Invariant nextRuntime (bind sourceEnv decl.fvarId sourceValue)
           nextStore nextLocals nextWitness
+
+/--
+One zero-argument local alias is simulated by the generated `local.get` /
+`local.set` pair.  No host operation or heap transition is involved.
+-/
+theorem letStepSimulates_localAlias
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {sourceEnv : Env}
+    {sourceId : FVarId} {kind : AbiKind}
+    {sourceRuntime : RuntimeState} {sourceValue : Value}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {sourceIndex resultIndex : Nat} {physical : Wasm.Value}
+    {witness : RefinementWitness}
+    (valueEq : decl.value = .fvar sourceId #[])
+    (sourceLookup : lookup sourceEnv sourceId = some sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (sourcePhysical : locals.get sourceIndex = some physical)
+    (physicalRelated :
+      PhysicalValueRel witness kind physical sourceValue)
+    (targetSet : locals.set? resultIndex physical = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [.localGet sourceIndex]
+      sourceRuntime sourceRuntime sourceEnv sourceValue initial initial locals
+      updated resultIndex witness witness := by
+  have nextRelated :
+      StateRelated sourceFunction sourceRuntime
+        (bind sourceEnv decl.fvarId sourceValue) initial updated witness := by
+    have bound := initialRelated.bindPhysical resultFound resultKindAt
+      physicalRelated targetSet
+    simpa [initialRelated.clearFailure] using bound
+  refine ⟨?_, initialRelated, nextRelated, ?_⟩
+  · unfold SourceLetResult
+    have sourceLookupValue :
+        lookupValue sourceEnv sourceId = .ok sourceValue := by
+      simp [lookupValue, sourceLookup]
+    have emptyArgs : evalArgs sourceEnv #[] = .ok #[] := by
+      unfold evalArgs
+      simp
+      rfl
+    simp only [evalLetValue, valueEq]
+    rw [sourceLookupValue, emptyArgs]
+    change
+      Except.ok (sourceRuntime, LetAction.value sourceValue) =
+        Except.ok (sourceRuntime, LetAction.value sourceValue)
+    rfl
+  · intro rest Q tail continued
+    simp only [List.singleton_append, Wasm.wp_localGet_cons]
+    have sourcePhysicalWithTail :
+        ({ locals with values := tail } : Wasm.Locals).get sourceIndex =
+          some physical := by
+      simpa [Wasm.Locals.get] using sourcePhysical
+    rw [sourcePhysicalWithTail]
+    exact FirTalos.Concrete.wp_localSet_of_set targetSet continued
+
+/--
+Uniform runtime-law instance for every admitted local alias in an arbitrary
+direct-value spine.
+
+The proof derives both symbolic and numeric instructions from the executable
+compiler/adapter, resolves the copied lane from `StateRelated`, and uses the
+threaded frame-shape invariant to justify the destination write.
+-/
+theorem directLetRuntimeRefines_localAlias
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction) :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv (LocalAliasSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    frameAligned sourceStep stateRelated valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨sourceId, kind, valueEq, resultKind, sourceCompiled, resultCompiled⟩
+  have sourceFacts :
+      nextRuntime = sourceRuntime ∧
+        lookup sourceEnv sourceId = some sourceValue := by
+    unfold SourceLetResult at sourceStep
+    simp only [evalLetValue, valueEq] at sourceStep
+    have emptyArgs : evalArgs sourceEnv #[] = .ok #[] := by
+      unfold evalArgs
+      simp
+      rfl
+    cases sourceLookupEq : lookup sourceEnv sourceId with
+    | none =>
+        have lookupFailed :
+            lookupValue sourceEnv sourceId =
+              .error (.unknownVar sourceId) := by
+          simp [lookupValue, sourceLookupEq]
+        rw [lookupFailed] at sourceStep
+        contradiction
+    | some actual =>
+        have lookupSucceeded :
+            lookupValue sourceEnv sourceId = .ok actual := by
+          simp [lookupValue, sourceLookupEq]
+        rw [lookupSucceeded, emptyArgs] at sourceStep
+        have pairEq :
+            (sourceRuntime, LetAction.value actual) =
+              (nextRuntime, LetAction.value sourceValue) := by
+          change
+            Except.ok (sourceRuntime, LetAction.value actual) =
+              Except.ok (nextRuntime, LetAction.value sourceValue)
+            at sourceStep
+          exact Except.ok.inj sourceStep
+        have runtimeEq : sourceRuntime = nextRuntime :=
+          congrArg Prod.fst pairEq
+        have actionEq :
+            LetAction.value actual = LetAction.value sourceValue :=
+          congrArg Prod.snd pairEq
+        have actualEq : actual = sourceValue :=
+          LetAction.value.inj actionEq
+        exact ⟨runtimeEq.symm, congrArg some actualEq⟩
+  rcases sourceFacts with ⟨rfl, sourceLookup⟩
+  obtain ⟨sourceIndex, sourceFound, sourceKindAt⟩ :=
+    localsAligned sourceCompiled
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨physical, sourcePhysical, physicalRelated⟩ :=
+    stateRelated.resolve sourceLookup sourceFound sourceKindAt
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet sourceId] := by
+    have emptyCompiled :
+        Fir.Wasm.compileArgs context #[] = .ok ([], #[]) := by
+      rfl
+    simp [Fir.Wasm.compileLetValue, valueEq, resultKind, sourceCompiled,
+      emptyCompiled]
+    rfl
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  have expectedAdapted :
+      instructions sourceModule sourceFunction labels [.localGet sourceId] =
+        .ok [.localGet sourceIndex] := by
+    have sourceFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            sourceId =
+          some sourceIndex := by
+      simpa [functionBindings] using sourceFound
+    simp [instructions, instruction, sourceFound']
+    rfl
+  rw [expectedAdapted] at valueAdapted
+  injection valueAdapted with targetValueEq
+  subst targetValue
+  obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+    frameAligned.set? (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := targetStore) (nextWitness := witness)
+      (physical := physical) resultFound
+  exact ⟨targetStore, updated, witness,
+    letStepSimulates_localAlias valueEq sourceLookup stateRelated resultFound
+      resultKindAt sourcePhysical physicalRelated targetSet,
+    nextFrameAligned⟩
 
 /--
 Structural, certificate-free partial correctness for the direct-value code

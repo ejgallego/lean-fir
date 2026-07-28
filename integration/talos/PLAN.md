@@ -3543,6 +3543,23 @@ literal/constructor/projection refinements for the currently admitted
 direct-value fragment, then extends the induction with effects and control
 flow. No FIR semantic contract or executable ABI changed.
 
+W6.6ef supplies the first constructive instance of that uniform runtime law.
+`LocalAliasSupported` admits zero-argument `.fvar` declarations only when the
+source and destination have the same compiler-selected ABI kind; it contains
+no target instructions or numeric local indices. `ConcreteLocalFrameAligned`
+separates the missing resource fact from semantic refinement by recording the
+exact parameter/local frame lengths. A generic lookup-bound theorem makes
+every compiler-resolved destination valid, Talos `set?` preserves the frame
+shape, and `directLetRuntimeRefines_localAlias` derives the emitted
+`local.get`, adapted numeric source slot, copied physical lane, destination
+slot, and `local.set` simulation from the production compiler/adapter plus
+`StateRelated`. The contract harness composes two aliases and a return through
+the structural theorem, demonstrating that the runtime-law interface scales
+past one-node declarations without certificates. The next slice generalizes
+this resource instance across read-only projections, where descriptor
+readiness remains the operation-specific semantic invariant. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

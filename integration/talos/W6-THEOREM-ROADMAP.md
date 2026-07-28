@@ -385,8 +385,12 @@ acceptance tests pass.
    `DirectLetRuntimeRefines` premise is a uniform runtime law over
    compiler/adaptor outputs, parameterized by the admitted declaration
    predicate and the resource invariant; it is not a per-program translation
-   certificate. Discharge that law from the existing operation refinements for
-   the currently admitted direct-value fragment.
+   certificate. The zero-argument local-alias instance is constructive:
+   `ConcreteLocalFrameAligned` makes compiler-resolved destination writes
+   total and is preserved by `local.set`; the contract harness composes two
+   such declarations. Extend this runtime law across the existing
+   allocation/projection refinements for the currently admitted direct-value
+   fragment.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

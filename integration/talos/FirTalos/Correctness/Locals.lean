@@ -118,6 +118,54 @@ theorem findFVar?_ne_of_name_ne
                   have tailDifferent := ih leftTail rightTail
                   omega
 
+/-- A successful symbolic-local lookup always denotes an in-bounds slot. -/
+theorem findFVar?_lt_length
+    {bindings : List (Lean.FVarId × α)} {fvar : Lean.FVarId} {index : Nat}
+    (found : findFVar? bindings fvar = some index) :
+    index < bindings.length := by
+  induction bindings generalizing index with
+  | nil => simp [findFVar?] at found
+  | cons binding bindings ih =>
+      simp only [findFVar?] at found
+      split at found
+      · simp at found
+        subst index
+        simp
+      · cases tailFound : findFVar? bindings fvar with
+        | none => simp [tailFound] at found
+        | some tailIndex =>
+            simp [tailFound] at found
+            subst index
+            have := ih tailFound
+            simp
+            omega
+
+/-- An in-bounds Talos local can always be updated by its checked setter. -/
+theorem locals_set?_exists
+    {locals : Wasm.Locals} {index : Nat} {value : Wasm.Value}
+    (valid : locals.validIndex index) :
+    ∃ updated, locals.set? index value = some updated := by
+  simp only [Wasm.Locals.validIndex] at valid
+  unfold Wasm.Locals.set?
+  split
+  · exact ⟨_, rfl⟩
+  · exact ⟨_, rfl⟩
+
+/-- Updating one Talos local preserves the parameter/local frame shape. -/
+theorem locals_lengths_of_set?
+    {before after : Wasm.Locals} {index : Nat} {value : Wasm.Value}
+    (updated : before.set? index value = some after) :
+    after.params.length = before.params.length ∧
+      after.locals.length = before.locals.length := by
+  unfold Wasm.Locals.set? at updated
+  split at updated
+  · cases updated
+    simp
+  · split at updated
+    · cases updated
+      simp
+    · contradiction
+
 /--
 Every live source binding has a compiler-resolved target slot whose physical
 value decodes to the source value under the current handle table.
