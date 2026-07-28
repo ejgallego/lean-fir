@@ -250,6 +250,90 @@ def intToInt8 (value : Int) : Int8 :=
 def int8ToInt (value : Int8) : Int :=
   Int8.toInt value
 
+@[noinline]
+def addInt16 (left right : Int16) : Int16 :=
+  Int16.add left right
+
+@[noinline]
+def subInt16 (left right : Int16) : Int16 :=
+  Int16.sub left right
+
+@[noinline]
+def mulInt16 (left right : Int16) : Int16 :=
+  Int16.mul left right
+
+@[noinline]
+def divInt16 (left right : Int16) : Int16 :=
+  Int16.div left right
+
+@[noinline]
+def modInt16 (left right : Int16) : Int16 :=
+  Int16.mod left right
+
+@[noinline]
+def landInt16 (left right : Int16) : Int16 :=
+  Int16.land left right
+
+@[noinline]
+def lorInt16 (left right : Int16) : Int16 :=
+  Int16.lor left right
+
+@[noinline]
+def xorInt16 (left right : Int16) : Int16 :=
+  Int16.xor left right
+
+@[noinline]
+def shiftLeftInt16 (value count : Int16) : Int16 :=
+  Int16.shiftLeft value count
+
+@[noinline]
+def shiftRightInt16 (value count : Int16) : Int16 :=
+  Int16.shiftRight value count
+
+@[noinline]
+def complementInt16 (value : Int16) : Int16 :=
+  Int16.complement value
+
+@[noinline]
+def negInt16 (value : Int16) : Int16 :=
+  Int16.neg value
+
+@[noinline]
+def absInt16 (value : Int16) : Int16 :=
+  Int16.abs value
+
+@[noinline]
+def decideInt16Eq (left right : Int16) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideInt16Lt (left right : Int16) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideInt16Le (left right : Int16) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
+def natToInt16 (value : Nat) : Int16 :=
+  Int16.ofNat value
+
+@[noinline]
+def intToInt16 (value : Int) : Int16 :=
+  Int16.ofInt value
+
+@[noinline]
+def int16ToInt (value : Int16) : Int :=
+  Int16.toInt value
+
+@[noinline]
+def int8ToInt16 (value : Int8) : Int16 :=
+  Int8.toInt16 value
+
+@[noinline]
+def int16ToInt8 (value : Int16) : Int8 :=
+  Int16.toInt8 value
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1757,6 +1841,12 @@ private structure FixedWidthCaseCodec (α : Type) where
 private def int8CaseCodec : FixedWidthCaseCodec Int8 where
   schema := .bits 8
   datum value := .bits 8 (UInt64.ofNat value.toUInt8.toNat)
+  externalTag := "fixed-width-signed-external"
+  conversionTag := "fixed-width-signed-conversion"
+
+private def int16CaseCodec : FixedWidthCaseCodec Int16 where
+  schema := .bits 16
+  datum value := .bits 16 (UInt64.ofNat value.toUInt16.toNat)
   externalTag := "fixed-width-signed-external"
   conversionTag := "fixed-width-signed-conversion"
 
@@ -6720,8 +6810,320 @@ private def int8Cases : Array Case := #[
     "Sign-extend the signed Int8 maximum to an exact immediate Int"
 ]
 
+private structure SignedFixedWidthCaseFamily (α : Type) where
+  typeName : Lean.Name
+  typeId : String
+  sourceSuffix : String
+  width : Nat
+  wasmLaneTag : String
+  codec : FixedWidthCaseCodec α
+  ofNat : Nat → α
+  ofInt : Int → α
+  toInt : α → Int
+  add : α → α → α
+  sub : α → α → α
+  mul : α → α → α
+  div : α → α → α
+  modulo : α → α → α
+  land : α → α → α
+  lor : α → α → α
+  xor : α → α → α
+  shiftLeft : α → α → α
+  shiftRight : α → α → α
+  complement : α → α
+  neg : α → α
+  abs : α → α
+  decEq : α → α → Bool
+  decLt : α → α → Bool
+  decLe : α → α → Bool
+
+private def signedFixedWidthCases
+    (family : SignedFixedWidthCaseFamily α) : Array Case :=
+  let externalName (suffix : String) := Lean.Name.str family.typeName suffix
+  let sourceNamespace := (``Source.addInt16).getPrefix
+  let sourceName (stem : String) :=
+    Lean.Name.str sourceNamespace (stem ++ family.sourceSuffix)
+  let value := family.ofInt
+  let magnitude : Nat := 2 ^ (family.width - 1)
+  let minimum : Int := -(Int.ofNat magnitude)
+  let maximum : Int := Int.ofNat (magnitude - 1)
+  let nearMinimum := minimum + 1
+  let tags (category : String) (extra : Array String) : Array String :=
+    #["stress", "scalar", family.typeId, "signed", category] ++
+      extra ++ #[family.wasmLaneTag]
+  #[
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-add-overflow" (sourceName "add") family.add
+      (externalName "add") (value maximum) (value 1)
+      (tags "arithmetic" #["addition", "overflow", "wraparound", "boundary"])
+      s!"Wrap the signed {family.typeId} maximum plus one to its minimum",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-sub-underflow" (sourceName "sub") family.sub
+      (externalName "sub") (value minimum) (value 1)
+      (tags "arithmetic" #["subtraction", "underflow", "wraparound", "boundary"])
+      s!"Wrap the signed {family.typeId} minimum minus one to its maximum",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-mul-overflow" (sourceName "mul") family.mul
+      (externalName "mul") (value (Int.ofNat (2 ^ (family.width - 2)))) (value 2)
+      (tags "arithmetic" #["multiplication", "overflow", "wraparound", "boundary"])
+      s!"Wrap the exact high multiplication bit into the {family.typeId} sign bit",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-div-negative-truncates" (sourceName "div") family.div
+      (externalName "div") (value (-7)) (value 3)
+      (tags "arithmetic" #["division", "negative", "truncate-zero", "boundary"])
+      s!"Truncate signed {family.typeId} division toward zero",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-div-min-neg-one" (sourceName "div") family.div
+      (externalName "div") (value minimum) (value (-1))
+      (tags "arithmetic"
+        #["division", "overflow", "wraparound", "minimum", "boundary"])
+      s!"Wrap the unique overflowing {family.typeId} quotient min / -1 back to min",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-div-zero" (sourceName "div") family.div
+      (externalName "div") (value (-7)) (value 0)
+      (tags "arithmetic" #["division", "negative", "zero-divisor", "boundary"])
+      s!"Pin total signed {family.typeId} division by zero to zero",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-mod-negative-dividend" (sourceName "mod") family.modulo
+      (externalName "mod") (value (-7)) (value 3)
+      (tags "arithmetic"
+        #["remainder", "negative-dividend", "truncate-zero", "boundary"])
+      s!"Retain the dividend sign for signed {family.typeId} remainder",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-mod-negative-divisor" (sourceName "mod") family.modulo
+      (externalName "mod") (value 7) (value (-3))
+      (tags "arithmetic"
+        #["remainder", "negative-divisor", "truncate-zero", "boundary"])
+      s!"Keep a positive {family.typeId} remainder when only the divisor is negative",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-mod-zero" (sourceName "mod") family.modulo
+      (externalName "mod") (value (-7)) (value 0)
+      (tags "arithmetic" #["remainder", "negative", "zero-divisor", "boundary"])
+      s!"Pin signed {family.typeId} remainder by zero to the dividend",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-land-mixed" (sourceName "land") family.land
+      (externalName "land") (value (-16)) (value 60)
+      (tags "bitwise" #["and", "mixed-bits", "twos-complement"])
+      s!"Intersect negative and positive {family.typeId} bit groups",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-lor-mixed" (sourceName "lor") family.lor
+      (externalName "lor") (value (-64)) (value 60)
+      (tags "bitwise" #["or", "mixed-bits", "twos-complement"])
+      s!"Union negative and positive {family.typeId} bit groups",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-xor-mixed" (sourceName "xor") family.xor
+      (externalName "xor") (value (-16)) (value 60)
+      (tags "bitwise" #["xor", "mixed-bits", "twos-complement"])
+      s!"Exclusive-or negative and positive {family.typeId} bit groups",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-left-negative-width" (sourceName "shiftLeft")
+      family.shiftLeft (externalName "shiftLeft")
+      (value nearMinimum) (value (-(Int.ofNat family.width)))
+      (tags "bitwise"
+        #["shift-left", "negative-count", "masked-count", "identity", "boundary"])
+      s!"Reduce a negative-width {family.typeId} left-shift count to zero",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-left-negative-one" (sourceName "shiftLeft")
+      family.shiftLeft (externalName "shiftLeft")
+      (value nearMinimum) (value (-1))
+      (tags "bitwise"
+        #["shift-left", "negative-count", "masked-count", "overflow", "boundary"])
+      s!"Reduce a negative-one {family.typeId} left-shift count to width minus one",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-left-width-plus-one" (sourceName "shiftLeft")
+      family.shiftLeft (externalName "shiftLeft")
+      (value nearMinimum) (value (Int.ofNat family.width + 1))
+      (tags "bitwise"
+        #["shift-left", "oversized-count", "masked-count", "overflow", "boundary"])
+      s!"Reduce a width-plus-one {family.typeId} left-shift count to one",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-right-negative-width" (sourceName "shiftRight")
+      family.shiftRight (externalName "shiftRight")
+      (value nearMinimum) (value (-(Int.ofNat family.width)))
+      (tags "bitwise"
+        #["shift-right", "negative-count", "masked-count", "arithmetic",
+          "identity", "boundary"])
+      s!"Reduce a negative-width {family.typeId} right-shift count to zero",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-right-negative-one" (sourceName "shiftRight")
+      family.shiftRight (externalName "shiftRight")
+      (value nearMinimum) (value (-1))
+      (tags "bitwise"
+        #["shift-right", "negative-count", "masked-count", "arithmetic",
+          "sign-extension", "boundary"])
+      s!"Reduce a negative-one {family.typeId} arithmetic shift to width minus one",
+    exactFixedWidthBinaryExternalCase family.codec
+      s!"{family.typeId}-shift-right-width-plus-one" (sourceName "shiftRight")
+      family.shiftRight (externalName "shiftRight")
+      (value nearMinimum) (value (Int.ofNat family.width + 1))
+      (tags "bitwise"
+        #["shift-right", "oversized-count", "masked-count", "arithmetic",
+          "sign-extension", "boundary"])
+      s!"Reduce a width-plus-one {family.typeId} arithmetic shift to one",
+    exactFixedWidthUnaryExternalCase family.codec
+      s!"{family.typeId}-complement-zero" (sourceName "complement") family.complement
+      (externalName "complement") (value 0)
+      (tags "bitwise" #["complement", "twos-complement", "boundary"])
+      s!"Complement {family.typeId} zero to negative one",
+    exactFixedWidthUnaryExternalCase family.codec
+      s!"{family.typeId}-neg-min" (sourceName "neg") family.neg
+      (externalName "neg") (value minimum)
+      (tags "arithmetic"
+        #["negation", "minimum", "overflow", "wraparound", "boundary"])
+      s!"Wrap negation of the signed {family.typeId} minimum back to itself",
+    exactFixedWidthUnaryExternalCase family.codec
+      s!"{family.typeId}-abs-negative" (sourceName "abs") family.abs
+      (externalName "abs") (value (-7))
+      (tags "arithmetic" #["absolute-value", "negative"])
+      s!"Compute a representable positive {family.typeId} absolute value",
+    exactFixedWidthUnaryExternalCase family.codec
+      s!"{family.typeId}-abs-min" (sourceName "abs") family.abs
+      (externalName "abs") (value minimum)
+      (tags "arithmetic"
+        #["absolute-value", "minimum", "overflow", "wraparound", "boundary"])
+      s!"Wrap the unrepresentable {family.typeId} minimum absolute value",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-eq-negative-true" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Eq") family.decEq (externalName "decEq")
+      (value (-1)) (value (-1))
+      (tags "decision" #["equality", "negative", "true", "boundary"])
+      s!"Decide equality of two negative-one {family.typeId} values",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-eq-sign-false" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Eq") family.decEq (externalName "decEq")
+      (value (-1)) (value 1)
+      (tags "decision" #["equality", "opposite-sign", "false", "boundary"])
+      s!"Reject equality of opposite-sign {family.typeId} values",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-lt-negative-zero-true" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Lt") family.decLt (externalName "decLt")
+      (value (-1)) (value 0)
+      (tags "decision"
+        #["ordering", "less-than", "opposite-sign", "true", "boundary"])
+      s!"Order negative one before zero using signed {family.typeId} comparison",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-lt-max-min-false" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Lt") family.decLt (externalName "decLt")
+      (value maximum) (value minimum)
+      (tags "decision"
+        #["ordering", "less-than", "opposite-sign", "false", "boundary"])
+      s!"Reject unsigned-style ordering of {family.typeId} maximum before minimum",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-le-min-min-true" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Le") family.decLe (externalName "decLe")
+      (value minimum) (value minimum)
+      (tags "decision"
+        #["ordering", "less-or-equal", "minimum", "equality", "true", "boundary"])
+      s!"Accept non-strict signed {family.typeId} ordering at the minimum",
+    exactFixedWidthDecisionExternalCase family.codec
+      s!"{family.typeId}-dec-le-zero-negative-false" (Lean.Name.str sourceNamespace
+        s!"decide{family.sourceSuffix}Le") family.decLe (externalName "decLe")
+      (value 0) (value (-1))
+      (tags "decision"
+        #["ordering", "less-or-equal", "opposite-sign", "false", "boundary"])
+      s!"Reject non-strict signed {family.typeId} ordering from zero to negative one",
+    exactNatToFixedWidthExternalCase family.codec
+      s!"nat-to-{family.typeId}-max-encoding" (sourceName "natTo") family.ofNat
+      (externalName "ofNat") (2 ^ family.width - 1)
+      (tags "conversion"
+        #["nat", "maximum-encoding", "negative-result", "boundary"])
+      s!"Wrap the all-one Nat encoding to negative-one {family.typeId}",
+    exactNatToFixedWidthExternalCase family.codec
+      s!"nat-to-{family.typeId}-modulus" (sourceName "natTo") family.ofNat
+      (externalName "ofNat") (2 ^ family.width)
+      (tags "conversion" #["nat", "modulus", "overflow", "wraparound", "boundary"])
+      s!"Wrap the exact {family.typeId} modulus to zero",
+    exactNatToFixedWidthExternalCase family.codec
+      s!"nat-to-{family.typeId}-multi-limb" (sourceName "natTo") family.ofNat
+      (externalName "ofNat") 340282366920938463463374607431768211473
+      (tags "conversion" #["nat", "heap-input", "multi-limb", "wraparound"])
+      s!"Reduce 2^128 + 17 modulo the {family.typeId} width",
+    exactIntToFixedWidthExternalCase family.codec
+      s!"int-to-{family.typeId}-positive-overflow" (sourceName "intTo") family.ofInt
+      (externalName "ofInt") (maximum + 1)
+      (tags "conversion"
+        #["int", "positive", "overflow", "wraparound", "boundary"])
+      s!"Wrap maximum plus one to the signed {family.typeId} minimum",
+    exactIntToFixedWidthExternalCase family.codec
+      s!"int-to-{family.typeId}-negative-underflow" (sourceName "intTo") family.ofInt
+      (externalName "ofInt") (minimum - 1)
+      (tags "conversion"
+        #["int", "negative", "underflow", "wraparound", "boundary"])
+      s!"Wrap minimum minus one to the signed {family.typeId} maximum",
+    exactIntToFixedWidthExternalCase family.codec
+      s!"int-to-{family.typeId}-multi-limb-positive" (sourceName "intTo") family.ofInt
+      (externalName "ofInt") 340282366920938463463374607431768211473
+      (tags "conversion"
+        #["int", "positive", "heap-input", "multi-limb", "wraparound"])
+      s!"Reduce positive 2^128 + 17 modulo the {family.typeId} width",
+    exactIntToFixedWidthExternalCase family.codec
+      s!"int-to-{family.typeId}-multi-limb-negative" (sourceName "intTo") family.ofInt
+      (externalName "ofInt") (-340282366920938463463374607431768211473)
+      (tags "conversion"
+        #["int", "negative", "heap-input", "multi-limb", "wraparound"])
+      s!"Reduce negative 2^128 + 17 modulo the {family.typeId} width",
+    exactFixedWidthToIntExternalCase family.codec
+      s!"{family.typeId}-to-int-min"
+      (Lean.Name.str sourceNamespace s!"{family.typeId}ToInt")
+      family.toInt (externalName "toInt") (value minimum)
+      (tags "conversion" #["int", "negative-result", "minimum", "boundary"])
+      s!"Sign-extend the signed {family.typeId} minimum to an exact Int",
+    exactFixedWidthToIntExternalCase family.codec
+      s!"{family.typeId}-to-int-max"
+      (Lean.Name.str sourceNamespace s!"{family.typeId}ToInt")
+      family.toInt (externalName "toInt") (value maximum)
+      (tags "conversion" #["int", "positive-result", "maximum", "boundary"])
+      s!"Sign-extend the signed {family.typeId} maximum to an exact Int"
+  ]
+
+private def int16CaseFamily : SignedFixedWidthCaseFamily Int16 where
+  typeName := ``Int16
+  typeId := "int16"
+  sourceSuffix := "Int16"
+  width := 16
+  wasmLaneTag := "i32"
+  codec := int16CaseCodec
+  ofNat := Source.natToInt16
+  ofInt := Source.intToInt16
+  toInt := Source.int16ToInt
+  add := Source.addInt16
+  sub := Source.subInt16
+  mul := Source.mulInt16
+  div := Source.divInt16
+  modulo := Source.modInt16
+  land := Source.landInt16
+  lor := Source.lorInt16
+  xor := Source.xorInt16
+  shiftLeft := Source.shiftLeftInt16
+  shiftRight := Source.shiftRightInt16
+  complement := Source.complementInt16
+  neg := Source.negInt16
+  abs := Source.absInt16
+  decEq := Source.decideInt16Eq
+  decLt := Source.decideInt16Lt
+  decLe := Source.decideInt16Le
+
+private def signedCrossConversionCases : Array Case := #[
+  exactFixedWidthConversionExternalCase int8CaseCodec int16CaseCodec
+    "int8-to-int16-sign-extend" ``Source.int8ToInt16 Source.int8ToInt16
+    ``Int8.toInt16 (int8Value (-128))
+    #["stress", "scalar", "int8", "int16", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i32"]
+    "Sign-extend the Int8 minimum through the lossless Int8-to-Int16 conversion",
+  exactFixedWidthConversionExternalCase int16CaseCodec int8CaseCodec
+    "int16-to-int8-truncate" ``Source.int16ToInt8 Source.int16ToInt8
+    ``Int16.toInt8 (Int16.ofInt (-129))
+    #["stress", "scalar", "int8", "int16", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i32"]
+    "Truncate Int16 negative 129 to the signed Int8 maximum bit pattern"
+]
+
+private def int16Cases : Array Case :=
+  signedFixedWidthCases int16CaseFamily ++ signedCrossConversionCases
+
 def cases : Array Case :=
-  preConversionCases ++ conversionCases ++ postConversionCases ++ int8Cases
+  preConversionCases ++ conversionCases ++ postConversionCases ++
+    int8Cases ++ int16Cases
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
 def requiredFinalExecutedForms : Array String :=
@@ -6752,16 +7154,19 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "small-word-nat-conversion").size == 15
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-cross-conversion").size == 20
+  validationCase.tags.contains "fixed-width-cross-conversion").size == 22
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-external").size == 28
+  validationCase.tags.contains "fixed-width-signed-external").size == 56
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-conversion").size == 9
+  validationCase.tags.contains "fixed-width-signed-conversion").size == 20
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 37
+  validationCase.tags.contains "int8").size == 39
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "int16").size == 39
 
 #guard System.Platform.numBits == 64
 
