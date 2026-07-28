@@ -262,6 +262,15 @@ private def externalNat (request : ExternalRequest) (runtime : RuntimeState)
       return value
   | _ => throw (.externalFailure request.name "expected a natural number")
 
+private def externalString (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault String := do
+  let .object (.heap location) := value
+    | throw (.externalFailure request.name "expected a string")
+  let cell ← getLiveCell runtime location
+  let .string value := cell.object
+    | throw (.externalFailure request.name "expected a string")
+  return value
+
 private def int32SignBit : Nat := 2147483648
 
 private def int32Mask : Nat := 4294967295
@@ -368,6 +377,27 @@ private def natDecLeExternal (request : ExternalRequest) (runtime : RuntimeState
     Except RuntimeFault ExternalResponse :=
   natDecisionExternal (fun left right => decide (left ≤ right)) request runtime
 
+private def stringToNatExternal (operation : String → Nat)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalString request runtime value
+  let (runtime, value) := literal runtime (.nat (operation value))
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def stringLengthExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringToNatExternal String.length request runtime
+
+private def stringUtf8ByteSizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringToNatExternal String.utf8ByteSize request runtime
+
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
   paramTypes := #[]
@@ -411,6 +441,30 @@ private def natDecisionGuard (name : Name) (operation : Nat → Nat → Bool)
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
+private def stringToNatGuard (name : Name) (operation : String → Nat)
+    (input : String) (expected : Nat) : Bool :=
+  let (runtime, reference) := alloc {} (.string input)
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.object reference] }
+  match stringToNatExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalNat request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.heap == runtime.heap &&
+          response.nextLocation == runtime.nextLocation &&
+          response.world == runtime.world
+
 #guard natBinaryGuard ``Nat.add (· + ·) multiLimbNat multiLimbNat
   680564733841876926926749214863536422946 true
 
@@ -438,6 +492,14 @@ private def natDecisionGuard (name : Name) (operation : Nat → Nat → Bool)
 
 #guard natDecisionGuard ``Nat.decLe
   (fun left right => decide (left ≤ right)) 9223372036854775808 9223372036854775807 false
+
+#guard stringToNatGuard ``String.Internal.length String.length "" 0
+
+#guard stringToNatGuard ``String.Internal.length String.length "\u0000é😀" 3
+
+#guard stringToNatGuard ``String.utf8ByteSize String.utf8ByteSize "" 0
+
+#guard stringToNatGuard ``String.utf8ByteSize String.utf8ByteSize "\u0000é😀" 7
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -746,6 +808,10 @@ private def validationExternals : ExternalImpl where
       natDecLtExternal request runtime
     else if request.name == ``Nat.decLe then
       natDecLeExternal request runtime
+    else if request.name == ``String.Internal.length then
+      stringLengthExternal request runtime
+    else if request.name == ``String.utf8ByteSize then
+      stringUtf8ByteSizeExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then

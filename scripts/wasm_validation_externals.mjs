@@ -1,4 +1,8 @@
 import assert from "./wasm_assert.mjs";
+import {
+  stringLength,
+  stringUtf8ByteSize,
+} from "./wasm_format_external_algorithms.mjs";
 
 export function naturalValue(host, value, context) {
   if (value.kind === "tagged") {
@@ -29,6 +33,13 @@ export function byteArrayValue(host, value, context) {
   return object.value;
 }
 
+export function stringValue(host, value, context) {
+  assert.equal(value.kind, "heap", `${context} must be a heap string`);
+  const object = host.liveCell(value.location).object;
+  assert.equal(object.kind, "string", `${context} heap object must be a string`);
+  return object.value;
+}
+
 function boolResult(value) {
   return { kind: "scalar", scalarKind: "uint8", value: value ? 1n : 0n };
 }
@@ -39,6 +50,14 @@ function naturalDecision(declaration, operation) {
     const left = naturalValue(host, args[0], `${declaration} left operand`);
     const right = naturalValue(host, args[1], `${declaration} right operand`);
     return { value: boolResult(operation(left, right)), world };
+  };
+}
+
+function stringMeasurement(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const source = stringValue(host, args[0], `${declaration} source`);
+    return { value: host.natural(operation(source)), world };
   };
 }
 
@@ -86,6 +105,10 @@ export const validationExternalRegistry = {
   "Nat.decEq": naturalDecision("Nat.decEq", (left, right) => left === right),
   "Nat.decLt": naturalDecision("Nat.decLt", (left, right) => left < right),
   "Nat.decLe": naturalDecision("Nat.decLe", (left, right) => left <= right),
+  "String.Internal.length":
+    stringMeasurement("String.Internal.length", stringLength),
+  "String.utf8ByteSize":
+    stringMeasurement("String.utf8ByteSize", stringUtf8ByteSize),
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");

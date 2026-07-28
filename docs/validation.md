@@ -1470,13 +1470,16 @@ Wasm import boundary and retains its own private event-time heap views.
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Nat.sub`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`, `Int.ofNat`,
 `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
-`ByteArray.get!`, `ByteArray.set!`, and the validation-owned Nat and ByteArray
-effect recorders are currently allowlisted. Natural addition and saturating
-subtraction share one exact binary-`Nat` adapter that decodes tagged or heap
-operands and re-encodes through the same tagged/heap boundary as the
-interpreter. The three natural decisions share an exact comparison adapter,
-preserve heap and world, and return the scalar `UInt8` discriminant consumed by
-lowered Boolean matching. The integer primitives decode and
+`ByteArray.get!`, `ByteArray.set!`, `String.Internal.length`,
+`String.utf8ByteSize`, and the validation-owned Nat and ByteArray effect
+recorders are currently allowlisted. Natural addition and saturating subtraction
+share one exact binary-`Nat` adapter that decodes tagged or heap operands and
+re-encodes through the same tagged/heap boundary as the interpreter. The three
+natural decisions share an exact comparison adapter, preserve heap and world,
+and return the scalar `UInt8` discriminant consumed by lowered Boolean matching.
+The two String measurements share one Unicode-aware, non-mutating adapter:
+character length counts Unicode scalar values, while UTF-8 size counts encoded
+bytes. The integer primitives decode and
 re-encode both signed immediate and heap representations; `Int.add` and
 `Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
 signed input to an exact natural result, and `Int.decLt` returns the scalar
