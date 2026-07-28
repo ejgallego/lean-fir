@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 130,
-        "minimumComparisons": 130,
+        "minimumCases": 136,
+        "minimumComparisons": 136,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 130,
-        "minimumComparisons": 260,
+        "minimumCases": 136,
+        "minimumComparisons": 272,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 135,
-      "minimumTierCases": 265,
-      "minimumComparisons": 395
+      "minimumUniqueCases": 141,
+      "minimumTierCases": 277,
+      "minimumComparisons": 413
     },
     "machine": {
-      "minimumCases": 135,
-      "minimumInterpreterSteps": 1943,
+      "minimumCases": 141,
+      "minimumInterpreterSteps": 1979,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -164,7 +164,9 @@
         "Nat.decEq",
         "Nat.decLe",
         "Nat.decLt",
-        "Nat.sub"
+        "Nat.sub",
+        "String.Internal.length",
+        "String.utf8ByteSize"
       ]
     }
   }

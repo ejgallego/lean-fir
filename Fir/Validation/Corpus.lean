@@ -111,6 +111,14 @@ def hasNatListElements (xs : List Nat) : Bool :=
 def idString (value : String) : String :=
   value
 
+@[noinline]
+def stringLength (value : String) : Nat :=
+  String.Internal.length value
+
+@[noinline]
+def stringUtf8ByteSize (value : String) : Nat :=
+  value.utf8ByteSize
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1331,6 +1339,114 @@ def cases : Array Case := #[
     requiredExecutedLcnfForms := #["inc", "return"]
     provenance := firProvenance
       "Round-trip embedded NUL and non-BMP UTF-8 without an external" },
+  { id := "string-length-empty"
+    entry := ``Source.stringLength
+    args := #[.string ""]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringLength "")
+    tags := #["stress", "string", "unicode", "measurement", "length", "empty",
+      "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.length]
+    requiredExecutedExternals := #[``String.Internal.length]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.length]
+    requiredExecutedExternalTrace := some #[``String.Internal.length]
+    provenance := firProvenance
+      "Measure zero Unicode scalar values in the empty String heap object" },
+  { id := "string-length-ascii"
+    entry := ``Source.stringLength
+    args := #[.string "Lean"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringLength "Lean")
+    tags := #["stress", "string", "unicode", "measurement", "length", "ascii",
+      "external"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.length]
+    requiredExecutedExternals := #[``String.Internal.length]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.length]
+    requiredExecutedExternalTrace := some #[``String.Internal.length]
+    provenance := firProvenance
+      "Measure ASCII String character length through exact external dispatch" },
+  { id := "string-length-nul-bmp-nonbmp"
+    entry := ``Source.stringLength
+    args := #[.string "\u0000é😀"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringLength "\u0000é😀")
+    tags := #["stress", "string", "unicode", "measurement", "length", "nul",
+      "bmp", "non-bmp", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.length]
+    requiredExecutedExternals := #[``String.Internal.length]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.length]
+    requiredExecutedExternalTrace := some #[``String.Internal.length]
+    provenance := firProvenance
+      "Count embedded NUL, BMP, and non-BMP characters as three scalar values" },
+  { id := "string-utf8-byte-size-empty"
+    entry := ``Source.stringUtf8ByteSize
+    args := #[.string ""]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringUtf8ByteSize "")
+    tags := #["stress", "string", "unicode", "measurement", "utf8", "bytes",
+      "empty", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.utf8ByteSize]
+    requiredExecutedExternalTrace := some #[``String.utf8ByteSize]
+    provenance := firProvenance
+      "Measure zero UTF-8 bytes in the empty String heap object" },
+  { id := "string-utf8-byte-size-ascii"
+    entry := ``Source.stringUtf8ByteSize
+    args := #[.string "Lean"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringUtf8ByteSize "Lean")
+    tags := #["stress", "string", "unicode", "measurement", "utf8", "bytes",
+      "ascii", "external"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.utf8ByteSize]
+    requiredExecutedExternalTrace := some #[``String.utf8ByteSize]
+    provenance := firProvenance
+      "Measure one UTF-8 byte per ASCII character through exact dispatch" },
+  { id := "string-utf8-byte-size-nul-bmp-nonbmp"
+    entry := ``Source.stringUtf8ByteSize
+    args := #[.string "\u0000é😀"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringUtf8ByteSize "\u0000é😀")
+    tags := #["stress", "string", "unicode", "measurement", "utf8", "bytes",
+      "nul", "bmp", "non-bmp", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternals := #[``String.utf8ByteSize]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.utf8ByteSize]
+    requiredExecutedExternalTrace := some #[``String.utf8ByteSize]
+    provenance := firProvenance
+      "Measure NUL, BMP, and non-BMP UTF-8 widths as one, two, and four bytes" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8
