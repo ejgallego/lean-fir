@@ -1,6 +1,9 @@
 import assert from "./wasm_assert.mjs";
 import {
   stringLength,
+  stringNext,
+  stringOffsetOfPos,
+  stringPosOf,
   stringUtf8ByteSize,
 } from "./wasm_format_external_algorithms.mjs";
 
@@ -40,6 +43,12 @@ export function stringValue(host, value, context) {
   return object.value;
 }
 
+export function scalarUInt32(value, context) {
+  assert.equal(value.kind, "scalar", `${context} must be a scalar`);
+  assert.equal(value.scalarKind, "uint32", `${context} must use UInt32`);
+  return value.value;
+}
+
 function boolResult(value) {
   return { kind: "scalar", scalarKind: "uint8", value: value ? 1n : 0n };
 }
@@ -58,6 +67,24 @@ function stringMeasurement(declaration, operation) {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
     const source = stringValue(host, args[0], `${declaration} source`);
     return { value: host.natural(operation(source)), world };
+  };
+}
+
+function stringCharToNatural(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const source = stringValue(host, args[0], `${declaration} source`);
+    const codePoint = scalarUInt32(args[1], `${declaration} character`);
+    return { value: host.natural(operation(source, codePoint)), world };
+  };
+}
+
+function stringNaturalToNatural(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const source = stringValue(host, args[0], `${declaration} source`);
+    const position = naturalValue(host, args[1], `${declaration} position`);
+    return { value: host.natural(operation(source, position)), world };
   };
 }
 
@@ -109,6 +136,12 @@ export const validationExternalRegistry = {
     stringMeasurement("String.Internal.length", stringLength),
   "String.utf8ByteSize":
     stringMeasurement("String.utf8ByteSize", stringUtf8ByteSize),
+  "String.Internal.posOf":
+    stringCharToNatural("String.Internal.posOf", stringPosOf),
+  "String.Internal.offsetOfPos":
+    stringNaturalToNatural("String.Internal.offsetOfPos", stringOffsetOfPos),
+  "String.Internal.next":
+    stringNaturalToNatural("String.Internal.next", stringNext),
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");

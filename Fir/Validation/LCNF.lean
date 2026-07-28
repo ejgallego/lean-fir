@@ -330,6 +330,12 @@ private def externalUInt8 (request : ExternalRequest) (value : Value) : Except R
   | .scalar (.uint8 value) => .ok value
   | _ => .error (.externalFailure request.name "expected a UInt8 scalar")
 
+private def externalUInt32 (request : ExternalRequest) (value : Value) :
+    Except RuntimeFault UInt32 :=
+  match value with
+  | .scalar (.uint32 value) => .ok value
+  | _ => .error (.externalFailure request.name "expected a UInt32 scalar")
+
 private def natBinaryExternal (operation : Nat → Nat → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -397,6 +403,76 @@ private def stringLengthExternal (request : ExternalRequest) (runtime : RuntimeS
 private def stringUtf8ByteSizeExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse :=
   stringToNatExternal String.utf8ByteSize request runtime
+
+private def stringPosOf (source : String) (needle : Char) : Nat :=
+  let rec go : List Char → Nat → Nat
+    | [], position => position
+    | char :: chars, position =>
+        if char == needle then position
+        else go chars (position + char.utf8Size)
+  go source.toList 0
+
+private def stringOffsetOfPos (source : String) (target : Nat) : Nat :=
+  let rec go : List Char → Nat → Nat → Nat
+    | [], _, offset => offset
+    | char :: chars, position, offset =>
+        if position >= target then offset
+        else go chars (position + char.utf8Size) (offset + 1)
+  go source.toList 0 0
+
+private def utf8Width (first : UInt8) : Nat :=
+  let first := first.toNat
+  if first < 0x80 then 1
+  else if first < 0xc0 then 1
+  else if first < 0xe0 then 2
+  else if first < 0xf0 then 3
+  else if first < 0xf8 then 4
+  else 1
+
+private def stringNext (source : String) (position : Nat) : Nat :=
+  match source.toUTF8[position]? with
+  | some first => position + utf8Width first
+  | none => position + 1
+
+private def stringCharToNatExternal (operation : String → Char → Nat)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [source, needle] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let source ← externalString request runtime source
+  let needle ← externalUInt32 request needle
+  let (runtime, value) := literal runtime (.nat (operation source (Char.ofNat needle.toNat)))
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def stringNatToNatExternal (operation : String → Nat → Nat)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [source, position] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let source ← externalString request runtime source
+  let position ← externalNat request runtime position
+  let (runtime, value) := literal runtime (.nat (operation source position))
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def stringPosOfExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringCharToNatExternal stringPosOf request runtime
+
+private def stringOffsetOfPosExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringNatToNatExternal stringOffsetOfPos request runtime
+
+private def stringNextExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  stringNatToNatExternal stringNext request runtime
 
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
@@ -500,6 +576,83 @@ private def stringToNatGuard (name : Name) (operation : String → Nat)
 #guard stringToNatGuard ``String.utf8ByteSize String.utf8ByteSize "" 0
 
 #guard stringToNatGuard ``String.utf8ByteSize String.utf8ByteSize "\u0000é😀" 7
+
+private def stringCharToNatGuard (name : Name) (operation : String → Char → Nat)
+    (source : String) (needle : Char) (expected : Nat) : Bool :=
+  let (runtime, reference) := alloc {} (.string source)
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.object reference, .scalar (.uint32 needle.val)] }
+  match stringCharToNatExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalNat request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.heap == runtime.heap &&
+          response.nextLocation == runtime.nextLocation &&
+          response.world == runtime.world
+
+private def stringNatToNatGuard (name : Name) (operation : String → Nat → Nat)
+    (source : String) (position expected : Nat) : Bool :=
+  let (runtime, reference) := alloc {} (.string source)
+  let (runtime, positionValue) := literal runtime (.nat position)
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.object reference, positionValue] }
+  match stringNatToNatExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalNat request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.heap == runtime.heap &&
+          response.nextLocation == runtime.nextLocation &&
+          response.world == runtime.world
+
+#guard stringCharToNatGuard ``String.Internal.posOf stringPosOf "" 'x' 0
+
+#guard stringCharToNatGuard ``String.Internal.posOf stringPosOf "Aé😀Z" '😀' 3
+
+#guard stringCharToNatGuard ``String.Internal.posOf stringPosOf "Aé😀Z" '\u0000' 8
+
+#guard stringNatToNatGuard ``String.Internal.offsetOfPos stringOffsetOfPos "Aé😀Z" 0 0
+
+#guard stringNatToNatGuard ``String.Internal.offsetOfPos stringOffsetOfPos "Aé😀Z" 2 2
+
+#guard stringNatToNatGuard ``String.Internal.offsetOfPos stringOffsetOfPos "Aé😀Z" 4 3
+
+#guard stringNatToNatGuard ``String.Internal.offsetOfPos stringOffsetOfPos "Aé😀Z" 8 4
+
+#guard stringNatToNatGuard ``String.Internal.offsetOfPos stringOffsetOfPos "Aé😀Z" 50 4
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "" 0 1
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 1 3
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 2 3
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 3 7
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 8 9
+
+#guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 50 51
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -812,6 +965,12 @@ private def validationExternals : ExternalImpl where
       stringLengthExternal request runtime
     else if request.name == ``String.utf8ByteSize then
       stringUtf8ByteSizeExternal request runtime
+    else if request.name == ``String.Internal.posOf then
+      stringPosOfExternal request runtime
+    else if request.name == ``String.Internal.offsetOfPos then
+      stringOffsetOfPosExternal request runtime
+    else if request.name == ``String.Internal.next then
+      stringNextExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then
