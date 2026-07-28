@@ -612,6 +612,10 @@ def negIntOfNat (value : Nat) : Int :=
   -(Int.ofNat value)
 
 @[noinline]
+def addInt (left right : Int) : Int :=
+  left + right
+
+@[noinline]
 def intPosImmediate : Int :=
   2147483647
 
@@ -1045,6 +1049,9 @@ private def intClassifyFormTrace : Array String :=
     "fap", "extern", "cases", "lit", "return"]
 
 private def intOfNatFormTrace : Array String :=
+  #["fap", "extern", "return"]
+
+private def intAddFormTrace : Array String :=
   #["fap", "extern", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
@@ -2220,6 +2227,72 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.ofNat, ``Int.neg]
     provenance := firProvenance
       "Convert Nat 2^128 + 17 then negate it through exact externals" },
+  { id := "int-add-multi-limb-positive-growth"
+    entry := ``Source.addInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.addInt
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "heap", "multi-limb", "external",
+      "arithmetic", "addition", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExternals := #[``Int.add]
+    requiredExecutedExternals := #[``Int.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.add]
+    requiredExecutedExternalTrace := some #[``Int.add]
+    provenance := firProvenance
+      "Add two positive multi-limb Int values and retain a heap result" },
+  { id := "int-add-multi-limb-negative-growth"
+    entry := ``Source.addInt
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.addInt
+      (-340282366920938463463374607431768211473)
+      (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "negative", "heap", "multi-limb",
+      "external", "arithmetic", "addition", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExternals := #[``Int.add]
+    requiredExecutedExternals := #[``Int.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.add]
+    requiredExecutedExternalTrace := some #[``Int.add]
+    provenance := firProvenance
+      "Add two negative multi-limb Int values and retain negSucc magnitude" },
+  { id := "int-add-multi-limb-cancellation"
+    entry := ``Source.addInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.addInt
+      340282366920938463463374607431768211473
+      (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "heap", "multi-limb", "external",
+      "arithmetic", "addition", "cancellation", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some intAddFormTrace
+    requiredExternals := #[``Int.add]
+    requiredExecutedExternals := #[``Int.add]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.add]
+    requiredExecutedExternalTrace := some #[``Int.add]
+    provenance := firProvenance
+      "Cancel opposite multi-limb heap Int values to immediate zero" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
