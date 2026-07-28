@@ -1484,6 +1484,7 @@ The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Nat.sub`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`, `Int.ofNat`,
 `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
 `ByteArray.get!`, `ByteArray.set!`, `String.Internal.extract`,
+`String.Internal.append`, `String.Internal.pushn`,
 `String.Internal.length`,
 `String.utf8ByteSize`, `String.Internal.posOf`,
 `String.Internal.offsetOfPos`, `String.Internal.next`, and the validation-owned
@@ -1503,7 +1504,15 @@ tagged and heap natural positions, preserve the heap and world, and return an
 exact natural position. String extraction also consumes raw byte positions: an
 invalid begin boundary returns empty, while an invalid or past-end end boundary
 returns the suffix from a valid begin. It preserves the source and world and
-allocates one exact String result. The integer primitives decode and
+allocates one exact String result. String append and repeated push independently
+compute their Unicode result and model the native runtime's consuming
+copy-on-write contract. An exclusive, nonpersistent left/source location is
+logically reused; a shared source is decremented and one result location is
+allocated; a persistent source remains unchanged and produces one allocation.
+Zero-count `pushn` returns its exact source without mutation or allocation, and
+append's borrowed right operand is always unchanged. Validation guards pin the
+result contents, logical locations, reference counts, allocation frontier, and
+world on every ownership path. The integer primitives decode and
 re-encode both signed immediate and heap representations; `Int.add` and
 `Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
 signed input to an exact natural result, and `Int.decLt` returns the scalar

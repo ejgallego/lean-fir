@@ -262,13 +262,18 @@ private def externalNat (request : ExternalRequest) (runtime : RuntimeState)
       return value
   | _ => throw (.externalFailure request.name "expected a natural number")
 
-private def externalString (request : ExternalRequest) (runtime : RuntimeState)
-    (value : Value) : Except RuntimeFault String := do
+private def externalStringCell (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault (Location × HeapCell × String) := do
   let .object (.heap location) := value
     | throw (.externalFailure request.name "expected a string")
   let cell ← getLiveCell runtime location
   let .string value := cell.object
     | throw (.externalFailure request.name "expected a string")
+  return (location, cell, value)
+
+private def externalString (request : ExternalRequest) (runtime : RuntimeState)
+    (value : Value) : Except RuntimeFault String := do
+  let (_, _, value) ← externalStringCell request runtime value
   return value
 
 private def int32SignBit : Nat := 2147483648
@@ -447,6 +452,12 @@ private def stringExtract (source : String) (beginPos endPos : Nat) : String :=
         else seek tail (position + char.utf8Size)
   if beginPos >= endPos then "" else String.ofList (seek source.toList 0)
 
+private def stringAppend (left right : String) : String :=
+  String.ofList (left.toList ++ right.toList)
+
+private def stringPushn (source : String) (char : Char) (count : Nat) : String :=
+  String.ofList (source.toList ++ List.replicate count char)
+
 private def stringCharToNatExternal (operation : String → Char → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -500,6 +511,48 @@ private def stringExtractExternal (request : ExternalRequest) (runtime : Runtime
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
+
+private def consumingStringResult (location : Location) (cell : HeapCell)
+    (result : String) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  if !cell.persistent && cell.rc == 1 then
+    let runtime ← setCell runtime location { cell with object := .string result }
+    return {
+      value := .object (.heap location)
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  let runtime ← decLocation runtime location
+  let (runtime, reference) := alloc runtime (.string result)
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def stringAppendExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [leftValue, rightValue] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let (location, cell, left) ← externalStringCell request runtime leftValue
+  let right ← externalString request runtime rightValue
+  consumingStringResult location cell (stringAppend left right) runtime
+
+private def stringPushnExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [sourceValue, charValue, countValue] := request.args.toList
+    | throw (.arityMismatch 3 request.args.size)
+  let (location, cell, source) ← externalStringCell request runtime sourceValue
+  let char ← externalUInt32 request charValue
+  let count ← externalNat request runtime countValue
+  if count == 0 then
+    return {
+      value := sourceValue
+      heap := runtime.heap
+      nextLocation := runtime.nextLocation
+      world := runtime.world }
+  consumingStringResult location cell
+    (stringPushn source (Char.ofNat char.toNat) count) runtime
 
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
@@ -722,6 +775,193 @@ private def stringExtractGuard (source : String) (beginPos endPos : Nat)
 #guard stringExtractGuard "Aé😀Z" 1 50 "é😀Z"
 
 #guard stringExtractGuard "Aé😀Z" 7 3 ""
+
+private def stringAppendRequest (left right : ObjectRef) : ExternalRequest := {
+  name := ``String.Internal.append
+  paramTypes := #[]
+  resultType := default
+  args := #[.object left, .object right] }
+
+private def stringAppendUniqueGuard : Bool :=
+  let (runtime, left) := alloc {} (.string "A")
+  let (runtime, right) := alloc runtime (.string "é😀")
+  match left, right with
+  | .heap leftLocation, .heap rightLocation =>
+      match getLiveCell runtime rightLocation,
+          stringAppendExternal (stringAppendRequest left right) runtime with
+      | .ok beforeRight, .ok response =>
+          let after : RuntimeState := {
+            runtime with
+            heap := response.heap
+            nextLocation := response.nextLocation
+            world := response.world }
+          match getLiveCell after leftLocation, getLiveCell after rightLocation with
+          | .ok afterLeft, .ok afterRight =>
+              response.value == .object left &&
+              response.nextLocation == runtime.nextLocation &&
+              response.world == runtime.world &&
+              afterLeft.rc == 1 && !afterLeft.persistent &&
+              afterLeft.object == .string "Aé😀" &&
+              afterRight == beforeRight
+          | _, _ => false
+      | _, _ => false
+  | _, _ => false
+
+private def stringAppendSharedGuard : Bool :=
+  let (runtime, left) := alloc {} (.string "A")
+  let (runtime, right) := alloc runtime (.string "é😀")
+  match left, right with
+  | .heap leftLocation, .heap rightLocation =>
+      match incLocation runtime leftLocation 1 with
+      | .error _ => false
+      | .ok runtime =>
+          match getLiveCell runtime rightLocation,
+              stringAppendExternal (stringAppendRequest left right) runtime with
+          | .ok beforeRight, .ok response =>
+              let after : RuntimeState := {
+                runtime with
+                heap := response.heap
+                nextLocation := response.nextLocation
+                world := response.world }
+              match response.value with
+              | .object (.heap resultLocation) =>
+                  match getLiveCell after leftLocation, getLiveCell after rightLocation,
+                      getLiveCell after resultLocation with
+                  | .ok afterLeft, .ok afterRight, .ok result =>
+                      resultLocation == runtime.nextLocation &&
+                      response.nextLocation == runtime.nextLocation + 1 &&
+                      response.world == runtime.world &&
+                      afterLeft.rc == 1 && !afterLeft.persistent &&
+                      afterLeft.object == .string "A" &&
+                      afterRight == beforeRight &&
+                      result.rc == 1 && !result.persistent &&
+                      result.object == .string "Aé😀"
+                  | _, _, _ => false
+              | _ => false
+          | _, _ => false
+  | _, _ => false
+
+private def stringAppendPersistentGuard : Bool :=
+  let (runtime, left) := alloc {} (.string "A") (persistent := true)
+  let (runtime, right) := alloc runtime (.string "é😀")
+  match left, right with
+  | .heap leftLocation, .heap rightLocation =>
+      match getLiveCell runtime leftLocation, getLiveCell runtime rightLocation,
+          stringAppendExternal (stringAppendRequest left right) runtime with
+      | .ok beforeLeft, .ok beforeRight, .ok response =>
+          let after : RuntimeState := {
+            runtime with
+            heap := response.heap
+            nextLocation := response.nextLocation
+            world := response.world }
+          match response.value with
+          | .object (.heap resultLocation) =>
+              match getLiveCell after leftLocation, getLiveCell after rightLocation,
+                  getLiveCell after resultLocation with
+              | .ok afterLeft, .ok afterRight, .ok result =>
+                  resultLocation == runtime.nextLocation &&
+                  response.nextLocation == runtime.nextLocation + 1 &&
+                  response.world == runtime.world &&
+                  afterLeft == beforeLeft && afterRight == beforeRight &&
+                  result.rc == 1 && !result.persistent &&
+                  result.object == .string "Aé😀"
+              | _, _, _ => false
+          | _ => false
+      | _, _, _ => false
+  | _, _ => false
+
+private def stringPushnRequest (source : ObjectRef) (count : Nat) : ExternalRequest := {
+  name := ``String.Internal.pushn
+  paramTypes := #[]
+  resultType := default
+  args := #[
+    .object source,
+    .scalar (.uint32 0x1f600),
+    .object (.tagged (UInt64.ofNat count))] }
+
+private def stringPushnZeroSharedGuard : Bool :=
+  let (runtime, source) := alloc {} (.string "A")
+  match source with
+  | .heap sourceLocation =>
+      match incLocation runtime sourceLocation 1 with
+      | .error _ => false
+      | .ok runtime =>
+          match getLiveCell runtime sourceLocation,
+              stringPushnExternal (stringPushnRequest source 0) runtime with
+          | .ok beforeSource, .ok response =>
+              let after : RuntimeState := {
+                runtime with
+                heap := response.heap
+                nextLocation := response.nextLocation
+                world := response.world }
+              match getLiveCell after sourceLocation with
+              | .ok afterSource =>
+                  response.value == .object source &&
+                  response.nextLocation == runtime.nextLocation &&
+                  response.world == runtime.world &&
+                  afterSource == beforeSource && afterSource.rc == 2
+              | _ => false
+          | _, _ => false
+  | _ => false
+
+private def stringPushnUniqueGuard : Bool :=
+  let (runtime, source) := alloc {} (.string "A")
+  match source with
+  | .heap sourceLocation =>
+      match stringPushnExternal (stringPushnRequest source 2) runtime with
+      | .error _ => false
+      | .ok response =>
+          let after : RuntimeState := {
+            runtime with
+            heap := response.heap
+            nextLocation := response.nextLocation
+            world := response.world }
+          match getLiveCell after sourceLocation with
+          | .ok afterSource =>
+              response.value == .object source &&
+              response.nextLocation == runtime.nextLocation &&
+              response.world == runtime.world &&
+              afterSource.rc == 1 && !afterSource.persistent &&
+              afterSource.object == .string "A😀😀"
+          | _ => false
+  | _ => false
+
+private def stringPushnSharedGuard : Bool :=
+  let (runtime, source) := alloc {} (.string "A")
+  match source with
+  | .heap sourceLocation =>
+      match incLocation runtime sourceLocation 1 with
+      | .error _ => false
+      | .ok runtime =>
+          match stringPushnExternal (stringPushnRequest source 2) runtime with
+          | .error _ => false
+          | .ok response =>
+              let after : RuntimeState := {
+                runtime with
+                heap := response.heap
+                nextLocation := response.nextLocation
+                world := response.world }
+              match response.value with
+              | .object (.heap resultLocation) =>
+                  match getLiveCell after sourceLocation, getLiveCell after resultLocation with
+                  | .ok afterSource, .ok result =>
+                      resultLocation == runtime.nextLocation &&
+                      response.nextLocation == runtime.nextLocation + 1 &&
+                      response.world == runtime.world &&
+                      afterSource.rc == 1 && !afterSource.persistent &&
+                      afterSource.object == .string "A" &&
+                      result.rc == 1 && !result.persistent &&
+                      result.object == .string "A😀😀"
+                  | _, _ => false
+              | _ => false
+  | _ => false
+
+#guard stringAppendUniqueGuard
+#guard stringAppendSharedGuard
+#guard stringAppendPersistentGuard
+#guard stringPushnZeroSharedGuard
+#guard stringPushnUniqueGuard
+#guard stringPushnSharedGuard
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -1042,6 +1282,10 @@ private def validationExternals : ExternalImpl where
       stringNextExternal request runtime
     else if request.name == ``String.Internal.extract then
       stringExtractExternal request runtime
+    else if request.name == ``String.Internal.append then
+      stringAppendExternal request runtime
+    else if request.name == ``String.Internal.pushn then
+      stringPushnExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then

@@ -1,10 +1,12 @@
 import assert from "./wasm_assert.mjs";
 import {
+  stringAppend,
   stringExtract,
   stringLength,
   stringNext,
   stringOffsetOfPos,
   stringPosOf,
+  stringPushn,
   stringUtf8ByteSize,
 } from "./wasm_format_external_algorithms.mjs";
 
@@ -100,6 +102,44 @@ function stringExtractExternal({ args, host, world }) {
   };
 }
 
+function consumingStringResult(host, source, result, context) {
+  assert.equal(source.kind, "heap", `${context} source must be a heap string`);
+  const cell = host.liveCell(source.location);
+  assert.equal(cell.object.kind, "string", `${context} source must be a string`);
+  if (!cell.persistent && cell.rc === 1) {
+    cell.object = { kind: "string", value: result };
+    return source;
+  }
+  host.decLocation(source.location);
+  return host.alloc({ kind: "string", value: result });
+}
+
+function stringAppendExternal({ args, host, world }) {
+  assert.equal(args.length, 2, "String.Internal.append external arity mismatch");
+  const left = stringValue(host, args[0], "String.Internal.append left operand");
+  const right = stringValue(host, args[1], "String.Internal.append right operand");
+  return {
+    value: consumingStringResult(
+      host, args[0], stringAppend(left, right), "String.Internal.append"),
+    world,
+  };
+}
+
+function stringPushnExternal({ args, host, world }) {
+  assert.equal(args.length, 3, "String.Internal.pushn external arity mismatch");
+  const source = stringValue(host, args[0], "String.Internal.pushn source");
+  const codePoint = scalarUInt32(args[1], "String.Internal.pushn character");
+  const count = naturalValue(host, args[2], "String.Internal.pushn count");
+  if (count === 0n) {
+    return { value: args[0], world };
+  }
+  return {
+    value: consumingStringResult(
+      host, args[0], stringPushn(source, codePoint, count), "String.Internal.pushn"),
+    world,
+  };
+}
+
 function setByteArray({ args, host, world }) {
   assert.equal(args.length, 3, "ByteArray.set! external arity mismatch");
   const source = args[0];
@@ -155,6 +195,8 @@ export const validationExternalRegistry = {
   "String.Internal.next":
     stringNaturalToNatural("String.Internal.next", stringNext),
   "String.Internal.extract": stringExtractExternal,
+  "String.Internal.append": stringAppendExternal,
+  "String.Internal.pushn": stringPushnExternal,
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");
