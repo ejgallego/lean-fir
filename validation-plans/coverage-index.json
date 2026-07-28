@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 255,
-        "minimumComparisons": 255,
+        "minimumCases": 299,
+        "minimumComparisons": 299,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 255,
-        "minimumComparisons": 510,
+        "minimumCases": 299,
+        "minimumComparisons": 598,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 260,
-      "minimumTierCases": 515,
-      "minimumComparisons": 770
+      "minimumUniqueCases": 308,
+      "minimumTierCases": 607,
+      "minimumComparisons": 906
     },
     "machine": {
-      "minimumCases": 260,
-      "minimumInterpreterSteps": 2751,
+      "minimumCases": 308,
+      "minimumInterpreterSteps": 3098,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -191,6 +191,21 @@
         "String.decEq",
         "String.decidableLT",
         "String.utf8ByteSize",
+        "UInt16.add",
+        "UInt16.complement",
+        "UInt16.decEq",
+        "UInt16.decLe",
+        "UInt16.decLt",
+        "UInt16.div",
+        "UInt16.land",
+        "UInt16.lor",
+        "UInt16.mod",
+        "UInt16.mul",
+        "UInt16.neg",
+        "UInt16.shiftLeft",
+        "UInt16.shiftRight",
+        "UInt16.sub",
+        "UInt16.xor",
         "UInt32.add",
         "UInt32.complement",
         "UInt32.decEq",
@@ -220,7 +235,22 @@
         "UInt64.shiftLeft",
         "UInt64.shiftRight",
         "UInt64.sub",
-        "UInt64.xor"
+        "UInt64.xor",
+        "UInt8.add",
+        "UInt8.complement",
+        "UInt8.decEq",
+        "UInt8.decLe",
+        "UInt8.decLt",
+        "UInt8.div",
+        "UInt8.land",
+        "UInt8.lor",
+        "UInt8.mod",
+        "UInt8.mul",
+        "UInt8.neg",
+        "UInt8.shiftLeft",
+        "UInt8.shiftRight",
+        "UInt8.sub",
+        "UInt8.xor"
       ]
     }
   }
