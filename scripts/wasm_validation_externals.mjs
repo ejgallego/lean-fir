@@ -66,6 +66,24 @@ function naturalDecision(declaration, operation) {
   };
 }
 
+function naturalBinary(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = naturalValue(host, args[0], `${declaration} left operand`);
+    const right = naturalValue(host, args[1], `${declaration} right operand`);
+    return { value: host.natural(operation(left, right)), world };
+  };
+}
+
+function integerBinary(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = integerValue(host, args[0], `${declaration} left operand`);
+    const right = integerValue(host, args[1], `${declaration} right operand`);
+    return { value: host.integer(operation(left, right)), world };
+  };
+}
+
 function stringMeasurement(declaration, operation) {
   return ({ args, host, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
@@ -186,18 +204,10 @@ function setByteArray({ args, host, world }) {
 }
 
 export const validationExternalRegistry = {
-  "Nat.add": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Nat.add external arity mismatch");
-    const left = naturalValue(host, args[0], "Nat.add left operand");
-    const right = naturalValue(host, args[1], "Nat.add right operand");
-    return { value: host.natural(left + right), world };
-  },
-  "Nat.sub": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Nat.sub external arity mismatch");
-    const left = naturalValue(host, args[0], "Nat.sub left operand");
-    const right = naturalValue(host, args[1], "Nat.sub right operand");
-    return { value: host.natural(left < right ? 0n : left - right), world };
-  },
+  "Nat.add": naturalBinary("Nat.add", (left, right) => left + right),
+  "Nat.sub": naturalBinary(
+    "Nat.sub", (left, right) => left < right ? 0n : left - right),
+  "Nat.mul": naturalBinary("Nat.mul", (left, right) => left * right),
   "Nat.decEq": naturalDecision("Nat.decEq", (left, right) => left === right),
   "Nat.decLt": naturalDecision("Nat.decLt", (left, right) => left < right),
   "Nat.decLe": naturalDecision("Nat.decLe", (left, right) => left <= right),
@@ -236,18 +246,9 @@ export const validationExternalRegistry = {
     const value = integerValue(host, args[0], "Int.natAbs operand");
     return { value: host.natural(value < 0n ? -value : value), world };
   },
-  "Int.add": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Int.add external arity mismatch");
-    const left = integerValue(host, args[0], "Int.add left operand");
-    const right = integerValue(host, args[1], "Int.add right operand");
-    return { value: host.integer(left + right), world };
-  },
-  "Int.sub": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Int.sub external arity mismatch");
-    const left = integerValue(host, args[0], "Int.sub left operand");
-    const right = integerValue(host, args[1], "Int.sub right operand");
-    return { value: host.integer(left - right), world };
-  },
+  "Int.add": integerBinary("Int.add", (left, right) => left + right),
+  "Int.sub": integerBinary("Int.sub", (left, right) => left - right),
+  "Int.mul": integerBinary("Int.mul", (left, right) => left * right),
   "Int.decLt": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Int.decLt external arity mismatch");
     const left = integerValue(host, args[0], "Int.decLt left operand");

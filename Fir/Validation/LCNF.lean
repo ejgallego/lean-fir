@@ -363,6 +363,10 @@ private def natSubExternal (request : ExternalRequest) (runtime : RuntimeState) 
     Except RuntimeFault ExternalResponse :=
   natBinaryExternal (· - ·) request runtime
 
+private def natMulExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal (· * ·) request runtime
+
 private def natDecisionExternal (operation : Nat → Nat → Bool)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -677,6 +681,14 @@ private def stringToNatGuard (name : Name) (operation : String → Nat)
 #guard natBinaryGuard ``Nat.sub (· - ·) multiLimbNat multiLimbNat 0 false
 
 #guard natBinaryGuard ``Nat.sub (· - ·) 17 multiLimbNat 0 false
+
+#guard natBinaryGuard ``Nat.mul (· * ·) 9223372036854775807 2
+  18446744073709551614 true
+
+#guard natBinaryGuard ``Nat.mul (· * ·) multiLimbNat 18446744073709551619
+  6277101735386680764856636523970481806806073916012401524787 true
+
+#guard natBinaryGuard ``Nat.mul (· * ·) multiLimbNat 0 0 false
 
 #guard natDecisionGuard ``Nat.decEq
   (fun left right => decide (left = right)) multiLimbNat multiLimbNat true
@@ -1283,6 +1295,10 @@ private def intSubExternal (request : ExternalRequest) (runtime : RuntimeState) 
     Except RuntimeFault ExternalResponse :=
   intBinaryExternal (· - ·) request runtime
 
+private def intMulExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intBinaryExternal (· * ·) request runtime
+
 private def intBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
   paramTypes := #[]
@@ -1329,6 +1345,15 @@ private def multiLimbInt : Int :=
 
 #guard intSubGuard multiLimbInt multiLimbInt 0 false
 
+#guard intBinaryGuard ``Int.mul (· * ·) 2147483647 2 4294967294 true
+
+#guard intBinaryGuard ``Int.mul (· * ·) (-2147483648) (-1) 2147483648 true
+
+#guard intBinaryGuard ``Int.mul (· * ·) multiLimbInt (-17)
+  (-5784800237655953878877368326340059595041) true
+
+#guard intBinaryGuard ``Int.mul (· * ·) multiLimbInt 0 0 false
+
 #guard intNatAbsGuard multiLimbInt multiLimbNat true
 
 #guard intNatAbsGuard (-multiLimbInt) multiLimbNat true
@@ -1356,6 +1381,8 @@ private def validationExternals : ExternalImpl where
       natAddExternal request runtime
     else if request.name == ``Nat.sub then
       natSubExternal request runtime
+    else if request.name == ``Nat.mul then
+      natMulExternal request runtime
     else if request.name == ``Nat.decEq then
       natDecEqExternal request runtime
     else if request.name == ``Nat.decLt then
@@ -1404,6 +1431,8 @@ private def validationExternals : ExternalImpl where
       intAddExternal request runtime
     else if request.name == ``Int.sub then
       intSubExternal request runtime
+    else if request.name == ``Int.mul then
+      intMulExternal request runtime
     else if request.name == ``Int.decLt then
       intDecLtExternal request runtime
     else
