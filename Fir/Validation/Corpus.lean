@@ -1,4 +1,5 @@
 import Fir.Validation.Protocol
+import Init.Data.Ord.String
 
 namespace Fir.Validation.Corpus
 
@@ -157,6 +158,21 @@ def stringPushnNonBmp (source : String) (count : Nat) : String :=
 def stringPushnNonBmpShared (source : String) (count : Nat) : String × String :=
   let result := String.Internal.pushn source '😀' count
   (source, result)
+
+@[noinline]
+def stringDecEq (left right : String) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def stringDecLt (left right : String) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def stringCompareClassify (left right : String) : Nat :=
+  match String.compare left right with
+  | .lt => 0
+  | .eq => 1
+  | .gt => 2
 
 def idUInt8 (value : UInt8) : UInt8 :=
   value
@@ -930,6 +946,12 @@ private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatu
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
+private def bmpPrivateUseString : String :=
+  String.ofList [Char.ofNat 0xe000]
+
+private def supplementaryPlaneString : String :=
+  String.ofList [Char.ofNat 0x10000]
+
 private def byteArrayPairPairDatum
     (value : (ByteArray × ByteArray) × (ByteArray × ByteArray)) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayPairDatum value.1, byteArrayPairDatum value.2]
@@ -1136,6 +1158,9 @@ private def stringPushnFormTrace : Array String :=
 
 private def sharedStringPushnFormTrace : Array String :=
   #["lit", "inc", "fap", "extern", "ctor", "return"]
+
+private def stringCompareClassifyFormTrace : Array String :=
+  #["fap", "extern", "cases", "lit", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "dec", "return"]
@@ -1913,6 +1938,181 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.pushn]
     provenance := firProvenance
       "Retain the source while repeated non-BMP push takes its shared copy-on-write path" },
+  { id := "string-dec-eq-nul-nonbmp-true"
+    entry := ``Source.stringDecEq
+    args := #[.string "A\u0000é😀", .string "A\u0000é😀"]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.stringDecEq "A\u0000é😀" "A\u0000é😀")
+    tags := #["stress", "string", "unicode", "comparison", "equality", "true",
+      "nul", "non-bmp", "external", "borrowed"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decEq]
+    requiredExecutedExternals := #[``String.decEq]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decEq]
+    requiredExecutedExternalTrace := some #[``String.decEq]
+    provenance := firProvenance
+      "Decide exact equality across NUL, BMP, and non-BMP UTF-8 contents" },
+  { id := "string-dec-eq-nonbmp-false"
+    entry := ``Source.stringDecEq
+    args := #[.string "A\u0000é😀", .string "A\u0000é😁"]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.stringDecEq "A\u0000é😀" "A\u0000é😁")
+    tags := #["stress", "string", "unicode", "comparison", "equality", "false",
+      "nul", "non-bmp", "external", "borrowed", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decEq]
+    requiredExecutedExternals := #[``String.decEq]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decEq]
+    requiredExecutedExternalTrace := some #[``String.decEq]
+    provenance := firProvenance
+      "Reject strings that differ only at one non-BMP scalar" },
+  { id := "string-dec-eq-prefix-false"
+    entry := ``Source.stringDecEq
+    args := #[.string "A", .string "A\u0000"]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.stringDecEq "A" "A\u0000")
+    tags := #["stress", "string", "comparison", "equality", "false", "prefix",
+      "nul", "external", "borrowed", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decEq]
+    requiredExecutedExternals := #[``String.decEq]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decEq]
+    requiredExecutedExternalTrace := some #[``String.decEq]
+    provenance := firProvenance
+      "Reject a proper prefix when the longer String continues with NUL" },
+  { id := "string-dec-lt-bmp-supplementary-true"
+    entry := ``Source.stringDecLt
+    args := #[.string bmpPrivateUseString, .string supplementaryPlaneString]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool
+      (Source.stringDecLt bmpPrivateUseString supplementaryPlaneString)
+    tags := #["stress", "string", "unicode", "comparison", "ordering", "true",
+      "bmp", "non-bmp", "external", "borrowed", "utf8", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decidableLT]
+    requiredExecutedExternals := #[``String.decidableLT]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decidableLT]
+    requiredExecutedExternalTrace := some #[``String.decidableLT]
+    provenance := firProvenance
+      "Order BMP U+E000 before supplementary U+10000 by UTF-8 rather than JS UTF-16" },
+  { id := "string-dec-lt-supplementary-bmp-false"
+    entry := ``Source.stringDecLt
+    args := #[.string supplementaryPlaneString, .string bmpPrivateUseString]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool
+      (Source.stringDecLt supplementaryPlaneString bmpPrivateUseString)
+    tags := #["stress", "string", "unicode", "comparison", "ordering", "false",
+      "bmp", "non-bmp", "external", "borrowed", "utf8", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decidableLT]
+    requiredExecutedExternals := #[``String.decidableLT]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decidableLT]
+    requiredExecutedExternalTrace := some #[``String.decidableLT]
+    provenance := firProvenance
+      "Reject the reverse supplementary/BMP order at the UTF-16 discriminator" },
+  { id := "string-dec-lt-prefix-true"
+    entry := ``Source.stringDecLt
+    args := #[.string "A", .string "A\u0000"]
+    argSchemas := #[.string, .string]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.stringDecLt "A" "A\u0000")
+    tags := #["stress", "string", "comparison", "ordering", "true", "prefix",
+      "nul", "external", "borrowed", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.decidableLT]
+    requiredExecutedExternals := #[``String.decidableLT]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.decidableLT]
+    requiredExecutedExternalTrace := some #[``String.decidableLT]
+    provenance := firProvenance
+      "Order a proper String prefix before the longer NUL-extended value" },
+  { id := "string-compare-equal"
+    entry := ``Source.stringCompareClassify
+    args := #[.string "A\u0000é😀", .string "A\u0000é😀"]
+    argSchemas := #[.string, .string]
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.stringCompareClassify "A\u0000é😀" "A\u0000é😀")
+    tags := #["stress", "string", "unicode", "comparison", "ordering", "equal",
+      "nul", "non-bmp", "external", "control-flow", "scalar-enum"]
+    requiredLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some stringCompareClassifyFormTrace
+    requiredExternals := #[``String.compare]
+    requiredExecutedExternals := #[``String.compare]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.compare]
+    requiredExecutedExternalTrace := some #[``String.compare]
+    provenance := firProvenance
+      "Classify the scalar Ordering.eq result returned by exact String comparison" },
+  { id := "string-compare-bmp-supplementary-lt"
+    entry := ``Source.stringCompareClassify
+    args := #[.string bmpPrivateUseString, .string supplementaryPlaneString]
+    argSchemas := #[.string, .string]
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.stringCompareClassify bmpPrivateUseString supplementaryPlaneString)
+    tags := #["stress", "string", "unicode", "comparison", "ordering", "less",
+      "bmp", "non-bmp", "external", "control-flow", "scalar-enum", "utf8", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some stringCompareClassifyFormTrace
+    requiredExternals := #[``String.compare]
+    requiredExecutedExternals := #[``String.compare]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.compare]
+    requiredExecutedExternalTrace := some #[``String.compare]
+    provenance := firProvenance
+      "Take the Ordering.lt branch for BMP U+E000 versus supplementary U+10000" },
+  { id := "string-compare-supplementary-bmp-gt"
+    entry := ``Source.stringCompareClassify
+    args := #[.string supplementaryPlaneString, .string bmpPrivateUseString]
+    argSchemas := #[.string, .string]
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.stringCompareClassify supplementaryPlaneString bmpPrivateUseString)
+    tags := #["stress", "string", "unicode", "comparison", "ordering", "greater",
+      "bmp", "non-bmp", "external", "control-flow", "scalar-enum", "utf8", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some stringCompareClassifyFormTrace
+    requiredExternals := #[``String.compare]
+    requiredExecutedExternals := #[``String.compare]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.compare]
+    requiredExecutedExternalTrace := some #[``String.compare]
+    provenance := firProvenance
+      "Take the Ordering.gt branch for the reverse supplementary/BMP order" },
+  { id := "string-compare-prefix-lt"
+    entry := ``Source.stringCompareClassify
+    args := #[.string "A", .string "A\u0000"]
+    argSchemas := #[.string, .string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringCompareClassify "A" "A\u0000")
+    tags := #["stress", "string", "comparison", "ordering", "less", "prefix",
+      "nul", "external", "control-flow", "scalar-enum", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "cases", "lit", "return"]
+    requiredExecutedLcnfFormTrace := some stringCompareClassifyFormTrace
+    requiredExternals := #[``String.compare]
+    requiredExecutedExternals := #[``String.compare]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``String.compare]
+    requiredExecutedExternalTrace := some #[``String.compare]
+    provenance := firProvenance
+      "Take the Ordering.lt branch when equal bytes end at the shorter prefix" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8

@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 159 cases. Required oracle edges must share one matrix
+edges over at least 169 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,12 +469,12 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 159 source cases are shared by the source-LCNF and V8
+current baseline, the 169 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 13 static forms, 13 executed forms, and all 24 interpreter
+contributes 13 static forms, 13 executed forms, and all 27 interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -1320,7 +1320,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 159 cases. Direct identity cases
+The compiler-generated corpus currently has 169 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
@@ -1362,6 +1362,12 @@ borrowed right operand. Exact final-impure and external traces distinguish
 unique, shared, self-aliased, and no-op paths, while reusable model guards pin
 the logical heap identity and reference-count effects that value observations
 cannot expose.
+Ten String-comparison cases cover exact equality and inequality, proper-prefix
+termination, all three `Ordering` branches, embedded NUL, distinct non-BMP
+scalars, and both directions of the U+E000/U+10000 boundary where JavaScript's
+default UTF-16 ordering disagrees with Lean's native UTF-8 ordering. The
+`String.compare` cases additionally match the returned scalar enum, pinning
+decision-to-control-flow lowering rather than observing only the final code.
 Empty `String` and `ByteArray` values exercise zero-length heap representations,
 while a string containing an embedded NUL, a multibyte BMP character, and a
 non-BMP character exercises the full JSON/native/interpreter text path. None can
@@ -1610,12 +1616,12 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 159 corpus cases, including a natural
+The default native-to-V8 matrix covers all 169 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, multi-limb and saturating `Nat.sub`, all three
 natural-decision primitives across tagged/heap and multi-limb boundaries,
 Unicode measurements, raw UTF-8 String navigation, extraction, and
-ownership-sensitive String construction,
+ownership-sensitive String construction, exact UTF-8 String equality and ordering,
 multi-limb `Int.add`/`Int.sub` growth and cancellation, cross-domain
 `Int.natAbs` signs and representation boundaries, all three
 controlled-effect programs, and all five mixed-layout projections.
